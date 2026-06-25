@@ -114,6 +114,29 @@ def _unsolicited_rdma(c, img, start):
     print("  STRAY ok: unsolicited WRITE_RDMA ignored, no corruption")
 
 
+def _write_error(c, server, start):
+    # a block-device write failure (disk full / I/O error) must reply -1 and not
+    # crash the server
+    original = server.bd.write
+
+    def _boom(_data):
+        raise OSError("simulated write failure")
+
+    server.bd.write = _boom
+    try:
+        c.sendto(U.pack_header(U.CMD_WRITE, 11, 0) + struct.pack("<IH", start, 1), SRV)
+        c.sendto(U.pack_header(U.CMD_WRITE_RDMA, 11, 0) + U.pack_block_type(7, 1)
+                 + b"\x00" * 512, SRV)
+        data, _ = c.recvfrom(2048)
+        cmd, _, _ = U.unpack_header(data)
+        result = struct.unpack_from("<i", data, 2)[0]
+        assert cmd == U.CMD_WRITE_DONE and result == -1, (cmd, result)
+    finally:
+        server.bd.write = original
+    _info(c, server.bd.sector_count())  # server still answers -> it stayed alive
+    print("  WERR  ok: write error replied -1, server stayed alive")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="udpbd_") as tmp:
         path = os.path.join(tmp, "test.img")
@@ -142,6 +165,7 @@ def main():
             _read(c, img2, 200, 5)
             _fuzz(c, size // 512)
             _truncated_rdma(c, img, 400)  # untouched region -> still matches original
+            _write_error(c, server, 700)  # write OSError -> reply -1, no crash
             _optimizer()
             print("ALL UDPBD TESTS PASSED")
         finally:
