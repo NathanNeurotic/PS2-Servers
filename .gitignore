@@ -6,10 +6,11 @@ __pycache__/
 venv/
 env/
 
-# Nuitka build output (from smbv1_server/build_exe.ps1)
+# Nuitka build output (from smbv1_server/build_exe.ps1 and build/build.py)
 *.build/
 *.dist/
 *.onefile-build/
+/dist/
 
 # OS cruft
 Thumbs.db
