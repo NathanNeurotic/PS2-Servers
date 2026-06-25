@@ -94,6 +94,16 @@ def _fuzz(c, expected_sectors):
     print("  FUZZ  ok: server survived malformed packets")
 
 
+def _truncated_rdma(c, img, start):
+    # a WRITE_RDMA that claims 2 sectors (1024 B) but carries only 100 B must be
+    # dropped, not partially written -- otherwise it corrupts the region/alignment
+    c.sendto(U.pack_header(U.CMD_WRITE, 9, 0) + struct.pack("<IH", start, 2), SRV)
+    c.sendto(U.pack_header(U.CMD_WRITE_RDMA, 9, 0) + U.pack_block_type(7, 2)
+             + b"\xAB" * 100, SRV)
+    _read(c, img, start, 2)  # region must read back as the original, untouched data
+    print("  TRUNC ok: truncated WRITE_RDMA dropped, no corruption")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="udpbd_") as tmp:
         path = os.path.join(tmp, "test.img")
@@ -120,6 +130,7 @@ def main():
                 img2 = f.read()
             _read(c, img2, 200, 5)
             _fuzz(c, size // 512)
+            _truncated_rdma(c, img, 400)  # untouched region -> still matches original
             _optimizer()
             print("ALL UDPBD TESTS PASSED")
         finally:
