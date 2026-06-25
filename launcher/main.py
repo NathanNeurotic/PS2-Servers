@@ -45,19 +45,23 @@ def _selfcheck():
     """Verify the re-exec path works in this build: build the command the GUI
     uses to start a server and confirm it actually launches."""
     import os
+    import shutil
     import subprocess
     import tempfile
     import time
     from .servers import frozen_self_exe, is_frozen, serve_command
 
+    argv = getattr(sys, "argv", None)
     print("is_frozen:", is_frozen())
     print("sys.executable:", sys.executable)
-    print("sys.argv[0]:", sys.argv[0] if sys.argv else None)
+    print("sys.argv[0]:", argv[0] if argv else None)
     print("NUITKA_ONEFILE_BINARY:", os.environ.get("NUITKA_ONEFILE_BINARY"))
     print("frozen_self_exe:", frozen_self_exe())
 
-    with tempfile.TemporaryDirectory(prefix="ps2chk_",
-                                     ignore_cleanup_errors=True) as tmpdir:
+    # mkdtemp + shutil.rmtree(ignore_errors=True): works on any Python (no 3.10+
+    # kwarg) and tolerates a lingering file lock if a re-exec'd child is slow to die
+    tmpdir = tempfile.mkdtemp(prefix="ps2chk_")
+    try:
         img = os.path.join(tmpdir, "a.img")
         with open(img, "wb") as f:
             f.write(b"\0" * 65536)
@@ -85,6 +89,8 @@ def _selfcheck():
                 proc.wait()
         print("RESULT:", "PASS" if alive else "FAIL")
         return 0 if alive else 1
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _print_list():
