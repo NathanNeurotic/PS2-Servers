@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="ps2serversgithubbanner.png" alt="PS2 Servers" width="820">
+</p>
+
 # PS2-Servers
 
 Network servers for loading PlayStation 2 games and apps over a LAN with
@@ -13,8 +17,6 @@ It detects your PC's LAN IP and shows the exact settings to enter in OPL.
   Windows) — see [Build the app](#build-the-single-file-app) to produce it.
 - **From source:** double-click **`Start-Launcher.bat`** (Windows) or run
   `./start-launcher.sh` (Linux/macOS). Requires Python 3.
-
-![one card per server: pick a folder, Start, and it shows the OPL settings]
 
 ## What's inside
 
