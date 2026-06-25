@@ -14,7 +14,7 @@ import sys
 
 
 def main(argv=None):
-    argv = list(getattr(sys, "argv", [])[1:] if argv is None else argv)
+    argv = list((getattr(sys, "argv", None) or [])[1:] if argv is None else argv)
 
     if "--serve" in argv:
         i = argv.index("--serve")
