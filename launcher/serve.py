@@ -49,4 +49,4 @@ def run_serve(key, server_args):
     main = getattr(module, "main", None)
     if main is None:
         raise SystemExit("server {} has no main()".format(key))
-    main()
+    return main()  # propagate the server's exit code (e.g. 1 on bind/open failure)

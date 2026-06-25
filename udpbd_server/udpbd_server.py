@@ -201,6 +201,13 @@ class UdpbdServer:
 
     def _handle_write_rdma(self, addr, datagram):
         _, cmdid, _ = unpack_header(datagram)
+        if self._write_left <= 0:
+            # no CMD_WRITE handshake in progress: a stray / duplicate / unsolicited
+            # RDMA would otherwise be written at the *current* file offset (wherever
+            # the last read/write left it) -- an arbitrary sector. Drop it.
+            if self.verbose:
+                print("Dropping unsolicited WRITE_RDMA from {}".format(addr[0]))
+            return
         block_shift, block_count = unpack_block_type(datagram)
         size = block_count * (1 << (block_shift + 2))
         if len(datagram) < 6 + size:
@@ -209,11 +216,15 @@ class UdpbdServer:
             if self.verbose:
                 print("Dropping truncated WRITE_RDMA from {}".format(addr[0]))
             return
+        size = min(size, self._write_left)  # never write past the requested region
         self.bd.write(datagram[6:6 + size])
         self._write_left -= size
         if self._write_left <= 0:
+            # signal failure on a read-only image instead of faking success, so the
+            # PS2 client doesn't believe a save committed when nothing was written
+            result = -1 if self.bd.read_only else 0
             reply = pack_header(CMD_WRITE_DONE, cmdid, (cmdid + 1) & 0xFF)
-            reply += struct.pack("<i", 0)
+            reply += struct.pack("<i", result)
             self.sock.sendto(reply, addr)
 
     def _print_stats(self):

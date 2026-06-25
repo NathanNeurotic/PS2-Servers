@@ -21,8 +21,7 @@ def main(argv=None):
             print("error: --serve requires a server key", file=sys.stderr)
             return 2
         from .serve import run_serve
-        run_serve(rest[0], rest[1:])
-        return 0
+        return run_serve(rest[0], rest[1:]) or 0
 
     if "--list" in argv or "-l" in argv:
         _print_list()

@@ -23,13 +23,10 @@ jobs:
         include:
           - os: windows-latest
             asset: PS2Servers-windows-x64.exe
-            built: dist/PS2Servers.exe
           - os: ubuntu-latest
             asset: PS2Servers-linux-x64
-            built: dist/PS2Servers
           - os: macos-latest
-            asset: PS2Servers-macos-arm64
-            built: dist/PS2Servers
+            asset: PS2Servers-macos-arm64.zip
     steps:
       - uses: actions/checkout@v4
 
@@ -51,7 +48,12 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          cp "${{ matrix.built }}" "out/${{ matrix.asset }}"
+          case "$RUNNER_OS" in
+            Windows) cp dist/PS2Servers.exe "out/${{ matrix.asset }}" ;;
+            Linux)   cp dist/PS2Servers "out/${{ matrix.asset }}" ;;
+            macOS)   app=$(ls -d dist/*.app | head -1)
+                     ( cd dist && zip -r -y "../out/${{ matrix.asset }}" "$(basename "$app")" ) ;;
+          esac
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
