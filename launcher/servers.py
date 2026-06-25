@@ -31,15 +31,32 @@ def is_frozen():
     return bool(getattr(sys, "frozen", False)) or ("__compiled__" in globals())
 
 
+def frozen_self_exe():
+    """Path of the executable to re-launch when frozen.
+
+    In a Nuitka *onefile* build, sys.executable is the temporary EXTRACTED inner
+    binary, which cannot be relaunched -- re-running the app means launching the
+    ORIGINAL onefile exe the user started. Nuitka exposes it via the
+    NUITKA_ONEFILE_BINARY env var; sys.argv[0] is the next-best source.
+    """
+    for candidate in (os.environ.get("NUITKA_ONEFILE_BINARY"),
+                      getattr(sys, "argv", [None])[0]):
+        if candidate:
+            path = os.path.abspath(candidate)
+            if os.path.exists(path):
+                return path
+    return sys.executable
+
+
 def serve_command(key, args):
     """Command that runs the Python server `key` in its own process.
 
-    When bundled, we re-exec *this* executable with a hidden --serve flag, so the
-    embedded Python runs the server with no system Python installed. From source,
-    we re-run the package the same way.
+    When bundled, we re-exec the original onefile exe with a hidden --serve flag,
+    so the embedded Python runs the server with no system Python installed. From
+    source, we re-run the package the same way.
     """
     if is_frozen():
-        return [sys.executable, "--serve", key, *args]
+        return [frozen_self_exe(), "--serve", key, *args]
     return [sys.executable, "-m", "launcher", "--serve", key, *args]
 
 
