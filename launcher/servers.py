@@ -95,6 +95,8 @@ class ServerDef:
             return False
         if self.runtime == "native":
             return self.resolve_binary(system) is not None
+        if is_frozen():
+            return True  # python servers are bundled into the executable
         return bool(self.module_file) and os.path.exists(self.module_file)
 
     def launch_command(self, values):
