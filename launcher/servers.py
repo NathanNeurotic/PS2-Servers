@@ -145,7 +145,12 @@ def _udpfs_argv(v):
 
 
 def _udpbd_argv(v):
-    return [v["image_file"]]
+    args = [v["image_file"]]
+    if v.get("read_only"):
+        args.append("-r")
+    if v.get("verbose"):
+        args.append("-v")
+    return args
 
 
 # --------------------------------------------------------------------------- #
@@ -203,23 +208,25 @@ UDPFS = ServerDef(
     _build_argv=_udpfs_argv,
 )
 
-# NOTE: UDPBD is currently the interim native .exe (Windows only). It will be
-# replaced by a pure-Python port -- at which point this entry becomes
-# runtime="python" with module_file/module_dir set and available_os = all three,
-# and the rest of the engine is unaffected.
+# Pure-Python port (udpbd_server/udpbd_server.py). Cross-platform; the legacy
+# Windows udpbd-server.exe is kept in the repo only as a fallback and is not used.
 UDPBD = ServerDef(
     key="udpbd",
     label="UDPBD server",
     blurb="Serve a single disk image as a block device over UDP. The PS2 finds "
     "the server automatically (broadcast).",
-    runtime="native",
+    runtime="python",
     default_port=0xBDBD,
     port_is_hex=True,
-    binary_rel={"Windows": "udpbd_server/udpbd-server.exe"},
-    available_os=("Windows",),  # interim: native exe only exists for Windows
+    module_file=_repo("udpbd_server", "udpbd_server.py"),
+    module_dir=_repo("udpbd_server"),
     fields=[
         Field("image_file", "Disk image", "file", required=True,
-              help="A single disk image / block device to serve."),
+              help="A single disk image to serve as a block device."),
+        Field("read_only", "Read-only", "bool", default=False, advanced=True,
+              help="No saves / no VMC writes."),
+        Field("verbose", "Verbose logging", "bool", default=False, advanced=True,
+              help="Log every read/write command."),
     ],
     _build_argv=_udpbd_argv,
 )
