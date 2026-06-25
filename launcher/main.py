@@ -28,12 +28,13 @@ def main(argv=None):
         _print_list()
         return 0
 
-    # Milestone 2 will launch the Tkinter GUI here.
-    _print_list()
-    print()
-    print("GUI not built yet (Milestone 2). For now, start a server directly, e.g.:")
-    print("  python -m launcher --serve smbv1 --share games=D:/PS2Games")
-    return 0
+    try:
+        from .gui import run_gui
+    except ImportError as e:  # Tkinter not present in this Python build
+        print("GUI unavailable ({}). Servers on this machine:".format(e))
+        _print_list()
+        return 1
+    return run_gui()
 
 
 def _print_list():
