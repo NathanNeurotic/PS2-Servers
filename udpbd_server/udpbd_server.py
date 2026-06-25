@@ -221,9 +221,9 @@ class UdpbdServer:
             self.bd.write(datagram[6:6 + size])
         except OSError as e:
             # disk full / I/O error / permission: abort the write and tell the
-            # client it failed, rather than letting the exception kill the server
-            if self.verbose:
-                print("Write error from {}: {}".format(addr[0], e))
+            # client it failed, rather than letting the exception kill the server.
+            # A failing write is a real operational problem -> always report it.
+            print("Write error from {}: {}".format(addr[0], e), file=sys.stderr)
             self._write_left = 0
             reply = pack_header(CMD_WRITE_DONE, cmdid, (cmdid + 1) & 0xFF)
             self.sock.sendto(reply + struct.pack("<i", -1), addr)
@@ -273,11 +273,14 @@ class UdpbdServer:
                     elif self.verbose:
                         print("Ignoring bad/short packet (cmd 0x{:x}) from {}".format(
                             cmd, addr[0]))
-                except (struct.error, IndexError, OSError) as e:
-                    # never let a malformed packet (fuzzing / port scan) or an I/O
-                    # error on read/send kill the server
+                except (struct.error, IndexError) as e:
+                    # malformed packet (fuzzing / port scan): noise -> only if verbose
                     if self.verbose:
-                        print("Error handling packet from {}: {}".format(addr[0], e))
+                        print("Bad packet from {}: {}".format(addr[0], e))
+                except OSError as e:
+                    # a system / network / disk error is a real problem -> always log
+                    print("I/O error handling packet from {}: {}".format(
+                        addr[0], e), file=sys.stderr)
         except KeyboardInterrupt:
             print("\nShutting down...")
             self._print_stats()
