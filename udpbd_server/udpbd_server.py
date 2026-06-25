@@ -217,7 +217,17 @@ class UdpbdServer:
                 print("Dropping truncated WRITE_RDMA from {}".format(addr[0]))
             return
         size = min(size, self._write_left)  # never write past the requested region
-        self.bd.write(datagram[6:6 + size])
+        try:
+            self.bd.write(datagram[6:6 + size])
+        except OSError as e:
+            # disk full / I/O error / permission: abort the write and tell the
+            # client it failed, rather than letting the exception kill the server
+            if self.verbose:
+                print("Write error from {}: {}".format(addr[0], e))
+            self._write_left = 0
+            reply = pack_header(CMD_WRITE_DONE, cmdid, (cmdid + 1) & 0xFF)
+            self.sock.sendto(reply + struct.pack("<i", -1), addr)
+            return
         self._write_left -= size
         if self._write_left <= 0:
             # signal failure on a read-only image instead of faking success, so the
@@ -263,10 +273,11 @@ class UdpbdServer:
                     elif self.verbose:
                         print("Ignoring bad/short packet (cmd 0x{:x}) from {}".format(
                             cmd, addr[0]))
-                except (struct.error, IndexError) as e:
-                    # never let a malformed packet (fuzzing / port scan) kill the server
+                except (struct.error, IndexError, OSError) as e:
+                    # never let a malformed packet (fuzzing / port scan) or an I/O
+                    # error on read/send kill the server
                     if self.verbose:
-                        print("Bad packet from {}: {}".format(addr[0], e))
+                        print("Error handling packet from {}: {}".format(addr[0], e))
         except KeyboardInterrupt:
             print("\nShutting down...")
             self._print_stats()
