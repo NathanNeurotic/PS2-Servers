@@ -46,7 +46,8 @@ def save(data):
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         os.replace(tmp, path)
-    except OSError:
+    except Exception:
+        # clean up the temp file on any failure (e.g. non-serializable value)
         try:
             os.remove(tmp)
         except OSError:

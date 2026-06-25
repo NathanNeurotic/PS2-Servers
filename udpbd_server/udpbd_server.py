@@ -203,6 +203,12 @@ class UdpbdServer:
         _, cmdid, _ = unpack_header(datagram)
         block_shift, block_count = unpack_block_type(datagram)
         size = block_count * (1 << (block_shift + 2))
+        if len(datagram) < 6 + size:
+            # truncated payload: drop it rather than write a short, misaligned block
+            # (which would corrupt every following write in the sequence)
+            if self.verbose:
+                print("Dropping truncated WRITE_RDMA from {}".format(addr[0]))
+            return
         self.bd.write(datagram[6:6 + size])
         self._write_left -= size
         if self._write_left <= 0:

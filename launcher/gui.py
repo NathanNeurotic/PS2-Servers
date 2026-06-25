@@ -312,12 +312,15 @@ class LauncherApp:
         self.out_queue.put((key, line + "\n"))
 
     def _drain_logs(self):
+        updates = {}
         try:
             for _ in range(500):  # cap per tick so a log flood can't freeze the GUI
                 key, line = self.out_queue.get_nowait()
-                self._append_log(key, line)
+                updates.setdefault(key, []).append(line)
         except queue.Empty:
             pass
+        for key, lines in updates.items():  # one widget update per server per tick
+            self._append_log(key, "".join(lines))
         self.root.after(150, self._drain_logs)
 
     def _append_log(self, key, text):
