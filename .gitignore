@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Nuitka build output (from smbv1_server/build_exe.ps1)
+*.build/
+*.dist/
+*.onefile-build/
+
+# OS cruft
+Thumbs.db
+.DS_Store
+desktop.ini
