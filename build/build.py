@@ -25,14 +25,17 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# server sources shipped as data at their original relative paths
+# Server sources shipped as data at their original relative paths -- the launcher
+# loads these by file path at runtime (Nuitka can't see those dynamic imports).
 DATA_FILES = [
     "smbv1_server/smbserver_opl.py",
     "udpfs_server/udpfs_server.py",
     "udpbd_server/udpbd_server.py",
 ]
-DATA_DIRS = [
-    "udpfs_server/compressed_iso",  # imported by udpfs_server at runtime
+# udpfs_server.py does `from compressed_iso import ...` on load. --include-data-dir
+# skips .py files, so compile it in as a real package instead (importable anywhere).
+INCLUDE_PACKAGES = [
+    "compressed_iso",
 ]
 
 
@@ -54,8 +57,8 @@ def main():
     ]
     for rel in DATA_FILES:
         cmd.append("--include-data-files={}={}".format(os.path.join(ROOT, rel), rel))
-    for rel in DATA_DIRS:
-        cmd.append("--include-data-dir={}={}".format(os.path.join(ROOT, rel), rel))
+    for pkg in INCLUDE_PACKAGES:
+        cmd.append("--include-package=" + pkg)
 
     if system == "Windows":
         cmd.append("--windows-console-mode=disable")
@@ -64,8 +67,13 @@ def main():
 
     cmd.append(os.path.join(ROOT, "ps2servers.py"))
 
+    # compressed_iso lives under udpfs_server/, so make it importable for Nuitka.
+    env = os.environ.copy()
+    env["PYTHONPATH"] = (os.path.join(ROOT, "udpfs_server") + os.pathsep
+                         + env.get("PYTHONPATH", ""))
+
     print("Running:\n  " + " \\\n  ".join(cmd) + "\n")
-    return subprocess.call(cmd, cwd=ROOT)
+    return subprocess.call(cmd, cwd=ROOT, env=env)
 
 
 if __name__ == "__main__":
