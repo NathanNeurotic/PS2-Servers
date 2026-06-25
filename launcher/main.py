@@ -52,29 +52,39 @@ def _selfcheck():
 
     print("is_frozen:", is_frozen())
     print("sys.executable:", sys.executable)
-    print("sys.argv[0]:", sys.argv[0])
+    print("sys.argv[0]:", sys.argv[0] if sys.argv else None)
     print("NUITKA_ONEFILE_BINARY:", os.environ.get("NUITKA_ONEFILE_BINARY"))
     print("frozen_self_exe:", frozen_self_exe())
 
-    img = os.path.join(tempfile.mkdtemp(prefix="ps2chk_"), "a.img")
-    with open(img, "wb") as f:
-        f.write(b"\0" * 65536)
-    cmd = serve_command("udpbd", [img])
-    print("serve_command:", cmd)
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True)
-    except OSError as e:
-        print("SPAWN FAILED:", e)
-        return 1
-    time.sleep(3)
-    alive = proc.poll() is None
-    print("server alive:", alive)
-    if not alive:
-        print("output:", (proc.stdout.read() or "")[:500])
-    proc.terminate()
-    print("RESULT:", "PASS" if alive else "FAIL")
-    return 0 if alive else 1
+    with tempfile.TemporaryDirectory(prefix="ps2chk_",
+                                     ignore_cleanup_errors=True) as tmpdir:
+        img = os.path.join(tmpdir, "a.img")
+        with open(img, "wb") as f:
+            f.write(b"\0" * 65536)
+        cmd = serve_command("udpbd", [img])
+        print("serve_command:", cmd)
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True)
+        except OSError as e:
+            print("SPAWN FAILED:", e)
+            return 1
+        alive = False
+        try:
+            time.sleep(3)
+            alive = proc.poll() is None
+            print("server alive:", alive)
+            if not alive:
+                print("output:", (proc.stdout.read() or "")[:500])
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        print("RESULT:", "PASS" if alive else "FAIL")
+        return 0 if alive else 1
 
 
 def _print_list():
