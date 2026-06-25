@@ -64,6 +64,11 @@ def main():
         # background with no dock / menu-bar presence. CI zips the .app for release.
         cmd += ["--standalone", "--macos-create-app-bundle",
                 "--macos-app-name=PS2 Servers"]
+        # optional cross-build target (e.g. x86_64 on an arm64 runner). Needs a
+        # universal2 Python so Nuitka has the target-arch slice of every lib.
+        arch = os.environ.get("MACOS_TARGET_ARCH")
+        if arch:
+            cmd.append("--macos-target-arch=" + arch)
     else:
         cmd.append("--onefile")
 
