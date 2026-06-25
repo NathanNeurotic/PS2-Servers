@@ -104,6 +104,16 @@ def _truncated_rdma(c, img, start):
     print("  TRUNC ok: truncated WRITE_RDMA dropped, no corruption")
 
 
+def _unsolicited_rdma(c, img, start):
+    # a WRITE_RDMA with NO preceding CMD_WRITE must be ignored -- otherwise it
+    # writes at the stale file offset left by the previous read, corrupting it
+    _read(c, img, start, 1)  # leaves the file pointer at sector start+1
+    c.sendto(U.pack_header(U.CMD_WRITE_RDMA, 8, 0) + U.pack_block_type(7, 1)
+             + b"\xCD" * 512, SRV)
+    _read(c, img, start, 2)  # sectors start..start+1 must be unchanged
+    print("  STRAY ok: unsolicited WRITE_RDMA ignored, no corruption")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="udpbd_") as tmp:
         path = os.path.join(tmp, "test.img")
@@ -125,6 +135,7 @@ def main():
             _read(c, img, 100, 8)      # 8 sectors      -> 128-byte blocks
             _read(c, img, 1000, 512)   # max read       -> 32-byte blocks (~183 packets)
             _read(c, img, 7777, 17)    # odd offset/count
+            _unsolicited_rdma(c, img, 600)  # no write in progress -> must be ignored
             _write(c, path, 200, 5)
             with open(path, "rb") as f:  # the written region must read back as new data
                 img2 = f.read()

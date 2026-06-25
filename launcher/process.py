@@ -64,6 +64,13 @@ class ServerProcess:
                 self._emit(line.rstrip("\n"))
         except (ValueError, OSError):
             pass  # stream closed during shutdown
+        finally:
+            # close the pipe on EOF too (a server that exits on its own never
+            # reaches stop(), which early-returns once the process is gone)
+            try:
+                self._proc.stdout.close()
+            except OSError:
+                pass
 
     def _emit(self, line):
         self.lines.append(line)

@@ -271,6 +271,7 @@ class LauncherApp:
                     "saved — then click Start again."):
                 self._save()
                 if elevate.relaunch_as_admin():
+                    self.stop_all()  # free ports before the elevated instance starts
                     self.root.destroy()
                 else:
                     messagebox.showerror(
@@ -363,6 +364,9 @@ class LauncherApp:
 
     def on_close(self):
         self._save()
+        # hide first so the (up to a few seconds of) child termination doesn't
+        # look like a frozen window
+        self.root.withdraw()
         self.stop_all()
         self.root.destroy()
 

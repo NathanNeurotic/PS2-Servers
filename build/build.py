@@ -45,7 +45,6 @@ def main():
 
     cmd = [
         sys.executable, "-m", "nuitka",
-        "--onefile",
         "--enable-plugin=tk-inter",
         "--assume-yes-for-downloads",
         "--output-dir=" + os.path.join(ROOT, "dist"),
@@ -60,10 +59,16 @@ def main():
     for pkg in INCLUDE_PACKAGES:
         cmd.append("--include-package=" + pkg)
 
+    if system == "Darwin":
+        # a Tkinter GUI needs a .app bundle on macOS, or its window opens in the
+        # background with no dock / menu-bar presence. CI zips the .app for release.
+        cmd += ["--standalone", "--macos-create-app-bundle",
+                "--macos-app-name=PS2 Servers"]
+    else:
+        cmd.append("--onefile")
+
     if system == "Windows":
         cmd.append("--windows-console-mode=disable")
-    # Linux/macOS produce a plain one-file binary (dist/PS2Servers) -- simplest
-    # to attach to a release. (A signed macOS .app bundle could come later.)
 
     cmd.append(os.path.join(ROOT, "ps2servers.py"))
 
