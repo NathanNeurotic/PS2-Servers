@@ -62,8 +62,8 @@ def main():
 
     if system == "Windows":
         cmd.append("--windows-console-mode=disable")
-    elif system == "Darwin":
-        cmd.append("--macos-create-app-bundle")
+    # Linux/macOS produce a plain one-file binary (dist/PS2Servers) -- simplest
+    # to attach to a release. (A signed macOS .app bundle could come later.)
 
     cmd.append(os.path.join(ROOT, "ps2servers.py"))
 
