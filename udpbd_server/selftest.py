@@ -85,31 +85,47 @@ def _optimizer():
     print("  SHIFT ok: block-size optimizer matches upstream table")
 
 
+def _fuzz(c, expected_sectors):
+    # malformed / short packets (fuzzing, port scans) must never crash the server
+    for bad in (b"\x00", b"\x02", b"\x02\x00\x00", b"\x05\x00\x00\x00\x00",
+                random.Random(7).randbytes(5), b"\x04\x00\x01\x00\x00\x00\x00"):
+        c.sendto(bad, SRV)
+    _info(c, expected_sectors)  # still answers -> it survived the garbage
+    print("  FUZZ  ok: server survived malformed packets")
+
+
 def main():
-    tmp = tempfile.mkdtemp(prefix="udpbd_")
-    path = os.path.join(tmp, "test.img")
-    size = 4 * 1024 * 1024
-    img = random.Random(1234).randbytes(size)
-    with open(path, "wb") as f:
-        f.write(img)
+    with tempfile.TemporaryDirectory(prefix="udpbd_") as tmp:
+        path = os.path.join(tmp, "test.img")
+        size = 4 * 1024 * 1024
+        img = random.Random(1234).randbytes(size)
+        with open(path, "wb") as f:
+            f.write(img)
 
-    server = U.UdpbdServer(U.BlockDevice(path), bind="127.0.0.1")
-    threading.Thread(target=server.run, daemon=True).start()
-    time.sleep(0.3)
+        server = U.UdpbdServer(U.BlockDevice(path), bind="127.0.0.1")
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        time.sleep(0.3)
 
-    c = _client()
-    print("UDPBD port self-test:")
-    _info(c, size // 512)
-    _read(c, img, 0, 1)        # smallest read  -> 512-byte blocks
-    _read(c, img, 100, 8)      # 8 sectors      -> 128-byte blocks
-    _read(c, img, 1000, 512)   # max read       -> 32-byte blocks (~183 packets)
-    _read(c, img, 7777, 17)    # odd offset/count
-    _write(c, path, 200, 5)
-    with open(path, "rb") as f:  # the written region must now read back as new data
-        img2 = f.read()
-    _read(c, img2, 200, 5)
-    _optimizer()
-    print("ALL UDPBD TESTS PASSED")
+        c = _client()
+        try:
+            print("UDPBD port self-test:")
+            _info(c, size // 512)
+            _read(c, img, 0, 1)        # smallest read  -> 512-byte blocks
+            _read(c, img, 100, 8)      # 8 sectors      -> 128-byte blocks
+            _read(c, img, 1000, 512)   # max read       -> 32-byte blocks (~183 packets)
+            _read(c, img, 7777, 17)    # odd offset/count
+            _write(c, path, 200, 5)
+            with open(path, "rb") as f:  # the written region must read back as new data
+                img2 = f.read()
+            _read(c, img2, 200, 5)
+            _fuzz(c, size // 512)
+            _optimizer()
+            print("ALL UDPBD TESTS PASSED")
+        finally:
+            c.close()
+            server.sock.close()       # unblocks recvfrom -> run() closes the image
+            thread.join(timeout=1.0)  # ensure the image handle is freed before cleanup
     return 0
 
 

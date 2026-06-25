@@ -89,3 +89,10 @@ class ServerProcess:
         except subprocess.TimeoutExpired:
             self._proc.kill()
             self._proc.wait()
+        finally:
+            # release the pipe fd and unblock the reader thread
+            if self._proc.stdout:
+                try:
+                    self._proc.stdout.close()
+                except OSError:
+                    pass
