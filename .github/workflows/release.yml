@@ -27,6 +27,8 @@ jobs:
             asset: PS2Servers-linux-x64
           - os: macos-latest
             asset: PS2Servers-macos-arm64.zip
+          - os: macos-13
+            asset: PS2Servers-macos-x64.zip
     steps:
       - uses: actions/checkout@v4
 
