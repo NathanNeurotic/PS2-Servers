@@ -132,8 +132,8 @@ class ServerCard(ttk.LabelFrame):
             self.adv_btn.config(text="Advanced ▸")
 
     def _browse(self, var, kind):
-        path = (filedialog.askdirectory() if kind == "folder"
-                else filedialog.askopenfilename())
+        path = (filedialog.askdirectory(parent=self) if kind == "folder"
+                else filedialog.askopenfilename(parent=self))
         if path:
             var.set(path)
 
@@ -313,7 +313,7 @@ class LauncherApp:
 
     def _drain_logs(self):
         try:
-            while True:
+            for _ in range(500):  # cap per tick so a log flood can't freeze the GUI
                 key, line = self.out_queue.get_nowait()
                 self._append_log(key, line)
         except queue.Empty:
@@ -324,6 +324,9 @@ class LauncherApp:
         widget = self.logs[key]
         widget.config(state="normal")
         widget.insert("end", text)
+        lines = int(widget.index("end-1c").split(".")[0])
+        if lines > 2000:  # keep the log bounded so memory/redraw stay cheap
+            widget.delete("1.0", "{}.0".format(lines - 2000))
         widget.see("end")
         widget.config(state="disabled")
 

@@ -128,6 +128,8 @@ def _smbv1_argv(v):
 
 
 def _udpfs_argv(v):
+    if not v.get("root_dir") and not v.get("block_device"):
+        raise ValueError("UDPFS needs a Games folder and/or a Disk image.")
     args = []
     if v.get("root_dir"):
         args += ["-d", v["root_dir"]]

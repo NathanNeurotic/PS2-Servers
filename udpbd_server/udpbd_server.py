@@ -227,20 +227,29 @@ class UdpbdServer:
         print()
         try:
             while True:
-                datagram, addr = self.sock.recvfrom(RECV_BUFLEN)
-                if not datagram:
+                try:
+                    datagram, addr = self.sock.recvfrom(RECV_BUFLEN)
+                except OSError:
+                    break  # socket closed -> shut down
+                if len(datagram) < 2:  # smaller than the header: ignore
                     continue
-                cmd = header_cmd(datagram)
-                if cmd == CMD_INFO:
-                    self._handle_info(addr, datagram)
-                elif cmd == CMD_READ:
-                    self._handle_read(addr, datagram)
-                elif cmd == CMD_WRITE:
-                    self._handle_write(addr, datagram)
-                elif cmd == CMD_WRITE_RDMA:
-                    self._handle_write_rdma(addr, datagram)
-                elif self.verbose:
-                    print("Invalid cmd: 0x{:x}".format(cmd))
+                try:
+                    cmd = header_cmd(datagram)
+                    if cmd == CMD_INFO:
+                        self._handle_info(addr, datagram)
+                    elif cmd == CMD_READ and len(datagram) >= 8:
+                        self._handle_read(addr, datagram)
+                    elif cmd == CMD_WRITE and len(datagram) >= 8:
+                        self._handle_write(addr, datagram)
+                    elif cmd == CMD_WRITE_RDMA and len(datagram) >= 6:
+                        self._handle_write_rdma(addr, datagram)
+                    elif self.verbose:
+                        print("Ignoring bad/short packet (cmd 0x{:x}) from {}".format(
+                            cmd, addr[0]))
+                except (struct.error, IndexError) as e:
+                    # never let a malformed packet (fuzzing / port scan) kill the server
+                    if self.verbose:
+                        print("Bad packet from {}: {}".format(addr[0], e))
         except KeyboardInterrupt:
             print("\nShutting down...")
             self._print_stats()

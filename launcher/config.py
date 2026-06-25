@@ -38,5 +38,17 @@ def load():
 def save(data):
     directory = config_dir()
     os.makedirs(directory, exist_ok=True)
-    with open(config_path(), "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    path = config_path()
+    tmp = path + ".tmp"
+    # write to a temp file then atomically replace, so a crash mid-write can't
+    # leave a truncated/corrupt config behind
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise

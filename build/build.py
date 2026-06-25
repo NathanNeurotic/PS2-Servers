@@ -68,9 +68,11 @@ def main():
     cmd.append(os.path.join(ROOT, "ps2servers.py"))
 
     # compressed_iso lives under udpfs_server/, so make it importable for Nuitka.
+    # Avoid a trailing os.pathsep (an empty entry means CWD, which can shadow imports).
     env = os.environ.copy()
-    env["PYTHONPATH"] = (os.path.join(ROOT, "udpfs_server") + os.pathsep
-                         + env.get("PYTHONPATH", ""))
+    extra = os.path.join(ROOT, "udpfs_server")
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = extra + os.pathsep + existing if existing else extra
 
     print("Running:\n  " + " \\\n  ".join(cmd) + "\n")
     return subprocess.call(cmd, cwd=ROOT, env=env)
