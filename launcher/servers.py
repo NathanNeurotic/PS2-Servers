@@ -39,8 +39,9 @@ def frozen_self_exe():
     ORIGINAL onefile exe the user started. Nuitka exposes it via the
     NUITKA_ONEFILE_BINARY env var; sys.argv[0] is the next-best source.
     """
-    for candidate in (os.environ.get("NUITKA_ONEFILE_BINARY"),
-                      getattr(sys, "argv", [None])[0]):
+    argv = getattr(sys, "argv", None)
+    argv0 = argv[0] if argv else None
+    for candidate in (os.environ.get("NUITKA_ONEFILE_BINARY"), argv0):
         if candidate:
             path = os.path.abspath(candidate)
             if os.path.exists(path):
