@@ -1,0 +1,66 @@
+name: Build release binaries
+
+# Builds the single-file launcher on each OS natively (no cross-compiling) and,
+# when triggered by a version tag like v0.1.0, attaches the binaries to the
+# matching GitHub Release. Use the manual "Run workflow" button to test-build
+# without publishing.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: PS2Servers-windows-x64.exe
+            built: dist/PS2Servers.exe
+          - os: ubuntu-latest
+            asset: PS2Servers-linux-x64
+            built: dist/PS2Servers
+          - os: macos-latest
+            asset: PS2Servers-macos-arm64
+            built: dist/PS2Servers
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Tk (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk tk-dev
+
+      - name: Install Nuitka
+        run: python -m pip install --upgrade pip nuitka
+
+      - name: Build single-file binary
+        run: python build/build.py
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "${{ matrix.built }}" "out/${{ matrix.asset }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/${{ matrix.asset }}
