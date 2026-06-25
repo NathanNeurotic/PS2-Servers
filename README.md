@@ -57,3 +57,43 @@ python build/build.py            # -> dist/PS2Servers(.exe)
 The UDPBD port is validated by `udpbd_server/selftest.py` at the protocol level
 (INFO/READ/WRITE byte-for-byte). As with the SMBv1 server, **final validation is on
 real hardware** — an actual PS2 running OPL, or PCSX2 with a network adapter.
+
+## Credits & thanks
+
+This is a fan project that stands entirely on the shoulders of the PS2 homebrew
+community. None of the clever parts are ours — we just wrapped brilliant existing
+work in something click‑and‑go. With genuine gratitude:
+
+- **Rick Gaiser — [@rickgaiser](https://github.com/rickgaiser)** — the heart of all
+  of this. He designed the **UDPBD** and **UDPFS** network protocols and wrote the
+  original servers, alongside **[Neutrino](https://github.com/rickgaiser/neutrino)**.
+  [`udpfs_server/udpfs_server.py`](udpfs_server/udpfs_server.py) is his UDPFS server
+  (from Neutrino's `pc/` host tools), and
+  [`udpbd_server/udpbd_server.py`](udpbd_server/udpbd_server.py) is our independent
+  Python re‑implementation of his UDPBD v2 protocol. The network game‑loading here
+  simply does not exist without his work — thank you.
+- **El_isra — [@israpps](https://github.com/israpps)** — maintains the canonical
+  **[udpbd-server](https://github.com/israpps/udpbd-server)** on GitHub (Rick's code,
+  with CI), which is the reference we ported from.
+- **Alex Parrado** — the Windows port of udpbd-server.
+- **[Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)** and the
+  **[ps2homebrew](https://github.com/ps2homebrew)** team — the loader everything here
+  serves, and the wider toolchain that makes PS2 homebrew possible.
+- **[prodeveloper0/pyudpbd](https://github.com/prodeveloper0/pyudpbd)** — a pure‑Python
+  UDPBD port we read while writing our own.
+- The folks behind **CHD ([libchdr](https://github.com/rtissera/libchdr) / MAME)**,
+  **CSO**, and **ZSO** — the compressed‑image formats UDPFS decompresses on the fly.
+
+### What's original here
+
+The **GUI launcher**, the **RiptOPL** SMBv1 server, and the **pure‑Python UDPBD port**
+were written for this repo. Everything at the protocol level is the community's —
+we reimplemented from public protocols/source (rather than copying code) where we
+could, and tried to attribute accurately.
+
+### To the authors above 🙏
+
+This exists out of appreciation for what you've given the PS2 scene, not any sense of
+ownership. If you'd like attribution changed, a link corrected, or your work removed
+from this repo entirely, please [open an issue](../../issues) — we'll sort it out
+right away, no questions asked. Thank you, sincerely.
