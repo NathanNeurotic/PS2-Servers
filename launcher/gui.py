@@ -11,7 +11,7 @@ import queue
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import config, netinfo
+from . import config, elevate, netinfo
 from .process import ServerProcess
 from .servers import REGISTRY, REPO_ROOT
 
@@ -257,6 +257,27 @@ class LauncherApp:
             messagebox.showerror("Missing input",
                                  "Please set: " + ", ".join(missing))
             return
+
+        if key == "smbv1" and values.get("take_445") and not elevate.is_admin():
+            if not elevate.can_elevate():
+                messagebox.showerror(
+                    "Administrator required",
+                    "'Take port 445' needs Windows administrator rights.")
+                return
+            if messagebox.askyesno(
+                    "Administrator required",
+                    "'Take port 445' needs administrator rights.\n\n"
+                    "Restart the launcher as administrator now? Your settings are "
+                    "saved — then click Start again."):
+                self._save()
+                if elevate.relaunch_as_admin():
+                    self.root.destroy()
+                else:
+                    messagebox.showerror(
+                        "Elevation failed",
+                        "Could not restart as administrator.")
+            return
+
         try:
             command = server.launch_command(values)
         except Exception as e:
