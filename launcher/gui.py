@@ -11,7 +11,7 @@ import queue
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import config, elevate, netinfo
+from . import config, elevate, netinfo, tray
 from .process import ServerProcess
 from .servers import REGISTRY, REPO_ROOT
 
@@ -189,7 +189,28 @@ class LauncherApp:
         self._build()
         self._restore()
 
-        root.protocol("WM_DELETE_WINDOW", self.on_close)
+        # On Windows, run from the system tray: closing or minimizing hides the
+        # window (servers keep running) and the tray menu restores or quits.
+        self._tray = None
+        self._tray_queue = queue.Queue()
+        if tray.AVAILABLE:
+            try:
+                self._tray = tray.SystemTray(
+                    "PS2 Servers — running",
+                    on_open=lambda: self._tray_queue.put("open"),
+                    on_quit=lambda: self._tray_queue.put("quit"))
+                if not self._tray.start():
+                    self._tray = None
+            except Exception:
+                self._tray = None
+
+        if self._tray:
+            root.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
+            root.bind("<Unmap>", self._on_unmap)
+            self.root.after(150, self._drain_tray)
+        else:
+            root.protocol("WM_DELETE_WINDOW", self.on_close)
+
         self.root.after(150, self._drain_logs)
         self.root.after(600, self._poll_status)
 
@@ -272,6 +293,8 @@ class LauncherApp:
                 self._save()
                 if elevate.relaunch_as_admin():
                     self.stop_all()  # free ports before the elevated instance starts
+                    if self._tray:
+                        self._tray.stop()
                     self.root.destroy()
                 else:
                     messagebox.showerror(
@@ -368,6 +391,42 @@ class LauncherApp:
         # look like a frozen window
         self.root.withdraw()
         self.stop_all()
+        self.root.destroy()
+
+    # -- system tray (Windows) -------------------------------------------- #
+    def _hide_to_tray(self):
+        # closing the window just hides it; the servers keep running in the tray
+        self._save()
+        self.root.withdraw()
+
+    def _on_unmap(self, event):
+        # minimizing also hides to the tray (off the taskbar)
+        if event.widget is self.root and self.root.state() == "iconic":
+            self.root.withdraw()
+
+    def _restore_from_tray(self):
+        self.root.deiconify()
+        self.root.state("normal")
+        self.root.lift()
+        self.root.focus_force()
+
+    def _drain_tray(self):
+        try:
+            while True:
+                action = self._tray_queue.get_nowait()
+                if action == "open":
+                    self._restore_from_tray()
+                elif action == "quit":
+                    self._quit_from_tray()
+        except queue.Empty:
+            pass
+        self.root.after(150, self._drain_tray)
+
+    def _quit_from_tray(self):
+        self._save()
+        self.stop_all()
+        if self._tray:
+            self._tray.stop()
         self.root.destroy()
 
 
