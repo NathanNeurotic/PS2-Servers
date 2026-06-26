@@ -12,6 +12,8 @@ for testing:
 import platform
 import sys
 
+from . import app_icon
+
 
 def main(argv=None):
     if argv is None:
@@ -34,6 +36,7 @@ def main(argv=None):
     if "--selfcheck" in argv:
         return _selfcheck()
 
+    app_icon.set_windows_app_id()
     try:
         from . import gui
     except ImportError as e:  # Tkinter not present in this Python build
@@ -45,9 +48,10 @@ def main(argv=None):
 
 
 def _apply_gui_review_fixes(gui):
-    """Apply terminal UX fixes and clearer tab styling for the launcher."""
+    """Apply terminal UX fixes, clearer tabs, and the app icon."""
     original_text = gui.tk.Text
     original_notebook = gui.ttk.Notebook
+    original_launcher_init = gui.LauncherApp.__init__
 
     def wrapped_text(*args, **kwargs):
         if kwargs.get("wrap") == "none":
@@ -77,6 +81,10 @@ def _apply_gui_review_fixes(gui):
             kwargs.setdefault("padding", (8, 8))
             return super().add(child, **kwargs)
 
+    def launcher_init(self, root):
+        app_icon.apply_to_tk_root(root, gui.tk)
+        original_launcher_init(self, root)
+
     def append_log(self, key, text):
         widget = self.logs[key]
         at_bottom = widget.yview()[1] >= 0.99
@@ -91,6 +99,7 @@ def _apply_gui_review_fixes(gui):
 
     gui.tk.Text = wrapped_text
     gui.ttk.Notebook = StyledNotebook
+    gui.LauncherApp.__init__ = launcher_init
     gui.LauncherApp._append_log = append_log
 
 
