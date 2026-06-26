@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" role="img" aria-label="Neon PS2-style server cube network">
+  <defs>
+    <radialGradient id="bg" cx="52%" cy="54%" r="68%">
+      <stop offset="0" stop-color="#06236a" stop-opacity="0.72"/>
+      <stop offset="0.38" stop-color="#02091f" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#000"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#64f7ff"/>
+      <stop offset="0.5" stop-color="#1388ff"/>
+      <stop offset="1" stop-color="#0047ff"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="hot" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse" patternTransform="skewX(-25) scale(1 .55)">
+      <path d="M52 0H0v52" fill="none" stroke="#146dff" stroke-opacity=".22" stroke-width="1"/>
+    </pattern>
+    <symbol id="cube" viewBox="0 0 120 140">
+      <polygon points="60,6 110,34 60,62 10,34" fill="#10214c" stroke="url(#edge)" stroke-width="2"/>
+      <polygon points="10,34 60,62 60,130 10,101" fill="#020613" stroke="url(#edge)" stroke-width="2"/>
+      <polygon points="110,34 60,62 60,130 110,101" fill="#071126" stroke="url(#edge)" stroke-width="2"/>
+      <path d="M60 8v122M10 34l50 28 50-28" fill="none" stroke="#00d9ff" stroke-opacity=".52" stroke-width="2"/>
+    </symbol>
+  </defs>
+  <rect width="1200" height="760" fill="url(#bg)"/>
+  <rect x="-120" y="455" width="1500" height="310" fill="url(#grid)" opacity=".85"/>
+  <g filter="url(#glow)" opacity=".9" fill="none" stroke-linecap="round">
+    <path d="M272 420 600 260 925 420 600 585Z" stroke="#1f8cff" stroke-width="5"/>
+    <path d="M600 260v325" stroke="#00d9ff" stroke-width="4"/>
+    <path d="M272 420h653" stroke="#1f8cff" stroke-width="3" opacity=".7"/>
+    <path d="M430 343 765 504" stroke="#1f8cff" stroke-width="3" opacity=".55"/>
+    <path d="M770 342 438 506" stroke="#1f8cff" stroke-width="3" opacity=".55"/>
+  </g>
+  <g filter="url(#glow)">
+    <use href="#cube" x="520" y="215" width="160" height="188"/>
+    <use href="#cube" x="185" y="370" width="145" height="170" opacity=".95"/>
+    <use href="#cube" x="850" y="370" width="145" height="170" opacity=".95"/>
+    <use href="#cube" x="522" y="520" width="156" height="182" opacity=".92"/>
+    <use href="#cube" x="548" y="52" width="115" height="134" opacity=".75"/>
+    <use href="#cube" x="150" y="585" width="90" height="104" opacity=".72"/>
+    <use href="#cube" x="975" y="585" width="90" height="104" opacity=".72"/>
+    <use href="#cube" x="132" y="205" width="72" height="84" opacity=".62"/>
+    <use href="#cube" x="997" y="198" width="72" height="84" opacity=".62"/>
+  </g>
+  <g filter="url(#hot)">
+    <circle cx="600" cy="260" r="5" fill="#9ffcff"/>
+    <circle cx="272" cy="420" r="5" fill="#9ffcff"/>
+    <circle cx="925" cy="420" r="5" fill="#9ffcff"/>
+    <circle cx="600" cy="585" r="5" fill="#9ffcff"/>
+    <path d="M600 30v140" stroke="#145cff" stroke-width="3" opacity=".8"/>
+    <path d="M600 404v125" stroke="#00dcff" stroke-width="3" opacity=".85"/>
+    <path d="M272 250v150" stroke="#145cff" stroke-width="3" opacity=".7"/>
+    <path d="M925 245v155" stroke="#145cff" stroke-width="3" opacity=".7"/>
+  </g>
+  <g fill="#26d9ff" opacity=".7">
+    <circle cx="118" cy="352" r="2"/><circle cx="1030" cy="326" r="2"/><circle cx="822" cy="132" r="2"/>
+    <circle cx="456" cy="162" r="1.7"/><circle cx="724" cy="645" r="1.7"/><circle cx="368" cy="616" r="1.5"/>
+    <circle cx="1010" cy="705" r="1.3"/><circle cx="193" cy="154" r="1.5"/><circle cx="675" cy="87" r="1.2"/>
+  </g>
+</svg>
