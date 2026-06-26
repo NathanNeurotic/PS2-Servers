@@ -35,12 +35,42 @@ def main(argv=None):
         return _selfcheck()
 
     try:
-        from .gui import run_gui
+        from . import gui
     except ImportError as e:  # Tkinter not present in this Python build
         print("GUI unavailable ({}). Servers on this machine:".format(e))
         _print_list()
         return 1
-    return run_gui()
+    _apply_gui_review_fixes(gui)
+    return gui.run_gui()
+
+
+def _apply_gui_review_fixes(gui):
+    """Apply terminal UX fixes for the tabbed launcher.
+
+    Keeps long terminal lines readable and avoids forcing the terminal back to
+    the bottom while a user is reading earlier log output.
+    """
+    original_text = gui.tk.Text
+
+    def wrapped_text(*args, **kwargs):
+        if kwargs.get("wrap") == "none":
+            kwargs["wrap"] = "char"
+        return original_text(*args, **kwargs)
+
+    def append_log(self, key, text):
+        widget = self.logs[key]
+        at_bottom = widget.yview()[1] >= 0.99
+        widget.config(state="normal")
+        widget.insert("end", self._terminal_text(key, text))
+        lines = int(widget.index("end-1c").split(".")[0])
+        if lines > 2000:  # keep the log bounded so memory/redraw stay cheap
+            widget.delete("1.0", "{}.0".format(lines - 2000))
+        if at_bottom:
+            widget.see("end")
+        widget.config(state="disabled")
+
+    gui.tk.Text = wrapped_text
+    gui.LauncherApp._append_log = append_log
 
 
 def _selfcheck():
