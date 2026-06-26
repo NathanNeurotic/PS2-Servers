@@ -1,0 +1,119 @@
+name: Release on main
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-on-main
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            artifact_name: PS2Servers-Windows
+            asset_name: PS2Servers-Windows.zip
+          - name: Linux
+            os: ubuntu-latest
+            artifact_name: PS2Servers-Linux
+            asset_name: PS2Servers-Linux.tar.gz
+          - name: macOS
+            os: macos-latest
+            artifact_name: PS2Servers-macOS
+            asset_name: PS2Servers-macOS.zip
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf python3-tk
+
+      - name: Install Python build dependencies
+        run: python -m pip install --upgrade pip nuitka ordered-set zstandard
+
+      - name: Build app
+        run: python build/build.py
+
+      - name: Package Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/PS2Servers.exe -DestinationPath ${{ matrix.asset_name }} -Force
+
+      - name: Package Linux app
+        if: runner.os == 'Linux'
+        shell: bash
+        run: tar -czf ${{ matrix.asset_name }} -C dist PS2Servers
+
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP_PATH="dist/PS2 Servers.app"
+          if [ ! -d "$APP_PATH" ]; then
+            APP_PATH="$(find dist -maxdepth 1 -name '*.app' -type d | head -n 1)"
+          fi
+          test -n "$APP_PATH"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" ${{ matrix.asset_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.asset_name }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release tag
+        id: tag
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TAG="main-${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: PS2 Servers ${{ steps.tag.outputs.tag }}
+          body: |
+            Automatic release from `main`.
+
+            Commit: ${{ github.sha }}
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
