@@ -45,17 +45,37 @@ def main(argv=None):
 
 
 def _apply_gui_review_fixes(gui):
-    """Apply terminal UX fixes for the tabbed launcher.
-
-    Keeps long terminal lines readable and avoids forcing the terminal back to
-    the bottom while a user is reading earlier log output.
-    """
+    """Apply terminal UX fixes and clearer tab styling for the launcher."""
     original_text = gui.tk.Text
+    original_notebook = gui.ttk.Notebook
 
     def wrapped_text(*args, **kwargs):
         if kwargs.get("wrap") == "none":
             kwargs["wrap"] = "char"
         return original_text(*args, **kwargs)
+
+    class StyledNotebook(original_notebook):
+        def __init__(self, *args, **kwargs):
+            kwargs.setdefault("style", "Server.TNotebook")
+            super().__init__(*args, **kwargs)
+            style = gui.ttk.Style(self)
+            style.configure("Server.TNotebook", borderwidth=1, tabmargins=(8, 6, 8, 0))
+            style.configure("Server.TNotebook.Tab", padding=(16, 7), font=("", 10, "bold"),
+                            borderwidth=2)
+            style.map("Server.TNotebook.Tab",
+                      background=[("selected", "#ffffff"),
+                                  ("active", "#eef4ff"),
+                                  ("!selected", "#d8dee8")],
+                      foreground=[("selected", "#0b2f5f"),
+                                  ("!selected", "#111111")],
+                      expand=[("selected", (2, 2, 2, 0))])
+
+        def add(self, child, **kwargs):
+            text = kwargs.get("text")
+            if text:
+                kwargs["text"] = "  {}  ".format(text.strip())
+            kwargs.setdefault("padding", (8, 8))
+            return super().add(child, **kwargs)
 
     def append_log(self, key, text):
         widget = self.logs[key]
@@ -70,6 +90,7 @@ def _apply_gui_review_fixes(gui):
         widget.config(state="disabled")
 
     gui.tk.Text = wrapped_text
+    gui.ttk.Notebook = StyledNotebook
     gui.LauncherApp._append_log = append_log
 
 
