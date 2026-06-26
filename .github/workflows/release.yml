@@ -99,7 +99,6 @@ jobs:
 
           🤖 Built by GitHub Actions (Intel macOS cross-built on Apple Silicon).
           EOF
-          sed -i 's/^          //' out/release-notes.md
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
