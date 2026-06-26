@@ -56,8 +56,8 @@ def main():
         "--output-filename=" + out,
         "--company-name=PS2-Servers",
         "--product-name=PS2 Servers",
-        "--product-version=0.1.4",
-        "--file-version=0.1.4",
+        "--product-version=0.1.5",
+        "--file-version=0.1.5",
     ]
     for rel in DATA_FILES:
         cmd.append("--include-data-files={}={}".format(os.path.join(ROOT, rel), rel))
