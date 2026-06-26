@@ -1,17 +1,14 @@
-"""Windows UAC elevation for the one option that needs admin rights.
+"""Windows UAC elevation for setup tasks that need admin rights.
 
-Only SMBv1's ``--take-445`` needs administrator privileges (it pauses Windows'
-LanmanServer to bind the standard port 445). Managing a single elevated child
-from a non-elevated parent is painful on Windows (UIPI blocks piping and
-termination), so instead we relaunch the *whole* launcher elevated -- then every
-server still streams its logs and stops normally.
+The launcher relaunches itself elevated instead of trying to manage one elevated
+child process. That keeps server logs, shutdown, and tray handling normal.
 """
 
 import os
 import platform
 import sys
 
-from .servers import REPO_ROOT, is_frozen
+from .servers import REPO_ROOT, frozen_self_exe, is_frozen
 
 
 def is_admin():
@@ -40,7 +37,7 @@ def relaunch_as_admin():
     try:
         import ctypes
         if is_frozen():
-            exe, params, cwd = sys.executable, "", None
+            exe, params, cwd = frozen_self_exe(), "", None
         else:  # from source: re-run `python -m launcher` from the repo root
             exe, params, cwd = sys.executable, "-m launcher", REPO_ROOT
         # ShellExecuteW returns a value > 32 on success.

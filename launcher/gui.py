@@ -12,7 +12,7 @@ import queue
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import config, elevate, netinfo, tray
+from . import config, elevate, netinfo, tray, windows_setup
 from .process import ServerProcess
 from .servers import REGISTRY, REPO_ROOT
 
@@ -30,7 +30,7 @@ TAB_TITLES = {
 
 def opl_hint(key, ip, values):
     if key == "smbv1":
-        port = str(values.get("port") or 1445)
+        port = "445" if values.get("take_445") else str(values.get("port") or 1445)
         return ("In OPL → Network:  IP {}  ·  Port {}  ·  Share 'games'  "
                 "·  NetBIOS off  ·  user/pass blank".format(ip, port))
     if key == "udpfs":
@@ -220,6 +220,8 @@ class LauncherApp:
 
         self.root.after(150, self._drain_logs)
         self.root.after(600, self._poll_status)
+        if self.saved.get("pending_start"):
+            self.root.after(350, self._start_pending)
 
     def _build(self):
         # header: LAN IP the user types into OPL
@@ -296,27 +298,7 @@ class LauncherApp:
                                  "Please set: " + ", ".join(missing))
             return
 
-        if key == "smbv1" and values.get("take_445") and not elevate.is_admin():
-            if not elevate.can_elevate():
-                messagebox.showerror(
-                    "Administrator required",
-                    "'Take port 445' needs Windows administrator rights.")
-                return
-            if messagebox.askyesno(
-                    "Administrator required",
-                    "'Take port 445' needs administrator rights.\n\n"
-                    "Restart the launcher as administrator now? Your settings are "
-                    "saved — then click Start again."):
-                self._save()
-                if elevate.relaunch_as_admin():
-                    self.stop_all()  # free ports before the elevated instance starts
-                    if self._tray:
-                        self._tray.stop()
-                    self.root.destroy()
-                else:
-                    messagebox.showerror(
-                        "Elevation failed",
-                        "Could not restart as administrator.")
+        if not self._ensure_windows_ready(key, values):
             return
 
         try:
@@ -336,6 +318,71 @@ class LauncherApp:
         self.procs[key] = proc
         card.refresh_status(True)
         self.nb.select(self.terminal_tab)
+
+    def _ensure_windows_ready(self, key, values):
+        if not windows_setup.is_windows():
+            return True
+
+        setup_needed = True
+        try:
+            setup_needed = windows_setup.needs_setup(key, values)
+        except Exception as e:
+            self._append_log(key, "[setup] Windows setup check failed; elevation will retry: {}\n".format(e))
+
+        admin_required = setup_needed or (key == "smbv1" and values.get("take_445"))
+        if admin_required and not elevate.is_admin():
+            if not elevate.can_elevate():
+                messagebox.showerror(
+                    "Administrator required",
+                    "Windows network setup needs administrator rights.")
+                return False
+
+            summary = windows_setup.setup_summary(key, values)
+            if messagebox.askyesno(
+                    "Administrator required",
+                    "PS2 Servers needs administrator rights to {}.\n\n"
+                    "Restart the launcher as administrator now? Your settings are "
+                    "saved and the server will continue automatically.".format(summary)):
+                self._save(pending_start=key)
+                if elevate.relaunch_as_admin():
+                    self.stop_all()  # free ports before the elevated instance starts
+                    if self._tray:
+                        self._tray.stop()
+                    self.root.destroy()
+                else:
+                    messagebox.showerror(
+                        "Elevation failed",
+                        "Could not restart as administrator.")
+            return False
+
+        if elevate.is_admin():
+            try:
+                result = windows_setup.apply_setup(key, values)
+            except windows_setup.WindowsSetupError as e:
+                messagebox.showerror("Windows setup failed", str(e))
+                self._append_log(key, "[setup] failed:\n{}\n".format(e))
+                return False
+
+            output = result.get("output") or ""
+            if output:
+                self._append_log(key, "[setup] {}\n".format(output.replace("\n", "\n[setup] ")))
+            if result.get("restart_needed"):
+                messagebox.showwarning(
+                    "Windows restart may be needed",
+                    "Windows enabled or changed an SMB1 optional feature and reported "
+                    "that a restart may be needed before that Windows feature is fully active.\n\n"
+                    "The PS2 Servers app will still try to start now.")
+        return True
+
+    def _start_pending(self):
+        key = self.saved.get("pending_start")
+        if key not in self.cards:
+            return
+        self.saved.pop("pending_start", None)
+        self._save()
+        self.nb.select(self.server_tabs[key])
+        self._append_log(key, "[launcher] continuing after administrator restart\n")
+        self.start_server(key)
 
     def stop_server(self, key):
         proc = self.procs.get(key)
@@ -401,9 +448,11 @@ class LauncherApp:
         if ip and ip in netinfo.all_ipv4():
             self.ip_var.set(ip)
 
-    def _save(self):
+    def _save(self, pending_start=None):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get()}
+        if pending_start:
+            data["pending_start"] = pending_start
         try:
             config.save(data)
         except OSError:
