@@ -38,7 +38,7 @@ def _clear_pending_start():
         if "pending_start" in data:
             data.pop("pending_start", None)
             config.save(data)
-    except OSError:
+    except Exception:
         pass
 
 
