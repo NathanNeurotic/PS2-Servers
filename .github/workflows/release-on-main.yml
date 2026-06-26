@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-on-main
@@ -53,7 +55,9 @@ jobs:
           sudo apt-get install -y patchelf python3-tk
 
       - name: Install Python build dependencies
-        run: python -m pip install --upgrade pip nuitka ordered-set zstandard
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
 
       - name: Build app
         run: python build/build.py
@@ -83,6 +87,11 @@ jobs:
           test -n "$APP_PATH"
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" ${{ matrix.asset_name }}
 
+      - name: Generate artifact attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ matrix.asset_name }}
+
       - name: Upload release asset artifact
         uses: actions/upload-artifact@v4
         with:
@@ -90,9 +99,36 @@ jobs:
           path: ${{ matrix.asset_name }}
           if-no-files-found: error
 
+  source:
+    name: Package source archive
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create portable source zip
+        shell: bash
+        run: |
+          git archive --format=zip --output=PS2Servers-source.zip HEAD
+
+      - name: Generate source attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: PS2Servers-source.zip
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS2Servers-source.zip
+          path: PS2Servers-source.zip
+          if-no-files-found: error
+
   release:
     name: Publish release
-    needs: build
+    needs:
+      - build
+      - source
     runs-on: ubuntu-latest
 
     steps:
@@ -104,6 +140,19 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          cd release-assets
+          sha256sum \
+            PS2Servers-linux-x64 \
+            PS2Servers-macos-arm64.zip \
+            PS2Servers-macos-x64.zip \
+            PS2Servers-source.zip \
+            PS2Servers-windows-x64.exe \
+            > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Create release tag
         id: tag
@@ -121,10 +170,18 @@ jobs:
             Automatic release from `main`.
 
             Commit: ${{ github.sha }}
+
+            Security notes:
+            - The Windows SMB server uses PS2 Servers' built-in SMB/CIFS implementation and does not enable Windows SMB1.
+            - Release assets include `SHA256SUMS.txt`.
+            - GitHub artifact attestations are generated for binary and source artifacts.
+            - For the lowest-trust path, use `PS2Servers-source.zip` and run from source.
           files: |
             release-assets/PS2Servers-linux-x64
             release-assets/PS2Servers-macos-arm64.zip
             release-assets/PS2Servers-macos-x64.zip
+            release-assets/PS2Servers-source.zip
             release-assets/PS2Servers-windows-x64.exe
+            release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
