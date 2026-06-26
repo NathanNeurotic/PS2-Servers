@@ -24,6 +24,10 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from launcher import app_icon
 
 # Server sources shipped as data at their original relative paths -- the launcher
 # loads these by file path at runtime (Nuitka can't see those dynamic imports).
@@ -42,6 +46,7 @@ INCLUDE_PACKAGES = [
 def main():
     system = platform.system()
     out = "PS2Servers.exe" if system == "Windows" else "PS2Servers"
+    icon_path = app_icon.write_ico(os.path.join(ROOT, "build", "PS2Servers.ico"))
 
     cmd = [
         sys.executable, "-m", "nuitka",
@@ -74,6 +79,7 @@ def main():
 
     if system == "Windows":
         cmd.append("--windows-console-mode=disable")
+        cmd.append("--windows-icon-from-ico=" + icon_path)
 
     cmd.append(os.path.join(ROOT, "ps2servers.py"))
 
