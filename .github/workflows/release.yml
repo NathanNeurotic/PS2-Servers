@@ -76,6 +76,30 @@ jobs:
                      ( cd dist && zip -r -y "../out/${{ matrix.asset }}" "$(basename "$app")" ) ;;
           esac
 
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > out/release-notes.md <<EOF
+          Built from the tagged \`${GITHUB_REF_NAME}\` source so the release tracks \`main\`. Download the correct asset for your OS below.
+
+          ## Downloads
+
+          | OS | File |
+          | --- | --- |
+          | Windows x64 | \`PS2Servers-windows-x64.exe\` |
+          | Linux x64 | \`PS2Servers-linux-x64\` |
+          | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` |
+          | macOS — Intel | \`PS2Servers-macos-x64.zip\` |
+
+          Run it: Windows — double-click. Linux — \`chmod +x PS2Servers-linux-x64\`, then run. macOS — unzip and right-click → Open (unsigned).
+
+          One launcher for all three OPL servers (SMBv1, UDPFS, UDPBD): pick a folder, hit Start. On Windows it runs from the system tray (close/minimize → tray; right-click → Open/Quit).
+
+          ⚠️ Servers pass protocol self-tests; real PS2 / PCSX2 hardware validation still pending.
+
+          🤖 Built by GitHub Actions (Intel macOS cross-built on Apple Silicon).
+          EOF
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -86,4 +110,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: PS2 Servers ${{ github.ref_name }}
+          body_path: out/release-notes.md
           files: out/${{ matrix.asset }}
