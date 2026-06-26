@@ -15,24 +15,26 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ matrix.name }}
+    name: Build ${{ matrix.asset_name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Windows
-            os: windows-latest
-            artifact_name: PS2Servers-Windows
-            asset_name: PS2Servers-Windows.zip
-          - name: Linux
-            os: ubuntu-latest
-            artifact_name: PS2Servers-Linux
-            asset_name: PS2Servers-Linux.tar.gz
-          - name: macOS
-            os: macos-latest
-            artifact_name: PS2Servers-macOS
-            asset_name: PS2Servers-macOS.zip
+          - os: windows-latest
+            asset_name: PS2Servers-windows-x64.exe
+            python_arch: x64
+          - os: ubuntu-latest
+            asset_name: PS2Servers-linux-x64
+            python_arch: x64
+          - os: macos-latest
+            asset_name: PS2Servers-macos-arm64.zip
+            python_arch: arm64
+            macos_target_arch: arm64
+          - os: macos-latest
+            asset_name: PS2Servers-macos-x64.zip
+            python_arch: x64
+            macos_target_arch: x86_64
 
     steps:
       - name: Check out repository
@@ -42,6 +44,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          architecture: ${{ matrix.python_arch }}
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -54,16 +57,20 @@ jobs:
 
       - name: Build app
         run: python build/build.py
+        env:
+          MACOS_TARGET_ARCH: ${{ matrix.macos_target_arch }}
 
-      - name: Package Windows app
+      - name: Package Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist/PS2Servers.exe -DestinationPath ${{ matrix.asset_name }} -Force
+        run: Copy-Item -Path dist/PS2Servers.exe -Destination ${{ matrix.asset_name }} -Force
 
-      - name: Package Linux app
+      - name: Package Linux executable
         if: runner.os == 'Linux'
         shell: bash
-        run: tar -czf ${{ matrix.asset_name }} -C dist PS2Servers
+        run: |
+          cp dist/PS2Servers ${{ matrix.asset_name }}
+          chmod +x ${{ matrix.asset_name }}
 
       - name: Package macOS app
         if: runner.os == 'macOS'
@@ -76,10 +83,10 @@ jobs:
           test -n "$APP_PATH"
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" ${{ matrix.asset_name }}
 
-      - name: Upload artifact
+      - name: Upload release asset artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
+          name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
           if-no-files-found: error
 
@@ -92,7 +99,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download build artifacts
+      - name: Download release asset artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
@@ -114,6 +121,10 @@ jobs:
             Automatic release from `main`.
 
             Commit: ${{ github.sha }}
-          files: release-assets/*
+          files: |
+            release-assets/PS2Servers-linux-x64
+            release-assets/PS2Servers-macos-arm64.zip
+            release-assets/PS2Servers-macos-x64.zip
+            release-assets/PS2Servers-windows-x64.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
