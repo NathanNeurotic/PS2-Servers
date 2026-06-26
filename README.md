@@ -18,6 +18,27 @@ It detects your PC's LAN IP and shows the exact settings to enter in OPL.
 - **From source:** double-click **`Start-Launcher.bat`** (Windows) or run
   `./start-launcher.sh` (Linux/macOS). Requires Python 3.
 
+## Windows security note
+
+PS2 Servers is an unsigned open-source network tool. Because it runs local server
+processes and may ask Windows Firewall to allow inbound LAN traffic, some
+antivirus products may flag the packaged Windows EXE heuristically.
+
+The SMBv1/RiptOPL server does **not** enable Windows' built-in SMB1 optional
+feature tree. It speaks the OPL-compatible SMB1/CIFS subset itself and normally
+listens on custom TCP port `1445`; OPL connects to this program directly.
+
+Windows setup is intentionally narrow:
+
+- no automatic enabling of Windows SMB1;
+- no disabling of SMB1 automatic removal;
+- Windows Firewall changes are limited to rules named `PS2 Servers - ...`;
+- a cleanup script is provided at `tools/remove-windows-firewall-rules.ps1`;
+- advanced port `445` mode is optional and temporarily pauses Windows File
+  Sharing only while that server mode is running.
+
+See [SECURITY.md](SECURITY.md) for verification, cleanup, and reporting details.
+
 ## What's inside
 
 All three servers are pure-Python (standard library) and run on Windows, Linux and macOS.
@@ -50,9 +71,23 @@ python -m launcher --list            # show servers available on this machine
 executable per OS — no Python install required for the end user:
 
 ```sh
-python -m pip install nuitka
+python -m pip install -r requirements-build.txt
 python build/build.py            # -> dist/PS2Servers(.exe)
 ```
+
+## Release verification
+
+Automatic releases include `SHA256SUMS.txt`, a portable source ZIP, and GitHub
+artifact attestations for the packaged assets. Example verification:
+
+```sh
+sha256sum -c SHA256SUMS.txt
+gh attestation verify PS2Servers-windows-x64.exe -R NathanNeurotic/PS2-Servers
+```
+
+Checksums prove the file was downloaded intact. Attestations prove build
+provenance. Neither is a magic safety certificate; if you want the lowest-trust
+path, inspect and run from source.
 
 ## Status
 
