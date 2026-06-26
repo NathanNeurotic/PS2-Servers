@@ -1,0 +1,6 @@
+# Build-only dependencies for packaged release artifacts.
+# Pinned to avoid unbounded dependency drift in GitHub Actions release builds.
+
+Nuitka==2.7.12
+ordered-set==4.1.0
+zstandard==0.23.0
