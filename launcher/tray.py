@@ -11,6 +11,8 @@ so the app can fall back gracefully and never trap the user with a hidden window
 import platform
 import threading
 
+from . import app_icon
+
 AVAILABLE = platform.system() == "Windows"
 
 if AVAILABLE:
@@ -42,6 +44,10 @@ if AVAILABLE:
     NIF_TIP = 0x04
 
     IDI_APPLICATION = 32512
+    IMAGE_ICON = 1
+    LR_LOADFROMFILE = 0x0010
+    LR_DEFAULTSIZE = 0x0040
+
     MF_STRING = 0x0000
     TPM_RIGHTBUTTON = 0x0002
     TPM_RETURNCMD = 0x0100
@@ -96,6 +102,10 @@ if AVAILABLE:
     user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASS)]
     user32.LoadIconW.restype = wintypes.HICON
     user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
+    user32.LoadImageW.restype = wintypes.HICON
+    user32.LoadImageW.argtypes = [
+        wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
+        ctypes.c_int, ctypes.c_int, wintypes.UINT]
     user32.CreatePopupMenu.restype = wintypes.HMENU
     user32.AppendMenuW.argtypes = [
         wintypes.HMENU, wintypes.UINT, ctypes.c_void_p, wintypes.LPCWSTR]
@@ -115,6 +125,17 @@ if AVAILABLE:
         wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATA)]
     kernel32.GetModuleHandleW.restype = wintypes.HMODULE
     kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+
+    def load_app_icon():
+        try:
+            icon = user32.LoadImageW(
+                None, app_icon.ico_path(), IMAGE_ICON, 0, 0,
+                LR_LOADFROMFILE | LR_DEFAULTSIZE)
+            if icon:
+                return icon
+        except Exception:
+            pass
+        return user32.LoadIconW(None, IDI_APPLICATION)
 
 
 class SystemTray:
@@ -150,6 +171,7 @@ class SystemTray:
                 wc = WNDCLASS()
                 wc.lpfnWndProc = self._wndproc
                 wc.hInstance = hinst
+                wc.hIcon = load_app_icon()
                 wc.lpszClassName = self._class_name
                 if not user32.RegisterClassW(ctypes.byref(wc)):
                     if kernel32.GetLastError() != 1410:  # not ALREADY_EXISTS
@@ -168,7 +190,7 @@ class SystemTray:
             nid.uID = 1
             nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
             nid.uCallbackMessage = WM_TRAY
-            nid.hIcon = user32.LoadIconW(None, IDI_APPLICATION)
+            nid.hIcon = load_app_icon()
             nid.szTip = self.tooltip
             self._nid = nid
             self._icon_added = bool(
