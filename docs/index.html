@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PS2 Servers — zero-terminal LAN game servers for OPL</title>
+  <meta name="description" content="PS2 Servers gives Open PS2 Loader users click-and-go SMBv1, UDPFS, and UDPBD servers with a simple GUI launcher.">
+  <meta property="og:title" content="PS2 Servers">
+  <meta property="og:description" content="Click-and-go LAN servers for PS2 game loading through OPL.">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#051a55">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="#top" aria-label="PS2 Servers home"><span class="brand-mark">PS2</span><span>PS2 Servers</span></a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#servers">Servers</a>
+        <a href="#quickstart">Quick start</a>
+        <a href="#download">Download</a>
+        <a href="https://github.com/NathanNeurotic/PS2-Servers">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <div class="kicker">SMBv1 · UDPFS · UDPBD</div>
+          <h1>PS2 <span>Servers</span></h1>
+          <p class="lede">Network game-loading servers for PlayStation 2 and Open PS2 Loader, wrapped in a GUI that turns setup variables, terminal commands, ports, and launch scripts into a click-and-go control panel.</p>
+          <div class="cta-row">
+            <a class="btn" href="https://github.com/NathanNeurotic/PS2-Servers/releases/latest">Download latest release</a>
+            <a class="btn secondary" href="https://github.com/NathanNeurotic/PS2-Servers">View source</a>
+          </div>
+          <div class="status-strip" aria-label="Project highlights">
+            <div class="status-card"><strong>3</strong><span>server modes</span></div>
+            <div class="status-card"><strong>0</strong><span>terminal work required</span></div>
+            <div class="status-card"><strong>LAN</strong><span>OPL focused</span></div>
+          </div>
+        </div>
+        <div class="hero-art" aria-hidden="true"><img src="assets/hero-grid.svg" alt=""></div>
+      </div>
+    </section>
+
+    <section class="section" id="servers">
+      <div class="container">
+        <h2>One launcher. Three routes into OPL.</h2>
+        <p class="section-intro">PS2 Servers packages the useful host-side network servers into a single launcher that shows your LAN IP, collects the right folder or image path, and prints the exact values you need to enter in Open PS2 Loader.</p>
+        <div class="cards">
+          <article class="card">
+            <h3>SMBv1 / RiptOPL</h3>
+            <p>Share a games folder over SMB without relying on Windows 11's removed SMB1 stack. Useful for classic OPL SMB workflows with fewer operating-system traps.</p>
+            <p><code>Share: games</code></p>
+          </article>
+          <article class="card">
+            <h3>UDPFS</h3>
+            <p>Serve a folder or image over UDPFS, including compressed image workflows. A modern path for network loading through OPL and compatible forks.</p>
+            <p><code>Folder / image server</code></p>
+          </article>
+          <article class="card">
+            <h3>UDPBD</h3>
+            <p>Serve a disk image as a UDP block device. The PS2 discovers it automatically, keeping the setup clean and fast for supported builds.</p>
+            <p><code>Auto-discovered</code></p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="quickstart">
+      <div class="container">
+        <h2>Boot the server, not a headache.</h2>
+        <p class="section-intro">The launcher is built for people who want to play games, not debug network services. Pick the server, choose the folder or image, press Start, then copy the displayed OPL settings.</p>
+        <div class="steps">
+          <article class="step"><h3>Download</h3><p>Grab the latest packaged build for your OS from GitHub Releases.</p></article>
+          <article class="step"><h3>Choose</h3><p>Select SMBv1, UDPFS, or UDPBD from the launcher tabs.</p></article>
+          <article class="step"><h3>Point</h3><p>Browse to your games folder or disk image. The app detects your LAN IP.</p></article>
+          <article class="step"><h3>Start</h3><p>Click Start and enter the shown values in OPL.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="download">
+      <div class="container">
+        <h2>Release assets built for normal humans.</h2>
+        <p class="section-intro">Automatic releases produce straightforward platform files: Windows as an `.exe`, Linux as a raw executable, and macOS as architecture-specific app zips.</p>
+        <div class="terminal">
+          <div class="terminal-bar"><span></span><span></span><span></span></div>
+          <pre><b>release assets</b>
+PS2Servers-windows-x64.exe
+PS2Servers-linux-x64
+PS2Servers-macos-arm64.zip
+PS2Servers-macos-x64.zip
+
+<b>from source</b>
+python -m pip install nuitka
+python build/build.py</pre>
+        </div>
+        <div class="cta-row">
+          <a class="btn" href="https://github.com/NathanNeurotic/PS2-Servers/releases/latest">Latest release</a>
+          <a class="btn secondary" href="https://github.com/NathanNeurotic/PS2-Servers/issues">Report an issue</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <span>PS2 Servers — LAN server launcher for Open PS2 Loader.</span>
+      <span>Fan project. Built for the PS2 homebrew scene.</span>
+    </div>
+  </footer>
+</body>
+</html>
