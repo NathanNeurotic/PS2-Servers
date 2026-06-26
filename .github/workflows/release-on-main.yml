@@ -1,0 +1,99 @@
+name: Release on main
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-on-main
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            artifact_name: PS2Servers-Windows
+            asset_name: PS2Servers-Windows.zip
+            package_command: Compress-Archive -Path dist/PS2Servers.exe -DestinationPath PS2Servers-Windows.zip -Force
+          - name: Linux
+            os: ubuntu-latest
+            artifact_name: PS2Servers-Linux
+            asset_name: PS2Servers-Linux.tar.gz
+            package_command: tar -czf PS2Servers-Linux.tar.gz -C dist PS2Servers
+          - name: macOS
+            os: macos-latest
+            artifact_name: PS2Servers-macOS
+            asset_name: PS2Servers-macOS.zip
+            package_command: ditto -c -k --sequesterRsrc --keepParent "dist/PS2 Servers.app" PS2Servers-macOS.zip
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip nuitka ordered-set zstandard
+
+      - name: Build app
+        run: python build/build.py
+
+      - name: Package artifact
+        shell: bash
+        run: ${{ matrix.package_command }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.asset_name }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release tag
+        id: tag
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TAG="main-${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: PS2 Servers ${{ steps.tag.outputs.tag }}
+          body: |
+            Automatic release from `main`.
+
+            Commit: ${{ github.sha }}
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
