@@ -42,6 +42,7 @@ def _powershell(script):
         ],
         capture_output=True,
         text=True,
+        errors="replace",
     )
 
 
@@ -136,7 +137,10 @@ def needs_setup(key, values):
         "  }",
         "}",
     ])
-    res = _powershell(script)
+    try:
+        res = _powershell(script)
+    except OSError:
+        return True
     if res.returncode != 0:
         return True
     return bool((res.stdout or "").strip())
@@ -236,7 +240,11 @@ def apply_setup(key, values):
         "Write-Output ('RESTART_NEEDED=' + $restartNeeded)",
     ])
 
-    res = _powershell(script)
+    try:
+        res = _powershell(script)
+    except OSError as e:
+        raise WindowsSetupError("Failed to run PowerShell: {}".format(e)) from e
+
     output = ((res.stdout or "") + (res.stderr or "")).strip()
     if res.returncode != 0:
         raise WindowsSetupError(output or "Windows setup failed.")

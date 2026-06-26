@@ -8,6 +8,7 @@ import os
 import platform
 import sys
 
+from . import config
 from .servers import REPO_ROOT, frozen_self_exe, is_frozen
 
 
@@ -30,6 +31,17 @@ def can_elevate():
     return platform.system() == "Windows"
 
 
+def _clear_pending_start():
+    """Remove a saved post-elevation auto-start request if relaunch fails."""
+    try:
+        data = config.load()
+        if "pending_start" in data:
+            data.pop("pending_start", None)
+            config.save(data)
+    except Exception:
+        pass
+
+
 def relaunch_as_admin():
     """Relaunch the launcher elevated via a UAC prompt. Returns True if launched."""
     if platform.system() != "Windows":
@@ -42,6 +54,10 @@ def relaunch_as_admin():
             exe, params, cwd = sys.executable, "-m launcher", REPO_ROOT
         # ShellExecuteW returns a value > 32 on success.
         rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, cwd, 1)
-        return rc > 32
+        if rc > 32:
+            return True
+        _clear_pending_start()
+        return False
     except Exception:
+        _clear_pending_start()
         return False
