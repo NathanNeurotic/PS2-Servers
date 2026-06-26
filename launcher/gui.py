@@ -1,9 +1,10 @@
 """Tkinter GUI -- the front-end any user sees.
 
-One card per server: pick a folder/file, hit Start, and the card shows exactly
-what to enter in OPL plus a live log. No terminal required. The GUI never blocks
-on a server; each runs as a subprocess (see process.py) and its output is pumped
-to the log via a thread-safe queue drained on the Tk main thread.
+One tab per server: pick a folder/file, hit Start, and the card shows exactly
+what to enter in OPL. The Terminal tab shows live output from every server. No
+terminal required. The GUI never blocks on a server; each runs as a subprocess
+(see process.py) and its output is pumped to the log via a thread-safe queue
+drained on the Tk main thread.
 """
 
 import platform
@@ -19,6 +20,12 @@ DOT_RUNNING = "●"  # filled circle
 COLOR_RUNNING = "#2e9e44"
 COLOR_STOPPED = "#b0b0b0"
 COLOR_ERROR = "#d23c3c"
+
+TAB_TITLES = {
+    "smbv1": "SMBv1",
+    "udpfs": "UDPFS",
+    "udpbd": "UDPBD",
+}
 
 
 def opl_hint(key, ip, values):
@@ -185,7 +192,7 @@ class LauncherApp:
         self.saved = config.load()
 
         root.title("PS2 Servers")
-        root.minsize(720, 600)
+        root.minsize(720, 540)
         self._build()
         self._restore()
 
@@ -227,25 +234,35 @@ class LauncherApp:
         ttk.Label(header, text="  (enter this in OPL where it asks for the PC/server IP)",
                   foreground="#888").pack(side="left")
 
-        # server cards
-        cards = ttk.Frame(self.root)
-        cards.pack(fill="x", padx=10, pady=4)
+        # main tabs: one server per tab, plus a shared terminal tab
+        self.nb = ttk.Notebook(self.root)
+        self.nb.pack(fill="both", expand=True, padx=10, pady=4)
+        self.server_tabs = {}
+
         for server in REGISTRY.values():
-            card = ServerCard(cards, self, server)
-            card.pack(fill="x", pady=5)
+            tab = ttk.Frame(self.nb)
+            tab.columnconfigure(0, weight=1)
+            card = ServerCard(tab, self, server)
+            card.grid(row=0, column=0, sticky="new", padx=8, pady=8)
+            self.nb.add(tab, text=TAB_TITLES.get(server.key, server.label))
+            self.server_tabs[server.key] = tab
             self.cards[server.key] = card
 
-        # logs
-        logframe = ttk.LabelFrame(self.root, text="  Logs  ")
-        logframe.pack(fill="both", expand=True, padx=10, pady=(4, 6))
-        self.nb = ttk.Notebook(logframe)
-        self.nb.pack(fill="both", expand=True, padx=4, pady=4)
+        self.terminal_tab = ttk.Frame(self.nb)
+        self.terminal_tab.rowconfigure(0, weight=1)
+        self.terminal_tab.columnconfigure(0, weight=1)
+        self.terminal = tk.Text(self.terminal_tab, height=16, wrap="none",
+                                state="disabled", background="#101418",
+                                foreground="#d8dee9", insertbackground="#d8dee9")
+        scroll = ttk.Scrollbar(self.terminal_tab, orient="vertical",
+                               command=self.terminal.yview)
+        self.terminal.configure(yscrollcommand=scroll.set)
+        self.terminal.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
+        scroll.grid(row=0, column=1, sticky="ns", padx=(0, 8), pady=8)
+        self.nb.add(self.terminal_tab, text="TERMINAL")
+
         for server in REGISTRY.values():
-            txt = tk.Text(self.nb, height=8, wrap="none", state="disabled",
-                          background="#101418", foreground="#d8dee9",
-                          insertbackground="#d8dee9")
-            self.nb.add(txt, text=server.label)
-            self.logs[server.key] = txt
+            self.logs[server.key] = self.terminal
 
         # footer
         footer = ttk.Frame(self.root)
@@ -318,7 +335,7 @@ class LauncherApp:
             return
         self.procs[key] = proc
         card.refresh_status(True)
-        self.nb.select(list(REGISTRY).index(key))
+        self.nb.select(self.terminal_tab)
 
     def stop_server(self, key):
         proc = self.procs.get(key)
@@ -350,12 +367,19 @@ class LauncherApp:
     def _append_log(self, key, text):
         widget = self.logs[key]
         widget.config(state="normal")
-        widget.insert("end", text)
+        widget.insert("end", self._terminal_text(key, text))
         lines = int(widget.index("end-1c").split(".")[0])
         if lines > 2000:  # keep the log bounded so memory/redraw stay cheap
             widget.delete("1.0", "{}.0".format(lines - 2000))
         widget.see("end")
         widget.config(state="disabled")
+
+    def _terminal_text(self, key, text):
+        prefix = "[{}] ".format(TAB_TITLES.get(key, key.upper()))
+        return "".join(
+            prefix + line if line.strip("\r\n") else line
+            for line in text.splitlines(True)
+        )
 
     # -- status polling --------------------------------------------------- #
     def _poll_status(self):
