@@ -537,6 +537,8 @@ class LauncherApp:
         self._append_log("setup", "[setup] firewall cleanup failed:\n{}\n".format(error))
 
     def stop_server(self, key):
+        if not self.is_running(key):
+            return
         proc = self.procs.get(key)
         if proc:
             proc.stop()
