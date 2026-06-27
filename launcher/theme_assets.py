@@ -1,8 +1,8 @@
-"""Reserved module for embedded PS2 theme assets.
+"""Reserved module for optional embedded PS2 theme assets.
 
-The current skin is intentionally code-only. User-supplied artwork should be
-added through deliberate asset packaging or a generated module produced by a
-script, not by hand-editing large base64 strings in review.
+The current skin is code-first and works without assets. If generated assets are
+added later, keep them in this module as base64 PNG strings in ASSETS so Nuitka
+bundles them automatically without loose runtime data files.
 """
 
 ASSETS = {}
