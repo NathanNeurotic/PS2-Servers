@@ -58,7 +58,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y python3-tk tk-dev
 
       - name: Install Nuitka
-        run: python -m pip install --upgrade pip nuitka
+        run: python -m pip install --upgrade pip -r requirements-build.txt
+
+      - name: Build bundled libchdr
+        env:
+          MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
+        run: python build/build_libchdr.py
 
       - name: Build single-file binary
         env:
@@ -92,6 +97,8 @@ jobs:
           | macOS — Intel | \`PS2Servers-macos-x64.zip\` |
 
           Run it: Windows — double-click. Linux — \`chmod +x PS2Servers-linux-x64\`, then run. macOS — unzip and right-click → Open (unsigned).
+
+          Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 
           One launcher for all three OPL servers (SMBv1, UDPFS, UDPBD): pick a folder, hit Start. On Windows it runs from the system tray (close/minimize → tray; right-click → Open/Quit).
 
