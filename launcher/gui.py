@@ -459,8 +459,8 @@ class LauncherApp:
                 setup_needed = windows_setup.needs_setup(key, values)
             except Exception as e:
                 error = str(e)
-            self.root.after(0, lambda: self._handle_windows_setup_check(
-                key, values, setup_needed, error))
+            self.root.after(0, self._handle_windows_setup_check,
+                            key, values, setup_needed, error)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -528,9 +528,10 @@ class LauncherApp:
             try:
                 result = windows_setup.apply_setup(key, values)
             except Exception as e:
-                self.root.after(0, lambda error=e: self._finish_windows_setup_failure(key, error))
+                self.root.after(0, self._finish_windows_setup_failure, key, e)
                 return
-            self.root.after(0, lambda: self._finish_windows_setup_success(key, values, result))
+            self.root.after(0, self._finish_windows_setup_success,
+                            key, values, result)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -661,9 +662,9 @@ class LauncherApp:
                     if output:
                         outputs.append(output)
                 output = "\n".join(outputs) or "PS2 Servers firewall allow rules are present."
-                self.root.after(0, lambda: self._finish_allow_success({"output": output}))
+                self.root.after(0, self._finish_allow_success, {"output": output})
             except Exception as e:
-                self.root.after(0, lambda error=e: self._finish_allow_failure(error))
+                self.root.after(0, self._finish_allow_failure, e)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -741,9 +742,9 @@ class LauncherApp:
             try:
                 result = windows_setup.remove_setup()
             except Exception as e:
-                self.root.after(0, lambda error=e: self._finish_cleanup_failure(error))
+                self.root.after(0, self._finish_cleanup_failure, e)
                 return
-            self.root.after(0, lambda: self._finish_cleanup_success(result))
+            self.root.after(0, self._finish_cleanup_success, result)
 
         threading.Thread(target=worker, daemon=True).start()
 
