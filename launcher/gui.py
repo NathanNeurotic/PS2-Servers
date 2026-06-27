@@ -11,6 +11,7 @@ import platform
 import queue
 import threading
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 from . import config, elevate, netinfo, tray, windows_setup
@@ -21,6 +22,76 @@ DOT_RUNNING = "●"  # filled circle
 COLOR_RUNNING = "#2e9e44"
 COLOR_STOPPED = "#b0b0b0"
 COLOR_ERROR = "#d23c3c"
+
+PROJECT_URL = "https://www.psx-place.com/resources/windows-linux-mac-ps2-servers-smbv1-udpbd-udpfs-for-everyone.1728/"
+REPO_URL = "https://github.com/NathanNeurotic/PS2-Servers"
+RELEASES_URL = "https://github.com/NathanNeurotic/PS2-Servers/releases"
+SECURITY_URL = "https://github.com/NathanNeurotic/PS2-Servers/blob/main/SECURITY.md"
+
+ABOUT_TEXT = r"""PS2 Servers
+
+PS2 Servers is a no-terminal launcher for PlayStation 2 network-loading servers. It gives normal users a simple GUI for starting the server mode they need, choosing folders or files, seeing live logs, and copying the exact settings they need to enter in OPL.
+
+What it runs
+
+- SMBv1 / RiptOPL mode: runs PS2 Servers' own small OPL-compatible SMB/CIFS server. This is not Windows File Sharing and does not require Windows' built-in SMB1 optional feature tree.
+- UDPFS mode: runs a UDPFS server for OPL's UDPFS device support.
+- UDPBD mode: runs a UDPBD block-device server for compatible clients.
+
+How SMB mode works
+
+Normal SMB mode listens on a custom TCP port, usually 1445. OPL connects directly to PS2 Servers at that port and share name. PS2 Servers speaks the small SMB/CIFS subset that OPL expects.
+
+That means normal SMB mode does not need Windows File Sharing, does not need Windows SMB1 enabled, and does not expose your normal Windows shares through SMB1.
+
+Advanced port 445 mode
+
+Port 445 is the standard Windows SMB/File Sharing port. If you choose the advanced port 445 option, PS2 Servers may need administrator rights because Windows normally owns that port.
+
+In that mode, PS2 Servers temporarily pauses Windows File Sharing / LanmanServer while the PS2 Servers SMB server is running, then returns control when the server stops. This is only for the advanced 445 path. Normal custom-port mode does not need it.
+
+Windows Firewall changes
+
+PS2 Servers creates only Windows Firewall allow rules with display names starting with:
+
+PS2 Servers -
+
+Those rules allow the app and selected server ports to accept inbound LAN connections from your PS2/client. The rules are created so Windows does not silently block the server.
+
+PS2 Servers does not create firewall block rules. It does not disable Windows Firewall. It does not broadly open unrelated ports. It does not enable, disable, install, or remove Windows SMB1 optional features.
+
+Allowing through the firewall
+
+Use "Allow through firewall" to create or refresh PS2 Servers allow rules. This is useful after moving the app, changing ports, reinstalling, or cleaning old rules.
+
+The allow action uses the current GUI settings, including the SMB port, UDPFS port, UDPBD port, and the current executable/Python path.
+
+Removing firewall rules
+
+Use "Remove PS2 Servers firewall rules" to delete only rules whose display names start with "PS2 Servers -".
+
+Removing those rules returns Windows to having no PS2 Servers-specific firewall rules. It does not add block rules. It does not change Windows SMB1. It does not remove unrelated firewall rules.
+
+No terminal required
+
+The buttons in this About tab and in the launcher footer are the normal way to manage PS2 Servers' Windows changes. Use "Allow through firewall" to add or refresh the rules. Use "Remove PS2 Servers firewall rules" to undo them. Use "Stop all servers" to shut down every running PS2 Servers process from the GUI.
+
+Advanced manual fallback
+
+The PowerShell cleanup command still exists for advanced users, scripts, or emergency repair, but normal users should not need it:
+
+powershell -ExecutionPolicy Bypass -File .\tools\remove-windows-firewall-rules.ps1
+
+Equivalent manual command:
+
+Get-NetFirewallRule -DisplayName "PS2 Servers - *" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+
+Release transparency
+
+PS2 Servers is open source. Packaged releases are built from the public GitHub repository. Releases can include checksums, source archives, and GitHub build provenance so users can inspect what they are running.
+
+Unsigned Windows network tools can still trigger antivirus heuristics. That does not prove the file is malicious, but users should not have to rely on trust alone. The source, release checksums, and security notes exist for verification.
+"""
 
 TAB_TITLES = {
     "smbv1": "SMBv1",
@@ -273,6 +344,8 @@ class LauncherApp:
             self.logs[server.key] = self.terminal
         self.logs["setup"] = self.terminal
 
+        self._build_about_tab()
+
         # footer
         footer = ttk.Frame(self.root)
         footer.pack(fill="x", padx=10, pady=(0, 10))
@@ -286,6 +359,56 @@ class LauncherApp:
             allow.config(state="disabled")
             remove.config(state="disabled")
         ttk.Button(footer, text="Stop all", command=self.stop_all).pack(side="right")
+
+    def _build_about_tab(self):
+        about = ttk.Frame(self.nb)
+        about.rowconfigure(2, weight=1)
+        about.columnconfigure(0, weight=1)
+
+        links = ttk.LabelFrame(about, text=" Links ")
+        links.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 0))
+        ttk.Button(links, text="Project page",
+                   command=lambda: self._open_url(PROJECT_URL)).pack(side="left", padx=(6, 0), pady=6)
+        ttk.Button(links, text="GitHub repo",
+                   command=lambda: self._open_url(REPO_URL)).pack(side="left", padx=(6, 0), pady=6)
+        ttk.Button(links, text="Releases",
+                   command=lambda: self._open_url(RELEASES_URL)).pack(side="left", padx=(6, 0), pady=6)
+        ttk.Button(links, text="Security notes",
+                   command=lambda: self._open_url(SECURITY_URL)).pack(side="left", padx=(6, 0), pady=6)
+
+        actions = ttk.LabelFrame(about, text=" No-terminal actions ")
+        actions.grid(row=1, column=0, sticky="ew", padx=8, pady=(8, 0))
+        allow = ttk.Button(actions, text="Allow through firewall",
+                           command=self.allow_windows_setup)
+        allow.pack(side="left", padx=(6, 0), pady=6)
+        remove = ttk.Button(actions, text="Remove PS2 Servers firewall rules",
+                            command=self.remove_windows_setup)
+        remove.pack(side="left", padx=(6, 0), pady=6)
+        ttk.Button(actions, text="Stop all servers",
+                   command=self.stop_all).pack(side="left", padx=(6, 0), pady=6)
+        if not windows_setup.is_windows():
+            allow.config(state="disabled")
+            remove.config(state="disabled")
+
+        text_frame = ttk.Frame(about)
+        text_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=8)
+        text_frame.rowconfigure(0, weight=1)
+        text_frame.columnconfigure(0, weight=1)
+        text = tk.Text(text_frame, wrap="word", height=18, state="normal")
+        scroll = ttk.Scrollbar(text_frame, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        text.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
+        text.insert("1.0", ABOUT_TEXT)
+        text.config(state="disabled")
+
+        self.nb.add(about, text="ABOUT")
+
+    def _open_url(self, url):
+        try:
+            webbrowser.open_new_tab(url)
+        except Exception as e:
+            messagebox.showerror("Cannot open link", str(e))
 
     # -- IP --------------------------------------------------------------- #
     def current_ip(self):
@@ -538,9 +661,9 @@ class LauncherApp:
                     if output:
                         outputs.append(output)
                 output = "\n".join(outputs) or "PS2 Servers firewall allow rules are present."
-                self.root.after(0, self._finish_allow_success, {"output": output})
+                self.root.after(0, lambda: self._finish_allow_success({"output": output}))
             except Exception as e:
-                self.root.after(0, self._finish_allow_failure, e)
+                self.root.after(0, lambda error=e: self._finish_allow_failure(error))
 
         threading.Thread(target=worker, daemon=True).start()
 
