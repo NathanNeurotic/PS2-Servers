@@ -108,6 +108,16 @@ The UDPBD port is validated by `udpbd_server/selftest.py` at the protocol level
 (INFO/READ/WRITE byte-for-byte). As with the SMBv1 server, **final validation is on
 real hardware** — an actual PS2 running OPL, or PCSX2 with a network adapter.
 
+## License and notices
+
+PS2 Servers is licensed under the **Academic Free License 3.0 (AFL-3.0)**. See
+[`LICENSE`](LICENSE).
+
+This repository also includes third-party notices and provenance details in
+[`NOTICE.md`](NOTICE.md), including the redistributed Neutrino UDPFS server,
+UDPBD protocol references, optional compression libraries, build tooling, and
+trademark notes.
+
 ## Credits & thanks
 
 This is a fan project that stands entirely on the shoulders of the PS2 homebrew
