@@ -62,6 +62,17 @@ Administrator rights are requested only when Windows requires them:
 The launcher shows whether it is currently running as administrator. Use "Restart as administrator" only when you intentionally need elevated Windows setup actions. Keeping the default launch non-admin reduces the blast radius of bugs and makes the app easier to trust.
 """
 
+COMPRESSION_ABOUT_TEXT = """
+
+Optional compression support
+
+Compressed image support is optional. ZSO/LZ4 support needs the Python lz4 package. CHD support needs the native libchdr library.
+
+Use the Compression support panel near the top of the launcher to check what is available. From source, the launcher can install lz4 with pip for you. Packaged builds cannot be modified with pip; lz4 should be bundled at build time if always-on ZSO support is desired.
+
+libchdr is a native system library, so the launcher shows platform-specific help instead of silently installing DLLs or system packages.
+"""
+
 
 def _apply_gui_review_fixes(gui):
     """Apply terminal UX fixes, clearer tabs, a light PS2 skin, and admin UX."""
@@ -75,6 +86,11 @@ def _apply_gui_review_fixes(gui):
         embedded_assets = getattr(theme_assets, "ASSETS", {})
     except Exception:
         embedded_assets = {}
+
+    try:
+        from . import optional_deps
+    except Exception:
+        optional_deps = None
 
     palette = {
         "bg": "#030713",
@@ -93,6 +109,8 @@ def _apply_gui_review_fixes(gui):
 
     if ADMIN_ABOUT_TEXT not in gui.ABOUT_TEXT:
         gui.ABOUT_TEXT += ADMIN_ABOUT_TEXT
+    if COMPRESSION_ABOUT_TEXT not in gui.ABOUT_TEXT:
+        gui.ABOUT_TEXT += COMPRESSION_ABOUT_TEXT
 
     gui.COLOR_RUNNING = palette["ok"]
     gui.COLOR_STOPPED = palette["muted"]
@@ -235,6 +253,93 @@ def _apply_gui_review_fixes(gui):
             button.config(state="disabled")
         self._ps2_admin_frame = frame
 
+    def add_compression_panel(self):
+        if optional_deps is None:
+            return
+        frame = gui.ttk.Frame(self.root, style="Admin.TFrame")
+        frame.pack(fill="x", padx=10, pady=(0, 4))
+        gui.ttk.Label(frame, text="Compression support:", style="Admin.TLabel",
+                      font=("", 9, "bold")).pack(side="left", padx=(8, 8), pady=6)
+        self._ps2_compression_var = gui.tk.StringVar(value="Checking…")
+        gui.ttk.Label(frame, textvariable=self._ps2_compression_var,
+                      style="Admin.TLabel").pack(side="left", padx=(0, 8), pady=6)
+        gui.ttk.Button(frame, text="Check",
+                       command=lambda: show_compression_status(self)).pack(side="right", padx=(4, 8), pady=5)
+        gui.ttk.Button(frame, text="CHD/libchdr help",
+                       command=show_libchdr_help).pack(side="right", padx=(4, 0), pady=5)
+        install = gui.ttk.Button(frame, text="Install ZSO/LZ4 support",
+                                 command=lambda: install_lz4_from_gui(self))
+        install.pack(side="right", padx=(4, 0), pady=5)
+        if optional_deps.is_frozen_app():
+            install.config(state="disabled")
+        self._ps2_lz4_button = install
+        self._ps2_compression_frame = frame
+        refresh_compression_status(self)
+
+    def refresh_compression_status(app):
+        statuses = optional_deps.check_all()
+        bits = []
+        for status in statuses:
+            label = "ZSO/LZ4" if status.key == "lz4" else "CHD"
+            bits.append("{} {}".format(label, "OK" if status.available else "missing"))
+        app._ps2_compression_var.set("; ".join(bits))
+        return statuses
+
+    def show_compression_status(app):
+        statuses = refresh_compression_status(app)
+        gui.messagebox.showinfo("Optional compression support",
+                                optional_deps.format_statuses(statuses))
+
+    def install_lz4_from_gui(app):
+        if optional_deps.is_frozen_app():
+            gui.messagebox.showinfo(
+                "Packaged app",
+                "This packaged app cannot install Python packages into itself.\n\n"
+                "Run from source to install lz4, or use a release build that bundles lz4."
+            )
+            return
+        command = " ".join(optional_deps.lz4_install_command())
+        if not gui.messagebox.askyesno(
+                "Install ZSO/LZ4 support?",
+                "Install the optional Python lz4 package now?\n\n"
+                "Command:\n{}\n\n"
+                "This affects the current Python environment only.".format(command)):
+            return
+        button = getattr(app, "_ps2_lz4_button", None)
+        if button:
+            button.config(state="disabled")
+        app._append_log("setup", "[deps] installing optional lz4 package\n")
+
+        def worker():
+            import threading  # keeps the top-level launcher import tiny
+            del threading
+            try:
+                optional_deps.install_lz4(
+                    log=lambda line: app.root.after(
+                        0, app._append_log, "setup", "[deps] {}\n".format(line)))
+            except Exception as e:
+                app.root.after(0, finish_lz4_install, app, False, str(e))
+                return
+            app.root.after(0, finish_lz4_install, app, True, "lz4 installed.")
+
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_lz4_install(app, success, detail):
+        button = getattr(app, "_ps2_lz4_button", None)
+        if button and not optional_deps.is_frozen_app():
+            button.config(state="normal")
+        refresh_compression_status(app)
+        if success:
+            app._append_log("setup", "[deps] lz4 install finished\n")
+            gui.messagebox.showinfo("ZSO/LZ4 support", detail)
+        else:
+            app._append_log("setup", "[deps] lz4 install failed: {}\n".format(detail))
+            gui.messagebox.showerror("ZSO/LZ4 install failed", detail)
+
+    def show_libchdr_help():
+        gui.messagebox.showinfo("CHD/libchdr support", optional_deps.libchdr_help_text())
+
     def restart_as_admin(app):
         if not gui.windows_setup.is_windows():
             gui.messagebox.showinfo("Windows only", "Administrator restart is only needed on Windows.")
@@ -285,6 +390,7 @@ def _apply_gui_review_fixes(gui):
     def launcher_build(self):
         build_banner(self)
         add_admin_panel(self)
+        add_compression_panel(self)
         original_build(self)
 
     def launcher_init(self, root):
