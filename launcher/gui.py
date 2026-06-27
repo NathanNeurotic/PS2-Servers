@@ -28,7 +28,7 @@ REPO_URL = "https://github.com/NathanNeurotic/PS2-Servers"
 RELEASES_URL = "https://github.com/NathanNeurotic/PS2-Servers/releases"
 SECURITY_URL = "https://github.com/NathanNeurotic/PS2-Servers/blob/main/SECURITY.md"
 
-ABOUT_TEXT = """PS2 Servers
+ABOUT_TEXT = r"""PS2 Servers
 
 PS2 Servers is a no-terminal launcher for PlayStation 2 network-loading servers. It gives normal users a simple GUI for starting the server mode they need, choosing folders or files, seeing live logs, and copying the exact settings they need to enter in OPL.
 
