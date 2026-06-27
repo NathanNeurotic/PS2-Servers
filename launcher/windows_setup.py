@@ -1,8 +1,9 @@
 """Windows setup helpers for the GUI launcher.
 
-The GUI uses these helpers to keep end users out of PowerShell, Windows Features,
-and Windows Firewall screens. All mutating actions require an elevated launcher;
-the unelevated launcher only checks whether setup is already complete.
+The launcher uses these helpers to keep end users out of Windows Firewall
+screens. Normal PS2 Servers SMB mode uses the repo's own small SMB/CIFS server
+on a custom TCP port and does not enable or depend on the Windows SMB1 optional
+feature tree.
 """
 
 import os
@@ -12,19 +13,12 @@ import sys
 
 from .servers import frozen_self_exe, is_frozen
 
-
-SMB1_FEATURES = (
-    "SMB1Protocol",
-    "SMB1Protocol-Client",
-    "SMB1Protocol-Server",
-)
-SMB1_REMOVAL_FEATURE = "SMB1Protocol-Deprecation"
-
 UDPBD_PORT = 0xBDBD
+FIREWALL_RULE_PREFIX = "PS2 Servers - "
 
 
 class WindowsSetupError(RuntimeError):
-    """Raised when Windows setup cannot be checked or applied."""
+    """Raised when Windows setup cannot be checked, applied, or removed."""
 
 
 def is_windows():
@@ -92,34 +86,42 @@ def _rule_names(key, values):
     return rules
 
 
+def _firewall_rules(key, values):
+    program = os.path.abspath(_server_program_path())
+    rules = [{
+        "name": "PS2 Servers - App",
+        "protocol": "Any",
+        "port": None,
+        "program": program,
+    }]
+    for proto, port, purpose in _server_ports(key, values):
+        rules.append({
+            "name": "PS2 Servers - {} {} {}".format(purpose, proto, port),
+            "protocol": proto,
+            "port": int(port),
+            "program": None,
+        })
+    return rules
+
+
 def needs_setup(key, values):
-    """True if an elevated setup pass is needed before starting this server.
+    """True if an elevated firewall setup pass is needed before starting.
 
     Query failures deliberately return True: if Windows blocks the check, the
     elevated path is the safer and more useful fallback.
+
+    Important: this check deliberately does not inspect or request Windows SMB1
+    optional features. The bundled SMB server speaks the OPL-compatible SMB1/CIFS
+    subset itself and should normally run on a custom port.
     """
     if not is_windows():
         return False
-
-    feature_lines = []
-    if key == "smbv1":
-        feature_array = "@({})".format(",".join(_ps_quote(f) for f in SMB1_FEATURES))
-        removal = _ps_quote(SMB1_REMOVAL_FEATURE)
-        feature_lines = [
-            "$features = {}".format(feature_array),
-            "foreach ($name in $features) {",
-            "  $f = Get-WindowsOptionalFeature -Online -FeatureName $name -ErrorAction SilentlyContinue",
-            "  if ($null -ne $f -and $f.State -ne 'Enabled') { Write-Output ('NEED_FEATURE=' + $name) }",
-            "}",
-            "$d = Get-WindowsOptionalFeature -Online -FeatureName {} -ErrorAction SilentlyContinue".format(removal),
-            "if ($null -ne $d -and $d.State -eq 'Enabled') { Write-Output ('NEED_DISABLE=' + {}) }".format(removal),
-        ]
 
     port_rule_names = _rule_names(key, values)[1:]
     rule_array = "@({})".format(",".join(_ps_quote(n) for n in port_rule_names))
     program = _ps_quote(os.path.abspath(_server_program_path()))
     app_rule = _ps_quote("PS2 Servers - App")
-    script = "\n".join(feature_lines + [
+    script = "\n".join([
         "$appRuleName = {}".format(app_rule),
         "$appProgram = {}".format(program),
         "$appRule = Get-NetFirewallRule -DisplayName $appRuleName -ErrorAction SilentlyContinue",
@@ -147,64 +149,20 @@ def needs_setup(key, values):
 
 
 def apply_setup(key, values):
-    """Enable required Windows features and firewall rules.
+    """Create required Windows Firewall allow rules.
 
     Returns a dict:
       changed: whether anything was changed
-      restart_needed: Windows reported a pending restart for an optional feature
+      restart_needed: always False; firewall-only setup does not require reboot
       output: human-readable setup log
+
+    This function does not enable Windows SMB1 optional features.
     """
     if not is_windows():
         return {"changed": False, "restart_needed": False, "output": ""}
 
-    program = os.path.abspath(_server_program_path())
-    rules = []
-    rules.append({
-        "name": "PS2 Servers - App",
-        "protocol": "Any",
-        "port": None,
-        "program": program,
-    })
-    for proto, port, purpose in _server_ports(key, values):
-        rules.append({
-            "name": "PS2 Servers - {} {} {}".format(purpose, proto, port),
-            "protocol": proto,
-            "port": int(port),
-            "program": None,
-        })
-
-    feature_script = []
-    if key == "smbv1":
-        feature_array = "@({})".format(",".join(_ps_quote(f) for f in SMB1_FEATURES))
-        removal = _ps_quote(SMB1_REMOVAL_FEATURE)
-        feature_script = [
-            "$features = {}".format(feature_array),
-            "foreach ($name in $features) {",
-            "  $f = Get-WindowsOptionalFeature -Online -FeatureName $name -ErrorAction SilentlyContinue",
-            "  if ($null -eq $f) {",
-            "    Write-Output ('SMB1 missing optional feature: ' + $name)",
-            "    continue",
-            "  }",
-            "  if ($f.State -ne 'Enabled') {",
-            "    Write-Output ('Enabling Windows optional feature: ' + $name)",
-            "    $r = Enable-WindowsOptionalFeature -Online -FeatureName $name -All -NoRestart -ErrorAction Stop",
-            "    $changed = $true",
-            "    if ($r.RestartNeeded) { $restartNeeded = $true }",
-            "  } else {",
-            "    Write-Output ('Windows optional feature already enabled: ' + $name)",
-            "  }",
-            "}",
-            "$d = Get-WindowsOptionalFeature -Online -FeatureName {} -ErrorAction SilentlyContinue".format(removal),
-            "if ($null -ne $d -and $d.State -eq 'Enabled') {",
-            "  Write-Output ('Disabling SMB1 automatic removal: ' + {})".format(removal),
-            "  $r = Disable-WindowsOptionalFeature -Online -FeatureName {} -NoRestart -ErrorAction Stop".format(removal),
-            "  $changed = $true",
-            "  if ($r.RestartNeeded) { $restartNeeded = $true }",
-            "}",
-        ]
-
     rule_lines = []
-    for rule in rules:
+    for rule in _firewall_rules(key, values):
         name = _ps_quote(rule["name"])
         proto = _ps_quote(rule["protocol"])
         rule_lines += [
@@ -234,10 +192,9 @@ def apply_setup(key, values):
     script = "\n".join([
         "$ErrorActionPreference = 'Stop'",
         "$changed = $false",
-        "$restartNeeded = $false",
-    ] + feature_script + rule_lines + [
+    ] + rule_lines + [
         "Write-Output ('SETUP_CHANGED=' + $changed)",
-        "Write-Output ('RESTART_NEEDED=' + $restartNeeded)",
+        "Write-Output 'NOTE=No Windows SMB1 optional features were enabled or changed.'",
     ])
 
     try:
@@ -252,7 +209,48 @@ def apply_setup(key, values):
     upper = output.upper()
     return {
         "changed": "SETUP_CHANGED=TRUE" in upper,
-        "restart_needed": "RESTART_NEEDED=TRUE" in upper,
+        "restart_needed": False,
+        "output": output,
+    }
+
+
+def remove_setup():
+    """Remove PS2 Servers Windows Firewall rules.
+
+    This is intentionally narrow: it removes only rules whose display names start
+    with "PS2 Servers - ". It does not touch Windows optional features or other
+    firewall rules.
+    """
+    if not is_windows():
+        return {"changed": False, "restart_needed": False, "output": ""}
+
+    prefix = _ps_quote(FIREWALL_RULE_PREFIX + "*")
+    script = "\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        "$rules = @(Get-NetFirewallRule -DisplayName {} -ErrorAction SilentlyContinue)".format(prefix),
+        "if ($rules.Count -eq 0) {",
+        "  Write-Output 'No PS2 Servers firewall rules found.'",
+        "  Write-Output 'SETUP_CHANGED=False'",
+        "} else {",
+        "  foreach ($rule in $rules) { Write-Output ('Removing firewall rule: ' + $rule.DisplayName) }",
+        "  $rules | Remove-NetFirewallRule -ErrorAction Stop",
+        "  Write-Output ('Removed PS2 Servers firewall rules: ' + $rules.Count)",
+        "  Write-Output 'SETUP_CHANGED=True'",
+        "}",
+    ])
+
+    try:
+        res = _powershell(script)
+    except OSError as e:
+        raise WindowsSetupError("Failed to run PowerShell: {}".format(e)) from e
+
+    output = ((res.stdout or "") + (res.stderr or "")).strip()
+    if res.returncode != 0:
+        raise WindowsSetupError(output or "Windows cleanup failed.")
+
+    return {
+        "changed": "SETUP_CHANGED=TRUE" in output.upper(),
+        "restart_needed": False,
         "output": output,
     }
 
@@ -262,10 +260,13 @@ def setup_summary(key, values):
         return ""
     parts = []
     if key == "smbv1":
-        parts.append("enable the Windows SMB 1.0/CIFS feature tree")
-    ports = _server_ports(key, values)
-    if ports:
-        parts.append("create Windows Firewall allow rules")
+        parts.append("create Windows Firewall allow rules for the built-in PS2 Servers SMB server")
+        if values.get("take_445"):
+            parts.append("temporarily use TCP 445 by pausing Windows file sharing while the server runs")
+    else:
+        ports = _server_ports(key, values)
+        if ports:
+            parts.append("create Windows Firewall allow rules")
     if not parts:
         return "apply Windows network setup"
     return " and ".join(parts)
