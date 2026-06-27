@@ -38,8 +38,11 @@ DATA_FILES = [
 ]
 # udpfs_server.py does `from compressed_iso import ...` on load. --include-data-dir
 # skips .py files, so compile it in as a real package instead (importable anywhere).
+# lz4 is optional in source mode, but bundled in packaged releases so normal users
+# do not need Python or pip for ZSO/LZ4 support.
 INCLUDE_PACKAGES = [
     "compressed_iso",
+    "lz4",
 ]
 
 
