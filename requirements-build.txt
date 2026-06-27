@@ -4,3 +4,4 @@
 Nuitka==2.7.12
 ordered-set==4.1.0
 zstandard==0.23.0
+lz4==4.4.4
