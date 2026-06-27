@@ -311,8 +311,6 @@ def _apply_gui_review_fixes(gui):
         app._append_log("setup", "[deps] installing optional lz4 package\n")
 
         def worker():
-            import threading  # keeps the top-level launcher import tiny
-            del threading
             try:
                 optional_deps.install_lz4(
                     log=lambda line: app.root.after(
