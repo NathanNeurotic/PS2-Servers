@@ -40,7 +40,12 @@ def _in_venv():
 
 
 def check_lz4():
-    if importlib.util.find_spec("lz4.block") is not None:
+    try:
+        has_lz4 = importlib.util.find_spec("lz4") is not None
+        has_block = has_lz4 and importlib.util.find_spec("lz4.block") is not None
+    except (ImportError, AttributeError, ValueError):
+        has_block = False
+    if has_block:
         return OptionalDepStatus("lz4", "ZSO/LZ4 support", True,
                                  "Python package 'lz4' is available.")
     return OptionalDepStatus("lz4", "ZSO/LZ4 support", False,
