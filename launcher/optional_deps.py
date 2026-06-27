@@ -101,7 +101,7 @@ def install_lz4(log: Optional[Callable[[str], None]] = None):
     if log:
         log("Running: {}".format(" ".join(cmd)))
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, cwd=os.getcwd())
+                            text=True, errors="replace", cwd=os.getcwd())
     output_lines: List[str] = []
     assert proc.stdout is not None
     for line in proc.stdout:
