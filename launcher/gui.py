@@ -399,7 +399,7 @@ class LauncherApp:
             try:
                 result = windows_setup.apply_setup(key, values)
             except Exception as e:
-                self.root.after(0, lambda: self._finish_windows_setup_failure(key, e))
+                self.root.after(0, lambda error=e: self._finish_windows_setup_failure(key, error))
                 return
             self.root.after(0, lambda: self._finish_windows_setup_success(key, values, result))
 
@@ -521,7 +521,7 @@ class LauncherApp:
             try:
                 result = windows_setup.remove_setup()
             except Exception as e:
-                self.root.after(0, lambda: self._finish_cleanup_failure(e))
+                self.root.after(0, lambda error=e: self._finish_cleanup_failure(error))
                 return
             self.root.after(0, lambda: self._finish_cleanup_success(result))
 
