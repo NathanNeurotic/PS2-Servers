@@ -70,6 +70,12 @@ def _apply_gui_review_fixes(gui):
     original_launcher_init = gui.LauncherApp.__init__
     original_build = gui.LauncherApp._build
 
+    try:
+        from . import theme_assets
+        embedded_assets = getattr(theme_assets, "ASSETS", {})
+    except Exception:
+        embedded_assets = {}
+
     palette = {
         "bg": "#030713",
         "panel": "#071226",
@@ -91,6 +97,21 @@ def _apply_gui_review_fixes(gui):
     gui.COLOR_RUNNING = palette["ok"]
     gui.COLOR_STOPPED = palette["muted"]
     gui.COLOR_ERROR = palette["error"]
+
+    def asset_photo(app, name):
+        data = embedded_assets.get(name)
+        if not data:
+            return None
+        if isinstance(data, (tuple, list)):
+            data = "".join(data)
+        try:
+            photo = gui.tk.PhotoImage(data=data)
+        except Exception:
+            return None
+        photos = getattr(app, "_ps2_theme_photos", [])
+        photos.append(photo)
+        app._ps2_theme_photos = photos
+        return photo
 
     def apply_theme(root):
         root.configure(background=palette["bg"])
@@ -175,15 +196,27 @@ def _apply_gui_review_fixes(gui):
     def build_banner(self):
         frame = gui.ttk.Frame(self.root, style="Header.TFrame")
         frame.pack(fill="x", padx=10, pady=(10, 0))
-        canvas = gui.tk.Canvas(frame, height=78, highlightthickness=0,
-                               bg=palette["bg"], bd=0)
-        canvas.pack(fill="x", expand=True)
-        canvas.bind("<Configure>", lambda event: draw_banner(canvas, event.width, 78))
-        self._ps2_theme_banner = canvas
+
+        banner = asset_photo(self, "BANNER")
+        if banner:
+            label = gui.tk.Label(frame, image=banner, bg=palette["bg"], bd=0,
+                                 highlightthickness=0)
+            label.pack(anchor="w")
+        else:
+            canvas = gui.tk.Canvas(frame, height=78, highlightthickness=0,
+                                   bg=palette["bg"], bd=0)
+            canvas.pack(fill="x", expand=True)
+            canvas.bind("<Configure>", lambda event: draw_banner(canvas, event.width, 78))
+            self._ps2_theme_banner = canvas
+
+        accent = asset_photo(self, "ACCENT")
+        if accent:
+            gui.tk.Label(frame, image=accent, bg=palette["bg"], bd=0,
+                         highlightthickness=0).pack(anchor="w", pady=(2, 0))
 
     def add_admin_panel(self):
         frame = gui.ttk.Frame(self.root, style="Admin.TFrame")
-        frame.pack(fill="x", padx=10, pady=(0, 10))
+        frame.pack(fill="x", padx=10, pady=(6, 4))
         is_admin = gui.elevate.is_admin()
         status_style = "AdminYes.TLabel" if is_admin else "AdminNo.TLabel"
         status_text = "Administrator: Yes" if is_admin else "Administrator: No"
@@ -249,13 +282,13 @@ def _apply_gui_review_fixes(gui):
 
     def launcher_build(self):
         build_banner(self)
+        add_admin_panel(self)
         original_build(self)
 
     def launcher_init(self, root):
         apply_theme(root)
         app_icon.apply_to_tk_root(root, gui.tk)
         original_launcher_init(self, root)
-        add_admin_panel(self)
 
     def append_log(self, key, text):
         widget = self.logs[key]
