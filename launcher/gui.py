@@ -538,9 +538,9 @@ class LauncherApp:
                     if output:
                         outputs.append(output)
                 output = "\n".join(outputs) or "PS2 Servers firewall allow rules are present."
-                self.root.after(0, lambda: self._finish_allow_success({"output": output}))
+                self.root.after(0, self._finish_allow_success, {"output": output})
             except Exception as e:
-                self.root.after(0, lambda error=e: self._finish_allow_failure(error))
+                self.root.after(0, self._finish_allow_failure, e)
 
         threading.Thread(target=worker, daemon=True).start()
 
