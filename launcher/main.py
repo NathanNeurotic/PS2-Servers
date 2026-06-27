@@ -187,11 +187,11 @@ def _apply_gui_review_fixes(gui):
             canvas.create_line(x, 18, x + 9, 10, x + 27, 10, x + 18, 18, fill="#0b69ff")
             canvas.create_line(x + 18, 36, x + 27, 28, x + 27, 10, fill="#0848b8")
         canvas.create_text(24, 24, anchor="w", text="PS2", fill=palette["accent2"],
-                           font=("Segoe UI", 26, "bold"))
+                           font=("", 26, "bold"))
         canvas.create_text(112, 26, anchor="w", text="SERVERS", fill=palette["text"],
-                           font=("Segoe UI", 18, "bold"))
+                           font=("", 18, "bold"))
         canvas.create_text(24, 56, anchor="w", text="SMBv1  ·  UDPFS  ·  UDPBD  ·  no terminal required",
-                           fill=palette["muted"], font=("Segoe UI", 9))
+                           fill=palette["muted"], font=("", 9))
 
     def build_banner(self):
         frame = gui.ttk.Frame(self.root, style="Header.TFrame")
@@ -215,6 +215,8 @@ def _apply_gui_review_fixes(gui):
                          highlightthickness=0).pack(anchor="w", pady=(2, 0))
 
     def add_admin_panel(self):
+        if not gui.windows_setup.is_windows():
+            return
         frame = gui.ttk.Frame(self.root, style="Admin.TFrame")
         frame.pack(fill="x", padx=10, pady=(6, 4))
         is_admin = gui.elevate.is_admin()
@@ -229,7 +231,7 @@ def _apply_gui_review_fixes(gui):
                                 style="Accent.TButton",
                                 command=lambda: restart_as_admin(self))
         button.pack(side="right", padx=8, pady=5)
-        if is_admin or not gui.windows_setup.is_windows() or not gui.elevate.can_elevate():
+        if is_admin or not gui.elevate.can_elevate():
             button.config(state="disabled")
         self._ps2_admin_frame = frame
 
