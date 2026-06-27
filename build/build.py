@@ -64,6 +64,11 @@ def main():
     ]
     for rel in DATA_FILES:
         cmd.append("--include-data-files={}={}".format(os.path.join(ROOT, rel), rel))
+
+    native_dir = os.path.join(ROOT, "build", "native")
+    if os.path.isdir(native_dir):
+        cmd.append("--include-data-dir={}={}".format(native_dir, "native"))
+
     for pkg in INCLUDE_PACKAGES:
         cmd.append("--include-package=" + pkg)
 
