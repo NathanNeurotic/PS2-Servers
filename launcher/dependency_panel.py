@@ -1,14 +1,19 @@
 """Small Tkinter panel for optional compression dependency status.
 
 This module intentionally keeps native dependency setup conservative. Python lz4
-can be installed in source mode. Native libchdr is detected and explained, but
-release builds should bundle vetted native binaries instead of downloading them
-at runtime.
+can be installed in source mode. Packaged releases bundle Python dependencies
+instead of requiring users to install Python. Native libchdr is detected and
+explained, but release builds should bundle vetted native binaries instead of
+downloading them at runtime.
 """
 
 import threading
 
 from . import optional_deps
+
+
+LZ4_SOURCE_BUTTON = "Install ZSO/LZ4 support"
+LZ4_PACKAGED_BUTTON = "ZSO/LZ4 bundled in release"
 
 
 def add_panel(app, gui):
@@ -25,7 +30,8 @@ def add_panel(app, gui):
                    command=lambda: show_status(app, gui)).pack(side="right", padx=(4, 8), pady=5)
     gui.ttk.Button(frame, text="CHD/libchdr details",
                    command=lambda: show_libchdr_details(gui)).pack(side="right", padx=(4, 0), pady=5)
-    install = gui.ttk.Button(frame, text="Install ZSO/LZ4 support",
+    install_text = LZ4_PACKAGED_BUTTON if optional_deps.is_frozen_app() else LZ4_SOURCE_BUTTON
+    install = gui.ttk.Button(frame, text=install_text,
                              command=lambda: install_lz4(app, gui))
     install.pack(side="right", padx=(4, 0), pady=5)
     if optional_deps.is_frozen_app():
@@ -59,8 +65,8 @@ def install_lz4(app, gui):
     if optional_deps.is_frozen_app():
         gui.messagebox.showinfo(
             "Packaged app",
-            "This packaged app cannot install Python packages into itself.\n\n"
-            "Use a release build that bundles lz4, or run from source to install lz4."
+            "Packaged PS2 Servers releases do not need a user-installed Python just for ZSO/LZ4.\n\n"
+            "The release build should bundle lz4. If ZSO/LZ4 still reports missing, that is a release packaging problem, not something the user should fix with pip."
         )
         return
 
