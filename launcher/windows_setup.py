@@ -122,65 +122,12 @@ def _firewall_rules(key, values):
     return rules
 
 
-def needs_setup(key, values):
-    """True if an elevated firewall setup pass is needed before starting.
-
-    Query failures deliberately return True: if Windows blocks the check, the
-    elevated path is the safer and more useful fallback.
-
-    Important: this check deliberately does not inspect or request Windows SMB1
-    optional features. The bundled SMB server speaks the OPL-compatible SMB1/CIFS
-    subset itself and should normally run on a custom port.
-    """
-    if not is_windows():
-        return False
-
-    port_rule_names = _rule_names(key, values)[1:]
-    rule_array = "@({})".format(",".join(_ps_quote(n) for n in port_rule_names))
-    program = _ps_quote(os.path.abspath(_server_program_path()))
-    app_rule = _ps_quote("PS2 Servers - App")
-    script = "\n".join([
-        "$appRuleName = {}".format(app_rule),
-        "$appProgram = {}".format(program),
-        "$appRule = Get-NetFirewallRule -DisplayName $appRuleName -ErrorAction SilentlyContinue",
-        "if (-not $appRule) {",
-        "  Write-Output ('NEED_RULE=' + $appRuleName)",
-        "} else {",
-        "  $appFilter = $appRule | Get-NetFirewallApplicationFilter",
-        "  $programs = @($appFilter | ForEach-Object { $_.Program })",
-        "  if ($programs -notcontains $appProgram) { Write-Output ('NEED_RULE=' + $appRuleName) }",
-        "}",
-        "$rules = {}".format(rule_array),
-        "foreach ($name in $rules) {",
-        "  if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {",
-        "    Write-Output ('NEED_RULE=' + $name)",
-        "  }",
-        "}",
-    ])
-    try:
-        res = _powershell(script)
-    except (OSError, subprocess.TimeoutExpired):
-        return True
-    if res.returncode != 0:
-        return True
-    return bool((res.stdout or "").strip())
-
-
-def apply_setup(key, values):
-    """Create required Windows Firewall allow rules.
-
-    Returns a dict:
-      changed: whether anything was changed
-      restart_needed: always False; firewall-only setup does not require reboot
-      output: human-readable setup log
-
-    This function does not enable Windows SMB1 optional features.
-    """
-    if not is_windows():
-        return {"changed": False, "restart_needed": False, "output": ""}
-
+def _run_firewall_rule_script(rules):
+    """Create/refresh the supplied firewall rules in one hidden PowerShell pass."""
     rule_lines = []
-    for rule in _firewall_rules(key, values):
+    changed = False
+    for rule in rules:
+        changed = True
         name = _ps_quote(rule["name"])
         proto = _ps_quote(rule["protocol"])
         rule_lines += [
@@ -229,10 +176,78 @@ def apply_setup(key, values):
 
     upper = output.upper()
     return {
-        "changed": "SETUP_CHANGED=TRUE" in upper,
+        "changed": changed or "SETUP_CHANGED=TRUE" in upper,
         "restart_needed": False,
         "output": output,
     }
+
+
+def needs_setup(key, values):
+    """True if an elevated firewall setup pass is needed before starting.
+
+    Query failures deliberately return True: if Windows blocks the check, the
+    elevated path is the safer and more useful fallback.
+
+    Important: this check deliberately does not inspect or request Windows SMB1
+    optional features. The bundled SMB server speaks the OPL-compatible SMB1/CIFS
+    subset itself and should normally run on a custom port.
+    """
+    if not is_windows():
+        return False
+
+    port_rule_names = _rule_names(key, values)[1:]
+    rule_array = "@({})".format(",".join(_ps_quote(n) for n in port_rule_names))
+    program = _ps_quote(os.path.abspath(_server_program_path()))
+    app_rule = _ps_quote("PS2 Servers - App")
+    script = "\n".join([
+        "$appRuleName = {}".format(app_rule),
+        "$appProgram = {}".format(program),
+        "$appRule = Get-NetFirewallRule -DisplayName $appRuleName -ErrorAction SilentlyContinue",
+        "if (-not $appRule) {",
+        "  Write-Output ('NEED_RULE=' + $appRuleName)",
+        "} else {",
+        "  $appFilter = $appRule | Get-NetFirewallApplicationFilter",
+        "  $programs = @($appFilter | ForEach-Object { $_.Program })",
+        "  if ($programs -notcontains $appProgram) { Write-Output ('NEED_RULE=' + $appRuleName) }",
+        "}",
+        "$rules = {}".format(rule_array),
+        "foreach ($name in $rules) {",
+        "  if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {",
+        "    Write-Output ('NEED_RULE=' + $name)",
+        "  }",
+        "}",
+    ])
+    try:
+        res = _powershell(script)
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+    if res.returncode != 0:
+        return True
+    return bool((res.stdout or "").strip())
+
+
+def apply_setup(key, values):
+    """Create required Windows Firewall allow rules for one server."""
+    if not is_windows():
+        return {"changed": False, "restart_needed": False, "output": ""}
+    return _run_firewall_rule_script(_firewall_rules(key, values))
+
+
+def apply_setup_for_servers(server_values):
+    """Create/refresh PS2 Servers allow rules for all supplied server values.
+
+    server_values is a mapping like {"smbv1": {...}, "udpfs": {...}, ...}.
+    The shared application rule is deduplicated so the GUI's Allow action does
+    one clean firewall pass instead of repeatedly removing/recreating it.
+    """
+    if not is_windows():
+        return {"changed": False, "restart_needed": False, "output": ""}
+
+    rules_by_name = {}
+    for key, values in server_values.items():
+        for rule in _firewall_rules(key, values or {}):
+            rules_by_name[rule["name"]] = rule
+    return _run_firewall_rule_script(list(rules_by_name.values()))
 
 
 def remove_setup():
