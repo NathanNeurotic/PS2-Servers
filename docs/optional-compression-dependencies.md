@@ -13,6 +13,15 @@ The launcher shows a **Compression support** panel. It can:
 - explain native `libchdr` setup without requiring users to open a terminal just
   to understand what is missing.
 
+## Packaged releases versus source mode
+
+Normal users should use the packaged PS2 Servers release. They should not need to
+install Python just to use the launcher or ZSO/LZ4 support.
+
+Source-mode users already have Python, so the GUI can offer to install missing
+Python packages into that Python environment. Packaged releases cannot pip-install
+into themselves; Python dependencies must be bundled at build time.
+
 ## ZSO/LZ4
 
 ZSO/LZ4 support uses the Python `lz4` package.
@@ -20,8 +29,8 @@ ZSO/LZ4 support uses the Python `lz4` package.
 When running from source, the GUI can run the current Python environment's pip
 install command after user confirmation.
 
-Packaged releases cannot pip-install into themselves. Release builds should
-bundle `lz4` when always-on ZSO/LZ4 support is desired.
+Packaged release builds bundle `lz4` so users without Python can still get
+ZSO/LZ4 support.
 
 ## CHD/libchdr
 
