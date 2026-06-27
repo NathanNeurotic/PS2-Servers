@@ -492,6 +492,14 @@ class LauncherApp:
                 return
 
         if not elevate.is_admin():
+            if not require_confirm:
+                self._append_log(
+                    "setup",
+                    "[setup] firewall cleanup aborted: administrator rights were not granted\n")
+                messagebox.showerror(
+                    "Administrator required",
+                    "Failed to acquire administrator rights for firewall cleanup.")
+                return
             if not elevate.can_elevate():
                 messagebox.showerror(
                     "Administrator required",
