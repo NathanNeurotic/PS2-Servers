@@ -25,6 +25,7 @@ TAB_TITLES = {
     "smbv1": "SMBv1",
     "udpfs": "UDPFS",
     "udpbd": "UDPBD",
+    "setup": "SETUP",
 }
 
 
@@ -220,7 +221,9 @@ class LauncherApp:
 
         self.root.after(150, self._drain_logs)
         self.root.after(600, self._poll_status)
-        if self.saved.get("pending_start"):
+        if self.saved.get("pending_cleanup"):
+            self.root.after(350, self._cleanup_pending)
+        elif self.saved.get("pending_start"):
             self.root.after(350, self._start_pending)
 
     def _build(self):
@@ -265,10 +268,16 @@ class LauncherApp:
 
         for server in REGISTRY.values():
             self.logs[server.key] = self.terminal
+        self.logs["setup"] = self.terminal
 
         # footer
         footer = ttk.Frame(self.root)
         footer.pack(fill="x", padx=10, pady=(0, 10))
+        cleanup = ttk.Button(footer, text="Remove firewall rules",
+                             command=self.remove_windows_setup)
+        cleanup.pack(side="left")
+        if not windows_setup.is_windows():
+            cleanup.config(state="disabled")
         ttk.Button(footer, text="Stop all", command=self.stop_all).pack(side="right")
 
     # -- IP --------------------------------------------------------------- #
@@ -341,6 +350,9 @@ class LauncherApp:
             if messagebox.askyesno(
                     "Administrator required",
                     "PS2 Servers needs administrator rights to {}.\n\n"
+                    "This will not enable Windows SMB1. It only manages PS2 Servers "
+                    "firewall rules, and advanced port 445 mode only pauses Windows "
+                    "file sharing while that server is running.\n\n"
                     "Restart the launcher as administrator now? Your settings are "
                     "saved and the server will continue automatically.".format(summary)):
                 self._save(pending_start=key)
@@ -355,7 +367,9 @@ class LauncherApp:
                         "Could not restart as administrator.")
             return False
 
-        if elevate.is_admin():
+        if setup_needed and elevate.is_admin():
+            if not self._confirm_windows_setup(key, values):
+                return False
             try:
                 result = windows_setup.apply_setup(key, values)
             except windows_setup.WindowsSetupError as e:
@@ -369,10 +383,31 @@ class LauncherApp:
             if result.get("restart_needed"):
                 messagebox.showwarning(
                     "Windows restart may be needed",
-                    "Windows enabled or changed an SMB1 optional feature and reported "
-                    "that a restart may be needed before that Windows feature is fully active.\n\n"
+                    "Windows reported that a restart may be needed before the "
+                    "network setup change is fully active.\n\n"
                     "The PS2 Servers app will still try to start now.")
         return True
+
+    def _confirm_windows_setup(self, key, values):
+        summary = windows_setup.setup_summary(key, values)
+        if key == "smbv1":
+            detail = (
+                "The SMB server is PS2 Servers' built-in OPL-compatible SMB/CIFS "
+                "server. This does not enable Windows SMB1 or expose Windows file "
+                "sharing over SMB1."
+            )
+        else:
+            detail = "This only creates or refreshes PS2 Servers firewall allow rules."
+        return messagebox.askyesno(
+            "Allow Windows Firewall setup?",
+            "PS2 Servers needs to {}.\n\n{}\n\nContinue?".format(summary, detail))
+
+    def _cleanup_pending(self):
+        self.saved.pop("pending_cleanup", None)
+        self._save()
+        self.nb.select(self.terminal_tab)
+        self._append_log("setup", "[setup] continuing firewall cleanup after administrator restart\n")
+        self._remove_windows_setup(require_confirm=False)
 
     def _start_pending(self):
         key = self.saved.get("pending_start")
@@ -383,6 +418,65 @@ class LauncherApp:
         self.nb.select(self.server_tabs[key])
         self._append_log(key, "[launcher] continuing after administrator restart\n")
         self.start_server(key)
+
+    def remove_windows_setup(self):
+        self._remove_windows_setup(require_confirm=True)
+
+    def _remove_windows_setup(self, require_confirm=True):
+        if not windows_setup.is_windows():
+            messagebox.showinfo("Windows only", "Firewall cleanup is only needed on Windows.")
+            return
+
+        running = [key for key in self.procs if self.is_running(key)]
+        if running:
+            if require_confirm:
+                if not messagebox.askyesno(
+                        "Stop running servers?",
+                        "Firewall cleanup should be done with PS2 Servers stopped.\n\n"
+                        "Stop all running servers and continue?"):
+                    return
+            self.stop_all()
+
+        if require_confirm:
+            if not messagebox.askyesno(
+                    "Remove PS2 Servers firewall rules?",
+                    "This removes only Windows Firewall rules whose display names "
+                    "start with:\n\nPS2 Servers -\n\n"
+                    "It does not enable, disable, install, or remove Windows SMB1 "
+                    "optional features. Continue?"):
+                return
+
+        if not elevate.is_admin():
+            if not elevate.can_elevate():
+                messagebox.showerror(
+                    "Administrator required",
+                    "Removing Windows Firewall rules needs administrator rights.")
+                return
+
+            self._save(pending_cleanup=True)
+            if elevate.relaunch_as_admin():
+                self.stop_all()
+                if self._tray:
+                    self._tray.stop()
+                self.root.destroy()
+            else:
+                self.saved.pop("pending_cleanup", None)
+                self._save()
+                messagebox.showerror(
+                    "Elevation failed",
+                    "Could not restart as administrator.")
+            return
+
+        try:
+            result = windows_setup.remove_setup()
+        except windows_setup.WindowsSetupError as e:
+            messagebox.showerror("Windows cleanup failed", str(e))
+            self._append_log("setup", "[setup] firewall cleanup failed:\n{}\n".format(e))
+            return
+
+        output = result.get("output") or "No PS2 Servers firewall rules found."
+        self._append_log("setup", "[setup] {}\n".format(output.replace("\n", "\n[setup] ")))
+        messagebox.showinfo("Firewall cleanup complete", output)
 
     def stop_server(self, key):
         proc = self.procs.get(key)
@@ -448,11 +542,13 @@ class LauncherApp:
         if ip and ip in netinfo.all_ipv4():
             self.ip_var.set(ip)
 
-    def _save(self, pending_start=None):
+    def _save(self, pending_start=None, pending_cleanup=False):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get()}
         if pending_start:
             data["pending_start"] = pending_start
+        if pending_cleanup:
+            data["pending_cleanup"] = True
         try:
             config.save(data)
         except OSError:
