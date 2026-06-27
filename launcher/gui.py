@@ -222,7 +222,9 @@ class LauncherApp:
 
         self.root.after(150, self._drain_logs)
         self.root.after(600, self._poll_status)
-        if self.saved.get("pending_cleanup"):
+        if self.saved.get("pending_firewall_allow"):
+            self.root.after(350, self._allow_pending)
+        elif self.saved.get("pending_cleanup"):
             self.root.after(350, self._cleanup_pending)
         elif self.saved.get("pending_start"):
             self.root.after(350, self._start_pending)
@@ -274,11 +276,15 @@ class LauncherApp:
         # footer
         footer = ttk.Frame(self.root)
         footer.pack(fill="x", padx=10, pady=(0, 10))
-        cleanup = ttk.Button(footer, text="Remove firewall rules",
-                             command=self.remove_windows_setup)
-        cleanup.pack(side="left")
+        allow = ttk.Button(footer, text="Allow through firewall",
+                           command=self.allow_windows_setup)
+        allow.pack(side="left")
+        remove = ttk.Button(footer, text="Remove PS2 Servers firewall rules",
+                            command=self.remove_windows_setup)
+        remove.pack(side="left", padx=(6, 0))
         if not windows_setup.is_windows():
-            cleanup.config(state="disabled")
+            allow.config(state="disabled")
+            remove.config(state="disabled")
         ttk.Button(footer, text="Stop all", command=self.stop_all).pack(side="right")
 
     # -- IP --------------------------------------------------------------- #
@@ -389,7 +395,7 @@ class LauncherApp:
         else:
             detail = "This only creates or refreshes PS2 Servers firewall allow rules."
         return messagebox.askyesno(
-            "Allow Windows Firewall setup?",
+            "Allow through Windows Firewall?",
             "PS2 Servers needs to {}.\n\n{}\n\nContinue?".format(summary, detail))
 
     def _apply_windows_setup_then_start(self, key, values):
@@ -447,6 +453,13 @@ class LauncherApp:
         card.toggle_btn.config(state="normal")
         self.nb.select(self.terminal_tab)
 
+    def _allow_pending(self):
+        self.saved.pop("pending_firewall_allow", None)
+        self._save()
+        self.nb.select(self.terminal_tab)
+        self._append_log("setup", "[setup] continuing firewall allow after administrator restart\n")
+        self._allow_windows_setup(require_confirm=False)
+
     def _cleanup_pending(self):
         self.saved.pop("pending_cleanup", None)
         self._save()
@@ -464,12 +477,88 @@ class LauncherApp:
         self._append_log(key, "[launcher] continuing after administrator restart\n")
         self.start_server(key)
 
+    def allow_windows_setup(self):
+        self._allow_windows_setup(require_confirm=True)
+
+    def _allow_windows_setup(self, require_confirm=True):
+        if not windows_setup.is_windows():
+            messagebox.showinfo("Windows only", "Firewall rules are only needed on Windows.")
+            return
+
+        if require_confirm:
+            if not messagebox.askyesno(
+                    "Allow PS2 Servers through Windows Firewall?",
+                    "This creates or refreshes allow rules named:\n\n"
+                    "PS2 Servers - ...\n\n"
+                    "It does not enable Windows SMB1 and it does not create block rules.\n\n"
+                    "Continue?"):
+                return
+
+        if not elevate.is_admin():
+            if not require_confirm:
+                self._append_log(
+                    "setup",
+                    "[setup] firewall allow aborted: administrator rights were not granted\n")
+                messagebox.showerror(
+                    "Administrator required",
+                    "Failed to acquire administrator rights to allow PS2 Servers through the firewall.")
+                return
+            if not elevate.can_elevate():
+                messagebox.showerror(
+                    "Administrator required",
+                    "Allowing PS2 Servers through Windows Firewall needs administrator rights.")
+                return
+
+            self._save(pending_firewall_allow=True)
+            if elevate.relaunch_as_admin():
+                self.stop_all()
+                if self._tray:
+                    self._tray.stop()
+                self.root.destroy()
+            else:
+                self.saved.pop("pending_firewall_allow", None)
+                self._save()
+                messagebox.showerror(
+                    "Elevation failed",
+                    "Could not restart as administrator.")
+            return
+
+        self._allow_windows_setup_async()
+
+    def _allow_windows_setup_async(self):
+        self._append_log("setup", "[setup] allowing PS2 Servers through Windows Firewall\n")
+        values = {key: card.values() for key, card in self.cards.items()}
+
+        def worker():
+            try:
+                outputs = []
+                for key, server_values in values.items():
+                    result = windows_setup.apply_setup(key, server_values)
+                    output = result.get("output") or ""
+                    if output:
+                        outputs.append(output)
+                output = "\n".join(outputs) or "PS2 Servers firewall allow rules are present."
+                self.root.after(0, lambda: self._finish_allow_success({"output": output}))
+            except Exception as e:
+                self.root.after(0, lambda error=e: self._finish_allow_failure(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_allow_success(self, result):
+        output = result.get("output") or "PS2 Servers firewall allow rules are present."
+        self._append_log("setup", "[setup] {}\n".format(output.replace("\n", "\n[setup] ")))
+        messagebox.showinfo("Allowed through firewall", output)
+
+    def _finish_allow_failure(self, error):
+        messagebox.showerror("Firewall allow failed", str(error))
+        self._append_log("setup", "[setup] firewall allow failed:\n{}\n".format(error))
+
     def remove_windows_setup(self):
         self._remove_windows_setup(require_confirm=True)
 
     def _remove_windows_setup(self, require_confirm=True):
         if not windows_setup.is_windows():
-            messagebox.showinfo("Windows only", "Firewall cleanup is only needed on Windows.")
+            messagebox.showinfo("Windows only", "Firewall rules are only needed on Windows.")
             return
 
         running = [key for key in self.procs if self.is_running(key)]
@@ -487,8 +576,8 @@ class LauncherApp:
                     "Remove PS2 Servers firewall rules?",
                     "This removes only Windows Firewall rules whose display names "
                     "start with:\n\nPS2 Servers -\n\n"
-                    "It does not enable, disable, install, or remove Windows SMB1 "
-                    "optional features. Continue?"):
+                    "It does not create block rules. After this, Windows returns to "
+                    "having no PS2 Servers-specific firewall rules. Continue?"):
                 return
 
         if not elevate.is_admin():
@@ -538,10 +627,10 @@ class LauncherApp:
     def _finish_cleanup_success(self, result):
         output = result.get("output") or "No PS2 Servers firewall rules found."
         self._append_log("setup", "[setup] {}\n".format(output.replace("\n", "\n[setup] ")))
-        messagebox.showinfo("Firewall cleanup complete", output)
+        messagebox.showinfo("PS2 Servers firewall rules removed", output)
 
     def _finish_cleanup_failure(self, error):
-        messagebox.showerror("Windows cleanup failed", str(error))
+        messagebox.showerror("Firewall removal failed", str(error))
         self._append_log("setup", "[setup] firewall cleanup failed:\n{}\n".format(error))
 
     def stop_server(self, key):
@@ -612,13 +701,16 @@ class LauncherApp:
         if ip and ip in netinfo.all_ipv4():
             self.ip_var.set(ip)
 
-    def _save(self, pending_start=None, pending_cleanup=False):
+    def _save(self, pending_start=None, pending_cleanup=False,
+              pending_firewall_allow=False):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get()}
         if pending_start:
             data["pending_start"] = pending_start
         if pending_cleanup:
             data["pending_cleanup"] = True
+        if pending_firewall_allow:
+            data["pending_firewall_allow"] = True
         try:
             config.save(data)
         except OSError:
