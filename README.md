@@ -22,6 +22,9 @@ The launcher starts normally without administrator rights. The GUI shows whether
 it is currently running as administrator and includes a **Restart as administrator**
 button for the few Windows setup actions that actually need elevation.
 
+The GUI uses a lightweight PS2-themed Tkinter skin. It does not use Electron,
+Qt, a browser view, or any heavy UI framework.
+
 ## Windows security note
 
 PS2 Servers is an unsigned open-source network tool. Because it runs local server
