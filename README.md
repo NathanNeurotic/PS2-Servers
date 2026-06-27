@@ -65,6 +65,25 @@ All three servers are pure-Python (standard library) and run on Windows, Linux a
 `udpbd_server/udpbd_server.py` is a pure-Python port of Rick Gaiser's UDPBD server —
 see [its provenance](udpbd_server/SOURCE.md). UDPBD has largely been superseded by UDPFS.
 
+## Optional compressed-image support
+
+UDPFS can expose compressed images as `.iso` files when compression support is
+available.
+
+The launcher includes a **Compression support** panel so users do not need to use
+a terminal for the common checks:
+
+- **Check** reports whether ZSO/LZ4 and CHD support are available.
+- **Install ZSO/LZ4 support** installs the Python `lz4` package when running from
+  source.
+- **CHD/libchdr help** shows platform-specific guidance for installing or making
+  `libchdr` available.
+
+Packaged single-file builds cannot install Python packages into themselves. If a
+release should have always-on ZSO support, bundle `lz4` at build time. CHD support
+uses native `libchdr`, so the launcher shows guidance instead of silently placing
+DLLs or changing system packages.
+
 ## Run a server on its own (terminal)
 
 Each server still runs standalone, and the launcher can run them too:
