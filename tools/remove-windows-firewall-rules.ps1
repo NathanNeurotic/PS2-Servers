@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 # Remove PS2 Servers Windows Firewall rules.
 #
 # Run from an elevated PowerShell prompt:
