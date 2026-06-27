@@ -18,6 +18,10 @@ It detects your PC's LAN IP and shows the exact settings to enter in OPL.
 - **From source:** double-click **`Start-Launcher.bat`** (Windows) or run
   `./start-launcher.sh` (Linux/macOS). Requires Python 3.
 
+The launcher starts normally without administrator rights. The GUI shows whether
+it is currently running as administrator and includes a **Restart as administrator**
+button for the few Windows setup actions that actually need elevation.
+
 ## Windows security note
 
 PS2 Servers is an unsigned open-source network tool. Because it runs local server
@@ -33,9 +37,15 @@ Windows setup is intentionally narrow:
 - no automatic enabling of Windows SMB1;
 - no disabling of SMB1 automatic removal;
 - Windows Firewall changes are limited to rules named `PS2 Servers - ...`;
-- a cleanup script is provided at `tools/remove-windows-firewall-rules.ps1`;
+- firewall allow/cleanup can be handled from the GUI without a terminal;
+- administrator rights are requested only for firewall changes or advanced port
+  `445` mode;
 - advanced port `445` mode is optional and temporarily pauses Windows File
   Sharing only while that server mode is running.
+
+Normal custom-port SMB mode, UDPFS, UDPBD, folder browsing, and logs do not need
+the whole launcher to run as administrator. Keeping the default launch non-admin
+reduces the blast radius of bugs and keeps the app easier to trust.
 
 See [SECURITY.md](SECURITY.md) for verification, cleanup, and reporting details.
 
