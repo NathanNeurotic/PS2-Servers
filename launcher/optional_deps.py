@@ -57,7 +57,8 @@ def _try_load_library(candidates):
 
 def check_libchdr():
     found = ctypes.util.find_library("chdr")
-    candidates = [found, "libchdr.so.0", "libchdr.so", "libchdr.dylib", "chdr.dll", "libchdr.dll"]
+    candidates = [found, "libchdr.so.0", "libchdr.so", "libchdr.dylib",
+                  "libchdr.0.dylib", "chdr.dll", "libchdr.dll", "libchdr-0.dll"]
     loaded, error = _try_load_library(candidates)
     if loaded:
         return OptionalDepStatus("libchdr", "CHD support", True,
@@ -116,20 +117,26 @@ def install_lz4(log: Optional[Callable[[str], None]] = None):
 
 
 def libchdr_setup_text():
+    if is_frozen_app():
+        return (
+            "Packaged releases are expected to include CHD support. If CHD still reports "
+            "missing in a packaged build, that is a release packaging problem rather than "
+            "something the user should fix manually."
+        )
     system = platform.system()
     if system == "Windows":
         return (
-            "CHD support uses the native libchdr library. Windows release builds should "
-            "bundle a vetted libchdr binary. This launcher does not download native binaries."
+            "CHD support uses native libchdr. Source users can place a trusted libchdr DLL "
+            "on PATH, but normal Windows users should use the packaged release."
         )
     if system == "Darwin":
         return (
-            "CHD support uses the native libchdr library. If Homebrew is installed, install "
-            "libchdr with: brew install libchdr. If Homebrew is missing, install Homebrew first."
+            "CHD support uses native libchdr. Source users can install it with Homebrew: "
+            "brew install libchdr. Normal macOS users should use the packaged release."
         )
     if system == "Linux":
         return (
-            "CHD support uses the native libchdr library. Install the package that provides "
-            "libchdr.so through your distribution package manager."
+            "CHD support uses native libchdr. Source users can install the distribution "
+            "package that provides libchdr.so. Normal users should use the packaged release."
         )
     return "CHD support needs libchdr installed on the system library path."
