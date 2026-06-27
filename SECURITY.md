@@ -10,6 +10,9 @@ The packaged Windows executable is unsigned. Antivirus products may flag unsigne
 network tools heuristically, especially when they open local server ports or ask
 for Windows Firewall rules.
 
+The GUI uses a lightweight Tkinter skin. It does not use Electron, Qt, a webview,
+or a heavyweight browser-based interface.
+
 ## Administrator rights
 
 PS2 Servers is designed to launch normally without administrator rights. Normal
