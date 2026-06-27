@@ -47,32 +47,233 @@ def main(argv=None):
     return gui.run_gui()
 
 
+ADMIN_ABOUT_TEXT = """
+
+Administrator rights
+
+PS2 Servers is designed to start normally without administrator rights. Normal custom-port SMB mode, UDPFS, UDPBD, browsing folders, and reading logs do not need the whole launcher to run elevated.
+
+Administrator rights are requested only when Windows requires them:
+
+- creating or refreshing PS2 Servers Windows Firewall allow rules;
+- removing PS2 Servers Windows Firewall rules;
+- using the advanced SMB port 445 mode.
+
+The launcher shows whether it is currently running as administrator. Use "Restart as administrator" only when you intentionally need elevated Windows setup actions. Keeping the default launch non-admin reduces the blast radius of bugs and makes the app easier to trust.
+"""
+
+
 def _apply_gui_review_fixes(gui):
-    """Apply terminal UX fixes, clearer tabs, and the app icon."""
+    """Apply terminal UX fixes, clearer tabs, a light PS2 skin, and admin UX."""
     original_text = gui.tk.Text
     original_notebook = gui.ttk.Notebook
     original_launcher_init = gui.LauncherApp.__init__
+    original_build = gui.LauncherApp._build
+
+    try:
+        from . import theme_assets
+        embedded_assets = getattr(theme_assets, "ASSETS", {})
+    except Exception:
+        embedded_assets = {}
+
+    palette = {
+        "bg": "#030713",
+        "panel": "#071226",
+        "panel2": "#0b1a35",
+        "panel3": "#10254b",
+        "text": "#d9ecff",
+        "muted": "#8aa9d6",
+        "accent": "#0094ff",
+        "accent2": "#37d7ff",
+        "ok": "#46f6b1",
+        "warn": "#ffcf5a",
+        "error": "#ff426d",
+        "entry": "#07101f",
+    }
+
+    if ADMIN_ABOUT_TEXT not in gui.ABOUT_TEXT:
+        gui.ABOUT_TEXT += ADMIN_ABOUT_TEXT
+
+    gui.COLOR_RUNNING = palette["ok"]
+    gui.COLOR_STOPPED = palette["muted"]
+    gui.COLOR_ERROR = palette["error"]
+
+    def asset_photo(app, name):
+        data = embedded_assets.get(name)
+        if not data:
+            return None
+        if isinstance(data, (tuple, list)):
+            data = "".join(data)
+        try:
+            photo = gui.tk.PhotoImage(data=data)
+        except Exception:
+            return None
+        photos = getattr(app, "_ps2_theme_photos", [])
+        photos.append(photo)
+        app._ps2_theme_photos = photos
+        return photo
+
+    def apply_theme(root):
+        root.configure(background=palette["bg"])
+        style = gui.ttk.Style(root)
+        try:
+            style.theme_use("clam")
+        except gui.tk.TclError:
+            pass
+
+        style.configure(".",
+                        background=palette["bg"],
+                        foreground=palette["text"],
+                        fieldbackground=palette["entry"],
+                        bordercolor=palette["panel3"],
+                        lightcolor=palette["panel3"],
+                        darkcolor=palette["panel"],
+                        troughcolor=palette["panel"])
+        style.configure("TFrame", background=palette["bg"])
+        style.configure("Header.TFrame", background=palette["bg"])
+        style.configure("TLabel", background=palette["bg"], foreground=palette["text"])
+        style.configure("Muted.TLabel", background=palette["bg"], foreground=palette["muted"])
+        style.configure("Admin.TLabel", background=palette["panel"], foreground=palette["muted"])
+        style.configure("AdminYes.TLabel", background=palette["panel"], foreground=palette["ok"])
+        style.configure("AdminNo.TLabel", background=palette["panel"], foreground=palette["warn"])
+        style.configure("TButton", background=palette["panel2"], foreground=palette["text"],
+                        borderwidth=1, focusthickness=1, focuscolor=palette["accent"])
+        style.map("TButton",
+                  background=[("active", palette["panel3"]), ("pressed", palette["accent"])],
+                  foreground=[("disabled", "#5f6f8d"), ("pressed", "#ffffff")])
+        style.configure("Accent.TButton", background=palette["accent"], foreground="#ffffff",
+                        borderwidth=1, focusthickness=1, focuscolor=palette["accent2"])
+        style.map("Accent.TButton",
+                  background=[("active", "#12b8ff"), ("pressed", "#006fd0")],
+                  foreground=[("disabled", "#5f6f8d"), ("!disabled", "#ffffff")])
+        style.configure("TEntry", fieldbackground=palette["entry"], foreground=palette["text"],
+                        insertcolor=palette["text"], bordercolor=palette["panel3"])
+        style.configure("TCombobox", fieldbackground=palette["entry"], foreground=palette["text"],
+                        arrowcolor=palette["accent"], bordercolor=palette["panel3"])
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", palette["entry"])],
+                  foreground=[("readonly", palette["text"])])
+        style.configure("TCheckbutton", background=palette["bg"], foreground=palette["text"])
+        style.map("TCheckbutton", background=[("active", palette["panel"])])
+        style.configure("TLabelframe", background=palette["panel"], foreground=palette["text"],
+                        bordercolor=palette["accent"], relief="solid")
+        style.configure("TLabelframe.Label", background=palette["bg"], foreground=palette["accent2"],
+                        font=("", 10, "bold"))
+        style.configure("Admin.TFrame", background=palette["panel"], relief="solid", borderwidth=1)
+        style.configure("Server.TNotebook", background=palette["bg"], borderwidth=0,
+                        tabmargins=(8, 6, 8, 0))
+        style.configure("Server.TNotebook.Tab", padding=(16, 7), font=("", 10, "bold"),
+                        background=palette["panel"], foreground=palette["muted"], borderwidth=1)
+        style.map("Server.TNotebook.Tab",
+                  background=[("selected", palette["panel3"]),
+                              ("active", palette["panel2"]),
+                              ("!selected", palette["panel"])],
+                  foreground=[("selected", palette["accent2"]),
+                              ("active", palette["text"]),
+                              ("!selected", palette["muted"])],
+                  expand=[("selected", (2, 2, 2, 0))])
+
+    def draw_banner(canvas, width=760, height=78):
+        canvas.delete("all")
+        canvas.create_rectangle(0, 0, width, height, fill=palette["bg"], outline="")
+        for y, color in ((10, "#061534"), (38, "#082351"), (68, "#061534")):
+            canvas.create_line(0, y, width, y, fill=color)
+        for x in range(32, width, 96):
+            canvas.create_line(x, 0, x, height, fill="#081f48")
+        canvas.create_line(0, height - 2, width, height - 2, fill=palette["accent"], width=2)
+        canvas.create_line(0, height - 5, width, height - 5, fill="#013a7a")
+        for x in (42, 132, width - 185, width - 72):
+            canvas.create_rectangle(x, 18, x + 18, 36, outline=palette["accent"], width=1)
+            canvas.create_line(x, 18, x + 9, 10, x + 27, 10, x + 18, 18, fill="#0b69ff")
+            canvas.create_line(x + 18, 36, x + 27, 28, x + 27, 10, fill="#0848b8")
+        canvas.create_text(24, 24, anchor="w", text="PS2", fill=palette["accent2"],
+                           font=("", 26, "bold"))
+        canvas.create_text(112, 26, anchor="w", text="SERVERS", fill=palette["text"],
+                           font=("", 18, "bold"))
+        canvas.create_text(24, 56, anchor="w", text="SMBv1  ·  UDPFS  ·  UDPBD  ·  no terminal required",
+                           fill=palette["muted"], font=("", 9))
+
+    def build_banner(self):
+        frame = gui.ttk.Frame(self.root, style="Header.TFrame")
+        frame.pack(fill="x", padx=10, pady=(10, 0))
+
+        banner = asset_photo(self, "BANNER")
+        if banner:
+            label = gui.tk.Label(frame, image=banner, bg=palette["bg"], bd=0,
+                                 highlightthickness=0)
+            label.pack(anchor="w")
+        else:
+            canvas = gui.tk.Canvas(frame, height=78, highlightthickness=0,
+                                   bg=palette["bg"], bd=0)
+            canvas.pack(fill="x", expand=True)
+            canvas.bind("<Configure>", lambda event: draw_banner(canvas, event.width, 78))
+            self._ps2_theme_banner = canvas
+
+        accent = asset_photo(self, "ACCENT")
+        if accent:
+            gui.tk.Label(frame, image=accent, bg=palette["bg"], bd=0,
+                         highlightthickness=0).pack(anchor="w", pady=(2, 0))
+
+    def add_admin_panel(self):
+        if not gui.windows_setup.is_windows():
+            return
+        frame = gui.ttk.Frame(self.root, style="Admin.TFrame")
+        frame.pack(fill="x", padx=10, pady=(6, 4))
+        is_admin = gui.elevate.is_admin()
+        status_style = "AdminYes.TLabel" if is_admin else "AdminNo.TLabel"
+        status_text = "Administrator: Yes" if is_admin else "Administrator: No"
+        gui.ttk.Label(frame, text=status_text, style=status_style,
+                      font=("", 9, "bold")).pack(side="left", padx=(8, 10), pady=6)
+        gui.ttk.Label(frame,
+                      text="Normal launch stays non-admin. Elevate only for firewall changes or advanced port 445.",
+                      style="Admin.TLabel").pack(side="left", padx=(0, 8), pady=6)
+        button = gui.ttk.Button(frame, text="Restart as administrator",
+                                style="Accent.TButton",
+                                command=lambda: restart_as_admin(self))
+        button.pack(side="right", padx=8, pady=5)
+        if is_admin or not gui.elevate.can_elevate():
+            button.config(state="disabled")
+        self._ps2_admin_frame = frame
+
+    def restart_as_admin(app):
+        if not gui.windows_setup.is_windows():
+            gui.messagebox.showinfo("Windows only", "Administrator restart is only needed on Windows.")
+            return
+        if gui.elevate.is_admin():
+            gui.messagebox.showinfo("Already administrator", "PS2 Servers is already running as administrator.")
+            return
+        if not gui.elevate.can_elevate():
+            gui.messagebox.showerror("Administrator unavailable", "This environment cannot request administrator rights.")
+            return
+        if not gui.messagebox.askyesno(
+                "Restart as administrator?",
+                "Restart PS2 Servers as administrator?\n\n"
+                "Use this only when you need to manage Windows Firewall rules "
+                "or use advanced SMB port 445 mode. Normal servers do not need it."):
+            return
+        app._save()
+        if gui.elevate.relaunch_as_admin():
+            app.stop_all()
+            if app._tray:
+                app._tray.stop()
+            app.root.destroy()
+        else:
+            gui.messagebox.showerror("Elevation failed", "Could not restart as administrator.")
 
     def wrapped_text(*args, **kwargs):
         if kwargs.get("wrap") == "none":
             kwargs["wrap"] = "char"
+        kwargs.setdefault("background", palette["entry"])
+        kwargs.setdefault("foreground", palette["text"])
+        kwargs.setdefault("insertbackground", palette["text"])
+        kwargs.setdefault("selectbackground", palette["accent"])
+        kwargs.setdefault("selectforeground", "#ffffff")
         return original_text(*args, **kwargs)
 
     class StyledNotebook(original_notebook):
         def __init__(self, *args, **kwargs):
             kwargs.setdefault("style", "Server.TNotebook")
             super().__init__(*args, **kwargs)
-            style = gui.ttk.Style(self)
-            style.configure("Server.TNotebook", borderwidth=1, tabmargins=(8, 6, 8, 0))
-            style.configure("Server.TNotebook.Tab", padding=(16, 7), font=("", 10, "bold"),
-                            borderwidth=2)
-            style.map("Server.TNotebook.Tab",
-                      background=[("selected", "#ffffff"),
-                                  ("active", "#eef4ff"),
-                                  ("!selected", "#d8dee8")],
-                      foreground=[("selected", "#0b2f5f"),
-                                  ("!selected", "#111111")],
-                      expand=[("selected", (2, 2, 2, 0))])
 
         def add(self, child, **kwargs):
             text = kwargs.get("text")
@@ -81,7 +282,13 @@ def _apply_gui_review_fixes(gui):
             kwargs.setdefault("padding", (8, 8))
             return super().add(child, **kwargs)
 
+    def launcher_build(self):
+        build_banner(self)
+        add_admin_panel(self)
+        original_build(self)
+
     def launcher_init(self, root):
+        apply_theme(root)
         app_icon.apply_to_tk_root(root, gui.tk)
         original_launcher_init(self, root)
 
@@ -99,6 +306,7 @@ def _apply_gui_review_fixes(gui):
 
     gui.tk.Text = wrapped_text
     gui.ttk.Notebook = StyledNotebook
+    gui.LauncherApp._build = launcher_build
     gui.LauncherApp.__init__ = launcher_init
     gui.LauncherApp._append_log = append_log
 
