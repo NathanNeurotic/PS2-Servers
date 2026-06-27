@@ -4,13 +4,16 @@ CHD (Compressed Hunks of Data) format wrapper.
 Supports CHD v5 format used by MAME and PCSX2.
 Uses libchdr (the official MAME C library) for decompression.
 
-Install: apt install libchdr0
-Build from source: https://github.com/rtissera/libchdr
+Packaged PS2 Servers releases look for a bundled native libchdr in the app's
+`native/` directory before falling back to system libraries.
 """
 
 import ctypes
 import ctypes.util
+import os
+import platform
 import struct
+import sys
 
 from .base import CompressedFileWrapper
 
@@ -19,13 +22,77 @@ from .base import CompressedFileWrapper
 # libchdr loading
 # ---------------------------------------------------------------------------
 
+_DLL_DIR_HANDLES = []
+
+
+def _lib_names():
+    system = platform.system()
+    if system == "Windows":
+        return ["chdr.dll", "libchdr.dll", "libchdr-0.dll"]
+    if system == "Darwin":
+        return ["libchdr.dylib", "libchdr.0.dylib"]
+    return ["libchdr.so.0", "libchdr.so"]
+
+
+def _native_dirs():
+    dirs = []
+    env_dir = os.environ.get("PS2SERVERS_NATIVE_LIB_DIR")
+    if env_dir:
+        dirs.append(env_dir)
+
+    # In Nuitka onefile builds, data files are extracted next to the inner binary.
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    dirs.append(os.path.join(exe_dir, "native"))
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    dirs.append(os.path.join(here, "native"))
+    dirs.append(os.path.join(os.path.dirname(here), "native"))
+    dirs.append(os.path.join(os.path.dirname(os.path.dirname(here)), "native"))
+    dirs.append(os.path.join(os.getcwd(), "native"))
+
+    unique = []
+    for path in dirs:
+        if path and path not in unique:
+            unique.append(path)
+    return unique
+
+
+def _prepare_native_dir(path):
+    if not os.path.isdir(path):
+        return
+    current = os.environ.get("PATH", "")
+    parts = current.split(os.pathsep) if current else []
+    if path not in parts:
+        os.environ["PATH"] = path + (os.pathsep + current if current else "")
+    if platform.system() == "Windows" and hasattr(os, "add_dll_directory"):
+        try:
+            _DLL_DIR_HANDLES.append(os.add_dll_directory(path))
+        except (OSError, AttributeError):
+            pass
+
+
+def _candidate_paths():
+    candidates = []
+    names = _lib_names()
+    for folder in _native_dirs():
+        _prepare_native_dir(folder)
+        for name in names:
+            candidates.append(os.path.join(folder, name))
+
+    found = ctypes.util.find_library("chdr")
+    if found:
+        candidates.append(found)
+    candidates.extend(names)
+    return candidates
+
+
 def _load_libchdr():
     """Attempt to load libchdr. Returns loaded ctypes.CDLL or raises ImportError."""
-    name = ctypes.util.find_library("chdr")
-    candidates = ["libchdr.so.0", "libchdr.so"]
-    if name:
-        candidates.insert(0, name)
-    for candidate in candidates:
+    attempted = []
+    for candidate in _candidate_paths():
+        if not candidate or candidate in attempted:
+            continue
+        attempted.append(candidate)
         try:
             lib = ctypes.cdll.LoadLibrary(candidate)
             _declare_api(lib)
@@ -33,9 +100,8 @@ def _load_libchdr():
         except OSError:
             continue
     raise ImportError(
-        "libchdr not found. Install with:\n"
-        "  apt install libchdr0\n"
-        "or build from source: https://github.com/rtissera/libchdr"
+        "libchdr not found. PS2 Servers checked bundled and system library paths. "
+        "Tried: {}".format(", ".join(attempted))
     )
 
 
@@ -101,7 +167,7 @@ def _extract_user_data(sector: bytes) -> bytes:
 # ---------------------------------------------------------------------------
 
 class ChdFileWrapper(CompressedFileWrapper):
-    """CHD v5 wrapper backed by libchdr (apt install libchdr0).
+    """CHD v5 wrapper backed by libchdr.
 
     Parses the CHD v5 header directly in Python (stable binary format),
     then delegates all hunk decompression to chd_read() from libchdr.

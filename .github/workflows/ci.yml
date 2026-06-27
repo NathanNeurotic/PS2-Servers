@@ -28,3 +28,6 @@ jobs:
 
       - name: Run UDPBD protocol selftest
         run: python udpbd_server/selftest.py
+
+      - name: Smoke build bundled libchdr
+        run: python build/build_libchdr.py
