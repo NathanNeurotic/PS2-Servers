@@ -10,6 +10,24 @@ The packaged Windows executable is unsigned. Antivirus products may flag unsigne
 network tools heuristically, especially when they open local server ports or ask
 for Windows Firewall rules.
 
+## Administrator rights
+
+PS2 Servers is designed to launch normally without administrator rights. Normal
+custom-port SMB mode, UDPFS, UDPBD, folder browsing, and log viewing do not need
+the whole launcher to run elevated.
+
+The launcher may request administrator rights only for Windows actions that need
+them:
+
+- creating or refreshing PS2 Servers Windows Firewall allow rules;
+- removing PS2 Servers Windows Firewall rules;
+- using the advanced SMB port `445` mode.
+
+The GUI shows whether it is currently running as administrator and provides a
+manual **Restart as administrator** button. This is intentionally not automatic on
+launch, because always running local network servers as administrator increases
+risk and makes antivirus heuristics more suspicious.
+
 ## Windows SMB behavior
 
 The SMBv1/RiptOPL server does **not** enable or depend on Windows' built-in SMB1
@@ -37,7 +55,12 @@ Windows Firewall allow rules named with the prefix:
 PS2 Servers -
 ```
 
-Manual cleanup from an elevated PowerShell prompt:
+The GUI can also remove PS2 Servers' own firewall rules without requiring the
+user to type PowerShell commands. The cleanup action removes only rules whose
+display names start with `PS2 Servers -`.
+
+Manual cleanup from an elevated PowerShell prompt remains available for advanced
+users, scripts, or emergency repair:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\remove-windows-firewall-rules.ps1
