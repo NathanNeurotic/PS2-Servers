@@ -60,7 +60,14 @@ def _install_dependency_panel_hook():
         def find_spec(self, fullname, path=None, target_module=None):
             if fullname != target:
                 return None
-            spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+            spec = None
+            for finder in sys.meta_path:
+                if finder is self:
+                    continue
+                if hasattr(finder, "find_spec"):
+                    spec = finder.find_spec(fullname, path, target_module)
+                    if spec:
+                        break
             if spec and spec.loader and not isinstance(spec.loader, _GuiLoader):
                 spec.loader = _GuiLoader(spec.loader)
             return spec
