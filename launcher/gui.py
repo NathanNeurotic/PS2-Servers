@@ -9,6 +9,7 @@ drained on the Tk main thread.
 
 import platform
 import queue
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -25,6 +26,7 @@ TAB_TITLES = {
     "smbv1": "SMBv1",
     "udpfs": "UDPFS",
     "udpbd": "UDPBD",
+    "setup": "SETUP",
 }
 
 
@@ -220,7 +222,9 @@ class LauncherApp:
 
         self.root.after(150, self._drain_logs)
         self.root.after(600, self._poll_status)
-        if self.saved.get("pending_start"):
+        if self.saved.get("pending_cleanup"):
+            self.root.after(350, self._cleanup_pending)
+        elif self.saved.get("pending_start"):
             self.root.after(350, self._start_pending)
 
     def _build(self):
@@ -265,10 +269,16 @@ class LauncherApp:
 
         for server in REGISTRY.values():
             self.logs[server.key] = self.terminal
+        self.logs["setup"] = self.terminal
 
         # footer
         footer = ttk.Frame(self.root)
         footer.pack(fill="x", padx=10, pady=(0, 10))
+        cleanup = ttk.Button(footer, text="Remove firewall rules",
+                             command=self.remove_windows_setup)
+        cleanup.pack(side="left")
+        if not windows_setup.is_windows():
+            cleanup.config(state="disabled")
         ttk.Button(footer, text="Stop all", command=self.stop_all).pack(side="right")
 
     # -- IP --------------------------------------------------------------- #
@@ -298,49 +308,53 @@ class LauncherApp:
                                  "Please set: " + ", ".join(missing))
             return
 
-        if not self._ensure_windows_ready(key, values):
+        if windows_setup.is_windows():
+            self._begin_windows_setup_check(key, values)
             return
+        self._launch_server(key, values)
 
-        try:
-            command = server.launch_command(values)
-        except Exception as e:
-            messagebox.showerror("Cannot start", str(e))
-            return
+    def _set_card_busy(self, key, busy, text=None):
+        card = self.cards[key]
+        card.toggle_btn.config(state="disabled" if busy else "normal")
+        if text:
+            card.toggle_btn.config(text=text)
 
-        self._append_log(key, "[launcher] starting: {}\n".format(" ".join(command)))
-        proc = ServerProcess(key, command, cwd=REPO_ROOT, on_output=self._on_output)
-        try:
-            proc.start()
-        except OSError as e:
-            messagebox.showerror("Cannot start", str(e))
-            card.refresh_status(False, error=True)
-            return
-        self.procs[key] = proc
-        card.refresh_status(True)
-        self.nb.select(self.terminal_tab)
+    def _begin_windows_setup_check(self, key, values):
+        self._set_card_busy(key, True, "Checking")
+        self._append_log(key, "[setup] checking Windows Firewall setup\n")
 
-    def _ensure_windows_ready(self, key, values):
-        if not windows_setup.is_windows():
-            return True
+        def worker():
+            setup_needed = True
+            error = None
+            try:
+                setup_needed = windows_setup.needs_setup(key, values)
+            except Exception as e:
+                error = str(e)
+            self.root.after(0, lambda: self._handle_windows_setup_check(
+                key, values, setup_needed, error))
 
-        setup_needed = True
-        try:
-            setup_needed = windows_setup.needs_setup(key, values)
-        except Exception as e:
-            self._append_log(key, "[setup] Windows setup check failed; elevation will retry: {}\n".format(e))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _handle_windows_setup_check(self, key, values, setup_needed, error=None):
+        if error:
+            self._append_log(key, "[setup] Windows setup check failed; elevation will retry: {}\n".format(error))
 
         admin_required = setup_needed or (key == "smbv1" and values.get("take_445"))
         if admin_required and not elevate.is_admin():
+            self._set_card_busy(key, False, "Start")
             if not elevate.can_elevate():
                 messagebox.showerror(
                     "Administrator required",
                     "Windows network setup needs administrator rights.")
-                return False
+                return
 
             summary = windows_setup.setup_summary(key, values)
             if messagebox.askyesno(
                     "Administrator required",
                     "PS2 Servers needs administrator rights to {}.\n\n"
+                    "This will not enable Windows SMB1. It only manages PS2 Servers "
+                    "firewall rules, and advanced port 445 mode only pauses Windows "
+                    "file sharing while that server is running.\n\n"
                     "Restart the launcher as administrator now? Your settings are "
                     "saved and the server will continue automatically.".format(summary)):
                 self._save(pending_start=key)
@@ -353,26 +367,92 @@ class LauncherApp:
                     messagebox.showerror(
                         "Elevation failed",
                         "Could not restart as administrator.")
-            return False
+            return
 
-        if elevate.is_admin():
+        if setup_needed and elevate.is_admin():
+            if not self._confirm_windows_setup(key, values):
+                self._set_card_busy(key, False, "Start")
+                return
+            self._apply_windows_setup_then_start(key, values)
+            return
+
+        self._launch_server(key, values)
+
+    def _confirm_windows_setup(self, key, values):
+        summary = windows_setup.setup_summary(key, values)
+        if key == "smbv1":
+            detail = (
+                "The SMB server is PS2 Servers' built-in OPL-compatible SMB/CIFS "
+                "server. This does not enable Windows SMB1 or expose Windows file "
+                "sharing over SMB1."
+            )
+        else:
+            detail = "This only creates or refreshes PS2 Servers firewall allow rules."
+        return messagebox.askyesno(
+            "Allow Windows Firewall setup?",
+            "PS2 Servers needs to {}.\n\n{}\n\nContinue?".format(summary, detail))
+
+    def _apply_windows_setup_then_start(self, key, values):
+        self._set_card_busy(key, True, "Setting up")
+
+        def worker():
             try:
                 result = windows_setup.apply_setup(key, values)
-            except windows_setup.WindowsSetupError as e:
-                messagebox.showerror("Windows setup failed", str(e))
-                self._append_log(key, "[setup] failed:\n{}\n".format(e))
-                return False
+            except Exception as e:
+                self.root.after(0, lambda error=e: self._finish_windows_setup_failure(key, error))
+                return
+            self.root.after(0, lambda: self._finish_windows_setup_success(key, values, result))
 
-            output = result.get("output") or ""
-            if output:
-                self._append_log(key, "[setup] {}\n".format(output.replace("\n", "\n[setup] ")))
-            if result.get("restart_needed"):
-                messagebox.showwarning(
-                    "Windows restart may be needed",
-                    "Windows enabled or changed an SMB1 optional feature and reported "
-                    "that a restart may be needed before that Windows feature is fully active.\n\n"
-                    "The PS2 Servers app will still try to start now.")
-        return True
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_windows_setup_success(self, key, values, result):
+        output = result.get("output") or ""
+        if output:
+            self._append_log(key, "[setup] {}\n".format(output.replace("\n", "\n[setup] ")))
+        if result.get("restart_needed"):
+            messagebox.showwarning(
+                "Windows restart may be needed",
+                "Windows reported that a restart may be needed before the "
+                "network setup change is fully active.\n\n"
+                "The PS2 Servers app will still try to start now.")
+        self._launch_server(key, values)
+
+    def _finish_windows_setup_failure(self, key, error):
+        self._set_card_busy(key, False, "Start")
+        messagebox.showerror("Windows setup failed", str(error))
+        self._append_log(key, "[setup] failed:\n{}\n".format(error))
+
+    def _launch_server(self, key, values):
+        card = self.cards[key]
+        server = REGISTRY[key]
+        self._set_card_busy(key, True, "Starting")
+        try:
+            command = server.launch_command(values)
+        except Exception as e:
+            self._set_card_busy(key, False, "Start")
+            messagebox.showerror("Cannot start", str(e))
+            return
+
+        self._append_log(key, "[launcher] starting: {}\n".format(" ".join(command)))
+        proc = ServerProcess(key, command, cwd=REPO_ROOT, on_output=self._on_output)
+        try:
+            proc.start()
+        except OSError as e:
+            self._set_card_busy(key, False, "Start")
+            messagebox.showerror("Cannot start", str(e))
+            card.refresh_status(False, error=True)
+            return
+        self.procs[key] = proc
+        card.refresh_status(True)
+        card.toggle_btn.config(state="normal")
+        self.nb.select(self.terminal_tab)
+
+    def _cleanup_pending(self):
+        self.saved.pop("pending_cleanup", None)
+        self._save()
+        self.nb.select(self.terminal_tab)
+        self._append_log("setup", "[setup] continuing firewall cleanup after administrator restart\n")
+        self._remove_windows_setup(require_confirm=False)
 
     def _start_pending(self):
         key = self.saved.get("pending_start")
@@ -384,11 +464,94 @@ class LauncherApp:
         self._append_log(key, "[launcher] continuing after administrator restart\n")
         self.start_server(key)
 
+    def remove_windows_setup(self):
+        self._remove_windows_setup(require_confirm=True)
+
+    def _remove_windows_setup(self, require_confirm=True):
+        if not windows_setup.is_windows():
+            messagebox.showinfo("Windows only", "Firewall cleanup is only needed on Windows.")
+            return
+
+        running = [key for key in self.procs if self.is_running(key)]
+        if running:
+            if require_confirm:
+                if not messagebox.askyesno(
+                        "Stop running servers?",
+                        "Firewall cleanup should be done with PS2 Servers stopped.\n\n"
+                        "Stop all running servers and continue?"):
+                    return
+            self.stop_all()
+
+        if require_confirm:
+            if not messagebox.askyesno(
+                    "Remove PS2 Servers firewall rules?",
+                    "This removes only Windows Firewall rules whose display names "
+                    "start with:\n\nPS2 Servers -\n\n"
+                    "It does not enable, disable, install, or remove Windows SMB1 "
+                    "optional features. Continue?"):
+                return
+
+        if not elevate.is_admin():
+            if not require_confirm:
+                self._append_log(
+                    "setup",
+                    "[setup] firewall cleanup aborted: administrator rights were not granted\n")
+                messagebox.showerror(
+                    "Administrator required",
+                    "Failed to acquire administrator rights for firewall cleanup.")
+                return
+            if not elevate.can_elevate():
+                messagebox.showerror(
+                    "Administrator required",
+                    "Removing Windows Firewall rules needs administrator rights.")
+                return
+
+            self._save(pending_cleanup=True)
+            if elevate.relaunch_as_admin():
+                self.stop_all()
+                if self._tray:
+                    self._tray.stop()
+                self.root.destroy()
+            else:
+                self.saved.pop("pending_cleanup", None)
+                self._save()
+                messagebox.showerror(
+                    "Elevation failed",
+                    "Could not restart as administrator.")
+            return
+
+        self._cleanup_windows_setup_async()
+
+    def _cleanup_windows_setup_async(self):
+        self._append_log("setup", "[setup] removing PS2 Servers firewall rules\n")
+
+        def worker():
+            try:
+                result = windows_setup.remove_setup()
+            except Exception as e:
+                self.root.after(0, lambda error=e: self._finish_cleanup_failure(error))
+                return
+            self.root.after(0, lambda: self._finish_cleanup_success(result))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_cleanup_success(self, result):
+        output = result.get("output") or "No PS2 Servers firewall rules found."
+        self._append_log("setup", "[setup] {}\n".format(output.replace("\n", "\n[setup] ")))
+        messagebox.showinfo("Firewall cleanup complete", output)
+
+    def _finish_cleanup_failure(self, error):
+        messagebox.showerror("Windows cleanup failed", str(error))
+        self._append_log("setup", "[setup] firewall cleanup failed:\n{}\n".format(error))
+
     def stop_server(self, key):
+        if not self.is_running(key):
+            return
         proc = self.procs.get(key)
         if proc:
             proc.stop()
         self.cards[key].refresh_status(False)
+        self.cards[key].toggle_btn.config(state="normal")
         self._append_log(key, "[launcher] stopped\n")
 
     def stop_all(self):
@@ -435,6 +598,7 @@ class LauncherApp:
             current = self.cards[key].toggle_btn.cget("text") == "Stop"
             if current and not running:  # server exited on its own
                 self.cards[key].refresh_status(False)
+                self.cards[key].toggle_btn.config(state="normal")
                 self._append_log(key, "[launcher] server exited (code {})\n".format(
                     proc.returncode))
         self.root.after(600, self._poll_status)
@@ -448,11 +612,13 @@ class LauncherApp:
         if ip and ip in netinfo.all_ipv4():
             self.ip_var.set(ip)
 
-    def _save(self, pending_start=None):
+    def _save(self, pending_start=None, pending_cleanup=False):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get()}
         if pending_start:
             data["pending_start"] = pending_start
+        if pending_cleanup:
+            data["pending_cleanup"] = True
         try:
             config.save(data)
         except OSError:

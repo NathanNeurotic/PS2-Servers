@@ -30,9 +30,13 @@ class ServerProcess:
         self.error = None
 
         creationflags = 0
+        startupinfo = None
         if platform.system() == "Windows":
-            # Don't pop a console window for the child.
+            # Do not flash or leave a console window for bundled server children.
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0
 
         # Unbuffered child stdout so Python servers' logs arrive line-by-line.
         env = os.environ.copy()
@@ -49,6 +53,7 @@ class ServerProcess:
                 bufsize=1,
                 env=env,
                 creationflags=creationflags,
+                startupinfo=startupinfo,
             )
         except OSError as e:
             self.error = str(e)
