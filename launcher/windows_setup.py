@@ -15,6 +15,7 @@ from .servers import frozen_self_exe, is_frozen
 
 UDPBD_PORT = 0xBDBD
 FIREWALL_RULE_PREFIX = "PS2 Servers - "
+POWERSHELL_TIMEOUT = 30
 
 
 class WindowsSetupError(RuntimeError):
@@ -25,18 +26,35 @@ def is_windows():
     return platform.system() == "Windows"
 
 
+def _hidden_subprocess_kwargs():
+    """Windows subprocess flags that prevent console-window flashes."""
+    if not is_windows():
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        "startupinfo": startupinfo,
+    }
+
+
 def _powershell(script):
-    """Run a small PowerShell script and return CompletedProcess."""
+    """Run a small hidden PowerShell script and return CompletedProcess."""
     return subprocess.run(
         [
             "powershell",
             "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle", "Hidden",
             "-ExecutionPolicy", "Bypass",
             "-Command", script,
         ],
         capture_output=True,
         text=True,
         errors="replace",
+        timeout=POWERSHELL_TIMEOUT,
+        **_hidden_subprocess_kwargs(),
     )
 
 
@@ -141,7 +159,7 @@ def needs_setup(key, values):
     ])
     try:
         res = _powershell(script)
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return True
     if res.returncode != 0:
         return True
@@ -199,6 +217,9 @@ def apply_setup(key, values):
 
     try:
         res = _powershell(script)
+    except subprocess.TimeoutExpired as e:
+        raise WindowsSetupError("Windows setup timed out after {} seconds.".format(
+            POWERSHELL_TIMEOUT)) from e
     except OSError as e:
         raise WindowsSetupError("Failed to run PowerShell: {}".format(e)) from e
 
@@ -241,6 +262,9 @@ def remove_setup():
 
     try:
         res = _powershell(script)
+    except subprocess.TimeoutExpired as e:
+        raise WindowsSetupError("Windows cleanup timed out after {} seconds.".format(
+            POWERSHELL_TIMEOUT)) from e
     except OSError as e:
         raise WindowsSetupError("Failed to run PowerShell: {}".format(e)) from e
 
