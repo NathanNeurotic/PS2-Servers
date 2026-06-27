@@ -72,13 +72,17 @@ Use "Remove PS2 Servers firewall rules" to delete only rules whose display names
 
 Removing those rules returns Windows to having no PS2 Servers-specific firewall rules. It does not add block rules. It does not change Windows SMB1. It does not remove unrelated firewall rules.
 
-Manual undo
+No terminal required
 
-You can also remove the rules from an elevated PowerShell prompt with:
+The buttons in this About tab and in the launcher footer are the normal way to manage PS2 Servers' Windows changes. Use "Allow through firewall" to add or refresh the rules. Use "Remove PS2 Servers firewall rules" to undo them. Use "Stop all servers" to shut down every running PS2 Servers process from the GUI.
+
+Advanced manual fallback
+
+The PowerShell cleanup command still exists for advanced users, scripts, or emergency repair, but normal users should not need it:
 
 powershell -ExecutionPolicy Bypass -File .\tools\remove-windows-firewall-rules.ps1
 
-or manually with:
+Equivalent manual command:
 
 Get-NetFirewallRule -DisplayName "PS2 Servers - *" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 
@@ -358,22 +362,36 @@ class LauncherApp:
 
     def _build_about_tab(self):
         about = ttk.Frame(self.nb)
-        about.rowconfigure(1, weight=1)
+        about.rowconfigure(2, weight=1)
         about.columnconfigure(0, weight=1)
 
-        links = ttk.Frame(about)
+        links = ttk.LabelFrame(about, text=" Links ")
         links.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 0))
         ttk.Button(links, text="Project page",
-                   command=lambda: self._open_url(PROJECT_URL)).pack(side="left")
+                   command=lambda: self._open_url(PROJECT_URL)).pack(side="left", padx=(6, 0), pady=6)
         ttk.Button(links, text="GitHub repo",
-                   command=lambda: self._open_url(REPO_URL)).pack(side="left", padx=(6, 0))
+                   command=lambda: self._open_url(REPO_URL)).pack(side="left", padx=(6, 0), pady=6)
         ttk.Button(links, text="Releases",
-                   command=lambda: self._open_url(RELEASES_URL)).pack(side="left", padx=(6, 0))
+                   command=lambda: self._open_url(RELEASES_URL)).pack(side="left", padx=(6, 0), pady=6)
         ttk.Button(links, text="Security notes",
-                   command=lambda: self._open_url(SECURITY_URL)).pack(side="left", padx=(6, 0))
+                   command=lambda: self._open_url(SECURITY_URL)).pack(side="left", padx=(6, 0), pady=6)
+
+        actions = ttk.LabelFrame(about, text=" No-terminal actions ")
+        actions.grid(row=1, column=0, sticky="ew", padx=8, pady=(8, 0))
+        allow = ttk.Button(actions, text="Allow through firewall",
+                           command=self.allow_windows_setup)
+        allow.pack(side="left", padx=(6, 0), pady=6)
+        remove = ttk.Button(actions, text="Remove PS2 Servers firewall rules",
+                            command=self.remove_windows_setup)
+        remove.pack(side="left", padx=(6, 0), pady=6)
+        ttk.Button(actions, text="Stop all servers",
+                   command=self.stop_all).pack(side="left", padx=(6, 0), pady=6)
+        if not windows_setup.is_windows():
+            allow.config(state="disabled")
+            remove.config(state="disabled")
 
         text_frame = ttk.Frame(about)
-        text_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        text_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=8)
         text_frame.rowconfigure(0, weight=1)
         text_frame.columnconfigure(0, weight=1)
         text = tk.Text(text_frame, wrap="word", height=18, state="normal")
