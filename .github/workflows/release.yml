@@ -6,7 +6,7 @@ name: Build release binaries
 #
 # Both macOS builds run on the fast-scheduling Apple-Silicon runner: the arm64
 # one natively, and the Intel (x86_64) one cross-built with a universal2 Python
-# (the free Intel macos-13 runners are being retired and queue for hours).
+# running under its x86_64 slice so native Python extensions match the artifact.
 on:
   push:
     tags:
@@ -37,8 +37,8 @@ jobs:
       - uses: actions/checkout@v4
 
       # Most jobs use setup-python. The macOS x86_64 cross-build instead needs a
-      # universal2 interpreter (with universal Tcl/Tk) so Nuitka has the x86_64
-      # slice of every linked library.
+      # universal2 interpreter (with universal Tcl/Tk) and must execute Python as
+      # x86_64 so compiled dependencies like lz4 match the Intel artifact.
       - uses: actions/setup-python@v5
         if: matrix.macos_arch != 'x86_64'
         with:
@@ -47,28 +47,49 @@ jobs:
       - name: Install universal2 Python (macOS x86_64 cross-build)
         if: matrix.macos_arch == 'x86_64'
         run: |
+          sudo softwareupdate --install-rosetta --agree-to-license || true
           curl -sSLO https://www.python.org/ftp/python/3.12.7/python-3.12.7-macos11.pkg
           sudo installer -pkg python-3.12.7-macos11.pkg -target /
           PYBIN=/Library/Frameworks/Python.framework/Versions/3.12/bin
           sudo ln -sf "$PYBIN/python3" "$PYBIN/python"
           echo "$PYBIN" >> "$GITHUB_PATH"
+          arch -x86_64 "$PYBIN/python3" -c 'import platform; print(platform.machine())'
 
       - name: Install Tk (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3-tk tk-dev
 
       - name: Install Nuitka
+        if: matrix.macos_arch != 'x86_64'
         run: python -m pip install --upgrade pip -r requirements-build.txt
 
+      - name: Install Nuitka (macOS x86_64)
+        if: matrix.macos_arch == 'x86_64'
+        run: arch -x86_64 python -m pip install --upgrade pip -r requirements-build.txt
+
       - name: Build bundled libchdr
+        if: matrix.macos_arch != 'x86_64'
         env:
           MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
         run: python build/build_libchdr.py
 
+      - name: Build bundled libchdr (macOS x86_64)
+        if: matrix.macos_arch == 'x86_64'
+        env:
+          MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
+        run: arch -x86_64 python build/build_libchdr.py
+
       - name: Build single-file binary
+        if: matrix.macos_arch != 'x86_64'
         env:
           MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
         run: python build/build.py
+
+      - name: Build single-file binary (macOS x86_64)
+        if: matrix.macos_arch == 'x86_64'
+        env:
+          MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
+        run: arch -x86_64 python build/build.py
 
       - name: Stage artifact
         shell: bash
