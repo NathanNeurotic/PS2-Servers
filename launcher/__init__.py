@@ -8,11 +8,11 @@ __version__ = "0.1.0"
 
 
 def _install_dependency_panel_hook():
-    """Patch launcher.gui when it is imported so the dependency panel is mounted.
+    """Patch launcher.gui when it is imported so add-on panels/skin hooks mount.
 
-    The normal, boring implementation would be a direct call from main.py's GUI
-    build wrapper. This import hook keeps the change self-contained in the
-    launcher package while still avoiding heavy dependencies or runtime plugins.
+    The normal, boring implementation would be direct calls from the GUI build
+    path. This import hook keeps the changes self-contained in the launcher
+    package while still avoiding heavy dependencies or runtime plugins.
     """
     import importlib.abc
     import importlib.machinery
@@ -26,15 +26,22 @@ def _install_dependency_panel_hook():
         try:
             from . import dependency_panel
         except Exception:
-            return
+            dependency_panel = None
+        try:
+            from . import asset_skin
+        except Exception:
+            asset_skin = None
 
         original_build = gui.LauncherApp._build
 
-        def build_with_dependency_panel(self):
-            dependency_panel.add_panel(self, gui)
+        def build_with_addons(self):
+            if asset_skin is not None:
+                asset_skin.install(self, gui)
+            if dependency_panel is not None:
+                dependency_panel.add_panel(self, gui)
             return original_build(self)
 
-        gui.LauncherApp._build = build_with_dependency_panel
+        gui.LauncherApp._build = build_with_addons
         gui._ps2_dependency_panel_patched = True
 
     if target in sys.modules:
