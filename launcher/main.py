@@ -106,6 +106,9 @@ def _apply_gui_review_fixes(gui):
         except gui.tk.TclError:
             return None
 
+    def content_parent(app):
+        return getattr(app, "content", app.root)
+
     def apply_theme(root):
         root.configure(background=palette["bg"])
         style = gui.ttk.Style(root)
@@ -190,14 +193,15 @@ def _apply_gui_review_fixes(gui):
         background = asset_photo(self, "BACKGROUND", max_width=960, max_height=640)
         if not background:
             return
-        label = gui.tk.Label(self.root, image=background, bg=palette["bg"], bd=0,
+        parent = content_parent(self)
+        label = gui.tk.Label(parent, image=background, bg=palette["bg"], bd=0,
                              highlightthickness=0)
         label.place(x=0, y=0, relwidth=1, relheight=1)
         label.lower()
         self._ps2_theme_background = label
 
     def build_banner(self):
-        frame = gui.ttk.Frame(self.root, style="Header.TFrame")
+        frame = gui.ttk.Frame(content_parent(self), style="Header.TFrame")
         frame.pack(fill="x", padx=10, pady=(10, 0))
 
         banner = asset_photo(self, "BANNER", max_width=980, max_height=520)
@@ -228,7 +232,7 @@ def _apply_gui_review_fixes(gui):
     def add_admin_panel(self):
         if not gui.windows_setup.is_windows():
             return
-        frame = gui.ttk.Frame(self.root, style="Admin.TFrame")
+        frame = gui.ttk.Frame(content_parent(self), style="Admin.TFrame")
         frame.pack(fill="x", padx=10, pady=(6, 4))
         is_admin = gui.elevate.is_admin()
         status_style = "AdminYes.TLabel" if is_admin else "AdminNo.TLabel"
