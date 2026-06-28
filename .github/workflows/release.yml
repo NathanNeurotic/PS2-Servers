@@ -25,7 +25,7 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            asset: PS2Servers-windows-x64.exe
+            asset: PS2Servers-windows-x64.zip
           - os: ubuntu-latest
             asset: PS2Servers-linux-x64
           - os: macos-latest
@@ -92,12 +92,25 @@ jobs:
         # cross-target path again and can reuse arm64 native extensions.
         run: arch -x86_64 python build/build.py
 
-      - name: Stage artifact
+      - name: Stage Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path out -Force | Out-Null
+          $packageDir = "out/PS2Servers-windows-x64"
+          New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+          Copy-Item -Path dist/PS2Servers.exe -Destination "$packageDir/PS2Servers.exe" -Force
+          if (Test-Path build/native) {
+            Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
+          }
+          Compress-Archive -Path $packageDir -DestinationPath "out/${{ matrix.asset }}" -Force
+
+      - name: Stage Unix artifact
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           mkdir -p out
           case "$RUNNER_OS" in
-            Windows) cp dist/PS2Servers.exe "out/${{ matrix.asset }}" ;;
             Linux)   cp dist/PS2Servers "out/${{ matrix.asset }}" ;;
             macOS)   app=$(ls -d dist/*.app | head -1)
                      ( cd dist && zip -r -y "../out/${{ matrix.asset }}" "$(basename "$app")" ) ;;
@@ -113,12 +126,12 @@ jobs:
 
           | OS | File |
           | --- | --- |
-          | Windows x64 | \`PS2Servers-windows-x64.exe\` |
+          | Windows x64 | \`PS2Servers-windows-x64.zip\` |
           | Linux x64 | \`PS2Servers-linux-x64\` |
           | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` |
           | macOS — Intel | \`PS2Servers-macos-x64.zip\` |
 
-          Run it: Windows — double-click. Linux — \`chmod +x PS2Servers-linux-x64\`, then run. macOS — unzip and right-click → Open (unsigned).
+          Run it: Windows — unzip and double-click \`PS2Servers.exe\`. Linux — \`chmod +x PS2Servers-linux-x64\`, then run. macOS — unzip and right-click → Open (unsigned).
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 

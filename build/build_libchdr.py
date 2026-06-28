@@ -75,7 +75,10 @@ def find_outputs():
     system = platform.system()
     patterns = []
     if system == "Windows":
-        patterns = ["**/chdr.dll", "**/libchdr.dll", "**/libchdr-0.dll"]
+        # Stage libchdr plus any DLLs it was linked against. The Windows release
+        # ZIP carries build/native beside the EXE, and the runtime adds that
+        # directory to the DLL search path before loading libchdr.
+        patterns = ["**/*.dll"]
     elif system == "Darwin":
         patterns = ["**/libchdr*.dylib"]
     else:
@@ -96,6 +99,10 @@ def stage_outputs(files):
     reset_dir(NATIVE_DIR)
     if not files:
         raise RuntimeError("libchdr build produced no native library files")
+    if platform.system() == "Windows":
+        lib_names = {"chdr.dll", "libchdr.dll", "libchdr-0.dll"}
+        if not any(os.path.basename(path).lower() in lib_names for path in files):
+            raise RuntimeError("libchdr build produced DLLs, but no libchdr DLL")
 
     for src in files:
         dest = os.path.join(NATIVE_DIR, os.path.basename(src))
