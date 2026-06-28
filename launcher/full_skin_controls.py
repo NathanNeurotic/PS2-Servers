@@ -91,7 +91,7 @@ def install(app, gui):
         if app_obj.is_running(key):
             app_obj._append_log(
                 "setup",
-                "[settings] {} is already running; restart that server to use changed launch settings\n".format(label),
+                "[settings] {} is already running; restart this server to use changed launch settings\n".format(label),
             )
 
     def revert_server_defaults(app_obj, key):
@@ -104,7 +104,7 @@ def install(app, gui):
         if app_obj.is_running(key):
             app_obj._append_log(
                 "setup",
-                "[settings] {} is already running; restart that server to use default launch settings\n".format(label),
+                "[settings] {} is already running; restart this server to use default launch settings\n".format(label),
             )
 
     ServerCard._build = build_with_page_actions

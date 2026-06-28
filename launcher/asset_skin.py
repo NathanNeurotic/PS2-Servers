@@ -120,7 +120,7 @@ def _soften_styles(root, gui):
 def _install_page_controls(app, gui):
     try:
         from . import full_skin_controls
-    except Exception:
+    except ImportError:
         return
     full_skin_controls.install(app, gui)
 

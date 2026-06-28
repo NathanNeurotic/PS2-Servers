@@ -121,6 +121,7 @@ class ServerCard(ttk.LabelFrame):
         self.app = app
         self.server = server
         self.vars = {}
+        self._active_values = None
         self._advanced_shown = False
         self._build()
 
@@ -241,6 +242,8 @@ class ServerCard(ttk.LabelFrame):
             self.app.start_server(self.server.key)
 
     def refresh_status(self, running, error=False):
+        if error or not running:
+            self._active_values = None
         if error:
             self.status.config(text=DOT_RUNNING + " Error", foreground=COLOR_ERROR)
         elif running:
@@ -249,8 +252,9 @@ class ServerCard(ttk.LabelFrame):
             self.status.config(text=DOT_RUNNING + " Stopped", foreground=COLOR_STOPPED)
         self.toggle_btn.config(text="Stop" if running else "Start")
         if running:
+            hint_values = self._active_values if self._active_values is not None else self.values()
             self.hint.config(text=opl_hint(self.server.key, self.app.current_ip(),
-                                           self.values()))
+                                           hint_values))
         else:
             self.hint.config(text="")
 
@@ -572,6 +576,7 @@ class LauncherApp:
             card.refresh_status(False, error=True)
             return
         self.procs[key] = proc
+        card._active_values = dict(values)
         card.refresh_status(True)
         card.toggle_btn.config(state="normal")
         self.nb.select(self.terminal_tab)
@@ -757,11 +762,12 @@ class LauncherApp:
         self._append_log("setup", "[setup] firewall cleanup failed:\n{}\n".format(error))
 
     def stop_server(self, key):
-        if not self.is_running(key):
-            return
         proc = self.procs.get(key)
-        if proc:
+        if not proc:
+            return
+        if proc.is_running():
             proc.stop()
+        self.cards[key]._active_values = None
         self.cards[key].refresh_status(False)
         self.cards[key].toggle_btn.config(state="normal")
         self._append_log(key, "[launcher] stopped\n")
@@ -809,6 +815,7 @@ class LauncherApp:
             running = proc.is_running()
             current = self.cards[key].toggle_btn.cget("text") == "Stop"
             if current and not running:  # server exited on its own
+                self.cards[key]._active_values = None
                 self.cards[key].refresh_status(False)
                 self.cards[key].toggle_btn.config(state="normal")
                 self._append_log(key, "[launcher] server exited (code {})\n".format(

@@ -73,12 +73,65 @@ def check_all():
     return [check_lz4(), check_libchdr()]
 
 
-def format_statuses(statuses=None):
-    statuses = statuses or check_all()
+def summarize_statuses(statuses):
+    if not statuses:
+        return "Unknown"
+    missing = [status for status in statuses if not status.available]
+    if not missing:
+        return "Ready"
+    if is_frozen_app():
+        return "Limited"
+    if all(status.key == "libchdr" for status in missing):
+        return "Limited"
+    return "Needs setup"
+
+
+def _split_loader_errors(detail):
+    marker = " Last loader errors: "
+    if marker not in detail:
+        return detail, []
+    summary, raw_errors = detail.split(marker, 1)
+    errors = [part.strip() for part in raw_errors.split("; ") if part.strip()]
+    return summary, errors
+
+
+def _shorten(text, limit=220):
+    if len(text) <= limit:
+        return text
+    return text[:limit - 3].rstrip() + "..."
+
+
+def _status_line(status):
+    state = "Ready" if status.available else "Missing"
+    detail, loader_errors = _split_loader_errors(status.detail)
+    if loader_errors:
+        detail = "{} {} loader attempts failed; see technical details below.".format(
+            detail, len(loader_errors))
+    return "{}: {} - {}".format(state, status.label, detail)
+
+
+def _technical_lines(statuses):
     lines = []
     for status in statuses:
-        marker = "OK" if status.available else "Missing"
-        lines.append("{}: {} — {}".format(marker, status.label, status.detail))
+        detail, loader_errors = _split_loader_errors(status.detail)
+        if loader_errors:
+            lines.append("{} loader errors: {} attempts failed.".format(
+                status.label, len(loader_errors)))
+            lines.append("Last loader error: {}".format(_shorten(loader_errors[-1])))
+        elif not status.available:
+            lines.append("{}: {}".format(status.label, detail))
+    return lines
+
+
+def format_statuses(statuses=None):
+    statuses = statuses or check_all()
+    lines = ["Compression support: {}".format(summarize_statuses(statuses)), ""]
+    for status in statuses:
+        lines.append(_status_line(status))
+    technical = _technical_lines(statuses)
+    if technical:
+        lines.extend(["", "Technical details:"])
+        lines.extend(technical)
     return "\n".join(lines)
 
 

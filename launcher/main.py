@@ -73,7 +73,7 @@ def _apply_gui_review_fixes(gui):
     try:
         from . import theme_assets
         embedded_assets = getattr(theme_assets, "ASSETS", {})
-    except Exception:
+    except ImportError:
         embedded_assets = {}
 
     palette = {
