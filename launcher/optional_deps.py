@@ -80,9 +80,10 @@ def _candidate_native_dirs():
     for path in dirs:
         if not path:
             continue
-        norm = os.path.normcase(os.path.abspath(path))
+        abs_path = os.path.abspath(path)
+        norm = os.path.normcase(abs_path)
         if norm not in seen:
-            out.append(path)
+            out.append(abs_path)
             seen.add(norm)
     return out
 
@@ -97,7 +98,7 @@ def _prepare_native_dir(path):
     if platform.system() == "Windows" and hasattr(os, "add_dll_directory"):
         try:
             _DLL_DIR_HANDLES.append(os.add_dll_directory(path))
-        except (OSError, AttributeError):
+        except (OSError, ValueError, AttributeError):
             pass
 
 
