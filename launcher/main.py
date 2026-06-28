@@ -129,6 +129,12 @@ def _apply_gui_review_fixes(gui):
         style.configure("Header.TFrame", background=palette["bg"])
         style.configure("TLabel", background=palette["bg"], foreground=palette["text"])
         style.configure("Muted.TLabel", background=palette["bg"], foreground=palette["muted"])
+        style.configure("TopStrip.TFrame", background=palette["panel"], relief="flat")
+        style.configure("TopStripTitle.TLabel", background=palette["panel"],
+                        foreground=palette["text"])
+        style.configure("TopStripHint.TLabel", background=palette["panel"],
+                        foreground=palette["muted"])
+        style.configure("Footer.TFrame", background=palette["panel"], relief="flat")
         style.configure("Admin.TLabel", background=palette["panel"], foreground=palette["muted"])
         style.configure("AdminYes.TLabel", background=palette["panel"], foreground=palette["ok"])
         style.configure("AdminNo.TLabel", background=palette["panel"], foreground=palette["warn"])
@@ -155,9 +161,23 @@ def _apply_gui_review_fixes(gui):
                         bordercolor=palette["accent"], relief="solid")
         style.configure("TLabelframe.Label", background=palette["bg"], foreground=palette["accent2"],
                         font=("", 10, "bold"))
+        style.configure("Card.TLabelframe", background=palette["panel"], foreground=palette["text"],
+                        bordercolor="#18416f", relief="solid", borderwidth=1)
+        style.configure("Card.TLabelframe.Label", background=palette["bg"],
+                        foreground=palette["accent2"], font=("", 10, "bold"))
+        style.configure("Card.TFrame", background=palette["panel"])
+        style.configure("Card.TLabel", background=palette["panel"], foreground=palette["text"])
+        style.configure("CardMuted.TLabel", background=palette["panel"], foreground=palette["muted"])
+        style.configure("CardHelp.TLabel", background=palette["panel"], foreground=palette["muted"])
+        style.configure("CardHint.TLabel", background=palette["panel"], foreground=palette["accent2"])
+        style.configure("CardStatus.TLabel", background=palette["panel"], foreground=palette["muted"])
+        style.configure("Card.TCheckbutton", background=palette["panel"], foreground=palette["text"])
+        style.map("Card.TCheckbutton", background=[("active", palette["panel2"])])
+        style.configure("PageActions.TFrame", background=palette["panel"], relief="flat")
+        style.configure("PageActions.TLabel", background=palette["panel"], foreground=palette["muted"])
         style.configure("Admin.TFrame", background=palette["panel"], relief="solid", borderwidth=1)
         style.configure("Server.TNotebook", background=palette["bg"], borderwidth=0,
-                        tabmargins=(8, 6, 8, 0))
+                        tabmargins=(14, 8, 14, 0))
         style.configure("Server.TNotebook.Tab", padding=(16, 7), font=("", 10, "bold"),
                         background=palette["panel"], foreground=palette["muted"], borderwidth=1)
         style.map("Server.TNotebook.Tab",
@@ -166,8 +186,7 @@ def _apply_gui_review_fixes(gui):
                               ("!selected", palette["panel"])],
                   foreground=[("selected", palette["accent2"]),
                               ("active", palette["text"]),
-                              ("!selected", palette["muted"])],
-                  expand=[("selected", (2, 2, 2, 0))])
+                              ("!selected", palette["muted"])])
 
     def draw_banner(canvas, width=760, height=78):
         canvas.delete("all")
@@ -202,14 +221,14 @@ def _apply_gui_review_fixes(gui):
 
     def build_banner(self):
         frame = gui.ttk.Frame(content_parent(self), style="Header.TFrame")
-        frame.pack(fill="x", padx=10, pady=(10, 0))
+        frame.pack(fill="x", padx=16, pady=(12, 0))
 
-        banner = asset_photo(self, "BANNER", max_width=980, max_height=520)
+        banner = asset_photo(self, "BANNER")
         if banner:
-            height = 168
+            height = 180
             canvas = gui.tk.Canvas(frame, height=height, highlightthickness=0,
                                    bg=palette["bg"], bd=0)
-            canvas.pack(fill="x", expand=True)
+            canvas.pack(fill="x")
 
             def draw(event=None):
                 width = event.width if event else 820
@@ -227,25 +246,29 @@ def _apply_gui_review_fixes(gui):
         accent = asset_photo(self, "ACCENT", max_width=780, max_height=36)
         if accent:
             gui.tk.Label(frame, image=accent, bg=palette["bg"], bd=0,
-                         highlightthickness=0).pack(anchor="w", pady=(2, 0))
+                         highlightthickness=0).pack(anchor="w", pady=(4, 0))
 
     def add_admin_panel(self):
         if not gui.windows_setup.is_windows():
             return
-        frame = gui.ttk.Frame(content_parent(self), style="Admin.TFrame")
-        frame.pack(fill="x", padx=10, pady=(6, 4))
+        frame = gui.ttk.Frame(content_parent(self), style="Admin.TFrame",
+                              padding=(12, 8))
+        frame.pack(fill="x", padx=16, pady=(8, 8))
+        frame.columnconfigure(1, weight=1)
         is_admin = gui.elevate.is_admin()
         status_style = "AdminYes.TLabel" if is_admin else "AdminNo.TLabel"
         status_text = "Administrator: Yes" if is_admin else "Administrator: No"
         gui.ttk.Label(frame, text=status_text, style=status_style,
-                      font=("", 9, "bold")).pack(side="left", padx=(8, 10), pady=6)
+                      font=("", 9, "bold")).grid(row=0, column=0, sticky="w",
+                                                 padx=(0, 12))
         gui.ttk.Label(frame,
                       text="Normal launch stays non-admin. Elevate only for firewall changes or advanced port 445.",
-                      style="Admin.TLabel").pack(side="left", padx=(0, 8), pady=6)
+                      style="Admin.TLabel", wraplength=560).grid(
+                          row=0, column=1, sticky="w")
         button = gui.ttk.Button(frame, text="Restart as administrator",
                                 style="Accent.TButton",
                                 command=lambda: restart_as_admin(self))
-        button.pack(side="right", padx=8, pady=5)
+        button.grid(row=0, column=2, sticky="e", padx=(12, 0))
         if is_admin or not gui.elevate.can_elevate():
             button.config(state="disabled")
         self._ps2_admin_frame = frame

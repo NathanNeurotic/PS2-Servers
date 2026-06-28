@@ -15,23 +15,24 @@ LZ4_PACKAGED_BUTTON = "Bundled in release"
 
 
 def add_panel(app, gui):
-    frame = gui.ttk.Frame(app.root, style="Admin.TFrame")
-    frame.pack(fill="x", padx=10, pady=(0, 4))
+    parent = getattr(app, "content", app.root)
+    frame = gui.ttk.Frame(parent, style="Admin.TFrame", padding=(12, 8))
+    frame.pack(fill="x", padx=16, pady=(0, 8))
 
     gui.ttk.Label(frame, text="Compression:", style="Admin.TLabel",
-                  font=("", 9, "bold")).pack(side="left", padx=(8, 8), pady=6)
+                  font=("", 9, "bold")).pack(side="left", padx=(0, 8))
     app._ps2_compression_var = gui.tk.StringVar(value="Checking…")
     gui.ttk.Label(frame, textvariable=app._ps2_compression_var,
-                  style="Admin.TLabel").pack(side="left", padx=(0, 8), pady=6)
+                  style="Admin.TLabel").pack(side="left", padx=(0, 8))
 
     gui.ttk.Button(frame, text="Check",
-                   command=lambda: show_status(app, gui)).pack(side="right", padx=(4, 8), pady=5)
+                   command=lambda: show_status(app, gui)).pack(side="right", padx=(4, 0))
     gui.ttk.Button(frame, text="Details",
-                   command=lambda: show_libchdr_details(gui)).pack(side="right", padx=(4, 0), pady=5)
+                   command=lambda: show_libchdr_details(gui)).pack(side="right", padx=(4, 0))
     install_text = LZ4_PACKAGED_BUTTON if optional_deps.is_frozen_app() else LZ4_SOURCE_BUTTON
     install = gui.ttk.Button(frame, text=install_text,
                              command=lambda: install_lz4(app, gui))
-    install.pack(side="right", padx=(4, 0), pady=5)
+    install.pack(side="right", padx=(4, 0))
     if optional_deps.is_frozen_app():
         install.config(state="disabled")
     app._ps2_lz4_button = install
