@@ -61,7 +61,10 @@ def refresh_status_async(app):
             text = _status_bits(optional_deps.check_all())
         except Exception as e:
             text = "Compression check failed: {}".format(e)
-        app.root.after(0, app._ps2_compression_var.set, text)
+        try:
+            app.root.after(0, app._ps2_compression_var.set, text)
+        except Exception:
+            pass
 
     threading.Thread(target=worker, daemon=True).start()
 
