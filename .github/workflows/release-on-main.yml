@@ -25,28 +25,35 @@ jobs:
         include:
           - os: windows-latest
             asset_name: PS2Servers-windows-x64.exe
-            python_arch: x64
           - os: ubuntu-latest
             asset_name: PS2Servers-linux-x64
-            python_arch: x64
           - os: macos-latest
             asset_name: PS2Servers-macos-arm64.zip
-            python_arch: arm64
-            macos_target_arch: arm64
           - os: macos-latest
             asset_name: PS2Servers-macos-x64.zip
-            python_arch: x64
-            macos_target_arch: x86_64
+            macos_arch: x86_64
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Set up Python
+        if: matrix.macos_arch != 'x86_64'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          architecture: ${{ matrix.python_arch }}
+
+      - name: Install universal2 Python (macOS x64)
+        if: matrix.macos_arch == 'x86_64'
+        shell: bash
+        run: |
+          sudo softwareupdate --install-rosetta --agree-to-license || true
+          curl -sSLO https://www.python.org/ftp/python/3.12.7/python-3.12.7-macos11.pkg
+          sudo installer -pkg python-3.12.7-macos11.pkg -target /
+          PYBIN=/Library/Frameworks/Python.framework/Versions/3.12/bin
+          sudo ln -sf "$PYBIN/python3" "$PYBIN/python"
+          echo "$PYBIN" >> "$GITHUB_PATH"
+          arch -x86_64 "$PYBIN/python3" -c 'import platform; print(platform.machine())'
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -55,14 +62,41 @@ jobs:
           sudo apt-get install -y patchelf python3-tk
 
       - name: Install Python build dependencies
+        if: matrix.macos_arch != 'x86_64'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-build.txt
 
+      - name: Install Python build dependencies (macOS x64)
+        if: matrix.macos_arch == 'x86_64'
+        run: |
+          arch -x86_64 python -m pip install --upgrade pip
+          arch -x86_64 python -m pip install -r requirements-build.txt
+
+      - name: Build bundled libchdr
+        if: matrix.macos_arch != 'x86_64'
+        env:
+          MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
+        run: python build/build_libchdr.py
+
+      - name: Build bundled libchdr (macOS x64)
+        if: matrix.macos_arch == 'x86_64'
+        env:
+          MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
+        run: arch -x86_64 python build/build_libchdr.py
+
       - name: Build app
+        if: matrix.macos_arch != 'x86_64'
         run: python build/build.py
         env:
           MACOS_TARGET_ARCH: ${{ matrix.macos_target_arch }}
+
+      - name: Build app (macOS x64)
+        if: matrix.macos_arch == 'x86_64'
+        # Python is already executing as x86_64 here. Do not pass
+        # MACOS_TARGET_ARCH to build.py, because that makes Nuitka enter its
+        # cross-target path and can reuse arm64 native extensions.
+        run: arch -x86_64 python build/build.py
 
       - name: Package Windows executable
         if: runner.os == 'Windows'
