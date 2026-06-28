@@ -56,9 +56,15 @@ def _native_dirs():
     dirs.append(os.path.join(os.getcwd(), "build", "native"))
 
     unique = []
+    seen = set()
     for path in dirs:
-        if path and path not in unique:
-            unique.append(path)
+        if not path:
+            continue
+        abs_path = os.path.abspath(path)
+        norm = os.path.normcase(abs_path)
+        if norm not in seen:
+            unique.append(abs_path)
+            seen.add(norm)
     return unique
 
 
@@ -72,7 +78,7 @@ def _prepare_native_dir(path):
     if platform.system() == "Windows" and hasattr(os, "add_dll_directory"):
         try:
             _DLL_DIR_HANDLES.append(os.add_dll_directory(path))
-        except (OSError, AttributeError):
+        except (OSError, ValueError, AttributeError):
             pass
 
 
