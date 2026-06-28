@@ -1,8 +1,12 @@
-"""Reserved module for optional embedded PS2 theme assets.
+"""Embedded PS2 theme assets.
 
-The current skin is code-first and works without assets. If generated assets are
-added later, keep them in this module as base64 PNG strings in ASSETS so Nuitka
-bundles them automatically without loose runtime data files.
+Generated from the optimized asset set supplied for the PS2 Servers GUI skin.
+Images are embedded as base64 PNG strings so packaged Nuitka builds keep the
+exact skin without loose asset files.
 """
 
-ASSETS = {}
+ASSETS = {
+}
+
+def asset_names():
+    return tuple(ASSETS.keys())
