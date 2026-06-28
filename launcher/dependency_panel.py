@@ -38,17 +38,32 @@ def add_panel(app, gui):
         install.config(state="disabled")
     app._ps2_lz4_button = install
     app._ps2_compression_frame = frame
-    refresh_status(app)
+    refresh_status_async(app)
 
 
-def refresh_status(app):
-    statuses = optional_deps.check_all()
+def _status_bits(statuses):
     bits = []
     for status in statuses:
         label = "ZSO/LZ4" if status.key == "lz4" else "CHD"
         bits.append("{} {}".format(label, "OK" if status.available else "missing"))
-    app._ps2_compression_var.set("; ".join(bits))
+    return "; ".join(bits)
+
+
+def refresh_status(app):
+    statuses = optional_deps.check_all()
+    app._ps2_compression_var.set(_status_bits(statuses))
     return statuses
+
+
+def refresh_status_async(app):
+    def worker():
+        try:
+            text = _status_bits(optional_deps.check_all())
+        except Exception as e:
+            text = "Compression check failed: {}".format(e)
+        app.root.after(0, app._ps2_compression_var.set, text)
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def show_status(app, gui):
@@ -101,7 +116,7 @@ def finish_install(app, gui, success, detail):
     button = getattr(app, "_ps2_lz4_button", None)
     if button and not optional_deps.is_frozen_app():
         button.config(state="normal")
-    refresh_status(app)
+    refresh_status_async(app)
     if success:
         app._append_log("setup", "[deps] lz4 install finished\n")
         gui.messagebox.showinfo("ZSO/LZ4 support", detail)
