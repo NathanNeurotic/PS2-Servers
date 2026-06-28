@@ -9,6 +9,7 @@ drained on the Tk main thread.
 
 import platform
 import queue
+import sys
 import threading
 import tkinter as tk
 import webbrowser
@@ -132,8 +133,8 @@ class ServerCard(ttk.LabelFrame):
 
         # header: blurb + status + start/stop
         ttk.Label(self, text=self.server.blurb, wraplength=560,
-                  foreground="#555").grid(row=row, column=0, columnspan=3,
-                                          sticky="w", padx=8, pady=(6, 2))
+                  foreground="#b4c6df").grid(row=row, column=0, columnspan=3,
+                                             sticky="w", padx=8, pady=(6, 2))
         row += 1
 
         self.status = ttk.Label(self, text=DOT_RUNNING + " Stopped",
@@ -167,7 +168,7 @@ class ServerCard(ttk.LabelFrame):
                 arow = self._add_field(self.adv_frame, f, arow)
             row += 1
 
-        self.hint = ttk.Label(self, text="", foreground="#1c6db5", wraplength=620)
+        self.hint = ttk.Label(self, text="", foreground="#46d9ff", wraplength=620)
         self.hint.grid(row=row, column=0, columnspan=3, sticky="w", padx=8, pady=(2, 6))
 
     def _add_field(self, parent, f, row):
@@ -198,7 +199,7 @@ class ServerCard(ttk.LabelFrame):
         self.vars[f.key] = var
         row += 1
         if f.help:  # on its own row so it never overlaps the entry/Browse button
-            ttk.Label(parent, text=f.help, foreground="#888", font=("", 8)).grid(
+            ttk.Label(parent, text=f.help, foreground="#9fb7d7", font=("", 8)).grid(
                 row=row, column=1, columnspan=2, sticky="w", padx=4, pady=(0, 2))
             row += 1
         return row
@@ -315,7 +316,7 @@ class LauncherApp:
         self.ip_combo.pack(side="left", padx=6)
         ttk.Button(header, text="Refresh", command=self._refresh_ips).pack(side="left")
         ttk.Label(header, text="  (enter this in OPL where it asks for the PC/server IP)",
-                  foreground="#888").pack(side="left")
+                  foreground="#9fb7d7").pack(side="left")
 
         # main tabs: one server per tab, plus a shared terminal tab
         self.nb = ttk.Notebook(self.root)
@@ -366,11 +367,27 @@ class LauncherApp:
 
     def _build_about_tab(self):
         about = ttk.Frame(self.nb)
-        about.rowconfigure(2, weight=1)
         about.columnconfigure(0, weight=1)
+        row = 0
+
+        try:
+            from . import theme_assets
+            logo = theme_assets.photo_fit(sys.modules[__name__], "LOGO", owner=self,
+                                          max_width=150, max_height=150)
+        except (ImportError, tk.TclError):
+            logo = None
+        if logo:
+            brand = ttk.Frame(about)
+            brand.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
+            tk.Label(brand, image=logo, bd=0, highlightthickness=0,
+                     background=self.root.cget("background")).pack(side="left")
+            ttk.Label(brand, text="PS2 Servers", font=("", 14, "bold")).pack(
+                side="left", padx=(10, 0))
+            row += 1
 
         links = ttk.LabelFrame(about, text=" Links ")
-        links.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 0))
+        links.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
+        row += 1
         ttk.Button(links, text="Project page",
                    command=lambda: self._open_url(PROJECT_URL)).pack(side="left", padx=(6, 0), pady=6)
         ttk.Button(links, text="GitHub repo",
@@ -381,7 +398,8 @@ class LauncherApp:
                    command=lambda: self._open_url(SECURITY_URL)).pack(side="left", padx=(6, 0), pady=6)
 
         actions = ttk.LabelFrame(about, text=" No-terminal actions ")
-        actions.grid(row=1, column=0, sticky="ew", padx=8, pady=(8, 0))
+        actions.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
+        row += 1
         allow = ttk.Button(actions, text="Allow through firewall",
                            command=self.allow_windows_setup)
         allow.pack(side="left", padx=(6, 0), pady=6)
@@ -395,7 +413,8 @@ class LauncherApp:
             remove.config(state="disabled")
 
         text_frame = ttk.Frame(about)
-        text_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=8)
+        about.rowconfigure(row, weight=1)
+        text_frame.grid(row=row, column=0, sticky="nsew", padx=8, pady=8)
         text_frame.rowconfigure(0, weight=1)
         text_frame.columnconfigure(0, weight=1)
         text = tk.Text(text_frame, wrap="word", height=18, state="normal")

@@ -1,27 +1,97 @@
-"""Embedded PS2 theme asset registry.
+"""File-backed PS2 theme asset registry and Tk image loader."""
 
-The server tab icons are optimized copies of the supplied PS2 Servers icon set.
-They are embedded as base64 PNG strings so packaged builds keep the exact icons
-without loose runtime files.
-"""
+import math
+import os
+import sys
 
-ASSETS = {
-    "ICON_SMB": "iVBORw0KGgoAAAANSUhEUgAAACYAAAATCAYAAAD8in+wAAAA+klEQVR42u2UMWoCURRFz3wkGYuZBKJgF7IAVyBDqgzuRHAPYmFlYRVIqqwjYIoUZgezgdilSEA0iKN//rcyiDhjBId5hbe+cM97//7nAOVK7fYSqCFA31/jMYADlF3XG1hsSwLYKl40jdUfCsCY5A4hUoo6gEKoCgPzgw5+0JEFlgVUKJiNnhyRYLPJjxXbMdFgWU9aCJh3fSOzY069bQ91Te1O8p9pTr29fZlKYr8ASsd+41Md101WWub5XGxvazrqHfSWAEyyfFNc5Ap1dd8Nt6GsMcN9PmOI/sB0op9J9GteUNWHfgMIgZd48Ru4rvceL+ePKfZPgDWQNFKYJIlrLQAAAABJRU5ErkJggg==",
-    "ICON_UDPFS": "iVBORw0KGgoAAAANSUhEUgAAACYAAAATCAYAAAD8in+wAAAA+UlEQVR42u3UsWrCQBzH8e+lYg0BDQjN0sHiWp/AoVvoG3QXiuC7ODk4FPoahXbo0jfoCwRxcRC0GGqT3p1TpNSY4pDklP7mP/w/97//nQDspnd5DngYkPlsOgEQgF2r2kOss74JsCj6ulUqfrMAJFxhSIQlOgAWhqY0WK/eoldvmQXLApUKe/wIzL3Kf9hJwJyGK/7atVJgd9rVB03MabgiOU2R00vreRw7Fi4XOu+Gyeea7Fe4XOi0vjsTKwJn3Kv8Pa2sVACUki95o+7dtv8TJZV8TqvTSr9vYfI7Gkt4ygs1uLjuAj7wsF6vbmpV+zWOPkd7ygOADYBPSosSd1mMAAAAAElFTkSuQmCC",
-    "ICON_UDPBD": "iVBORw0KGgoAAAANSUhEUgAAACYAAAATCAYAAAD8in+wAAABG0lEQVR42u2VsUoDQRRFz4xm4oYgBhLSCJoqlXZWKhZC8AvsrO3F1k/QxsLKH/AHBMUuX6CVnRFBJJEECRhn4xurlTVu2GqTEbzVFA/u4XLfGwUElYV6XoJBFQ/0+tx6BFBAYHKFYzWj9n0AC63dEQmbGgDlangirdUKgMZTzU7DNO8qem15TwCarZPk5KYBFkFFkN6A3b5c2Oj9odriDdjb4MmkLoGv5f8Hi2t+btGOds0LsNXqrknr2g+wYqmsiqWymiTkOM+/0bF+t+OyNtxYOiB+8fvdjkvy/ZXYJOC828rRtFI/cZHP66wJN2uHjdiJME7kKmlOxN19gw2H9gy4zApqu360DjSA83bvfsvkCjc2fD8dM/4A8AUhJlySGMujeAAAAABJRU5ErkJggg==",
-}
 
 THEME_ASSET_FILES = {
-    "BANNER": "banner.png",
-    "BACKGROUND": "background.png",
-    "ACCENT": "accent.png",
-    "LINEBREAK": "linebreak.png",
-    "LOGO": "logo.png",
-    "ICON_SMB": "icon_smb.png",
-    "ICON_UDPFS": "icon_udpfs.png",
-    "ICON_UDPBD": "icon_udpbd.png",
+    "BANNER": "BANNER.png",
+    "BACKGROUND": "BACKGROUND.png",
+    "ACCENT": "ACCENT.png",
+    "LINEBREAK": "LINEBREAK.png",
+    "LOGO": "LOGO.png",
+    "ICON_SMB": "ICON_SMB.png",
+    "ICON_UDPFS": "ICON_UDPFS.png",
+    "ICON_UDPBD": "ICON_UDPBD.png",
 }
 
 
 def asset_names():
     return tuple(THEME_ASSET_FILES.keys())
+
+
+def _candidate_asset_dirs():
+    package_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(package_dir, "assets", "theme"),
+    ]
+
+    # PyInstaller-style extraction, harmless for Nuitka/source mode.
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        candidates.append(os.path.join(frozen_root, "launcher", "assets", "theme"))
+
+    # Nuitka standalone/onefile data files are extracted beside the packaged
+    # package layout. Keep this relative to the executable as a fallback.
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    candidates.append(os.path.join(exe_dir, "launcher", "assets", "theme"))
+
+    # Last resort for source checkouts launched from repo root.
+    candidates.append(os.path.join(os.getcwd(), "launcher", "assets", "theme"))
+
+    seen = set()
+    out = []
+    for path in candidates:
+        norm = os.path.normcase(os.path.abspath(path))
+        if norm not in seen:
+            out.append(path)
+            seen.add(norm)
+    return out
+
+
+def asset_path(name):
+    filename = THEME_ASSET_FILES.get(name)
+    if not filename:
+        return None
+    for directory in _candidate_asset_dirs():
+        path = os.path.join(directory, filename)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _keep(owner, image):
+    if owner is None or image is None:
+        return image
+    photos = getattr(owner, "_ps2_theme_photos", [])
+    photos.append(image)
+    owner._ps2_theme_photos = photos
+    return image
+
+
+def photo(gui, name, owner=None, subsample=1):
+    path = asset_path(name)
+    if not path:
+        return None
+    image = gui.tk.PhotoImage(file=path)
+    if subsample and subsample > 1:
+        image = image.subsample(subsample, subsample)
+    return _keep(owner, image)
+
+
+def photo_fit(gui, name, owner=None, max_width=None, max_height=None):
+    path = asset_path(name)
+    if not path:
+        return None
+    image = gui.tk.PhotoImage(file=path)
+    width = max(1, image.width())
+    height = max(1, image.height())
+    factor = 1
+    if max_width:
+        factor = max(factor, int(math.ceil(width / float(max_width))))
+    if max_height:
+        factor = max(factor, int(math.ceil(height / float(max_height))))
+    if factor > 1:
+        image = image.subsample(factor, factor)
+    return _keep(owner, image)

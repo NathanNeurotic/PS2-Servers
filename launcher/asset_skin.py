@@ -16,17 +16,10 @@ _TAB_ICON_BY_TEXT = {
 
 
 def _photo(app, gui, name):
-    data = theme_assets.ASSETS.get(name)
-    if not data:
-        return None
     try:
-        image = gui.tk.PhotoImage(data=data)
-    except Exception:
+        return theme_assets.photo_fit(gui, name, owner=app, max_width=56, max_height=28)
+    except gui.tk.TclError:
         return None
-    photos = getattr(app, "_ps2_theme_photos", [])
-    photos.append(image)
-    app._ps2_theme_photos = photos
-    return image
 
 
 def _install_tab_icons(app, gui):

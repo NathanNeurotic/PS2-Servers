@@ -69,6 +69,11 @@ def main():
     if os.path.isdir(native_dir):
         cmd.append("--include-data-dir={}={}".format(native_dir, "native"))
 
+    theme_asset_dir = os.path.join(ROOT, "launcher", "assets", "theme")
+    if os.path.isdir(theme_asset_dir):
+        cmd.append("--include-data-dir={}={}".format(
+            theme_asset_dir, "launcher/assets/theme"))
+
     for pkg in INCLUDE_PACKAGES:
         cmd.append("--include-package=" + pkg)
 
