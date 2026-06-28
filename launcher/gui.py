@@ -24,6 +24,11 @@ COLOR_RUNNING = "#2e9e44"
 COLOR_STOPPED = "#b0b0b0"
 COLOR_ERROR = "#d23c3c"
 
+APP_CONTENT_WIDTH = 1000
+APP_WINDOW_WIDTH = 1024
+APP_INITIAL_HEIGHT = 760
+APP_MIN_HEIGHT = 420
+
 PROJECT_URL = "https://www.psx-place.com/resources/windows-linux-mac-ps2-servers-smbv1-udpbd-udpfs-for-everyone.1728/"
 REPO_URL = "https://github.com/NathanNeurotic/PS2-Servers"
 RELEASES_URL = "https://github.com/NathanNeurotic/PS2-Servers/releases"
@@ -270,7 +275,8 @@ class LauncherApp:
         self.saved = config.load()
 
         root.title("PS2 Servers")
-        root.minsize(720, 540)
+        self._configure_window()
+        self.content = self._build_scroll_body()
         self._build()
         self._restore()
 
@@ -305,9 +311,85 @@ class LauncherApp:
         elif self.saved.get("pending_start"):
             self.root.after(350, self._start_pending)
 
+    def _configure_window(self):
+        screen_height = self.root.winfo_screenheight()
+        height = min(APP_INITIAL_HEIGHT, max(APP_MIN_HEIGHT, screen_height - 80))
+        self.root.geometry("{}x{}".format(APP_WINDOW_WIDTH, height))
+        self.root.minsize(APP_WINDOW_WIDTH, APP_MIN_HEIGHT)
+        self.root.resizable(False, True)
+        self.root.bind("<Configure>", self._enforce_fixed_width, add="+")
+
+    def _enforce_fixed_width(self, event):
+        if event.widget is not self.root or event.width == APP_WINDOW_WIDTH or event.height <= 1:
+            return
+
+        def resize():
+            try:
+                self.root.geometry("{}x{}".format(APP_WINDOW_WIDTH, event.height))
+            except tk.TclError:
+                pass
+
+        self.root.after_idle(resize)
+
+    def _build_scroll_body(self):
+        bg = self.root.cget("background")
+        canvas = tk.Canvas(self.root, width=APP_CONTENT_WIDTH, highlightthickness=0,
+                           bd=0, background=bg)
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        body = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=body, anchor="nw",
+                                      width=APP_CONTENT_WIDTH)
+
+        def refresh_scroll_region(event=None):
+            height = max(body.winfo_reqheight(), canvas.winfo_height())
+            canvas.itemconfigure(window, width=APP_CONTENT_WIDTH, height=height)
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        body.bind("<Configure>", refresh_scroll_region)
+        canvas.bind("<Configure>", refresh_scroll_region)
+        self._scroll_canvas = canvas
+        self._scrollbar = scrollbar
+        self._bind_body_mousewheel(canvas)
+        return body
+
+    def _bind_body_mousewheel(self, canvas):
+        def should_scroll_page(event):
+            if isinstance(event.widget, tk.Text):
+                return False
+            first, last = canvas.yview()
+            return first > 0.0 or last < 1.0
+
+        def on_mousewheel(event):
+            if not should_scroll_page(event):
+                return None
+            units = -1 if event.delta > 0 else 1
+            canvas.yview_scroll(units, "units")
+            return "break"
+
+        def on_scroll_up(event):
+            if should_scroll_page(event):
+                canvas.yview_scroll(-1, "units")
+                return "break"
+            return None
+
+        def on_scroll_down(event):
+            if should_scroll_page(event):
+                canvas.yview_scroll(1, "units")
+                return "break"
+            return None
+
+        self.root.bind("<MouseWheel>", on_mousewheel, add="+")
+        self.root.bind("<Button-4>", on_scroll_up, add="+")
+        self.root.bind("<Button-5>", on_scroll_down, add="+")
+
     def _build(self):
+        parent = self.content
         # header: LAN IP the user types into OPL
-        header = ttk.Frame(self.root)
+        header = ttk.Frame(parent)
         header.pack(fill="x", padx=10, pady=(10, 4))
         ttk.Label(header, text="Your PC's LAN IP:", font=("", 10, "bold")).pack(side="left")
         self.ip_var = tk.StringVar(value=netinfo.best_lan_ip())
@@ -319,7 +401,7 @@ class LauncherApp:
                   foreground="#9fb7d7").pack(side="left")
 
         # main tabs: one server per tab, plus a shared terminal tab
-        self.nb = ttk.Notebook(self.root)
+        self.nb = ttk.Notebook(parent)
         self.nb.pack(fill="both", expand=True, padx=10, pady=4)
         self.server_tabs = {}
 
@@ -352,7 +434,7 @@ class LauncherApp:
         self._build_about_tab()
 
         # footer
-        footer = ttk.Frame(self.root)
+        footer = ttk.Frame(parent)
         footer.pack(fill="x", padx=10, pady=(0, 10))
         allow = ttk.Button(footer, text="Allow through firewall",
                            command=self.allow_windows_setup)
