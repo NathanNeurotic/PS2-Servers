@@ -27,7 +27,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from launcher import app_icon
+from launcher import app_icon, release_metadata
 
 # Server sources shipped as data at their original relative paths -- the launcher
 # loads these by file path at runtime (Nuitka can't see those dynamic imports).
@@ -48,7 +48,8 @@ INCLUDE_PACKAGES = [
 
 def main():
     system = platform.system()
-    out = "PS2Servers.exe" if system == "Windows" else "PS2Servers"
+    out = (release_metadata.WINDOWS_EXE_NAME if system == "Windows"
+           else release_metadata.EXECUTABLE_BASENAME)
     icon_path = app_icon.write_ico(os.path.join(ROOT, "build", "PS2Servers.ico"))
 
     cmd = [
@@ -57,10 +58,12 @@ def main():
         "--assume-yes-for-downloads",
         "--output-dir=" + os.path.join(ROOT, "dist"),
         "--output-filename=" + out,
-        "--company-name=PS2-Servers",
-        "--product-name=PS2 Servers",
-        "--product-version=0.1.5",
-        "--file-version=0.1.5",
+        "--company-name=" + release_metadata.COMPANY_NAME,
+        "--product-name=" + release_metadata.PRODUCT_NAME,
+        "--product-version=" + release_metadata.PRODUCT_VERSION,
+        "--file-version=" + release_metadata.FILE_VERSION,
+        "--file-description=" + release_metadata.FILE_DESCRIPTION,
+        "--copyright=" + release_metadata.COPYRIGHT,
     ]
     for rel in DATA_FILES:
         cmd.append("--include-data-files={}={}".format(os.path.join(ROOT, rel), rel))

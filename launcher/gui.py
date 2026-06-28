@@ -9,6 +9,7 @@ drained on the Tk main thread.
 
 import platform
 import queue
+import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -17,7 +18,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import config, elevate, netinfo, tray, windows_setup
 from .process import ServerProcess
-from .servers import REGISTRY, REPO_ROOT
+from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen
 
 DOT_RUNNING = "●"  # filled circle
 COLOR_RUNNING = "#2e9e44"
@@ -123,7 +124,8 @@ class ServerCard(ttk.LabelFrame):
     """One server's controls, status and OPL hint."""
 
     def __init__(self, master, app, server):
-        super().__init__(master, text="  " + server.label + "  ")
+        super().__init__(master, text="  " + server.label + "  ",
+                         style="Card.TLabelframe")
         self.app = app
         self.server = server
         self.vars = {}
@@ -133,21 +135,23 @@ class ServerCard(ttk.LabelFrame):
 
     # -- widget construction ---------------------------------------------- #
     def _build(self):
+        self.configure(padding=(12, 10, 12, 12))
         self.columnconfigure(1, weight=1)
         row = 0
 
         # header: blurb + status + start/stop
         ttk.Label(self, text=self.server.blurb, wraplength=560,
-                  foreground="#b4c6df").grid(row=row, column=0, columnspan=3,
-                                             sticky="w", padx=8, pady=(6, 2))
+                  style="CardMuted.TLabel").grid(row=row, column=0, columnspan=3,
+                                                 sticky="w", padx=4, pady=(2, 6))
         row += 1
 
         self.status = ttk.Label(self, text=DOT_RUNNING + " Stopped",
-                                foreground=COLOR_STOPPED)
-        self.status.grid(row=row, column=0, sticky="w", padx=8)
+                                foreground=COLOR_STOPPED,
+                                style="CardStatus.TLabel")
+        self.status.grid(row=row, column=0, sticky="w", padx=4, pady=(0, 4))
         self.toggle_btn = ttk.Button(self, text="Start", width=10,
                                      command=self.on_toggle)
-        self.toggle_btn.grid(row=row, column=2, sticky="e", padx=8, pady=2)
+        self.toggle_btn.grid(row=row, column=2, sticky="e", padx=4, pady=(0, 4))
         if not self.server.is_available():
             self.status.config(text="n/a on this OS", foreground=COLOR_ERROR)
             self.toggle_btn.config(state="disabled")
@@ -162,9 +166,9 @@ class ServerCard(ttk.LabelFrame):
         if advanced:
             self.adv_btn = ttk.Button(self, text="Advanced ▸", width=14,
                                       command=self._toggle_advanced)
-            self.adv_btn.grid(row=row, column=0, sticky="w", padx=8, pady=2)
+            self.adv_btn.grid(row=row, column=0, sticky="w", padx=4, pady=(4, 2))
             row += 1
-            self.adv_frame = ttk.Frame(self)
+            self.adv_frame = ttk.Frame(self, style="Card.TFrame")
             self.adv_frame.grid(row=row, column=0, columnspan=3, sticky="ew")
             self.adv_frame.columnconfigure(1, weight=1)
             self.adv_frame.grid_remove()
@@ -173,39 +177,44 @@ class ServerCard(ttk.LabelFrame):
                 arow = self._add_field(self.adv_frame, f, arow)
             row += 1
 
-        self.hint = ttk.Label(self, text="", foreground="#46d9ff", wraplength=620)
-        self.hint.grid(row=row, column=0, columnspan=3, sticky="w", padx=8, pady=(2, 6))
+        self.hint = ttk.Label(self, text="", style="CardHint.TLabel",
+                              wraplength=720)
+        self.hint.grid(row=row, column=0, columnspan=3, sticky="w",
+                       padx=4, pady=(4, 0))
 
     def _add_field(self, parent, f, row):
         if f.kind == "bool":
             var = tk.BooleanVar(value=bool(f.default))
-            ttk.Checkbutton(parent, text=f.label, variable=var).grid(
-                row=row, column=0, columnspan=3, sticky="w", padx=8, pady=1)
+            ttk.Checkbutton(parent, text=f.label, variable=var,
+                            style="Card.TCheckbutton").grid(
+                row=row, column=0, columnspan=3, sticky="w", padx=4, pady=2)
             self.vars[f.key] = var
             return row + 1
 
-        ttk.Label(parent, text=f.label + ":").grid(row=row, column=0, sticky="w",
-                                                   padx=8, pady=1)
+        ttk.Label(parent, text=f.label + ":", style="Card.TLabel").grid(
+            row=row, column=0, sticky="w", padx=4, pady=2)
         if f.kind == "port":
             var = tk.StringVar(value=self.server.port_display())
             ttk.Entry(parent, textvariable=var, width=12).grid(
-                row=row, column=1, sticky="w", padx=4, pady=1)
+                row=row, column=1, sticky="w", padx=6, pady=2)
         elif f.kind in ("folder", "file"):
             var = tk.StringVar(value="")
             ttk.Entry(parent, textvariable=var).grid(
-                row=row, column=1, sticky="ew", padx=4, pady=1)
+                row=row, column=1, sticky="ew", padx=6, pady=2)
             ttk.Button(parent, text="Browse…", width=10,
                        command=lambda v=var, k=f.kind: self._browse(v, k)).grid(
-                row=row, column=2, sticky="e", padx=8, pady=1)
+                row=row, column=2, sticky="e", padx=4, pady=2)
         else:  # text
             var = tk.StringVar(value=str(f.default or ""))
             ttk.Entry(parent, textvariable=var).grid(
-                row=row, column=1, sticky="ew", padx=4, pady=1)
+                row=row, column=1, sticky="ew", padx=6, pady=2)
         self.vars[f.key] = var
         row += 1
         if f.help:  # on its own row so it never overlaps the entry/Browse button
-            ttk.Label(parent, text=f.help, foreground="#9fb7d7", font=("", 8)).grid(
-                row=row, column=1, columnspan=2, sticky="w", padx=4, pady=(0, 2))
+            ttk.Label(parent, text=f.help, style="CardHelp.TLabel",
+                      font=("", 8)).grid(
+                row=row, column=1, columnspan=2, sticky="w",
+                padx=6, pady=(0, 4))
             row += 1
         return row
 
@@ -273,16 +282,22 @@ class LauncherApp:
         self.out_queue = queue.Queue()
         self.logs = {}
         self.saved = config.load()
+        self._tray = None
+        self._tray_option_widgets = []
+        self.close_to_tray_var = tk.BooleanVar(
+            value=self._saved_bool("close_to_tray", tray.AVAILABLE))
+        self.minimize_to_tray_var = tk.BooleanVar(
+            value=self._saved_bool("minimize_to_tray", tray.AVAILABLE))
 
         root.title("PS2 Servers")
         self._configure_window()
         self.content = self._build_scroll_body()
         self._build()
+        self._refresh_scroll_body()
         self._restore()
 
         # On Windows, run from the system tray: closing or minimizing hides the
         # window (servers keep running) and the tray menu restores or quits.
-        self._tray = None
         self._tray_queue = queue.Queue()
         if tray.AVAILABLE:
             try:
@@ -296,11 +311,12 @@ class LauncherApp:
                 self._tray = None
 
         if self._tray:
-            root.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
+            root.protocol("WM_DELETE_WINDOW", self._on_window_close)
             root.bind("<Unmap>", self._on_unmap)
             self.root.after(150, self._drain_tray)
         else:
-            root.protocol("WM_DELETE_WINDOW", self.on_close)
+            root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        self._update_tray_option_controls()
 
         self.root.after(150, self._drain_logs)
         self.root.after(600, self._poll_status)
@@ -316,16 +332,26 @@ class LauncherApp:
         height = min(APP_INITIAL_HEIGHT, max(APP_MIN_HEIGHT, screen_height - 80))
         self.root.geometry("{}x{}".format(APP_WINDOW_WIDTH, height))
         self.root.minsize(APP_WINDOW_WIDTH, APP_MIN_HEIGHT)
+        self.root.maxsize(APP_WINDOW_WIDTH, max(APP_MIN_HEIGHT, screen_height))
         self.root.resizable(False, True)
         self.root.bind("<Configure>", self._enforce_fixed_width, add="+")
 
     def _enforce_fixed_width(self, event):
-        if event.widget is not self.root or event.width == APP_WINDOW_WIDTH or event.height <= 1:
+        if str(event.widget) != str(self.root) or event.height <= 1:
+            return
+        if event.width == APP_WINDOW_WIDTH and self.root.state() != "zoomed":
             return
 
         def resize():
             try:
-                self.root.geometry("{}x{}".format(APP_WINDOW_WIDTH, event.height))
+                height = self.root.winfo_height()
+                if height <= 1:
+                    height = event.height
+                height = min(max(APP_MIN_HEIGHT, height),
+                             self.root.winfo_screenheight())
+                if self.root.state() == "zoomed":
+                    self.root.state("normal")
+                self.root.geometry("{}x{}".format(APP_WINDOW_WIDTH, height))
             except tk.TclError:
                 pass
 
@@ -337,28 +363,41 @@ class LauncherApp:
                            bd=0, background=bg)
         scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
 
         body = ttk.Frame(canvas)
         window = canvas.create_window((0, 0), window=body, anchor="nw",
                                       width=APP_CONTENT_WIDTH)
 
         def refresh_scroll_region(event=None):
-            height = max(body.winfo_reqheight(), canvas.winfo_height())
-            canvas.itemconfigure(window, width=APP_CONTENT_WIDTH, height=height)
-            canvas.configure(scrollregion=canvas.bbox("all"))
+            height = max(1, body.winfo_reqheight())
+            current_width = str(canvas.itemcget(window, "width"))
+            current_height = str(canvas.itemcget(window, "height"))
+            if current_width != str(APP_CONTENT_WIDTH) or current_height != str(height):
+                canvas.itemconfigure(window, width=APP_CONTENT_WIDTH, height=height)
+                scrollregion = canvas.bbox("all")
+                if scrollregion:
+                    canvas.configure(scrollregion=scrollregion)
 
         body.bind("<Configure>", refresh_scroll_region)
         canvas.bind("<Configure>", refresh_scroll_region)
         self._scroll_canvas = canvas
         self._scrollbar = scrollbar
+        self._scroll_window = window
         self._bind_body_mousewheel(canvas)
+        self._refresh_scroll_body = refresh_scroll_region
         return body
 
     def _bind_body_mousewheel(self, canvas):
         def should_scroll_page(event):
-            if isinstance(event.widget, tk.Text):
+            widget = event.widget
+            if isinstance(widget, str):
+                try:
+                    widget = canvas.nametowidget(widget)
+                except (KeyError, tk.TclError):
+                    widget = None
+            if hasattr(widget, "winfo_class") and widget.winfo_class() == "Text":
                 return False
             first, last = canvas.yview()
             return first > 0.0 or last < 1.0
@@ -389,27 +428,31 @@ class LauncherApp:
     def _build(self):
         parent = self.content
         # header: LAN IP the user types into OPL
-        header = ttk.Frame(parent)
-        header.pack(fill="x", padx=10, pady=(10, 4))
-        ttk.Label(header, text="Your PC's LAN IP:", font=("", 10, "bold")).pack(side="left")
+        header = ttk.Frame(parent, style="TopStrip.TFrame", padding=(12, 10))
+        header.pack(fill="x", padx=16, pady=(12, 8))
+        header.columnconfigure(3, weight=1)
+        ttk.Label(header, text="LAN IP", font=("", 10, "bold"),
+                  style="TopStripTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.ip_var = tk.StringVar(value=netinfo.best_lan_ip())
         self.ip_combo = ttk.Combobox(header, textvariable=self.ip_var, width=18,
                                      values=netinfo.all_ipv4(), state="readonly")
-        self.ip_combo.pack(side="left", padx=6)
-        ttk.Button(header, text="Refresh", command=self._refresh_ips).pack(side="left")
-        ttk.Label(header, text="  (enter this in OPL where it asks for the PC/server IP)",
-                  foreground="#9fb7d7").pack(side="left")
+        self.ip_combo.grid(row=0, column=1, sticky="w", padx=(10, 6))
+        ttk.Button(header, text="Refresh", command=self._refresh_ips).grid(
+            row=0, column=2, sticky="w")
+        ttk.Label(header, text="Enter this in OPL where it asks for the PC/server IP.",
+                  style="TopStripHint.TLabel", wraplength=420).grid(
+            row=0, column=3, sticky="w", padx=(12, 0))
 
         # main tabs: one server per tab, plus a shared terminal tab
         self.nb = ttk.Notebook(parent)
-        self.nb.pack(fill="both", expand=True, padx=10, pady=4)
+        self.nb.pack(fill="x", padx=16, pady=(0, 12))
         self.server_tabs = {}
 
         for server in REGISTRY.values():
             tab = ttk.Frame(self.nb)
             tab.columnconfigure(0, weight=1)
             card = ServerCard(tab, self, server)
-            card.grid(row=0, column=0, sticky="new", padx=8, pady=8)
+            card.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
             self.nb.add(tab, text=TAB_TITLES.get(server.key, server.label))
             self.server_tabs[server.key] = tab
             self.cards[server.key] = card
@@ -434,18 +477,24 @@ class LauncherApp:
         self._build_about_tab()
 
         # footer
-        footer = ttk.Frame(parent)
-        footer.pack(fill="x", padx=10, pady=(0, 10))
+        footer = ttk.Frame(parent, style="Footer.TFrame", padding=(12, 10))
+        footer.pack(fill="x", padx=16, pady=(0, 14))
+        footer.columnconfigure(2, weight=1)
         allow = ttk.Button(footer, text="Allow through firewall",
                            command=self.allow_windows_setup)
-        allow.pack(side="left")
+        allow.grid(row=0, column=0, sticky="w")
         remove = ttk.Button(footer, text="Remove PS2 Servers firewall rules",
                             command=self.remove_windows_setup)
-        remove.pack(side="left", padx=(6, 0))
+        remove.grid(row=0, column=1, sticky="w", padx=(8, 0))
         if not windows_setup.is_windows():
             allow.config(state="disabled")
             remove.config(state="disabled")
-        ttk.Button(footer, text="Stop all", command=self.stop_all).pack(side="right")
+        ttk.Button(footer, text="Stop all", command=self.stop_all).grid(
+            row=0, column=3, sticky="e")
+        ttk.Button(footer, text="Restart", command=self.restart_app).grid(
+            row=0, column=4, sticky="e", padx=(8, 0))
+        ttk.Button(footer, text="Exit", command=self.exit_app).grid(
+            row=0, column=5, sticky="e", padx=(8, 0))
 
     def _build_about_tab(self):
         about = ttk.Frame(self.nb)
@@ -490,9 +539,27 @@ class LauncherApp:
         remove.pack(side="left", padx=(6, 0), pady=6)
         ttk.Button(actions, text="Stop all servers",
                    command=self.stop_all).pack(side="left", padx=(6, 0), pady=6)
+        ttk.Button(actions, text="Restart app",
+                   command=self.restart_app).pack(side="left", padx=(6, 0), pady=6)
+        ttk.Button(actions, text="Exit app",
+                   command=self.exit_app).pack(side="left", padx=(6, 0), pady=6)
         if not windows_setup.is_windows():
             allow.config(state="disabled")
             remove.config(state="disabled")
+
+        behavior = ttk.LabelFrame(about, text=" Window behavior ")
+        behavior.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
+        behavior.columnconfigure(2, weight=1)
+        row += 1
+        close_to_tray = ttk.Checkbutton(
+            behavior, text="Close to tray", variable=self.close_to_tray_var,
+            command=self._save, style="Card.TCheckbutton")
+        close_to_tray.grid(row=0, column=0, sticky="w", padx=(6, 12), pady=6)
+        minimize_to_tray = ttk.Checkbutton(
+            behavior, text="Minimize to tray", variable=self.minimize_to_tray_var,
+            command=self._save, style="Card.TCheckbutton")
+        minimize_to_tray.grid(row=0, column=1, sticky="w", padx=(0, 12), pady=6)
+        self._tray_option_widgets.extend([close_to_tray, minimize_to_tray])
 
         text_frame = ttk.Frame(about)
         about.rowconfigure(row, weight=1)
@@ -924,6 +991,10 @@ class LauncherApp:
         self.root.after(600, self._poll_status)
 
     # -- config ----------------------------------------------------------- #
+    def _saved_bool(self, key, default=False):
+        value = self.saved.get(key, default)
+        return bool(value) if isinstance(value, bool) else bool(default)
+
     def _restore(self):
         servers = self.saved.get("servers", {})
         for key, card in self.cards.items():
@@ -931,11 +1002,17 @@ class LauncherApp:
         ip = self.saved.get("ip")
         if ip and ip in netinfo.all_ipv4():
             self.ip_var.set(ip)
+        self.close_to_tray_var.set(
+            self._saved_bool("close_to_tray", self.close_to_tray_var.get()))
+        self.minimize_to_tray_var.set(
+            self._saved_bool("minimize_to_tray", self.minimize_to_tray_var.get()))
 
     def _save(self, pending_start=None, pending_cleanup=False,
               pending_firewall_allow=False):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
-                "ip": self.ip_var.get()}
+                "ip": self.ip_var.get(),
+                "close_to_tray": bool(self.close_to_tray_var.get()),
+                "minimize_to_tray": bool(self.minimize_to_tray_var.get())}
         if pending_start:
             data["pending_start"] = pending_start
         if pending_cleanup:
@@ -948,22 +1025,80 @@ class LauncherApp:
             pass
 
     def on_close(self):
+        self.exit_app(confirm=False)
+
+    def exit_app(self, confirm=True):
+        if confirm and not self._confirm_app_shutdown("Exit PS2 Servers?"):
+            return
+        self._shutdown_app()
+
+    def restart_app(self):
+        if not self._confirm_app_shutdown("Restart PS2 Servers?"):
+            return
+        self._save()
+        command = self._restart_command()
+        try:
+            subprocess.Popen(command, cwd=None if is_frozen() else REPO_ROOT)
+        except OSError as e:
+            messagebox.showerror("Restart failed", str(e))
+            return
+        self._shutdown_app()
+
+    def _restart_command(self):
+        if is_frozen():
+            return [frozen_self_exe()]
+        return [sys.executable, "-m", "launcher"]
+
+    def _confirm_app_shutdown(self, title):
+        running = [TAB_TITLES.get(key, key.upper())
+                   for key in self.procs if self.is_running(key)]
+        if not running:
+            return True
+        return messagebox.askyesno(
+            title,
+            "This will stop running servers:\n\n{}\n\nContinue?".format(
+                ", ".join(running)))
+
+    def _shutdown_app(self):
         self._save()
         # hide first so the (up to a few seconds of) child termination doesn't
         # look like a frozen window
         self.root.withdraw()
         self.stop_all()
+        if self._tray:
+            self._tray.stop()
         self.root.destroy()
 
     # -- system tray (Windows) -------------------------------------------- #
+    def _on_window_close(self):
+        if self._should_close_to_tray():
+            self._hide_to_tray()
+            return
+        self.exit_app(confirm=False)
+
+    def _should_close_to_tray(self):
+        return bool(self._tray and self.close_to_tray_var.get())
+
+    def _should_minimize_to_tray(self):
+        return bool(self._tray and self.minimize_to_tray_var.get())
+
+    def _update_tray_option_controls(self):
+        state = "normal" if self._tray else "disabled"
+        for widget in self._tray_option_widgets:
+            try:
+                widget.config(state=state)
+            except tk.TclError:
+                pass
+
     def _hide_to_tray(self):
         # closing the window just hides it; the servers keep running in the tray
         self._save()
         self.root.withdraw()
 
     def _on_unmap(self, event):
-        # minimizing also hides to the tray (off the taskbar)
-        if event.widget is self.root and self.root.state() == "iconic":
+        # minimizing can hide to the tray (off the taskbar) when enabled.
+        if (event.widget is self.root and self.root.state() == "iconic"
+                and self._should_minimize_to_tray()):
             self.root.withdraw()
 
     def _restore_from_tray(self):
@@ -979,17 +1114,13 @@ class LauncherApp:
                 if action == "open":
                     self._restore_from_tray()
                 elif action == "quit":
-                    self._quit_from_tray()
+                    self.exit_app(confirm=False)
         except queue.Empty:
             pass
         self.root.after(150, self._drain_tray)
 
     def _quit_from_tray(self):
-        self._save()
-        self.stop_all()
-        if self._tray:
-            self._tray.stop()
-        self.root.destroy()
+        self.exit_app(confirm=False)
 
 
 def run_gui():

@@ -13,6 +13,11 @@ for Windows Firewall rules.
 The GUI uses a lightweight Tkinter skin. It does not use Electron, Qt, a webview,
 or a heavyweight browser-based interface.
 
+The project maintains a public antivirus transparency note in
+[`docs/antivirus-transparency.md`](docs/antivirus-transparency.md), including
+stable vendor identity, executable/package names, network ports, firewall
+behavior, and false-positive review status.
+
 ## Administrator rights
 
 PS2 Servers is designed to launch normally without administrator rights. Normal
@@ -62,6 +67,9 @@ The GUI can also remove PS2 Servers' own firewall rules without requiring the
 user to type PowerShell commands. The cleanup action removes only rules whose
 display names start with `PS2 Servers -`.
 
+Firewall changes require user action and consent. The app does not silently add,
+remove, or modify firewall rules on launch.
+
 Manual cleanup from an elevated PowerShell prompt remains available for advanced
 users, scripts, or emergency repair:
 
@@ -95,6 +103,18 @@ gh attestation verify PS2Servers-windows-x64.zip -R NathanNeurotic/PS2-Servers
 Checksums verify file integrity, and attestations verify build provenance. They do
 not prove that a program is harmless. Users who want the lowest-trust path should
 inspect the source and run from source instead of using the unsigned packaged EXE.
+
+## Antivirus false-positive review
+
+PS2 Servers has been submitted to Avast/Gen Threat Labs for false-positive review.
+
+The application is open source and built from the public GitHub repository. It is
+a PS2 homebrew utility for user-controlled local server setup and does not
+contain malware, credential collection, persistence, adware, browser
+modification, or crypto-mining behavior.
+
+Repository:
+https://github.com/NathanNeurotic/PS2-Servers
 
 ## Reporting a security issue
 

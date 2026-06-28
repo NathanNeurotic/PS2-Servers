@@ -77,6 +77,12 @@ def _soften_styles(root, gui):
     style.configure("Header.TFrame", background=palette["bg"])
     style.configure("TLabel", background=palette["bg"], foreground=palette["text"])
     style.configure("Muted.TLabel", background=palette["bg"], foreground=palette["muted"])
+    style.configure("TopStrip.TFrame", background=palette["surface"], relief="flat")
+    style.configure("TopStripTitle.TLabel", background=palette["surface"],
+                    foreground=palette["text"])
+    style.configure("TopStripHint.TLabel", background=palette["surface"],
+                    foreground=palette["muted"])
+    style.configure("Footer.TFrame", background=palette["surface"], relief="flat")
 
     # Utility cards: softer border, brighter secondary text.
     style.configure("Admin.TFrame", background=palette["surface"], relief="flat", borderwidth=0)
@@ -90,6 +96,22 @@ def _soften_styles(root, gui):
                     darkcolor=palette["surface"], relief="solid", borderwidth=1)
     style.configure("TLabelframe.Label", background=palette["bg"], foreground=palette["accent2"],
                     font=("", 10, "bold"))
+    style.configure("Card.TLabelframe", background=palette["surface"],
+                    foreground=palette["text"], bordercolor=palette["edge"],
+                    lightcolor=palette["edge"], darkcolor=palette["surface"],
+                    relief="solid", borderwidth=1)
+    style.configure("Card.TLabelframe.Label", background=palette["bg"],
+                    foreground=palette["accent2"], font=("", 10, "bold"))
+    style.configure("Card.TFrame", background=palette["surface"])
+    style.configure("Card.TLabel", background=palette["surface"], foreground=palette["text"])
+    style.configure("CardMuted.TLabel", background=palette["surface"], foreground=palette["muted"])
+    style.configure("CardHelp.TLabel", background=palette["surface"], foreground=palette["muted"])
+    style.configure("CardHint.TLabel", background=palette["surface"], foreground=palette["accent2"])
+    style.configure("CardStatus.TLabel", background=palette["surface"], foreground=palette["muted"])
+    style.configure("Card.TCheckbutton", background=palette["surface"], foreground=palette["text"])
+    style.map("Card.TCheckbutton", background=[("active", palette["surface2"])])
+    style.configure("PageActions.TFrame", background=palette["surface"], relief="flat")
+    style.configure("PageActions.TLabel", background=palette["surface"], foreground=palette["muted"])
 
     style.configure("TButton", background=palette["surface2"], foreground=palette["text"],
                     padding=(10, 5), borderwidth=1, focusthickness=1,
@@ -100,7 +122,7 @@ def _soften_styles(root, gui):
     style.configure("Accent.TButton", background=palette["accent"], foreground="#ffffff",
                     padding=(12, 6), borderwidth=0)
 
-    style.configure("Server.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(8, 8, 8, 0))
+    style.configure("Server.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(14, 8, 14, 0))
     style.configure("Server.TNotebook.Tab", padding=(14, 8), font=("", 10, "bold"),
                     background=palette["surface"], foreground=palette["muted"], borderwidth=1)
     style.map("Server.TNotebook.Tab",

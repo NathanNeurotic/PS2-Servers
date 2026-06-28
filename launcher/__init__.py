@@ -4,7 +4,9 @@ A small GUI/engine that lets any user pick and run one or more of the PS2 OPL
 network servers (SMBv1, UDPBD, UDPFS) without touching a terminal.
 """
 
-__version__ = "0.1.0"
+from .release_metadata import PRODUCT_VERSION
+
+__version__ = PRODUCT_VERSION
 
 
 def _install_dependency_panel_hook():
