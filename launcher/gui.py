@@ -330,14 +330,18 @@ class LauncherApp:
         self.root.bind("<Configure>", self._enforce_fixed_width, add="+")
 
     def _enforce_fixed_width(self, event):
-        if event.widget is not self.root or event.height <= 1:
+        if str(event.widget) != str(self.root) or event.height <= 1:
             return
         if event.width == APP_WINDOW_WIDTH and self.root.state() != "zoomed":
             return
-        height = min(max(APP_MIN_HEIGHT, event.height), self.root.winfo_screenheight())
 
         def resize():
             try:
+                height = self.root.winfo_height()
+                if height <= 1:
+                    height = event.height
+                height = min(max(APP_MIN_HEIGHT, height),
+                             self.root.winfo_screenheight())
                 if self.root.state() == "zoomed":
                     self.root.state("normal")
                 self.root.geometry("{}x{}".format(APP_WINDOW_WIDTH, height))
@@ -352,8 +356,8 @@ class LauncherApp:
                            bd=0, background=bg)
         scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
 
         body = ttk.Frame(canvas)
         window = canvas.create_window((0, 0), window=body, anchor="nw",
@@ -361,8 +365,13 @@ class LauncherApp:
 
         def refresh_scroll_region(event=None):
             height = max(1, body.winfo_reqheight())
-            canvas.itemconfigure(window, width=APP_CONTENT_WIDTH, height=height)
-            canvas.configure(scrollregion=canvas.bbox("all"))
+            current_width = str(canvas.itemcget(window, "width"))
+            current_height = str(canvas.itemcget(window, "height"))
+            if current_width != str(APP_CONTENT_WIDTH) or current_height != str(height):
+                canvas.itemconfigure(window, width=APP_CONTENT_WIDTH, height=height)
+                scrollregion = canvas.bbox("all")
+                if scrollregion:
+                    canvas.configure(scrollregion=scrollregion)
 
         body.bind("<Configure>", refresh_scroll_region)
         canvas.bind("<Configure>", refresh_scroll_region)
@@ -375,7 +384,13 @@ class LauncherApp:
 
     def _bind_body_mousewheel(self, canvas):
         def should_scroll_page(event):
-            if isinstance(event.widget, tk.Text):
+            widget = event.widget
+            if isinstance(widget, str):
+                try:
+                    widget = canvas.nametowidget(widget)
+                except (KeyError, tk.TclError):
+                    widget = None
+            if hasattr(widget, "winfo_class") and widget.winfo_class() == "Text":
                 return False
             first, last = canvas.yview()
             return first > 0.0 or last < 1.0
