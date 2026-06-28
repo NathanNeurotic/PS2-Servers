@@ -89,7 +89,7 @@ include:
 GitHub artifact attestations can be verified with the GitHub CLI. Example:
 
 ```sh
-gh attestation verify PS2Servers-windows-x64.exe -R NathanNeurotic/PS2-Servers
+gh attestation verify PS2Servers-windows-x64.zip -R NathanNeurotic/PS2-Servers
 ```
 
 Checksums verify file integrity, and attestations verify build provenance. They do

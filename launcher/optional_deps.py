@@ -42,6 +42,91 @@ def check_lz4():
                              "Python package 'lz4' is not available.")
 
 
+_DLL_DIR_HANDLES = []
+
+
+def _libchdr_names():
+    system = platform.system()
+    if system == "Windows":
+        return ["chdr.dll", "libchdr.dll", "libchdr-0.dll"]
+    if system == "Darwin":
+        return ["libchdr.dylib", "libchdr.0.dylib"]
+    return ["libchdr.so.0", "libchdr.so"]
+
+
+def _candidate_native_dirs():
+    package_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(package_dir)
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    cwd = os.getcwd()
+    dirs = [
+        os.environ.get("PS2SERVERS_NATIVE_LIB_DIR"),
+        os.path.join(root_dir, "native"),
+        os.path.join(root_dir, "build", "native"),
+    ]
+
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        dirs.append(os.path.join(frozen_root, "native"))
+
+    dirs.extend([
+        os.path.join(exe_dir, "native"),
+        os.path.join(cwd, "native"),
+        os.path.join(cwd, "build", "native"),
+    ])
+
+    seen = set()
+    out = []
+    for path in dirs:
+        if not path:
+            continue
+        norm = os.path.normcase(os.path.abspath(path))
+        if norm not in seen:
+            out.append(path)
+            seen.add(norm)
+    return out
+
+
+def _prepare_native_dir(path):
+    if not os.path.isdir(path):
+        return
+    current = os.environ.get("PATH", "")
+    parts = current.split(os.pathsep) if current else []
+    if path not in parts:
+        os.environ["PATH"] = path + (os.pathsep + current if current else "")
+    if platform.system() == "Windows" and hasattr(os, "add_dll_directory"):
+        try:
+            _DLL_DIR_HANDLES.append(os.add_dll_directory(path))
+        except (OSError, AttributeError):
+            pass
+
+
+def _libchdr_candidates():
+    candidates = []
+    names = _libchdr_names()
+    for directory in _candidate_native_dirs():
+        _prepare_native_dir(directory)
+        for name in names:
+            candidates.append(os.path.join(directory, name))
+
+    found = ctypes.util.find_library("chdr")
+    if found:
+        candidates.append(found)
+    candidates.extend(names)
+
+    seen = set()
+    out = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        has_sep = os.path.sep in candidate or (os.path.altsep and os.path.altsep in candidate)
+        norm = os.path.normcase(os.path.abspath(candidate)) if has_sep else candidate
+        if norm not in seen:
+            out.append(candidate)
+            seen.add(norm)
+    return out
+
+
 def _try_load_library(candidates):
     errors = []
     for candidate in candidates:
@@ -56,10 +141,7 @@ def _try_load_library(candidates):
 
 
 def check_libchdr():
-    found = ctypes.util.find_library("chdr")
-    candidates = [found, "libchdr.so.0", "libchdr.so", "libchdr.dylib",
-                  "libchdr.0.dylib", "chdr.dll", "libchdr.dll", "libchdr-0.dll"]
-    loaded, error = _try_load_library(candidates)
+    loaded, error = _try_load_library(_libchdr_candidates())
     if loaded:
         return OptionalDepStatus("libchdr", "CHD support", True,
                                  "libchdr is available ({})".format(loaded))

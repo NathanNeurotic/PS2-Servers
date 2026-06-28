@@ -40,6 +40,10 @@ def _native_dirs():
     if env_dir:
         dirs.append(env_dir)
 
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        dirs.append(os.path.join(frozen_root, "native"))
+
     # In Nuitka onefile builds, data files are extracted next to the inner binary.
     exe_dir = os.path.dirname(os.path.abspath(sys.executable))
     dirs.append(os.path.join(exe_dir, "native"))
@@ -49,6 +53,7 @@ def _native_dirs():
     dirs.append(os.path.join(os.path.dirname(here), "native"))
     dirs.append(os.path.join(os.path.dirname(os.path.dirname(here)), "native"))
     dirs.append(os.path.join(os.getcwd(), "native"))
+    dirs.append(os.path.join(os.getcwd(), "build", "native"))
 
     unique = []
     for path in dirs:

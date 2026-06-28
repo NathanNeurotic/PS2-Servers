@@ -13,8 +13,9 @@ plus a small **GUI launcher** so anyone can run them without touching a terminal
 The launcher lets you pick a server, choose your games folder, and click **Start**.
 It detects your PC's LAN IP and shows the exact settings to enter in OPL.
 
-- **Packaged app (no Python needed):** double-click **`PS2Servers`** (`.exe` on
-  Windows) — see [Build the app](#build-the-single-file-app) to produce it.
+- **Packaged app (no Python needed):** download the release for your OS. On
+  Windows, unzip `PS2Servers-windows-x64.zip` and double-click
+  **`PS2Servers.exe`**.
 - **From source:** double-click **`Start-Launcher.bat`** (Windows) or run
   `./start-launcher.sh` (Linux/macOS). Requires Python 3.
 
@@ -78,7 +79,7 @@ python -m launcher --serve udpfs -d D:/PS2Games
 python -m launcher --list            # show servers available on this machine
 ```
 
-## Build the single-file app
+## Build the packaged app
 
 [Nuitka](https://nuitka.net) bundles the launcher and all three servers into one
 executable per OS — no Python install required for the end user:
@@ -95,7 +96,7 @@ artifact attestations for the packaged assets. Example verification:
 
 ```sh
 sha256sum -c SHA256SUMS.txt
-gh attestation verify PS2Servers-windows-x64.exe -R NathanNeurotic/PS2-Servers
+gh attestation verify PS2Servers-windows-x64.zip -R NathanNeurotic/PS2-Servers
 ```
 
 Checksums prove the file was downloaded intact. Attestations prove build
