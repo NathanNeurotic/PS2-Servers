@@ -1,10 +1,8 @@
 """Small Tkinter panel for optional compression dependency status.
 
-This module intentionally keeps native dependency setup conservative. Python lz4
-can be installed in source mode. Packaged releases bundle Python dependencies
-instead of requiring users to install Python. Native libchdr is detected and
-explained, but release builds should bundle vetted native binaries instead of
-downloading them at runtime.
+The top-level UI stays friendly: Ready, Limited, or Checking. Technical details
+stay behind the Details/Check dialogs so normal users are not exposed to Python,
+pip, or native-library names unless they ask for diagnostics.
 """
 
 import threading
@@ -12,15 +10,15 @@ import threading
 from . import optional_deps
 
 
-LZ4_SOURCE_BUTTON = "Install ZSO/LZ4 support"
-LZ4_PACKAGED_BUTTON = "ZSO/LZ4 bundled in release"
+LZ4_SOURCE_BUTTON = "Fix ZSO/LZ4"
+LZ4_PACKAGED_BUTTON = "Bundled in release"
 
 
 def add_panel(app, gui):
     frame = gui.ttk.Frame(app.root, style="Admin.TFrame")
     frame.pack(fill="x", padx=10, pady=(0, 4))
 
-    gui.ttk.Label(frame, text="Compression support:", style="Admin.TLabel",
+    gui.ttk.Label(frame, text="Compression:", style="Admin.TLabel",
                   font=("", 9, "bold")).pack(side="left", padx=(8, 8), pady=6)
     app._ps2_compression_var = gui.tk.StringVar(value="Checking…")
     gui.ttk.Label(frame, textvariable=app._ps2_compression_var,
@@ -28,7 +26,7 @@ def add_panel(app, gui):
 
     gui.ttk.Button(frame, text="Check",
                    command=lambda: show_status(app, gui)).pack(side="right", padx=(4, 8), pady=5)
-    gui.ttk.Button(frame, text="CHD/libchdr details",
+    gui.ttk.Button(frame, text="Details",
                    command=lambda: show_libchdr_details(gui)).pack(side="right", padx=(4, 0), pady=5)
     install_text = LZ4_PACKAGED_BUTTON if optional_deps.is_frozen_app() else LZ4_SOURCE_BUTTON
     install = gui.ttk.Button(frame, text=install_text,
@@ -41,12 +39,21 @@ def add_panel(app, gui):
     refresh_status_async(app)
 
 
+def summarize_status_for_ui(statuses):
+    if not statuses:
+        return "Unknown"
+    missing = [status for status in statuses if not status.available]
+    if not missing:
+        return "Ready"
+    if optional_deps.is_frozen_app():
+        return "Limited"
+    if all(status.key == "libchdr" for status in missing):
+        return "Limited"
+    return "Needs setup"
+
+
 def _status_bits(statuses):
-    bits = []
-    for status in statuses:
-        label = "ZSO/LZ4" if status.key == "lz4" else "CHD"
-        bits.append("{} {}".format(label, "OK" if status.available else "missing"))
-    return "; ".join(bits)
+    return summarize_status_for_ui(statuses)
 
 
 def refresh_status(app):
@@ -60,7 +67,7 @@ def refresh_status_async(app):
         try:
             text = _status_bits(optional_deps.check_all())
         except Exception as e:
-            text = "Compression check failed: {}".format(e)
+            text = "Check failed"
         try:
             app.root.after(0, app._ps2_compression_var.set, text)
         except Exception:
@@ -71,12 +78,12 @@ def refresh_status_async(app):
 
 def show_status(app, gui):
     statuses = refresh_status(app)
-    gui.messagebox.showinfo("Optional compression support",
+    gui.messagebox.showinfo("Compression support",
                             optional_deps.format_statuses(statuses))
 
 
 def show_libchdr_details(gui):
-    gui.messagebox.showinfo("CHD/libchdr support", optional_deps.libchdr_setup_text())
+    gui.messagebox.showinfo("Compression details", optional_deps.libchdr_setup_text())
 
 
 def install_lz4(app, gui):
