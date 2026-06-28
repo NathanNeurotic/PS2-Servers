@@ -269,7 +269,10 @@ def _apply_gui_review_fixes(gui):
         canvas.pack(fill="x", expand=True)
 
         def redraw(event=None):
-            draw_banner(canvas, event.width if event else canvas.winfo_width())
+            try:
+                draw_banner(canvas, event.width if event else canvas.winfo_width())
+            except gui.tk.TclError:
+                pass
 
         canvas.bind("<Configure>", redraw)
         canvas.after_idle(redraw)
