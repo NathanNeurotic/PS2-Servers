@@ -23,6 +23,28 @@ from .base import CompressedFileWrapper
 # ---------------------------------------------------------------------------
 
 _DLL_DIR_HANDLES = []
+_DLL_DIR_PATHS = set()
+_PATH_DIRS = None
+_PREPARED_NATIVE_DIRS = set()
+
+
+def _normalize_path_entry(path):
+    if os.path.isabs(path):
+        return os.path.normcase(os.path.normpath(path))
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _known_path_dirs():
+    global _PATH_DIRS
+    if _PATH_DIRS is None:
+        current = os.environ.get("PATH", "")
+        parts = current.split(os.pathsep) if current else []
+        _PATH_DIRS = {
+            _normalize_path_entry(part)
+            for part in parts
+            if part
+        }
+    return _PATH_DIRS
 
 
 def _lib_names():
@@ -69,17 +91,29 @@ def _native_dirs():
 
 
 def _prepare_native_dir(path):
-    if not os.path.isdir(path):
+    abs_path = os.path.abspath(path)
+    norm_path = os.path.normcase(abs_path)
+    if norm_path in _PREPARED_NATIVE_DIRS:
         return
-    current = os.environ.get("PATH", "")
-    parts = current.split(os.pathsep) if current else []
-    if path not in parts:
-        os.environ["PATH"] = path + (os.pathsep + current if current else "")
+    if not os.path.isdir(abs_path):
+        return
+
+    path_dirs = _known_path_dirs()
+    if norm_path not in path_dirs:
+        current = os.environ.get("PATH", "")
+        os.environ["PATH"] = abs_path + (os.pathsep + current if current else "")
+        path_dirs.add(norm_path)
+
     if platform.system() == "Windows" and hasattr(os, "add_dll_directory"):
+        if norm_path in _DLL_DIR_PATHS:
+            _PREPARED_NATIVE_DIRS.add(norm_path)
+            return
         try:
-            _DLL_DIR_HANDLES.append(os.add_dll_directory(path))
+            _DLL_DIR_HANDLES.append(os.add_dll_directory(abs_path))
+            _DLL_DIR_PATHS.add(norm_path)
         except (OSError, ValueError, AttributeError):
             pass
+    _PREPARED_NATIVE_DIRS.add(norm_path)
 
 
 def _candidate_paths():
