@@ -52,6 +52,9 @@ the whole launcher to run as administrator. Keeping the default launch non-admin
 reduces the blast radius of bugs and keeps the app easier to trust.
 
 See [SECURITY.md](SECURITY.md) for verification, cleanup, and reporting details.
+See [docs/antivirus-transparency.md](docs/antivirus-transparency.md) for the
+public antivirus false-positive review note, stable release identity, ports,
+firewall behavior, and uninstall/cleanup details.
 
 ## What's inside
 

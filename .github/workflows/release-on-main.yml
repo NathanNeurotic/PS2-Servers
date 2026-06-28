@@ -212,11 +212,34 @@ jobs:
 
             Commit: ${{ github.sha }}
 
-            Security notes:
+            ## Security transparency
+
+            PS2 Servers is an open-source PS2 homebrew utility for user-controlled local server setup. It runs local LAN servers for Open PS2 Loader:
+
+            - SMBv1/RiptOPL: built-in SMB/CIFS subset, normally TCP port `1445`.
+            - UDPFS: UDP file/block serving, normally UDP port `0xF5F6`.
+            - UDPBD: UDP block-device serving, normally UDP port `0xBDBD`.
+
+            Windows behavior:
+
             - The Windows SMB server uses PS2 Servers' built-in SMB/CIFS implementation and does not enable Windows SMB1.
+            - The app does not enable or disable Windows optional features.
+            - Windows Firewall changes happen only after user action/consent and use rules named `PS2 Servers - ...`.
+            - Advanced SMB port `445` mode is optional and requires administrator consent.
+            - To uninstall, delete the extracted app folder. To remove PS2 Servers firewall rules, use the GUI action or `tools/remove-windows-firewall-rules.ps1`.
+
+            Verification:
+
             - Release assets include `SHA256SUMS.txt`.
             - GitHub artifact attestations are generated for binary and source artifacts.
             - For the lowest-trust path, use `PS2Servers-source.zip` and run from source.
+
+            PS2 Servers has been submitted to Avast/Gen Threat Labs for false-positive review.
+
+            The application is open source and built from the public GitHub repository. It is a PS2 homebrew utility for user-controlled local server setup and does not contain malware, credential collection, persistence, adware, browser modification, or crypto-mining behavior.
+
+            Repository:
+            https://github.com/NathanNeurotic/PS2-Servers
           files: |
             release-assets/PS2Servers-linux-x64
             release-assets/PS2Servers-macos-arm64.zip
