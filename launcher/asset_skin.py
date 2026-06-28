@@ -10,7 +10,6 @@ from . import theme_assets
 
 _TAB_ICON_BY_TEXT = {
     "SMBV1": "ICON_SMB",
-    "SMBv1": "ICON_SMB",
     "UDPFS": "ICON_UDPFS",
     "UDPBD": "ICON_UDPBD",
 }
@@ -36,18 +35,28 @@ def _install_tab_icons(app, gui):
         image = _photo(app, gui, key)
         if image:
             icons[key] = image
-    if not icons or getattr(gui, "_ps2_asset_tab_icons_patched", False):
+    if not icons:
+        return
+
+    # Store images on this root so their lifetime matches this Tk instance.
+    # The patched Notebook.add below looks them up dynamically from the notebook's
+    # toplevel instead of closing over the first app instance's images.
+    app.root._ps2_tab_icons = icons
+
+    if getattr(gui, "_ps2_asset_tab_icons_patched", False):
         return
 
     original_add = gui.ttk.Notebook.add
 
     def add_with_icons(self, child, **kwargs):
         raw_text = kwargs.get("text", "")
-        text = raw_text.strip()
-        icon_key = _TAB_ICON_BY_TEXT.get(text.upper()) or _TAB_ICON_BY_TEXT.get(text)
-        if icon_key and icon_key in icons:
-            kwargs.setdefault("image", icons[icon_key])
-            kwargs.setdefault("compound", "left")
+        icon_key = _TAB_ICON_BY_TEXT.get(raw_text.strip().upper())
+        if icon_key:
+            root = self.winfo_toplevel()
+            root_icons = getattr(root, "_ps2_tab_icons", {})
+            if icon_key in root_icons:
+                kwargs.setdefault("image", root_icons[icon_key])
+                kwargs.setdefault("compound", "left")
         return original_add(self, child, **kwargs)
 
     gui.ttk.Notebook.add = add_with_icons
