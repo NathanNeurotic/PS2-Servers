@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PS2 Servers Antivirus Detection Statement</title>
+  <meta name="description" content="Public antivirus detection and false-positive statement for PS2 Servers, an open-source PlayStation 2 homebrew local-network utility.">
+  <style>
+    :root {
+      --bg: #050811;
+      --panel: #0b1020;
+      --panel-2: #10192f;
+      --text: #e8eefc;
+      --muted: #aab7d4;
+      --soft: #7483a8;
+      --line: rgba(135, 165, 255, 0.24);
+      --accent: #69a7ff;
+      --accent-2: #9ad8ff;
+      --warn: #ffd479;
+      --ok: #8df7c1;
+      --danger: #ff8f8f;
+      --code-bg: #070b16;
+      --shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+      --radius: 18px;
+      --radius-sm: 12px;
+      --max: 1120px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      line-height: 1.62;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(71, 118, 255, 0.28), transparent 34rem),
+        radial-gradient(circle at 95% 12%, rgba(0, 199, 255, 0.16), transparent 28rem),
+        linear-gradient(135deg, #03050c 0%, var(--bg) 45%, #081226 100%);
+      min-height: 100vh;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.28;
+      background-image:
+        linear-gradient(rgba(126, 166, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(126, 166, 255, 0.08) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, black, transparent 88%);
+    }
+
+    a {
+      color: var(--accent-2);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .wrap {
+      width: min(var(--max), calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 64px 0 28px;
+      position: relative;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      color: var(--accent-2);
+      border: 1px solid var(--line);
+      background: rgba(7, 12, 26, 0.78);
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 0.9rem;
+      letter-spacing: 0.02em;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--ok);
+      box-shadow: 0 0 18px rgba(141, 247, 193, 0.9);
+    }
+
+    h1 {
+      max-width: 980px;
+      margin: 22px 0 14px;
+      font-size: clamp(2.4rem, 7vw, 5.6rem);
+      line-height: 0.96;
+      letter-spacing: -0.055em;
+      text-wrap: balance;
+    }
+
+    .lead {
+      max-width: 850px;
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(1.05rem, 2vw, 1.28rem);
+      text-wrap: balance;
+    }
+
+    .hero-card {
+      margin-top: 30px;
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 18px;
+    }
+
+    .card {
+      background: linear-gradient(180deg, rgba(16, 25, 47, 0.88), rgba(8, 13, 28, 0.92));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .card.pad {
+      padding: 24px;
+    }
+
+    .notice {
+      border-left: 4px solid var(--warn);
+    }
+
+    .notice strong {
+      color: var(--warn);
+    }
+
+    nav {
+      margin: 22px 0 34px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(7, 12, 26, 0.62);
+    }
+
+    nav ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    nav a {
+      display: inline-block;
+      color: var(--text);
+      border: 1px solid rgba(135, 165, 255, 0.22);
+      background: rgba(105, 167, 255, 0.08);
+      padding: 8px 11px;
+      border-radius: 999px;
+      font-size: 0.93rem;
+    }
+
+    main {
+      padding-bottom: 72px;
+    }
+
+    section {
+      margin: 22px 0;
+      padding: 28px;
+      background: rgba(7, 12, 26, 0.76);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: clamp(1.45rem, 3vw, 2.15rem);
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+    }
+
+    h3 {
+      margin: 22px 0 8px;
+      color: var(--accent-2);
+      font-size: 1.08rem;
+      letter-spacing: 0.01em;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .soft {
+      color: var(--soft);
+    }
+
+    .hash-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .hash-item {
+      border: 1px solid rgba(135, 165, 255, 0.2);
+      border-radius: var(--radius-sm);
+      padding: 15px;
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    .hash-item strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--accent-2);
+    }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    code {
+      background: rgba(105, 167, 255, 0.11);
+      border: 1px solid rgba(105, 167, 255, 0.18);
+      padding: 0.12rem 0.35rem;
+      border-radius: 6px;
+      color: #eaf4ff;
+      word-break: break-word;
+    }
+
+    pre {
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 14px 0;
+      padding: 16px;
+      color: #dbe8ff;
+      background: var(--code-bg);
+      border: 1px solid rgba(135, 165, 255, 0.18);
+      border-radius: var(--radius-sm);
+    }
+
+    ul, ol {
+      padding-left: 1.25rem;
+      margin: 0 0 14px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .checks {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      padding: 0;
+      list-style: none;
+      margin-top: 16px;
+    }
+
+    .checks li {
+      margin: 0;
+      padding: 13px 14px;
+      border: 1px solid rgba(135, 165, 255, 0.19);
+      border-radius: var(--radius-sm);
+      background: rgba(0, 0, 0, 0.16);
+    }
+
+    .checks li::before {
+      content: "✓";
+      color: var(--ok);
+      font-weight: 800;
+      margin-right: 8px;
+    }
+
+    .no-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      padding: 0;
+      list-style: none;
+      margin-top: 16px;
+    }
+
+    .no-list li {
+      margin: 0;
+      padding: 13px 14px;
+      border: 1px solid rgba(255, 143, 143, 0.2);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 143, 143, 0.045);
+    }
+
+    .no-list li::before {
+      content: "×";
+      color: var(--danger);
+      font-weight: 800;
+      margin-right: 8px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid rgba(135, 165, 255, 0.18);
+      border-radius: var(--radius-sm);
+      margin-top: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+      background: rgba(0, 0, 0, 0.14);
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(135, 165, 255, 0.16);
+    }
+
+    th {
+      color: var(--accent-2);
+      background: rgba(105, 167, 255, 0.08);
+      font-weight: 700;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: rgba(105, 167, 255, 0.075);
+      padding: 16px 18px;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      margin: 16px 0;
+    }
+
+    .footer {
+      margin-top: 28px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      color: var(--soft);
+      font-size: 0.94rem;
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(154, 216, 255, 0.38);
+      background: rgba(105, 167, 255, 0.12);
+      color: var(--text);
+      font-weight: 650;
+    }
+
+    .button.primary {
+      background: linear-gradient(135deg, rgba(105, 167, 255, 0.35), rgba(154, 216, 255, 0.16));
+    }
+
+    @media (max-width: 820px) {
+      header {
+        padding-top: 42px;
+      }
+
+      .hero-card {
+        grid-template-columns: 1fr;
+      }
+
+      section {
+        padding: 22px;
+      }
+
+      .checks,
+      .no-list {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        letter-spacing: -0.04em;
+      }
+    }
+
+    @media print {
+      body {
+        background: white;
+        color: #111827;
+      }
+
+      body::before,
+      nav,
+      .button-row {
+        display: none;
+      }
+
+      .card,
+      section {
+        box-shadow: none;
+        border-color: #cfd7e6;
+        background: white;
+      }
+
+      a,
+      h2,
+      h3,
+      .eyebrow,
+      th {
+        color: #003f8c;
+      }
+
+      pre,
+      code {
+        border-color: #cfd7e6;
+        background: #f4f7fb;
+        color: #111827;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="eyebrow">Public antivirus detection statement</div>
+      <h1>PS2 Servers antivirus detection statement</h1>
+      <p class="lead">
+        A plain-language explanation of current antivirus detections, expected network behavior, verification options, and the project’s false-positive review position.
+      </p>
+
+      <div class="hero-card">
+        <div class="card pad">
+          <p>
+            <strong>PS2 Servers</strong> is an open-source PlayStation 2 homebrew utility. Its purpose is to let Open PS2 Loader and compatible forks load files from a PC using local-network server modes such as SMBv1/RiptOPL, UDPFS, and UDPBD.
+          </p>
+          <div class="button-row">
+            <a class="button primary" href="https://github.com/NathanNeurotic/PS2-Servers">View source repository</a>
+            <a class="button" href="#verification">Verification options</a>
+            <a class="button" href="#detections">Detection responses</a>
+          </div>
+        </div>
+
+        <div class="card pad notice">
+          <p>
+            <strong>Important:</strong> The Windows build is currently unsigned and provides local network-server behavior by design. Those facts can cause heuristic antivirus detections even when the software is legitimate.
+          </p>
+          <p class="muted">
+            A detection should be taken seriously, but a generic or heuristic label is not automatically proof of malicious intent or a confirmed malware family.
+          </p>
+        </div>
+      </div>
+
+      <nav aria-label="Page sections">
+        <ul>
+          <li><a href="#files">Reviewed files</a></li>
+          <li><a href="#does">What it does</a></li>
+          <li><a href="#does-not">What it does not do</a></li>
+          <li><a href="#why">Why detections happen</a></li>
+          <li><a href="#detections">Detection responses</a></li>
+          <li><a href="#verification">Verification</a></li>
+          <li><a href="#position">Current position</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="files">
+      <h2>Current reviewed release files</h2>
+      <p>
+        These hashes identify the current files discussed in this statement.
+      </p>
+
+      <div class="hash-grid">
+        <div class="hash-item">
+          <strong>PS2Servers.exe</strong>
+          <code>75a1bc596fefc422a1b89520369c4cc088aba40c2062b279d9e4b88c31b8150c</code>
+        </div>
+        <div class="hash-item">
+          <strong>PS2Servers-windows-x64.zip</strong>
+          <code>d39705ae53ae0163c661bdd8e5c39c84f568eaa6d4ec30f8429a88a023fc1d66</code>
+        </div>
+      </div>
+    </section>
+
+    <section id="does">
+      <h2>What the program does</h2>
+      <p>
+        PS2 Servers provides user-controlled local server modes for PS2 homebrew use:
+      </p>
+
+      <ul class="checks">
+        <li><strong>SMBv1/RiptOPL:</strong> local SMB/CIFS-compatible server, normally TCP 1445.</li>
+        <li><strong>UDPFS:</strong> local UDP file/block serving, normally UDP 0xF5F6.</li>
+        <li><strong>UDPBD:</strong> local UDP block-device serving, normally UDP 0xBDBD.</li>
+        <li><strong>Firewall helper:</strong> optional Windows Firewall allow rules after user action.</li>
+      </ul>
+
+      <div class="callout">
+        Firewall rules created by the application use the name prefix <code>PS2 Servers -</code>. The app can also remove its own firewall rules.
+      </div>
+    </section>
+
+    <section id="does-not">
+      <h2>What the program does not do</h2>
+      <p>
+        PS2 Servers does not contain or intentionally perform any of the following behavior:
+      </p>
+
+      <ul class="no-list">
+        <li>credential theft</li>
+        <li>browser modification</li>
+        <li>adware installation</li>
+        <li>persistence installation</li>
+        <li>crypto-mining</li>
+        <li>ransomware behavior</li>
+        <li>unauthorized remote-control behavior</li>
+        <li>silent firewall modification on launch</li>
+        <li>silent administrator elevation on launch</li>
+        <li>Windows SMB1 optional-feature installation</li>
+        <li>Windows SMB1 automatic-removal disabling</li>
+      </ul>
+
+      <div class="callout">
+        The SMB mode uses the program’s own SMB/CIFS implementation for OPL compatibility. It does not require enabling Windows’ built-in SMB1 optional feature.
+      </div>
+    </section>
+
+    <section id="why">
+      <h2>Why some antivirus engines may detect it</h2>
+      <p>
+        The current Windows executable has several characteristics that can cause heuristic or machine-learning detections even when the software is legitimate:
+      </p>
+
+      <ol>
+        <li>It is unsigned.</li>
+        <li>It is distributed as a small independent project.</li>
+        <li>It starts local network services by design.</li>
+        <li>It may request firewall-rule changes after user consent.</li>
+        <li>It includes bundled runtime/application content.</li>
+        <li>It is not yet a widely reputation-established Windows binary.</li>
+      </ol>
+
+      <p>
+        These factors can trigger generic labels such as <code>Trojan.Generic</code>, <code>Malware.AI</code>, <code>Suspicious</code>, <code>Evo-gen</code>, <code>Susgen</code>, <code>Riskware</code>, or similar names. Those names are not necessarily specific claims that the file belongs to a known malware family. In many cases, they indicate a generic, heuristic, AI/ML, reputation, or suspicious-behavior classification.
+      </p>
+    </section>
+
+    <section id="detections">
+      <h2>Response to current detection types</h2>
+      <p>
+        Exact vendor names and labels may change as antivirus databases update. The table below explains the project’s response to the detection classes currently relevant to PS2 Servers.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Detection type</th>
+              <th>Public response</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>[Vendor / label: paste exact detection here]</code></td>
+              <td>This appears to be a generic or heuristic detection. The project is open source, the release hash is published, and the program’s network behavior is documented. The detection has been or will be submitted to the vendor for false-positive review.</td>
+            </tr>
+            <tr>
+              <td>Generic Trojan / Trojan.Generic / Trojan.Win32.Generic</td>
+              <td>This is a broad classification and does not identify a specific malicious behavior in PS2 Servers. The app’s server behavior is intentional and limited to user-selected local PS2 homebrew file serving.</td>
+            </tr>
+            <tr>
+              <td>AI / ML / MachineLearning / Malware.AI</td>
+              <td>This indicates an automated model-based classification. The likely triggers are unsigned distribution, bundled executable packaging, and local server/firewall behavior. The source code and expected behavior are public for review.</td>
+            </tr>
+            <tr>
+              <td>Evo-gen / Gen / Gen:Variant / Heur</td>
+              <td>This appears to be a generic evolutionary or heuristic classification rather than a specific malware-family identification. The file has been or will be submitted to the detecting vendor as a false positive.</td>
+            </tr>
+            <tr>
+              <td>Susgen / Suspicious / malicious-confidence label</td>
+              <td>This appears to be a suspicion-based classification. PS2 Servers does perform local network-server activity, but that activity is the documented purpose of the program. It is not hidden, persistent, or unrelated to the user-facing function.</td>
+            </tr>
+            <tr>
+              <td>Riskware / HackTool / PUA / PUP</td>
+              <td>PS2 Servers is not adware or bundled unwanted software. It is a user-launched local utility. Any elevated action is limited to firewall management or advanced port behavior and is disclosed to the user.</td>
+            </tr>
+            <tr>
+              <td>Network-related warning</td>
+              <td>Network activity is expected. The program exists to serve PS2 game and homebrew files from a PC to a PlayStation 2 over the local network. This is local server behavior, not unauthorized remote access.</td>
+            </tr>
+            <tr>
+              <td>URL / website reputation warning</td>
+              <td>The project is distributed from its public GitHub repository and release pages. Any URL reputation issue should be reviewed as a false positive against the repository or release URL.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="verification">
+      <h2>Verification options for users</h2>
+      <p>
+        Users who want the lowest-trust path do not need to rely only on the packaged executable.
+      </p>
+
+      <ol>
+        <li>Inspect the public source code.</li>
+        <li>Compare the downloaded file hash against the published SHA-256.</li>
+        <li>Verify GitHub build provenance where artifact attestations are available.</li>
+        <li>Run from source instead of using the packaged Windows executable.</li>
+        <li>Wait for antivirus vendor false-positive reviews to complete.</li>
+      </ol>
+
+      <h3>PowerShell hash verification</h3>
+      <pre><code>Get-FileHash .\PS2Servers-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\PS2Servers.exe -Algorithm SHA256</code></pre>
+
+      <h3>Expected current hashes</h3>
+      <pre><code>PS2Servers-windows-x64.zip
+d39705ae53ae0163c661bdd8e5c39c84f568eaa6d4ec30f8429a88a023fc1d66
+
+PS2Servers.exe
+75a1bc596fefc422a1b89520369c4cc088aba40c2062b279d9e4b88c31b8150c</code></pre>
+    </section>
+
+    <section id="position">
+      <h2>Current project position</h2>
+      <p>
+        I take antivirus reports seriously. The detections are being treated as false-positive candidates because the software’s behavior matches its documented purpose, the project is open source, and the release artifacts are identifiable by hash.
+      </p>
+
+      <p>
+        I am not asking users to blindly ignore their security software. I am asking that the report be evaluated against the actual source code, documented behavior, published hashes, and release provenance instead of assuming that a generic heuristic label is a confirmed malware verdict.
+      </p>
+
+      <p>
+        If a vendor identifies a specific malicious behavior, compromised dependency, or reproducible security issue, I will address it directly. If the vendor confirms the file is clean, I will update the release notes accordingly.
+      </p>
+
+      <div class="footer">
+        Last updated: 2026-06-28. This page may be updated as antivirus vendor reviews and release packaging change.
+      </div>
+    </section>
+  </main>
+</body>
+</html>
