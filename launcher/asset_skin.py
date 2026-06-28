@@ -117,7 +117,16 @@ def _soften_styles(root, gui):
                           ("!selected", palette["muted"])])
 
 
+def _install_page_controls(app, gui):
+    try:
+        from . import full_skin_controls
+    except Exception:
+        return
+    full_skin_controls.install(app, gui)
+
+
 def install(app, gui):
     """Install lightweight asset-driven visual hooks for this app instance."""
     _soften_styles(app.root, gui)
+    _install_page_controls(app, gui)
     _install_tab_icons(app, gui)
