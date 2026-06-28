@@ -87,8 +87,9 @@ jobs:
 
       - name: Build single-file binary (macOS x86_64)
         if: matrix.macos_arch == 'x86_64'
-        env:
-          MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
+        # Python is already executing as x86_64 here. Do not pass
+        # MACOS_TARGET_ARCH to build.py, because that makes Nuitka enter its
+        # cross-target path again and can reuse arm64 native extensions.
         run: arch -x86_64 python build/build.py
 
       - name: Stage artifact
