@@ -72,9 +72,8 @@ def _apply_gui_review_fixes(gui):
 
     try:
         from . import theme_assets
-        embedded_assets = getattr(theme_assets, "ASSETS", {})
-    except Exception:
-        embedded_assets = {}
+    except ImportError:
+        theme_assets = None
 
     palette = {
         "bg": "#030713",
@@ -98,20 +97,14 @@ def _apply_gui_review_fixes(gui):
     gui.COLOR_STOPPED = palette["muted"]
     gui.COLOR_ERROR = palette["error"]
 
-    def asset_photo(app, name):
-        data = embedded_assets.get(name)
-        if not data:
+    def asset_photo(app, name, max_width=None, max_height=None):
+        if theme_assets is None:
             return None
-        if isinstance(data, (tuple, list)):
-            data = "".join(data)
         try:
-            photo = gui.tk.PhotoImage(data=data)
-        except Exception:
+            return theme_assets.photo_fit(
+                gui, name, owner=app, max_width=max_width, max_height=max_height)
+        except gui.tk.TclError:
             return None
-        photos = getattr(app, "_ps2_theme_photos", [])
-        photos.append(photo)
-        app._ps2_theme_photos = photos
-        return photo
 
     def apply_theme(root):
         root.configure(background=palette["bg"])
@@ -193,23 +186,41 @@ def _apply_gui_review_fixes(gui):
         canvas.create_text(24, 56, anchor="w", text="SMBv1  ·  UDPFS  ·  UDPBD  ·  no terminal required",
                            fill=palette["muted"], font=("", 9))
 
+    def install_background(self):
+        background = asset_photo(self, "BACKGROUND", max_width=960, max_height=640)
+        if not background:
+            return
+        label = gui.tk.Label(self.root, image=background, bg=palette["bg"], bd=0,
+                             highlightthickness=0)
+        label.place(x=0, y=0, relwidth=1, relheight=1)
+        label.lower()
+        self._ps2_theme_background = label
+
     def build_banner(self):
         frame = gui.ttk.Frame(self.root, style="Header.TFrame")
         frame.pack(fill="x", padx=10, pady=(10, 0))
 
-        banner = asset_photo(self, "BANNER")
+        banner = asset_photo(self, "BANNER", max_width=980, max_height=520)
         if banner:
-            label = gui.tk.Label(frame, image=banner, bg=palette["bg"], bd=0,
-                                 highlightthickness=0)
-            label.pack(anchor="w")
-        else:
-            canvas = gui.tk.Canvas(frame, height=78, highlightthickness=0,
+            height = 168
+            canvas = gui.tk.Canvas(frame, height=height, highlightthickness=0,
                                    bg=palette["bg"], bd=0)
             canvas.pack(fill="x", expand=True)
-            canvas.bind("<Configure>", lambda event: draw_banner(canvas, event.width, 78))
-            self._ps2_theme_banner = canvas
 
-        accent = asset_photo(self, "ACCENT")
+            def draw(event=None):
+                width = event.width if event else 820
+                y = min(0, (height - banner.height()) // 2)
+                canvas.delete("all")
+                canvas.create_rectangle(0, 0, width, height, fill=palette["bg"], outline="")
+                canvas.create_image(0, y, anchor="nw", image=banner)
+
+            canvas.bind("<Configure>", draw)
+            draw()
+            self._ps2_theme_banner = canvas
+        else:
+            gui.ttk.Label(frame, text="PS2 Servers", font=("", 22, "bold")).pack(anchor="w")
+
+        accent = asset_photo(self, "ACCENT", max_width=780, max_height=36)
         if accent:
             gui.tk.Label(frame, image=accent, bg=palette["bg"], bd=0,
                          highlightthickness=0).pack(anchor="w", pady=(2, 0))
@@ -283,6 +294,7 @@ def _apply_gui_review_fixes(gui):
             return super().add(child, **kwargs)
 
     def launcher_build(self):
+        install_background(self)
         build_banner(self)
         add_admin_panel(self)
         original_build(self)

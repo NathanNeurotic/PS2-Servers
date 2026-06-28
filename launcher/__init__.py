@@ -25,11 +25,11 @@ def _install_dependency_panel_hook():
             return
         try:
             from . import dependency_panel
-        except Exception:
+        except ImportError:
             dependency_panel = None
         try:
             from . import asset_skin
-        except Exception:
+        except ImportError:
             asset_skin = None
 
         original_build = gui.LauncherApp._build

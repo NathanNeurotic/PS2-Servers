@@ -10,6 +10,10 @@ def install(app, gui):
     """Install per-server page action controls once before cards are built."""
     if getattr(gui, "_ps2_full_skin_controls_patched", False):
         return
+    try:
+        from . import theme_assets
+    except ImportError:
+        theme_assets = None
 
     ServerCard = gui.ServerCard
     LauncherApp = gui.LauncherApp
@@ -44,25 +48,41 @@ def install(app, gui):
         actions.grid(row=row, column=0, columnspan=3, sticky="ew", padx=8, pady=(4, 8))
         actions.columnconfigure(0, weight=1)
 
+        linebreak = None
+        if theme_assets is not None:
+            try:
+                linebreak = theme_assets.photo_fit(
+                    gui, "LINEBREAK", owner=card, max_width=620, max_height=36)
+            except gui.tk.TclError:
+                linebreak = None
+        if linebreak:
+            gui.tk.Label(actions, image=linebreak, bg="#081427", bd=0,
+                         highlightthickness=0).grid(
+                             row=0, column=0, columnspan=3, sticky="w",
+                             padx=8, pady=(6, 0))
+            control_row = 1
+        else:
+            control_row = 0
+
         gui.ttk.Label(
             actions,
             text="Page settings",
             style="Admin.TLabel",
             font=("", 9, "bold"),
-        ).grid(row=0, column=0, sticky="w", padx=(8, 4), pady=6)
+        ).grid(row=control_row, column=0, sticky="w", padx=(8, 4), pady=6)
 
         gui.ttk.Button(
             actions,
             text="Revert to Default",
             command=lambda c=card: c.revert_to_defaults(),
-        ).grid(row=0, column=1, sticky="e", padx=(4, 0), pady=5)
+        ).grid(row=control_row, column=1, sticky="e", padx=(4, 0), pady=5)
 
         gui.ttk.Button(
             actions,
             text="Apply",
             style="Accent.TButton",
             command=lambda c=card: c.apply_page_settings(),
-        ).grid(row=0, column=2, sticky="e", padx=(6, 8), pady=5)
+        ).grid(row=control_row, column=2, sticky="e", padx=(6, 8), pady=5)
 
     def build_with_page_actions(card):
         original_build(card)
@@ -91,7 +111,7 @@ def install(app, gui):
         if app_obj.is_running(key):
             app_obj._append_log(
                 "setup",
-                "[settings] {} is already running; restart that server to use changed launch settings\n".format(label),
+                "[settings] {} is already running; restart this server to use changed launch settings\n".format(label),
             )
 
     def revert_server_defaults(app_obj, key):
@@ -104,7 +124,7 @@ def install(app, gui):
         if app_obj.is_running(key):
             app_obj._append_log(
                 "setup",
-                "[settings] {} is already running; restart that server to use default launch settings\n".format(label),
+                "[settings] {} is already running; restart this server to use default launch settings\n".format(label),
             )
 
     ServerCard._build = build_with_page_actions

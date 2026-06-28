@@ -40,16 +40,7 @@ def add_panel(app, gui):
 
 
 def summarize_status_for_ui(statuses):
-    if not statuses:
-        return "Unknown"
-    missing = [status for status in statuses if not status.available]
-    if not missing:
-        return "Ready"
-    if optional_deps.is_frozen_app():
-        return "Limited"
-    if all(status.key == "libchdr" for status in missing):
-        return "Limited"
-    return "Needs setup"
+    return optional_deps.summarize_statuses(statuses)
 
 
 def _status_bits(statuses):
@@ -83,7 +74,12 @@ def show_status(app, gui):
 
 
 def show_libchdr_details(gui):
-    gui.messagebox.showinfo("Compression details", optional_deps.libchdr_setup_text())
+    status = optional_deps.check_libchdr()
+    text = "{}\n\n{}".format(
+        optional_deps.format_statuses([status]),
+        optional_deps.libchdr_setup_text(),
+    )
+    gui.messagebox.showinfo("Compression details", text)
 
 
 def install_lz4(app, gui):
