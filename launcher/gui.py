@@ -9,6 +9,7 @@ drained on the Tk main thread.
 
 import platform
 import queue
+import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -17,7 +18,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import config, elevate, netinfo, tray, windows_setup
 from .process import ServerProcess
-from .servers import REGISTRY, REPO_ROOT
+from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen
 
 DOT_RUNNING = "●"  # filled circle
 COLOR_RUNNING = "#2e9e44"
@@ -281,6 +282,12 @@ class LauncherApp:
         self.out_queue = queue.Queue()
         self.logs = {}
         self.saved = config.load()
+        self._tray = None
+        self._tray_option_widgets = []
+        self.close_to_tray_var = tk.BooleanVar(
+            value=self._saved_bool("close_to_tray", tray.AVAILABLE))
+        self.minimize_to_tray_var = tk.BooleanVar(
+            value=self._saved_bool("minimize_to_tray", tray.AVAILABLE))
 
         root.title("PS2 Servers")
         self._configure_window()
@@ -291,7 +298,6 @@ class LauncherApp:
 
         # On Windows, run from the system tray: closing or minimizing hides the
         # window (servers keep running) and the tray menu restores or quits.
-        self._tray = None
         self._tray_queue = queue.Queue()
         if tray.AVAILABLE:
             try:
@@ -305,11 +311,12 @@ class LauncherApp:
                 self._tray = None
 
         if self._tray:
-            root.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
+            root.protocol("WM_DELETE_WINDOW", self._on_window_close)
             root.bind("<Unmap>", self._on_unmap)
             self.root.after(150, self._drain_tray)
         else:
-            root.protocol("WM_DELETE_WINDOW", self.on_close)
+            root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        self._update_tray_option_controls()
 
         self.root.after(150, self._drain_logs)
         self.root.after(600, self._poll_status)
@@ -484,6 +491,10 @@ class LauncherApp:
             remove.config(state="disabled")
         ttk.Button(footer, text="Stop all", command=self.stop_all).grid(
             row=0, column=3, sticky="e")
+        ttk.Button(footer, text="Restart", command=self.restart_app).grid(
+            row=0, column=4, sticky="e", padx=(8, 0))
+        ttk.Button(footer, text="Exit", command=self.exit_app).grid(
+            row=0, column=5, sticky="e", padx=(8, 0))
 
     def _build_about_tab(self):
         about = ttk.Frame(self.nb)
@@ -528,9 +539,27 @@ class LauncherApp:
         remove.pack(side="left", padx=(6, 0), pady=6)
         ttk.Button(actions, text="Stop all servers",
                    command=self.stop_all).pack(side="left", padx=(6, 0), pady=6)
+        ttk.Button(actions, text="Restart app",
+                   command=self.restart_app).pack(side="left", padx=(6, 0), pady=6)
+        ttk.Button(actions, text="Exit app",
+                   command=self.exit_app).pack(side="left", padx=(6, 0), pady=6)
         if not windows_setup.is_windows():
             allow.config(state="disabled")
             remove.config(state="disabled")
+
+        behavior = ttk.LabelFrame(about, text=" Window behavior ")
+        behavior.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
+        behavior.columnconfigure(2, weight=1)
+        row += 1
+        close_to_tray = ttk.Checkbutton(
+            behavior, text="Close to tray", variable=self.close_to_tray_var,
+            command=self._save, style="Card.TCheckbutton")
+        close_to_tray.grid(row=0, column=0, sticky="w", padx=(6, 12), pady=6)
+        minimize_to_tray = ttk.Checkbutton(
+            behavior, text="Minimize to tray", variable=self.minimize_to_tray_var,
+            command=self._save, style="Card.TCheckbutton")
+        minimize_to_tray.grid(row=0, column=1, sticky="w", padx=(0, 12), pady=6)
+        self._tray_option_widgets.extend([close_to_tray, minimize_to_tray])
 
         text_frame = ttk.Frame(about)
         about.rowconfigure(row, weight=1)
@@ -962,6 +991,10 @@ class LauncherApp:
         self.root.after(600, self._poll_status)
 
     # -- config ----------------------------------------------------------- #
+    def _saved_bool(self, key, default=False):
+        value = self.saved.get(key, default)
+        return bool(value) if isinstance(value, bool) else bool(default)
+
     def _restore(self):
         servers = self.saved.get("servers", {})
         for key, card in self.cards.items():
@@ -969,11 +1002,17 @@ class LauncherApp:
         ip = self.saved.get("ip")
         if ip and ip in netinfo.all_ipv4():
             self.ip_var.set(ip)
+        self.close_to_tray_var.set(
+            self._saved_bool("close_to_tray", self.close_to_tray_var.get()))
+        self.minimize_to_tray_var.set(
+            self._saved_bool("minimize_to_tray", self.minimize_to_tray_var.get()))
 
     def _save(self, pending_start=None, pending_cleanup=False,
               pending_firewall_allow=False):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
-                "ip": self.ip_var.get()}
+                "ip": self.ip_var.get(),
+                "close_to_tray": bool(self.close_to_tray_var.get()),
+                "minimize_to_tray": bool(self.minimize_to_tray_var.get())}
         if pending_start:
             data["pending_start"] = pending_start
         if pending_cleanup:
@@ -986,22 +1025,80 @@ class LauncherApp:
             pass
 
     def on_close(self):
+        self.exit_app(confirm=False)
+
+    def exit_app(self, confirm=True):
+        if confirm and not self._confirm_app_shutdown("Exit PS2 Servers?"):
+            return
+        self._shutdown_app()
+
+    def restart_app(self):
+        if not self._confirm_app_shutdown("Restart PS2 Servers?"):
+            return
+        self._save()
+        command = self._restart_command()
+        try:
+            subprocess.Popen(command, cwd=None if is_frozen() else REPO_ROOT)
+        except OSError as e:
+            messagebox.showerror("Restart failed", str(e))
+            return
+        self._shutdown_app()
+
+    def _restart_command(self):
+        if is_frozen():
+            return [frozen_self_exe()]
+        return [sys.executable, "-m", "launcher"]
+
+    def _confirm_app_shutdown(self, title):
+        running = [TAB_TITLES.get(key, key.upper())
+                   for key in self.procs if self.is_running(key)]
+        if not running:
+            return True
+        return messagebox.askyesno(
+            title,
+            "This will stop running servers:\n\n{}\n\nContinue?".format(
+                ", ".join(running)))
+
+    def _shutdown_app(self):
         self._save()
         # hide first so the (up to a few seconds of) child termination doesn't
         # look like a frozen window
         self.root.withdraw()
         self.stop_all()
+        if self._tray:
+            self._tray.stop()
         self.root.destroy()
 
     # -- system tray (Windows) -------------------------------------------- #
+    def _on_window_close(self):
+        if self._should_close_to_tray():
+            self._hide_to_tray()
+            return
+        self.exit_app(confirm=False)
+
+    def _should_close_to_tray(self):
+        return bool(self._tray and self.close_to_tray_var.get())
+
+    def _should_minimize_to_tray(self):
+        return bool(self._tray and self.minimize_to_tray_var.get())
+
+    def _update_tray_option_controls(self):
+        state = "normal" if self._tray else "disabled"
+        for widget in self._tray_option_widgets:
+            try:
+                widget.config(state=state)
+            except tk.TclError:
+                pass
+
     def _hide_to_tray(self):
         # closing the window just hides it; the servers keep running in the tray
         self._save()
         self.root.withdraw()
 
     def _on_unmap(self, event):
-        # minimizing also hides to the tray (off the taskbar)
-        if event.widget is self.root and self.root.state() == "iconic":
+        # minimizing can hide to the tray (off the taskbar) when enabled.
+        if (event.widget is self.root and self.root.state() == "iconic"
+                and self._should_minimize_to_tray()):
             self.root.withdraw()
 
     def _restore_from_tray(self):
@@ -1017,17 +1114,13 @@ class LauncherApp:
                 if action == "open":
                     self._restore_from_tray()
                 elif action == "quit":
-                    self._quit_from_tray()
+                    self.exit_app(confirm=False)
         except queue.Empty:
             pass
         self.root.after(150, self._drain_tray)
 
     def _quit_from_tray(self):
-        self._save()
-        self.stop_all()
-        if self._tray:
-            self._tray.stop()
-        self.root.destroy()
+        self.exit_app(confirm=False)
 
 
 def run_gui():
