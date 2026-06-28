@@ -232,8 +232,11 @@ def _apply_gui_review_fixes(gui):
 
     def bind_wrap(widget, offset=48):
         def update(event=None):
-            root_width = widget.winfo_toplevel().winfo_width()
-            set_wrap(widget, root_width - offset)
+            try:
+                root_width = widget.winfo_toplevel().winfo_width()
+                set_wrap(widget, root_width - offset)
+            except gui.tk.TclError:
+                pass
         widget.bind("<Configure>", update, add="+")
         widget.after_idle(update)
 
