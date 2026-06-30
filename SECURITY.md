@@ -93,7 +93,8 @@ Automatic releases (built on every push to `main`) include:
 
 - packaged Windows/Linux/macOS assets — for Windows the recommended download is
   the standalone **folder** build (the single-file `.exe` can trip antivirus
-  heuristics; the folder build comes up clean), plus a single-file build per OS;
+  heuristics; the folder build comes up clean), plus a single-file build per OS
+  and a standalone **folder** build for Linux (`PS2Servers-linux-x64-folder.tar.gz`);
 - a portable source ZIP;
 - `SHA256SUMS.txt` for release asset checksums;
 - GitHub artifact attestations for build provenance.
