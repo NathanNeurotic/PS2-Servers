@@ -13,12 +13,14 @@ plus a small **GUI launcher** so anyone can run them without touching a terminal
 The launcher lets you pick a server, choose your games folder, and click **Start**.
 It detects your PC's LAN IP and shows the exact settings to enter in OPL.
 
-- **Packaged app (no Python needed):** download the release for your OS. On
-  Windows, unzip `PS2Servers-windows-x64.zip` and double-click
-  **`PS2Servers.exe`**. If your antivirus flags the single file, use the
-  **folder** build instead (`PS2Servers-windows-x64-folder.zip` /
-  `PS2Servers-linux-x64-folder.tar.gz`) — the same app without the
-  self-extracting wrapper; unzip it and run the executable inside the folder.
+- **Packaged app (no Python needed):** download the release for your OS.
+  **On Windows, prefer the folder build** — unzip
+  `PS2Servers-windows-x64-folder.zip` and run **`PS2Servers.exe`** from inside
+  the folder. It is the same app, but without the self-extracting wrapper that
+  makes the single-file `.exe` trip antivirus heuristics, so it comes up clean.
+  A single-file `PS2Servers-windows-x64.zip` is still provided for convenience
+  if your AV doesn't object. (Linux: `PS2Servers-linux-x64`, or
+  `PS2Servers-linux-x64-folder.tar.gz` if `/tmp` is mounted `noexec`.)
 - **From source:** double-click **`Start-Launcher.bat`** (Windows) or run
   `./start-launcher.sh` (Linux/macOS). Requires Python 3.
 

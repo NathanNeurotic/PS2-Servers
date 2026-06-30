@@ -108,6 +108,7 @@ jobs:
           $packageDir = "PS2Servers-windows-x64"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path dist/PS2Servers.exe -Destination "$packageDir/PS2Servers.exe" -Force
+          Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
           if (Test-Path build/native) {
             Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
           }
@@ -164,6 +165,7 @@ jobs:
           $packageDir = "PS2Servers-windows-x64-folder"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path "$($dist.FullName)/*" -Destination $packageDir -Recurse -Force
+          Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
           if (Test-Path build/native) {
             Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
           }
@@ -176,6 +178,7 @@ jobs:
         run: |
           dist=$(ls -d dist/*.dist 2>/dev/null | head -1)
           test -n "$dist"
+          cp ANTIVIRUS-NOTICE.md "$dist/"
           ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/${{ matrix.folder_asset }}" "$(basename "$dist")" )
 
       - name: Generate folder artifact attestation
@@ -278,11 +281,12 @@ jobs:
 
             ## Downloads
 
-            Each platform has a single-file build and, for Windows/Linux, a
-            **folder** build (`*-folder.zip` / `*-folder.tar.gz`). The folder
-            build is the same app without the self-extracting wrapper that some
-            antivirus engines flag — unzip and run the executable inside the
-            folder. macOS ships as a standalone `.app` already.
+            **On Windows, download the folder build** (`PS2Servers-windows-x64-folder.zip`)
+            and run `PS2Servers.exe` from inside the folder — it is the same app
+            without the self-extracting wrapper that trips antivirus heuristics, so
+            it comes up clean. A single-file `PS2Servers-windows-x64.zip` is also
+            published for convenience. Linux: `PS2Servers-linux-x64` (or the
+            `-folder.tar.gz` build if `/tmp` is `noexec`). macOS ships as a `.app`.
 
             ## Security transparency
 

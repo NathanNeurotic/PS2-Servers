@@ -87,12 +87,12 @@
     <section class="section" id="download">
       <div class="container">
         <h2>Release assets built for normal humans.</h2>
-        <p class="section-intro">Automatic releases produce straightforward platform files: a single-file build per OS, plus — for Windows and Linux — a standalone <b>folder</b> build for anyone whose antivirus flags the self-extracting single file. macOS ships as architecture-specific app zips.</p>
+        <p class="section-intro"><b>On Windows, the folder build is the recommended download</b> — it is the same app without the self-extracting wrapper that makes the single-file <code>.exe</code> trip antivirus heuristics, so it comes up clean. A single-file build is also published per OS for convenience, and macOS ships as architecture-specific app zips.</p>
         <div class="terminal">
           <div class="terminal-bar"><span></span><span></span><span></span></div>
           <pre><b>release assets</b>
-PS2Servers-windows-x64.zip
-PS2Servers-windows-x64-folder.zip      # AV-friendly, no self-extractor
+PS2Servers-windows-x64-folder.zip      # recommended on Windows (AV-clean)
+PS2Servers-windows-x64.zip             # single-file convenience build
 PS2Servers-linux-x64
 PS2Servers-linux-x64-folder.tar.gz
 PS2Servers-macos-arm64.zip
