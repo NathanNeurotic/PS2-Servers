@@ -10,7 +10,7 @@
 # authored from MS-CIFS and Open-PS2-Loader's own cdvdman/smb.h -- no third-party code copied.
 #
 #   python smbserver_opl.py --share games=D:/PS2Games
-#   then in OPL: SMB IP = this PC's LAN IP, SMB Port = 1445 (the printed port), Share = games,
+#   then in OPL: SMB IP = this PC's LAN IP, SMB Port = 1111 (the printed port), Share = games,
 #   user/pass blank (guest). Read-only by default; pass --writable for VMC-on-SMB.
 #
 # License: same as the surrounding RiptOPL project.
@@ -853,8 +853,9 @@ def main(argv=None):
         description="Minimal SMBv1 server for Open-PS2-Loader (guest auth, custom port).")
     ap.add_argument("--share", action="append", default=[], metavar="NAME=PATH",
                     help="a share, e.g. --share games=D:/PS2Games (repeatable)")
-    ap.add_argument("--port", type=int, default=1445,
-                    help="TCP port (default 1445; set OPL's SMB Port to match)")
+    ap.add_argument("--port", type=int, default=1111,
+                    help="TCP port (default 1111; set OPL's SMB Port to match). "
+                         "Avoid ports below 1033 -- Windows can reserve/block them.")
     ap.add_argument("--bind", default="0.0.0.0", help="bind address (default all interfaces)")
     ap.add_argument("--read-only", action="store_true",
                     help="serve the share read-only (no saves / no VMC writes); default is writable")
@@ -882,6 +883,16 @@ def main(argv=None):
     if args.take_445:
         port = 445
         restore = _take_445()
+    elif port < 1 or port > 65535:
+        print("ERROR: port %d is out of the valid range (1-65535)." % port, file=sys.stderr)
+        return 2
+    elif port < 1033:
+        # Low ports overlap well-known/privileged ports and Windows reserved /
+        # excluded port ranges, which frequently block the bind. (--take-445
+        # deliberately uses 445 and is handled above.)
+        print(" WARNING: port %d is below 1033. Windows can reserve or block low "
+              "ports; if the bind fails or OPL cannot connect, use a higher port "
+              "such as the default 1111." % port)
 
     # Bind; if the chosen port is taken/reserved, walk forward and report the real one.
     lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

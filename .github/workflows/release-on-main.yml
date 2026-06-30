@@ -288,7 +288,7 @@ jobs:
 
             PS2 Servers is an open-source PS2 homebrew utility for user-controlled local server setup. It runs local LAN servers for Open PS2 Loader:
 
-            - SMBv1/RiptOPL: built-in SMB/CIFS subset, normally TCP port `1445`.
+            - SMBv1/RiptOPL: built-in SMB/CIFS subset, normally TCP port `1111` (below 1033 discouraged).
             - UDPFS: UDP file/block serving, normally UDP port `0xF5F6`.
             - UDPBD: UDP block-device serving, normally UDP port `0xBDBD`.
 

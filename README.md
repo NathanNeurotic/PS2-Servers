@@ -37,7 +37,8 @@ antivirus products may flag the packaged Windows EXE heuristically.
 
 The SMBv1/RiptOPL server does **not** enable Windows' built-in SMB1 optional
 feature tree. It speaks the OPL-compatible SMB1/CIFS subset itself and normally
-listens on custom TCP port `1445`; OPL connects to this program directly.
+listens on custom TCP port `1111`; OPL connects to this program directly. (Avoid
+ports below 1033 — Windows can reserve or block low ports.)
 
 Windows setup is intentionally narrow:
 
