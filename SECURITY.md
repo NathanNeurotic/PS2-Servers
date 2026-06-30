@@ -91,9 +91,9 @@ Release assets are built by GitHub Actions from this public repository.
 
 Automatic releases (built on every push to `main`) include:
 
-- packaged Windows/Linux/macOS assets — a single-file build per OS and, for
-  Windows and Linux, a standalone **folder** build for users whose antivirus
-  flags the self-extracting single file;
+- packaged Windows/Linux/macOS assets — for Windows the recommended download is
+  the standalone **folder** build (the single-file `.exe` can trip antivirus
+  heuristics; the folder build comes up clean), plus a single-file build per OS;
 - a portable source ZIP;
 - `SHA256SUMS.txt` for release asset checksums;
 - GitHub artifact attestations for build provenance.

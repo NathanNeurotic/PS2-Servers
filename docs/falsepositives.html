@@ -499,7 +499,7 @@
       <ul class="checks">
         <li>Automatic (main) releases include a <code>SHA256SUMS.txt</code> manifest.</li>
         <li>Tagged releases include a <code>&lt;asset&gt;.sha256.txt</code> file next to each download.</li>
-        <li>Windows and Linux also offer a standalone <strong>folder</strong> build (no self-extracting wrapper) as an antivirus-friendlier alternative download.</li>
+        <li>On Windows the recommended download is the standalone <strong>folder</strong> build (no self-extracting wrapper) — it comes up clean on antivirus where the single file does not. A single-file build is also published, and Linux offers a folder build too.</li>
       </ul>
       <p>
         Compare the file you downloaded against the value published on that
@@ -567,7 +567,7 @@
       </ol>
 
       <div class="callout">
-        If the single-file build is flagged, download the standalone <strong>folder</strong> build instead (<code>PS2Servers-windows-x64-folder.zip</code> / <code>PS2Servers-linux-x64-folder.tar.gz</code>): the same app with no self-extracting wrapper.
+        On Windows, prefer the standalone <strong>folder</strong> build (<code>PS2Servers-windows-x64-folder.zip</code>): the same app with no self-extracting wrapper, which comes up clean on antivirus. (<code>PS2Servers-linux-x64-folder.tar.gz</code> is the Linux equivalent.) The single-file build is the one heuristics flag.
       </div>
 
       <p>

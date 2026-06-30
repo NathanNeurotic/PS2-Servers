@@ -187,16 +187,14 @@ jobs:
 
           ## Downloads
 
-          | OS | Single file | Folder (AV-friendly alternative) |
+          | OS | Recommended | Also available |
           | --- | --- | --- |
-          | Windows x64 | \`PS2Servers-windows-x64.zip\` | \`PS2Servers-windows-x64-folder.zip\` |
-          | Linux x64 | \`PS2Servers-linux-x64\` | \`PS2Servers-linux-x64-folder.tar.gz\` |
-          | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` | — (already a folder/.app) |
-          | macOS — Intel | \`PS2Servers-macos-x64.zip\` | — (already a folder/.app) |
+          | Windows x64 | \`PS2Servers-windows-x64-folder.zip\` (folder, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |
+          | Linux x64 | \`PS2Servers-linux-x64\` | \`PS2Servers-linux-x64-folder.tar.gz\` (folder; use if /tmp is noexec) |
+          | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` | |
+          | macOS — Intel | \`PS2Servers-macos-x64.zip\` | |
 
-          Run it: Windows — unzip and double-click \`PS2Servers.exe\`. Linux — \`chmod +x PS2Servers-linux-x64\`, then run. macOS — unzip and right-click → Open (unsigned).
-
-          Most users want the single file. The **folder** build is the same app without the self-extracting wrapper that some antivirus engines flag — unzip it and run \`PS2Servers.exe\` (Windows) or \`PS2Servers\` (Linux) from inside the folder. It also helps on Linux systems that mount \`/tmp\` as \`noexec\` (where the single-file build cannot self-extract).
+          Run it: **Windows — unzip the folder build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the folder build comes up clean. Linux — \`chmod +x PS2Servers-linux-x64\`, then run. macOS — unzip and right-click → Open (unsigned).
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 

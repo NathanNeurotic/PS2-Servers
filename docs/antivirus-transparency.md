@@ -39,22 +39,25 @@ Characteristics that can trip heuristics:
   (with an internal `--serve` flag) so the embedded Python interpreter can run a
   server with no system Python installed. "Extract-then-run" and "launch a copy
   of myself" are generic packer/dropper heuristics. The **folder** download
-  (below) has no self-extraction step and is the AV-friendlier option.
+  (below) has no self-extraction step and is the recommended Windows download.
 - On Windows it may run a short, hidden PowerShell command to create firewall
   allow rules — but only after explicit user consent.
 
 None of these is malicious behavior; each is inherent to "an unsigned, bundled,
 local network tool."
 
-## Two download shapes (single file vs. folder)
+## Two download shapes (folder is recommended on Windows)
 
-Every platform offers a single-file build. Windows and Linux additionally offer a
-**folder** build (`PS2Servers-windows-x64-folder.zip` /
+**On Windows, the folder build is the recommended download.** Windows and Linux
+each ship a **folder** build (`PS2Servers-windows-x64-folder.zip` /
 `PS2Servers-linux-x64-folder.tar.gz`): the same application laid out as a plain
 folder of the executable plus its libraries, with **no self-extracting
-bootstrap**. If your antivirus flags the single file, download the folder build,
-unzip it, and run `PS2Servers.exe` (Windows) or `PS2Servers` (Linux) from inside
-the folder. macOS already ships as a standalone `.app`.
+bootstrap** — which is the thing that makes the single-file `.exe` trip
+antivirus/SmartScreen heuristics. The folder build comes up clean where the
+single file does not. Unzip it and run `PS2Servers.exe` (Windows) or
+`PS2Servers` (Linux) from inside the folder. A single-file build is also
+published per platform for convenience. macOS already ships as a standalone
+`.app`.
 
 ## Network behavior
 
