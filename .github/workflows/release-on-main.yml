@@ -137,7 +137,7 @@ jobs:
           subject-path: ${{ matrix.asset_name }}
 
       - name: Upload release asset artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
@@ -188,7 +188,7 @@ jobs:
       - name: Upload folder release asset artifact
         if: matrix.folder_asset != ''
         continue-on-error: true
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.folder_asset }}
           path: ${{ matrix.folder_asset }}
@@ -213,7 +213,7 @@ jobs:
           subject-path: PS2Servers-source.zip
 
       - name: Upload source artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: PS2Servers-source.zip
           path: PS2Servers-source.zip
