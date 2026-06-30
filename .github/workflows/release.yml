@@ -43,7 +43,7 @@ jobs:
       # Most jobs use setup-python. The macOS x86_64 cross-build instead needs a
       # universal2 interpreter (with universal Tcl/Tk) and must execute Python as
       # x86_64 so compiled dependencies like lz4 match the Intel artifact.
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         if: matrix.macos_arch != 'x86_64'
         with:
           python-version: "3.12"
