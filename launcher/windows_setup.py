@@ -39,6 +39,22 @@ def _hidden_subprocess_kwargs():
     }
 
 
+def _powershell_executable():
+    """Absolute path to the system Windows PowerShell.
+
+    Resolving the bare name ``powershell`` via PATH/CWD could run an
+    attacker-placed ``powershell.*`` from the current directory or an earlier
+    PATH entry (binary hijacking). Prefer the fixed system location; fall back to
+    the bare name only if that file is somehow absent. The packaged app is x64,
+    so System32 is not WOW64-redirected.
+    """
+    system_root = os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows"
+    candidate = os.path.join(
+        system_root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
+    )
+    return candidate if os.path.isfile(candidate) else "powershell"
+
+
 def _powershell(script):
     """Run a small hidden PowerShell script and return CompletedProcess.
 
@@ -46,11 +62,12 @@ def _powershell(script):
     ``-Command`` scripts, not ``.ps1`` files, so script-execution policy never
     applies to them. Omitting the flag keeps the invocation off the
     "hidden window + ExecutionPolicy Bypass" pattern that antivirus/EDR engines
-    weight heavily, with no change in behavior.
+    weight heavily, with no change in behavior. The interpreter is resolved by
+    absolute path to avoid PATH/CWD hijacking.
     """
     return subprocess.run(
         [
-            "powershell",
+            _powershell_executable(),
             "-NoProfile",
             "-NonInteractive",
             "-WindowStyle", "Hidden",

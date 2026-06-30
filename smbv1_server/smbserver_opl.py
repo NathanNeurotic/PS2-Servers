@@ -797,8 +797,17 @@ def _take_445():
     Reversible: we only Stop (never Disable), so a reboot self-heals even on a hard kill."""
     import subprocess
 
+    # Resolve PowerShell by absolute path so a stray powershell.* on PATH or in
+    # the current directory cannot be run instead (binary hijacking). Fall back
+    # to the bare name only if the system executable is somehow missing.
+    system_root = os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows"
+    powershell = os.path.join(system_root, "System32", "WindowsPowerShell",
+                              "v1.0", "powershell.exe")
+    if not os.path.isfile(powershell):
+        powershell = "powershell"
+
     def ps(cmd):
-        return subprocess.run(["powershell", "-NoProfile", "-Command", cmd],
+        return subprocess.run([powershell, "-NoProfile", "-Command", cmd],
                               capture_output=True, text=True)
 
     status = ps("(Get-Service LanmanServer).Status").stdout.strip()
