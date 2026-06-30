@@ -86,6 +86,11 @@ UDPFS can transparently decompress CHD/CSO/ZSO images. How that support is bundl
 in releases and provided in source mode is documented in
 [docs/optional-compression-dependencies.md](docs/optional-compression-dependencies.md).
 
+Want a UDPFS server without Python (handy on low‑end hardware, or to avoid antivirus
+false positives on packaged builds)? **[udpfsd](https://github.com/pcm720/udpfsd)** by
+pcm720 is a Go alternative — a single prebuilt binary with the same CHD/CSO/ZSO
+support. See [Credits & thanks](#credits--thanks).
+
 ## Run a server on its own (terminal)
 
 Each server still runs standalone, and the launcher can run them too:
@@ -185,6 +190,14 @@ work in something click‑and‑go. With genuine gratitude:
   [`udpbd_server/udpbd_server.py`](udpbd_server/udpbd_server.py) is our independent
   Python re‑implementation of his UDPBD v2 protocol. The network game‑loading here
   simply does not exist without his work — thank you.
+- **pcm720 — [@pcm720](https://github.com/pcm720)** — a core Neutrino contributor and
+  author of **[udpfsd](https://github.com/pcm720/udpfsd)**, a UDPFS server written in
+  Go. If you'd rather not run our Python UDPFS server — e.g. on a low‑end device, or
+  to sidestep the antivirus heuristics that hit unsigned packaged Python builds —
+  udpfsd is an excellent no‑Python alternative: one standalone binary, prebuilt for
+  Windows, macOS, and low‑end ARM/MIPS targets, with the same transparent CHD/CSO/ZSO
+  decompression. Thanks as well for generously taking the time to vet the
+  network‑boot docs. 🙏
 - **El_isra — [@israpps](https://github.com/israpps)** — maintains the canonical
   **[udpbd-server](https://github.com/israpps/udpbd-server)** on GitHub (Rick's code,
   with CI), which is the reference we ported from.
