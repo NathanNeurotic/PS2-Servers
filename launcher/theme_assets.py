@@ -5,11 +5,10 @@ import os
 import sys
 
 
+# Only the assets actually rendered by the GUI are registered here. The loader
+# (asset_path) returns None gracefully for any unknown/missing key, so adding a
+# new themed image is just a new entry plus the PNG under assets/theme/.
 THEME_ASSET_FILES = {
-    "BANNER": "BANNER.png",
-    "BACKGROUND": "BACKGROUND.png",
-    "ACCENT": "ACCENT.png",
-    "LINEBREAK": "LINEBREAK.png",
     "LOGO": "LOGO.png",
     "ICON_SMB": "ICON_SMB.png",
     "ICON_UDPFS": "ICON_UDPFS.png",

@@ -15,6 +15,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -26,20 +28,22 @@ jobs:
         include:
           - os: windows-latest
             asset: PS2Servers-windows-x64.zip
+            folder_asset: PS2Servers-windows-x64-folder.zip
           - os: ubuntu-latest
             asset: PS2Servers-linux-x64
+            folder_asset: PS2Servers-linux-x64-folder.tar.gz
           - os: macos-latest
             asset: PS2Servers-macos-arm64.zip
           - os: macos-latest
             asset: PS2Servers-macos-x64.zip
             macos_arch: x86_64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # Most jobs use setup-python. The macOS x86_64 cross-build instead needs a
       # universal2 interpreter (with universal Tcl/Tk) and must execute Python as
       # x86_64 so compiled dependencies like lz4 match the Intel artifact.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         if: matrix.macos_arch != 'x86_64'
         with:
           python-version: "3.12"
@@ -49,6 +53,7 @@ jobs:
         run: |
           sudo softwareupdate --install-rosetta --agree-to-license || true
           curl -sSLO https://www.python.org/ftp/python/3.12.7/python-3.12.7-macos11.pkg
+          echo "2ec2355c1b3225ce1075fc1b562a6e113017aa6177df87c410667638c1574a09  python-3.12.7-macos11.pkg" | shasum -a 256 -c -
           sudo installer -pkg python-3.12.7-macos11.pkg -target /
           PYBIN=/Library/Frameworks/Python.framework/Versions/3.12/bin
           sudo ln -sf "$PYBIN/python3" "$PYBIN/python"
@@ -127,6 +132,49 @@ jobs:
           checksum = asset.with_name(asset.name + ".sha256.txt")
           checksum.write_text(f"{digest}  {asset.name}\n", encoding="utf-8")
 
+      # Additional download for users whose antivirus flags the self-extracting
+      # onefile: a plain standalone folder (no extraction bootstrap). Built only
+      # for Windows/Linux (macOS already ships a standalone .app).
+      - name: Build standalone folder
+        if: matrix.folder_asset != ''
+        env:
+          PS2_BUILD_MODE: standalone
+        run: python build/build.py
+
+      - name: Stage Windows folder artifact
+        if: runner.os == 'Windows' && matrix.folder_asset != ''
+        shell: pwsh
+        run: |
+          $dist = Get-ChildItem dist -Directory -Filter *.dist | Select-Object -First 1
+          if (-not $dist) { throw "standalone .dist folder not found in dist/" }
+          $packageDir = "out/PS2Servers-windows-x64-folder"
+          New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+          Copy-Item -Path "$($dist.FullName)/*" -Destination $packageDir -Recurse -Force
+          if (Test-Path build/native) {
+            Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
+          }
+          Compress-Archive -Path $packageDir -DestinationPath "out/${{ matrix.folder_asset }}" -Force
+
+      - name: Stage Linux folder artifact
+        if: runner.os == 'Linux' && matrix.folder_asset != ''
+        shell: bash
+        run: |
+          dist=$(ls -d dist/*.dist 2>/dev/null | head -1)
+          test -n "$dist"
+          ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/out/${{ matrix.folder_asset }}" "$(basename "$dist")" )
+
+      - name: Write folder asset checksum
+        if: matrix.folder_asset != ''
+        shell: python
+        run: |
+          import hashlib
+          from pathlib import Path
+
+          asset = Path("out") / "${{ matrix.folder_asset }}"
+          digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+          checksum = asset.with_name(asset.name + ".sha256.txt")
+          checksum.write_text(f"{digest}  {asset.name}\n", encoding="utf-8")
+
       - name: Write release notes
         shell: bash
         run: |
@@ -135,14 +183,16 @@ jobs:
 
           ## Downloads
 
-          | OS | File |
-          | --- | --- |
-          | Windows x64 | \`PS2Servers-windows-x64.zip\` |
-          | Linux x64 | \`PS2Servers-linux-x64\` |
-          | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` |
-          | macOS — Intel | \`PS2Servers-macos-x64.zip\` |
+          | OS | Single file | Folder (AV-friendly alternative) |
+          | --- | --- | --- |
+          | Windows x64 | \`PS2Servers-windows-x64.zip\` | \`PS2Servers-windows-x64-folder.zip\` |
+          | Linux x64 | \`PS2Servers-linux-x64\` | \`PS2Servers-linux-x64-folder.tar.gz\` |
+          | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` | — (already a folder/.app) |
+          | macOS — Intel | \`PS2Servers-macos-x64.zip\` | — (already a folder/.app) |
 
           Run it: Windows — unzip and double-click \`PS2Servers.exe\`. Linux — \`chmod +x PS2Servers-linux-x64\`, then run. macOS — unzip and right-click → Open (unsigned).
+
+          Most users want the single file. The **folder** build is the same app without the self-extracting wrapper that some antivirus engines flag — unzip it and run \`PS2Servers.exe\` (Windows) or \`PS2Servers\` (Linux) from inside the folder. It also helps on Linux systems that mount \`/tmp\` as \`noexec\` (where the single-file build cannot self-extract).
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 
@@ -181,20 +231,50 @@ jobs:
           🤖 Built by GitHub Actions (Intel macOS cross-built on Apple Silicon).
           EOF
 
+      - name: Attest build provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: out/${{ matrix.asset }}
+
+      - name: Attest folder build provenance
+        if: matrix.folder_asset != ''
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: out/${{ matrix.folder_asset }}
+
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.asset }}
           path: |
             out/${{ matrix.asset }}
             out/${{ matrix.asset }}.sha256.txt
 
+      - name: Upload folder build artifact
+        if: matrix.folder_asset != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.folder_asset }}
+          path: |
+            out/${{ matrix.folder_asset }}
+            out/${{ matrix.folder_asset }}.sha256.txt
+
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: PS2 Servers ${{ github.ref_name }}
           body_path: out/release-notes.md
           files: |
             out/${{ matrix.asset }}
             out/${{ matrix.asset }}.sha256.txt
+
+      - name: Attach folder build to release
+        if: startsWith(github.ref, 'refs/tags/') && matrix.folder_asset != ''
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          name: PS2 Servers ${{ github.ref_name }}
+          body_path: out/release-notes.md
+          files: |
+            out/${{ matrix.folder_asset }}
+            out/${{ matrix.folder_asset }}.sha256.txt

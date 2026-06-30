@@ -91,16 +91,12 @@ you specifically need 445.
 
 ## Status / testing
 
-`selftest.py` is a raw SMB1 client that mimics OPL's exact wire sequence (share-level + plaintext
-guest, the `READ_ANDX` framing, `FIND_FIRST2` listing) and asserts the protocol byte-for-byte:
-
-```sh
-python selftest.py     # spins up the server on a scratch port + temp share, runs 28 checks
-```
-
-The protocol is validated locally against that harness. **Final validation is on real hardware**
-(an actual PS2 running OPL, or PCSX2 with a network adapter) — booting an ISO over the share and
-browsing the menu. If you hit an issue there, run the server with `-v` and capture the output.
+This SMBv1 server is validated by use against Open PS2 Loader. **Final validation is on
+real hardware** (an actual PS2 running OPL, or PCSX2 with a network adapter) — booting an
+ISO over the share and browsing the menu. There is no standalone protocol self-test in this
+folder; the repo's automated self-test harness covers the UDPBD server
+(`udpbd_server/selftest.py`, run in CI). If you hit an issue, start the server with `-v` and
+capture the output when you open a report.
 
 ## Optional: build a single `.exe`
 

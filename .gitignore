@@ -11,6 +11,8 @@ env/
 *.dist/
 *.onefile-build/
 /dist/
+# Icon generated at build time by build/build.py (app_icon.write_ico)
+build/PS2Servers.ico
 
 # OS cruft
 Thumbs.db

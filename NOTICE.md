@@ -52,9 +52,13 @@ reference repository is maintained by El_isra:
   this repository does not redistribute its source code in the Python UDPBD
   implementation.
 
-A legacy `udpbd-server.exe` binary may exist in historical/source trees as a
-fallback artifact. The launcher uses the Python UDPBD implementation, not that
-legacy binary.
+A legacy `udpbd-server.exe` Windows binary (Alex Parrado's build of the upstream
+project) was previously vendored in this repository but was never used by the
+launcher. It has been removed so the source tree carries no unsigned third-party
+executables; the launcher uses only the pure-Python UDPBD implementation. The
+native build remains available upstream at
+https://github.com/israpps/udpbd-server for anyone who wants it. It may still
+appear in older git history or release source archives.
 
 ### pyudpbd
 
@@ -103,6 +107,26 @@ affiliated with, sponsored by, or endorsed by Sony Interactive Entertainment.
 
 User-supplied project artwork and PS2-themed UI assets are project assets unless
 otherwise noted in the file, pull request, or release notes.
+
+## Responsible use and disclaimer
+
+PS2 Servers is a general-purpose local file server for PlayStation 2 homebrew. It
+ships no games and no copyrighted content, and only serves files the user points
+it at. Users are solely responsible for ensuring they have the legal right to use,
+copy, and serve any games, disc images, saves, or other content, and for complying
+with the laws of their jurisdiction. The project does not condone or facilitate
+copyright infringement; the intended use is with homebrew and backups of media the
+user legally owns.
+
+The servers are unauthenticated (guest) and intended for trusted home LANs, not
+the public internet. Writable modes allow the PlayStation 2 to write to the shared
+folders and disc images (saves, VMC) — keep backups.
+
+The software is provided **"as is", without warranty of any kind**, and the
+authors' liability is limited, as set out in the Academic Free License 3.0
+(`LICENSE`, section 7 "Disclaimer of Warranty" and section 8 "Limitation of
+Liability"). Use is at your own risk. See also the "Legal & responsible use"
+section of the [README](README.md).
 
 ## Corrections
 

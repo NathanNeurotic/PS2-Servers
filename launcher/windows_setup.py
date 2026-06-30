@@ -40,14 +40,20 @@ def _hidden_subprocess_kwargs():
 
 
 def _powershell(script):
-    """Run a small hidden PowerShell script and return CompletedProcess."""
+    """Run a small hidden PowerShell script and return CompletedProcess.
+
+    We deliberately do NOT pass ``-ExecutionPolicy Bypass``: these are inline
+    ``-Command`` scripts, not ``.ps1`` files, so script-execution policy never
+    applies to them. Omitting the flag keeps the invocation off the
+    "hidden window + ExecutionPolicy Bypass" pattern that antivirus/EDR engines
+    weight heavily, with no change in behavior.
+    """
     return subprocess.run(
         [
             "powershell",
             "-NoProfile",
             "-NonInteractive",
             "-WindowStyle", "Hidden",
-            "-ExecutionPolicy", "Bypass",
             "-Command", script,
         ],
         capture_output=True,
