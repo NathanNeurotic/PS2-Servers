@@ -20,6 +20,7 @@
         <a href="#servers">Servers</a>
         <a href="#quickstart">Quick start</a>
         <a href="#download">Download</a>
+        <a href="falsepositives.html">Antivirus</a>
         <a href="https://github.com/NathanNeurotic/PS2-Servers">GitHub</a>
       </nav>
     </div>
@@ -86,21 +87,24 @@
     <section class="section" id="download">
       <div class="container">
         <h2>Release assets built for normal humans.</h2>
-        <p class="section-intro">Automatic releases produce straightforward platform files: Windows as a zip with the app and native support files, Linux as a raw executable, and macOS as architecture-specific app zips.</p>
+        <p class="section-intro">Automatic releases produce straightforward platform files: a single-file build per OS, plus — for Windows and Linux — a standalone <b>folder</b> build for anyone whose antivirus flags the self-extracting single file. macOS ships as architecture-specific app zips.</p>
         <div class="terminal">
           <div class="terminal-bar"><span></span><span></span><span></span></div>
           <pre><b>release assets</b>
 PS2Servers-windows-x64.zip
+PS2Servers-windows-x64-folder.zip      # AV-friendly, no self-extractor
 PS2Servers-linux-x64
+PS2Servers-linux-x64-folder.tar.gz
 PS2Servers-macos-arm64.zip
 PS2Servers-macos-x64.zip
 
 <b>from source</b>
-python -m pip install nuitka
+python -m pip install -r requirements-build.txt
 python build/build.py</pre>
         </div>
         <div class="cta-row">
           <a class="btn" href="https://github.com/NathanNeurotic/PS2-Servers/releases/latest">Latest release</a>
+          <a class="btn secondary" href="falsepositives.html">Antivirus statement</a>
           <a class="btn secondary" href="https://github.com/NathanNeurotic/PS2-Servers/issues">Report an issue</a>
         </div>
       </div>

@@ -86,13 +86,19 @@ Get-NetFirewallRule -DisplayName "PS2 Servers - *" -ErrorAction SilentlyContinue
 
 ## Release verification
 
-Release assets are built by GitHub Actions from this public repository. Releases
-include:
+Release assets are built by GitHub Actions from this public repository.
 
-- packaged Windows/Linux/macOS assets;
+Automatic releases (built on every push to `main`) include:
+
+- packaged Windows/Linux/macOS assets — a single-file build per OS and, for
+  Windows and Linux, a standalone **folder** build for users whose antivirus
+  flags the self-extracting single file;
 - a portable source ZIP;
 - `SHA256SUMS.txt` for release asset checksums;
 - GitHub artifact attestations for build provenance.
+
+Tagged `vX.Y.Z` releases include a per-asset `<asset>.sha256.txt` checksum file
+for each asset, plus GitHub artifact attestations.
 
 GitHub artifact attestations can be verified with the GitHub CLI. Example:
 
@@ -127,5 +133,10 @@ For malware or antivirus false-positive reports, include:
 - the detecting product name and version;
 - the full detection name;
 - a VirusTotal or vendor report link if available.
+
+You can (and should) also report the false positive directly to your antivirus
+vendor — the official per-vendor submission portals are listed in
+[docs/antivirus-transparency.md](docs/antivirus-transparency.md#reporting-a-false-positive-to-your-antivirus-vendor).
+Vendor reports are what actually clear a detection for everyone.
 
 Do not upload third-party private samples or user data to the issue tracker.

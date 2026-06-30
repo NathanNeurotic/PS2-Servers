@@ -113,7 +113,13 @@ def main():
         "modification, or crypto-mining behavior",
     )
 
-    for rel in ("launcher/windows_setup.py", "launcher/gui.py"):
+    # smbserver_opl.py is included because the real port-445 / LanmanServer logic
+    # lives there: it must never enable Windows SMB1 or any optional feature.
+    for rel in (
+        "launcher/windows_setup.py",
+        "launcher/gui.py",
+        "smbv1_server/smbserver_opl.py",
+    ):
         errors += require_absent(
             rel,
             "Enable-WindowsOptionalFeature",

@@ -230,8 +230,9 @@ UDPFS = ServerDef(
     _build_argv=_udpfs_argv,
 )
 
-# Pure-Python port (udpbd_server/udpbd_server.py). Cross-platform; the legacy
-# Windows udpbd-server.exe is kept in the repo only as a fallback and is not used.
+# Pure-Python port (udpbd_server/udpbd_server.py). Cross-platform; this is the
+# only UDPBD implementation the launcher uses. A legacy Windows udpbd-server.exe
+# was never wired in and is no longer vendored -- see udpbd_server/SOURCE.md.
 UDPBD = ServerDef(
     key="udpbd",
     label="UDPBD server",

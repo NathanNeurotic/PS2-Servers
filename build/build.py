@@ -8,6 +8,16 @@ Produces dist/PS2Servers (.exe on Windows) that bundles the Tkinter launcher and
 all three Python servers, so an end user needs no Python install -- they double
 click one file.
 
+Packaging mode (Windows/Linux) is controlled by the PS2_BUILD_MODE env var:
+
+    PS2_BUILD_MODE=onefile     (default) a single self-extracting executable
+    PS2_BUILD_MODE=standalone  a plain folder of the exe + its libraries
+
+The standalone folder has no self-extraction bootstrap, which antivirus and
+SmartScreen heuristics flag far less often, so releases publish it as an
+alternative download for users whose AV trips on the onefile. macOS always
+builds a standalone .app bundle (a Tkinter GUI needs one to show its window).
+
 How the bundling works
 ----------------------
 The launcher loads each server module *by file path at runtime* (see
@@ -80,6 +90,8 @@ def main():
     for pkg in INCLUDE_PACKAGES:
         cmd.append("--include-package=" + pkg)
 
+    build_mode = os.environ.get("PS2_BUILD_MODE", "onefile").strip().lower()
+
     if system == "Darwin":
         # a Tkinter GUI needs a .app bundle on macOS, or its window opens in the
         # background with no dock / menu-bar presence. CI zips the .app for release.
@@ -90,6 +102,10 @@ def main():
         arch = os.environ.get("MACOS_TARGET_ARCH")
         if arch:
             cmd.append("--macos-target-arch=" + arch)
+    elif build_mode == "standalone":
+        # A plain folder (dist/ps2servers.dist/) of the exe + libraries. No
+        # self-extraction bootstrap -> softer on AV/SmartScreen heuristics.
+        cmd.append("--standalone")
     else:
         cmd.append("--onefile")
 

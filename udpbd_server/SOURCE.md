@@ -21,9 +21,14 @@ their code.
 
 - `udpbd_server.py` — the server (standard library only). CLI: `udpbd_server.py <image>`.
 - `selftest.py` — protocol self-test (no PS2 needed): `python selftest.py`.
-- `udpbd-server.exe` — the legacy Windows binary (Alex Parrado's build). Kept as a
-  fallback only; **not used** by the launcher. Note it is device-oriented and does
-  not serve plain image files well on Windows — the reason for the Python port.
+
+The launcher uses **only** the pure-Python server above. A legacy Windows
+`udpbd-server.exe` (Alex Parrado's build) was previously vendored here but was
+never used by the launcher and has been removed to keep the repository free of
+unsigned third-party binaries. If you specifically want that native build, it
+remains available upstream at https://github.com/israpps/udpbd-server (note it is
+device-oriented and does not serve plain image files well on Windows — the reason
+for the Python port).
 
 ## Verify
 

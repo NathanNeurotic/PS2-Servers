@@ -475,12 +475,13 @@
 
       <nav aria-label="Page sections">
         <ul>
-          <li><a href="#files">Reviewed files</a></li>
+          <li><a href="#files">Release files</a></li>
           <li><a href="#does">What it does</a></li>
           <li><a href="#does-not">What it does not do</a></li>
           <li><a href="#why">Why detections happen</a></li>
           <li><a href="#detections">Detection responses</a></li>
           <li><a href="#verification">Verification</a></li>
+          <li><a href="#report">Report a false positive</a></li>
           <li><a href="#position">Current position</a></li>
         </ul>
       </nav>
@@ -489,21 +490,21 @@
 
   <main class="wrap">
     <section id="files">
-      <h2>Current reviewed release files</h2>
+      <h2>Release files and their hashes</h2>
       <p>
-        These hashes identify the current files discussed in this statement.
+        Release artifacts are rebuilt for every release, so this page deliberately
+        does not hard-code a hash that would silently go stale. The authoritative
+        SHA-256 for every asset is published <em>with each release</em>:
       </p>
-
-      <div class="hash-grid">
-        <div class="hash-item">
-          <strong>PS2Servers.exe</strong>
-          <code>75a1bc596fefc422a1b89520369c4cc088aba40c2062b279d9e4b88c31b8150c</code>
-        </div>
-        <div class="hash-item">
-          <strong>PS2Servers-windows-x64.zip</strong>
-          <code>d39705ae53ae0163c661bdd8e5c39c84f568eaa6d4ec30f8429a88a023fc1d66</code>
-        </div>
-      </div>
+      <ul class="checks">
+        <li>Automatic (main) releases include a <code>SHA256SUMS.txt</code> manifest.</li>
+        <li>Tagged releases include a <code>&lt;asset&gt;.sha256.txt</code> file next to each download.</li>
+        <li>Windows and Linux also offer a standalone <strong>folder</strong> build (no self-extracting wrapper) as an antivirus-friendlier alternative download.</li>
+      </ul>
+      <p>
+        Compare the file you downloaded against the value published on that
+        release's page — see <a href="#verification">Verification</a> below.
+      </p>
     </section>
 
     <section id="does">
@@ -558,11 +559,16 @@
       <ol>
         <li>It is unsigned.</li>
         <li>It is distributed as a small independent project.</li>
-        <li>It starts local network services by design.</li>
-        <li>It may request firewall-rule changes after user consent.</li>
+        <li>It starts local network services by design, including UDP broadcast for PS2 auto-discovery.</li>
+        <li>It may request firewall-rule changes after user consent, via a short hidden PowerShell command (without <code>-ExecutionPolicy Bypass</code>).</li>
         <li>It includes bundled runtime/application content.</li>
+        <li>The single-file build self-extracts to a temporary folder on launch and re-executes itself to run a server with the embedded interpreter — a generic packer/dropper heuristic. The <strong>folder</strong> download avoids this self-extraction step.</li>
         <li>It is not yet a widely reputation-established Windows binary.</li>
       </ol>
+
+      <div class="callout">
+        If the single-file build is flagged, download the standalone <strong>folder</strong> build instead (<code>PS2Servers-windows-x64-folder.zip</code> / <code>PS2Servers-linux-x64-folder.tar.gz</code>): the same app with no self-extracting wrapper.
+      </div>
 
       <p>
         These factors can trigger generic labels such as <code>Trojan.Generic</code>, <code>Malware.AI</code>, <code>Suspicious</code>, <code>Evo-gen</code>, <code>Susgen</code>, <code>Riskware</code>, or similar names. Those names are not necessarily specific claims that the file belongs to a known malware family. In many cases, they indicate a generic, heuristic, AI/ML, reputation, or suspicious-behavior classification.
@@ -584,10 +590,6 @@
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td><code>[Vendor / label: paste exact detection here]</code></td>
-              <td>This appears to be a generic or heuristic detection. The project is open source, the release hash is published, and the program’s network behavior is documented. The detection has been or will be submitted to the vendor for false-positive review.</td>
-            </tr>
             <tr>
               <td>Generic Trojan / Trojan.Generic / Trojan.Win32.Generic</td>
               <td>This is a broad classification and does not identify a specific malicious behavior in PS2 Servers. The app’s server behavior is intentional and limited to user-selected local PS2 homebrew file serving.</td>
@@ -636,15 +638,43 @@
       </ol>
 
       <h3>PowerShell hash verification</h3>
-      <pre><code>Get-FileHash .\PS2Servers-windows-x64.zip -Algorithm SHA256
-Get-FileHash .\PS2Servers.exe -Algorithm SHA256</code></pre>
+      <pre><code>Get-FileHash .\PS2Servers-windows-x64.zip -Algorithm SHA256</code></pre>
 
-      <h3>Expected current hashes</h3>
-      <pre><code>PS2Servers-windows-x64.zip
-d39705ae53ae0163c661bdd8e5c39c84f568eaa6d4ec30f8429a88a023fc1d66
+      <h3>Where to find the expected hash</h3>
+      <p>
+        Do not trust a hash printed on this page. Compare your download against the
+        checksum published <strong>on the release you downloaded</strong>:
+        <code>SHA256SUMS.txt</code> (automatic/main releases) or the per-asset
+        <code>&lt;asset&gt;.sha256.txt</code> file (tagged releases). On a main
+        release you can also verify build provenance with the GitHub CLI:
+      </p>
+      <pre><code>gh attestation verify PS2Servers-windows-x64.zip -R NathanNeurotic/PS2-Servers</code></pre>
+    </section>
 
-PS2Servers.exe
-75a1bc596fefc422a1b89520369c4cc088aba40c2062b279d9e4b88c31b8150c</code></pre>
+    <section id="report">
+      <h2>Report a false positive to your vendor</h2>
+      <p>
+        Vendor reports are what actually clear a detection for everyone. Record the
+        SHA-256 of your download (above), then submit it to the detecting vendor's
+        official false-positive form. Links can change — if one moves, search the
+        vendor's site for "false positive" or "sample submission".
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Vendor</th><th>Submission portal</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Microsoft Defender / SmartScreen</td><td><a href="https://www.microsoft.com/en-us/wdsi/filesubmission">microsoft.com/en-us/wdsi/filesubmission</a></td></tr>
+            <tr><td>Avast / AVG (Gen)</td><td><a href="https://www.avast.com/false-positive-file-form.php">avast.com/false-positive-file-form.php</a></td></tr>
+            <tr><td>Bitdefender</td><td><a href="https://www.bitdefender.com/consumer/support/answer/29358/">bitdefender.com consumer false-positive form</a></td></tr>
+            <tr><td>Kaspersky</td><td><a href="https://opentip.kaspersky.com/">opentip.kaspersky.com</a></td></tr>
+            <tr><td>ESET</td><td><a href="https://support.eset.com/en/kb141">support.eset.com sample submission</a></td></tr>
+            <tr><td>Malwarebytes</td><td><a href="https://www.malwarebytes.com/false-positive">malwarebytes.com/false-positive</a></td></tr>
+            <tr><td>Any / multi-engine</td><td><a href="https://www.virustotal.com">virustotal.com</a> — paste the SHA-256 or upload the file</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section id="position">
@@ -662,7 +692,10 @@ PS2Servers.exe
       </p>
 
       <div class="footer">
-        Last updated: 2026-06-28. This page may be updated as antivirus vendor reviews and release packaging change.
+        This statement is maintained in the project repository
+        (<code>docs/falsepositives.html</code>); its change history and last-updated
+        date are visible in the Git log. It may be updated as antivirus vendor
+        reviews and release packaging change.
       </div>
     </section>
   </main>
