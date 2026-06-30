@@ -137,12 +137,14 @@ jobs:
       # for Windows/Linux (macOS already ships a standalone .app).
       - name: Build standalone folder
         if: matrix.folder_asset != ''
+        continue-on-error: true
         env:
           PS2_BUILD_MODE: standalone
         run: python build/build.py
 
       - name: Stage Windows folder artifact
         if: runner.os == 'Windows' && matrix.folder_asset != ''
+        continue-on-error: true
         shell: pwsh
         run: |
           $dist = Get-ChildItem dist -Directory -Filter *.dist | Select-Object -First 1
@@ -157,6 +159,7 @@ jobs:
 
       - name: Stage Linux folder artifact
         if: runner.os == 'Linux' && matrix.folder_asset != ''
+        continue-on-error: true
         shell: bash
         run: |
           dist=$(ls -d dist/*.dist 2>/dev/null | head -1)
@@ -165,6 +168,7 @@ jobs:
 
       - name: Write folder asset checksum
         if: matrix.folder_asset != ''
+        continue-on-error: true
         shell: python
         run: |
           import hashlib
@@ -238,6 +242,7 @@ jobs:
 
       - name: Attest folder build provenance
         if: matrix.folder_asset != ''
+        continue-on-error: true
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: out/${{ matrix.folder_asset }}
@@ -252,6 +257,7 @@ jobs:
 
       - name: Upload folder build artifact
         if: matrix.folder_asset != ''
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.folder_asset }}
@@ -271,6 +277,7 @@ jobs:
 
       - name: Attach folder build to release
         if: startsWith(github.ref, 'refs/tags/') && matrix.folder_asset != ''
+        continue-on-error: true
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: PS2 Servers ${{ github.ref_name }}

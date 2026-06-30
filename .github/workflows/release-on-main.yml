@@ -149,12 +149,14 @@ jobs:
       # standalone .app.
       - name: Build standalone folder
         if: matrix.folder_asset != ''
+        continue-on-error: true
         env:
           PS2_BUILD_MODE: standalone
         run: python build/build.py
 
       - name: Package Windows folder build
         if: runner.os == 'Windows' && matrix.folder_asset != ''
+        continue-on-error: true
         shell: pwsh
         run: |
           $dist = Get-ChildItem dist -Directory -Filter *.dist | Select-Object -First 1
@@ -169,6 +171,7 @@ jobs:
 
       - name: Package Linux folder build
         if: runner.os == 'Linux' && matrix.folder_asset != ''
+        continue-on-error: true
         shell: bash
         run: |
           dist=$(ls -d dist/*.dist 2>/dev/null | head -1)
@@ -177,12 +180,14 @@ jobs:
 
       - name: Generate folder artifact attestation
         if: matrix.folder_asset != ''
+        continue-on-error: true
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: ${{ matrix.folder_asset }}
 
       - name: Upload folder release asset artifact
         if: matrix.folder_asset != ''
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.folder_asset }}
