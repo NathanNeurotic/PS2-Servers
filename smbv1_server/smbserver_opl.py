@@ -883,6 +883,9 @@ def main(argv=None):
     if args.take_445:
         port = 445
         restore = _take_445()
+    elif port < 1 or port > 65535:
+        print("ERROR: port %d is out of the valid range (1-65535)." % port, file=sys.stderr)
+        return 2
     elif port < 1033:
         # Low ports overlap well-known/privileged ports and Windows reserved /
         # excluded port ranges, which frequently block the bind. (--take-445
