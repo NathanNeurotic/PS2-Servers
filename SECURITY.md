@@ -42,7 +42,8 @@ The SMBv1/RiptOPL server does **not** enable or depend on Windows' built-in SMB1
 optional feature tree.
 
 Normal SMB mode uses PS2 Servers' own small SMB/CIFS implementation and listens
-on a custom TCP port, normally `1445`. OPL connects to this program directly.
+on a custom TCP port, by default `1111` (ports below 1033 are discouraged, as
+Windows can reserve or block low ports). OPL connects to this program directly.
 Windows file sharing does not need to expose SMB1.
 
 The advanced "Take port 445" option is different:

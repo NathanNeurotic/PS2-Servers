@@ -47,7 +47,7 @@ What it runs
 
 How SMB mode works
 
-Normal SMB mode listens on a custom TCP port, usually 1445. OPL connects directly to PS2 Servers at that port and share name. PS2 Servers speaks the small SMB/CIFS subset that OPL expects.
+Normal SMB mode listens on a custom TCP port, by default 1111. OPL connects directly to PS2 Servers at that port and share name. PS2 Servers speaks the small SMB/CIFS subset that OPL expects. Avoid ports below 1033 -- Windows can reserve or block low ports.
 
 That means normal SMB mode does not need Windows File Sharing, does not need Windows SMB1 enabled, and does not expose your normal Windows shares through SMB1.
 
@@ -110,7 +110,7 @@ TAB_TITLES = {
 
 def opl_hint(key, ip, values):
     if key == "smbv1":
-        port = "445" if values.get("take_445") else str(values.get("port") or 1445)
+        port = "445" if values.get("take_445") else str(values.get("port") or 1111)
         return ("In OPL → Network:  IP {}  ·  Port {}  ·  Share 'games'  "
                 "·  NetBIOS off  ·  user/pass blank".format(ip, port))
     if key == "udpfs":

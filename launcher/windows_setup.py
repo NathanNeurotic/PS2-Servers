@@ -109,7 +109,7 @@ def _parse_port(value, default):
 def _server_ports(key, values):
     """Return [(protocol, port, purpose), ...] for fixed inbound ports."""
     if key == "smbv1":
-        port = 445 if values.get("take_445") else _parse_port(values.get("port"), 1445)
+        port = 445 if values.get("take_445") else _parse_port(values.get("port"), 1111)
         return [("TCP", port, "SMBv1")]
     if key == "udpfs":
         return [("UDP", _parse_port(values.get("port"), 0xF5F6), "UDPFS discovery")]

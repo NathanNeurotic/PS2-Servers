@@ -184,15 +184,16 @@ SMBV1 = ServerDef(
     blurb="Share a games folder over SMB. Works even on Windows 11 where the OS "
     "removed SMB1.",
     runtime="python",
-    default_port=1445,
+    default_port=1111,
     share_hint="games",
     module_file=_repo("smbv1_server", "smbserver_opl.py"),
     module_dir=_repo("smbv1_server"),
     fields=[
         Field("games_folder", "Games folder", "folder", required=True,
               help="Folder of PS2 games/apps to share."),
-        Field("port", "Port", "port", default=1445, advanced=True,
-              help="TCP port (default 1445)."),
+        Field("port", "Port", "port", default=1111, advanced=True,
+              help="TCP port (default 1111). Avoid ports below 1033 -- Windows can "
+              "reserve or block low ports."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True,
               help="No saves / no VMC writes."),
         Field("take_445", "Take port 445 (admin)", "bool", default=False, advanced=True,

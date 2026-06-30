@@ -61,7 +61,7 @@ the folder. macOS already ships as a standalone `.app`.
 PS2 Servers only exposes local server behavior that the user chooses from the
 GUI:
 
-- SMBv1/RiptOPL: built-in SMB/CIFS subset, normally TCP port 1445.
+- SMBv1/RiptOPL: built-in SMB/CIFS subset, normally TCP port 1111. (Ports below 1033 are discouraged — Windows can reserve or block low ports.)
 - UDPFS: UDP file/block serving, normally UDP port 0xF5F6.
 - UDPBD: UDP block-device serving, normally UDP port 0xBDBD.
 
