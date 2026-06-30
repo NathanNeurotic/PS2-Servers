@@ -105,6 +105,7 @@ jobs:
           $packageDir = "out/PS2Servers-windows-x64"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path dist/PS2Servers.exe -Destination "$packageDir/PS2Servers.exe" -Force
+          Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
           if (Test-Path build/native) {
             Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
           }
@@ -152,6 +153,7 @@ jobs:
           $packageDir = "out/PS2Servers-windows-x64-folder"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path "$($dist.FullName)/*" -Destination $packageDir -Recurse -Force
+          Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
           if (Test-Path build/native) {
             Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
           }
@@ -164,6 +166,7 @@ jobs:
         run: |
           dist=$(ls -d dist/*.dist 2>/dev/null | head -1)
           test -n "$dist"
+          cp ANTIVIRUS-NOTICE.md "$dist/"
           ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/out/${{ matrix.folder_asset }}" "$(basename "$dist")" )
 
       - name: Write folder asset checksum
