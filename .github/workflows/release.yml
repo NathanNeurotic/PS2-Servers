@@ -267,7 +267,7 @@ jobs:
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           name: PS2 Servers ${{ github.ref_name }}
           body_path: out/release-notes.md
@@ -278,7 +278,7 @@ jobs:
       - name: Attach folder build to release
         if: startsWith(github.ref, 'refs/tags/') && matrix.folder_asset != ''
         continue-on-error: true
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           name: PS2 Servers ${{ github.ref_name }}
           body_path: out/release-notes.md
