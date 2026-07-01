@@ -100,10 +100,10 @@ FIO_S_IFDIR = 0x1000
 
 # Limits
 MAX_DATA_PAYLOAD = 1408  # Maximum UDPRDMA payload
-MAX_HANDLES = 32
+MAX_HANDLES = 64  # open handles per client (matches udpfsd; was 32 originally)
 
 # Multi-client session management
-SESSION_TIMEOUT = 30.0           # seconds of peer inactivity before reaping a session
+SESSION_TIMEOUT = 300.0          # default seconds of peer inactivity before reaping (see --peer-timeout)
 SESSION_SWEEP_INTERVAL = 5.0     # how often the demux loop checks for idle sessions
 HAS_PREAD = hasattr(os, 'pread')     # POSIX: lock-free positional block-device reads
 HAS_PWRITE = hasattr(os, 'pwrite')
@@ -309,7 +309,10 @@ class UdpfsServer:
                  sector_size: int = 512,
                  read_only: bool = False, verbose: bool = False,
                  enable_compression: bool = False,
-                 compression_cache_size: int = 32):
+                 compression_cache_size: int = 32,
+                 peer_timeout: float = SESSION_TIMEOUT,
+                 metrics: bool = False,
+                 metrics_period: float = 60.0):
         self.root_dir = os.path.realpath(root_dir) if root_dir else None
         self.port = port
         self.bind_ip = bind_ip
@@ -318,6 +321,10 @@ class UdpfsServer:
         self.verbose = verbose
         self.enable_compression = enable_compression
         self.compression_cache_size = compression_cache_size
+        self.session_timeout = peer_timeout
+        self.metrics = metrics
+        self.metrics_period = metrics_period
+        self._last_metrics = time.monotonic()
 
         if self.root_dir and not os.path.isdir(self.root_dir):
             print(f"Error: '{root_dir}' is not a directory")
@@ -469,9 +476,27 @@ class UdpfsServer:
         self._last_sweep = now
         with self.sessions_lock:
             idle = [a for a, s in self.sessions.items()
-                    if now - s.last_activity > SESSION_TIMEOUT]
+                    if now - s.last_activity > self.session_timeout]
             for a in idle:
                 self.sessions.pop(a).shutdown()
+
+    def _emit_metrics(self):
+        """Periodically log transfer/op stats when --metrics is enabled."""
+        if not self.metrics:
+            return
+        now = time.monotonic()
+        if now - self._last_metrics < self.metrics_period:
+            return
+        self._last_metrics = now
+        with self.sessions_lock:
+            nclients = len(self.sessions)
+        s = self.stats
+        self._print_event(
+            "[metrics] clients=%d read=%s written=%s "
+            "ops(open=%d read=%d bread=%d write=%d bwrite=%d dread=%d)" % (
+                nclients, self._format_bytes(s['bytes_read']),
+                self._format_bytes(s['bytes_written']),
+                s['open'], s['read'], s['bread'], s['write'], s['bwrite'], s['dread']))
 
     def _shutdown_all_sessions(self):
         self._shutdown = True
@@ -525,6 +550,7 @@ class UdpfsServer:
                         except BlockingIOError:
                             pass
                 self._sweep_idle_sessions()
+                self._emit_metrics()
             except KeyboardInterrupt:
                 if self._status_visible:
                     sys.stdout.write(f"\r{'':<79}\r")
@@ -1960,59 +1986,82 @@ class Session:
         self.handles.clear()
 
 
+def _env_bool(name, default=False):
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _env_int(name, default):
+    v = os.environ.get(name)
+    return int(v, 0) if v else default
+
+
+def _env_float(name, default):
+    v = os.environ.get(name)
+    return float(v) if v else default
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='UDPFS Server - Unified file and block device server over UDPRDMA',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
+    # Every option also reads an environment variable (container-friendly, like
+    # udpfsd); the CLI flag overrides the env var, which overrides the default.
     parser.add_argument(
-        '--block-device', '-b',
-        help='Block device or disk image to serve as handle 0'
+        '--block-device', '-b', default=os.environ.get('BDPATH'),
+        help='Block device or disk image to serve as handle 0 (env: BDPATH)'
     )
     parser.add_argument(
-        '--root-dir', '-d',
-        help='Root directory to serve files from'
+        '--root-dir', '-d', default=os.environ.get('FSROOT'),
+        help='Root directory to serve files from (env: FSROOT)'
     )
     parser.add_argument(
-        '--port', '-p',
-        type=lambda x: int(x, 0),
-        default=UDPFS_PORT,
-        help=f'UDP port to listen on (default: 0x{UDPFS_PORT:04X})'
+        '--port', '-p', type=lambda x: int(x, 0),
+        default=_env_int('PORT', UDPFS_PORT),
+        help=f'UDP port to listen on (default: 0x{UDPFS_PORT:04X}; env: PORT)'
     )
     parser.add_argument(
-        '--bind', '-i',
-        default='',
-        metavar='IP',
-        help='IP address to bind/listen on (default: all interfaces)'
+        '--bind', '-i', default=os.environ.get('BIND', ''), metavar='IP',
+        help='IP address to bind/listen on (default: all interfaces; env: BIND)'
     )
     parser.add_argument(
-        '--sector-size', '-s',
-        type=int,
-        default=512,
-        help='Sector size for block device (default: 512)'
+        '--sector-size', '-s', type=int, default=_env_int('SECTOR_SIZE', 512),
+        help='Sector size for block device (default: 512; env: SECTOR_SIZE)'
     )
     parser.add_argument(
-        '--read-only', '-r',
-        action='store_true',
-        help='Serve in read-only mode'
+        '--read-only', '-r', action='store_true', default=_env_bool('RO'),
+        help='Serve in read-only mode (env: RO)'
     )
     parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help='Verbose output'
+        '--verbose', '-v', action='store_true', default=_env_bool('VERBOSE'),
+        help='Verbose output (env: VERBOSE)'
     )
     parser.add_argument(
-        '--enable-compression', '-c',
-        action='store_true',
-        help='Enable transparent decompression of .zso (LZ4), .cso (zlib), and .chd (CHD v5) files. '
-             'Compressed files appear as .iso in directory listings.'
+        '--enable-compression', '-c', action='store_true',
+        default=_env_bool('ENABLE_COMPRESSION'),
+        help='Enable transparent decompression of .zso (LZ4), .cso (zlib), and .chd (CHD v5) '
+             'files. Compressed files appear as .iso in directory listings. (env: ENABLE_COMPRESSION)'
     )
     parser.add_argument(
-        '--compression-cache-size',
-        type=int,
-        default=32,
-        help='Number of decompressed blocks to cache per file (default: 32)'
+        '--compression-cache-size', type=int, default=_env_int('COMPRESSION_CACHE_SIZE', 32),
+        help='Number of decompressed blocks to cache per file (default: 32; env: COMPRESSION_CACHE_SIZE)'
+    )
+    parser.add_argument(
+        '--peer-timeout', type=float, default=_env_float('PEER_TIMEOUT', SESSION_TIMEOUT),
+        help=f'Seconds of client inactivity before its session is reaped '
+             f'(default: {int(SESSION_TIMEOUT)}; env: PEER_TIMEOUT)'
+    )
+    parser.add_argument(
+        '--metrics', action='store_true', default=_env_bool('METRICS'),
+        help='Periodically log transfer/op statistics (env: METRICS)'
+    )
+    parser.add_argument(
+        '--metrics-period', type=float, default=_env_float('METRICS_PERIOD', 60.0),
+        help='Seconds between metrics log lines (default: 60; env: METRICS_PERIOD)'
     )
 
     args = parser.parse_args()
@@ -2045,7 +2094,10 @@ def main():
         read_only=args.read_only,
         verbose=args.verbose,
         enable_compression=args.enable_compression,
-        compression_cache_size=args.compression_cache_size
+        compression_cache_size=args.compression_cache_size,
+        peer_timeout=args.peer_timeout,
+        metrics=args.metrics,
+        metrics_period=args.metrics_period
     )
     server.run()
 
