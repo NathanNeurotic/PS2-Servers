@@ -476,9 +476,10 @@ class LauncherApp:
 
         self._build_about_tab()
 
-        # footer
+        # Control bar: packed above the notebook (before=self.nb) so all controls
+        # -- LAN IP, admin panel, and these actions -- sit together at the top.
         footer = ttk.Frame(parent, style="Footer.TFrame", padding=(12, 10))
-        footer.pack(fill="x", padx=16, pady=(0, 14))
+        footer.pack(fill="x", padx=16, pady=(0, 8), before=self.nb)
         footer.columnconfigure(2, weight=1)
         allow = ttk.Button(footer, text="Allow through firewall",
                            command=self.allow_windows_setup)
