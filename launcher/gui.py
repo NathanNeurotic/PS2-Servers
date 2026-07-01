@@ -81,7 +81,7 @@ Removing those rules returns Windows to having no PS2 Servers-specific firewall 
 
 No terminal required
 
-The buttons in this About tab and in the launcher footer are the normal way to manage PS2 Servers' Windows changes. Use "Allow through firewall" to add or refresh the rules. Use "Remove PS2 Servers firewall rules" to undo them. Use "Stop all servers" to shut down every running PS2 Servers process from the GUI.
+The buttons in the launcher footer are the normal way to manage PS2 Servers' Windows changes. Use "Allow through firewall" to add or refresh the rules. Use "Remove PS2 Servers firewall rules" to undo them. Use "Stop all" to shut down every running PS2 Servers process from the GUI.
 
 Advanced manual fallback
 
@@ -527,25 +527,6 @@ class LauncherApp:
                    command=lambda: self._open_url(RELEASES_URL)).pack(side="left", padx=(6, 0), pady=6)
         ttk.Button(links, text="Security notes",
                    command=lambda: self._open_url(SECURITY_URL)).pack(side="left", padx=(6, 0), pady=6)
-
-        actions = ttk.LabelFrame(about, text=" No-terminal actions ")
-        actions.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
-        row += 1
-        allow = ttk.Button(actions, text="Allow through firewall",
-                           command=self.allow_windows_setup)
-        allow.pack(side="left", padx=(6, 0), pady=6)
-        remove = ttk.Button(actions, text="Remove PS2 Servers firewall rules",
-                            command=self.remove_windows_setup)
-        remove.pack(side="left", padx=(6, 0), pady=6)
-        ttk.Button(actions, text="Stop all servers",
-                   command=self.stop_all).pack(side="left", padx=(6, 0), pady=6)
-        ttk.Button(actions, text="Restart app",
-                   command=self.restart_app).pack(side="left", padx=(6, 0), pady=6)
-        ttk.Button(actions, text="Exit app",
-                   command=self.exit_app).pack(side="left", padx=(6, 0), pady=6)
-        if not windows_setup.is_windows():
-            allow.config(state="disabled")
-            remove.config(state="disabled")
 
         behavior = ttk.LabelFrame(about, text=" Window behavior ")
         behavior.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))

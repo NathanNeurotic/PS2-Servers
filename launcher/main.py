@@ -240,47 +240,6 @@ def _apply_gui_review_fixes(gui):
         widget.bind("<Configure>", update, add="+")
         widget.after_idle(update)
 
-    def draw_banner(canvas, width, height=88):
-        width = max(320, int(width))
-        canvas.delete("all")
-        canvas.create_rectangle(0, 0, width, height, fill=palette["bg"], outline="")
-        canvas.create_rectangle(0, 0, width, height, fill=palette["panel"], outline="#18416f")
-        for y, color in ((12, "#061534"), (42, "#082351"), (78, "#061534")):
-            canvas.create_line(0, y, width, y, fill=color)
-        for x in range(36, width + 96, 96):
-            canvas.create_line(x, 0, x - 38, height, fill="#081f48")
-        canvas.create_line(0, height - 3, width, height - 3, fill=palette["accent"], width=2)
-        for x in (42, 132, max(220, width - 190), max(300, width - 82)):
-            if 0 <= x < width - 28:
-                canvas.create_rectangle(x, 18, x + 18, 36, outline=palette["accent"], width=1)
-                canvas.create_line(x, 18, x + 9, 10, x + 27, 10, x + 18, 18,
-                                   fill="#0b69ff")
-                canvas.create_line(x + 18, 36, x + 27, 28, x + 27, 10, fill="#0848b8")
-        canvas.create_text(24, 25, anchor="w", text="PS2", fill=palette["accent2"],
-                           font=("", 26, "bold"))
-        canvas.create_text(112, 27, anchor="w", text="SERVERS", fill=palette["text"],
-                           font=("", 18, "bold"))
-        canvas.create_text(24, 61, anchor="w",
-                           text="SMBv1  ·  UDPFS  ·  UDPBD  ·  no terminal required",
-                           fill=palette["muted"], font=("", 9))
-
-    def build_banner(self):
-        frame = gui.ttk.Frame(content_parent(self), style="Header.TFrame")
-        frame.pack(fill="x", padx=16, pady=(12, 0))
-        canvas = gui.tk.Canvas(frame, height=88, highlightthickness=0,
-                               bg=palette["bg"], bd=0)
-        canvas.pack(fill="x", expand=True)
-
-        def redraw(event=None):
-            try:
-                draw_banner(canvas, event.width if event else canvas.winfo_width())
-            except gui.tk.TclError:
-                pass
-
-        canvas.bind("<Configure>", redraw)
-        canvas.after_idle(redraw)
-        self._ps2_theme_banner = canvas
-
     def add_admin_panel(self):
         if not gui.windows_setup.is_windows():
             return
@@ -370,7 +329,6 @@ def _apply_gui_review_fixes(gui):
                 child.columnconfigure(2, weight=1)
 
     def launcher_build(self):
-        build_banner(self)
         add_admin_panel(self)
         original_build(self)
         normalize_original_widgets(self)
