@@ -30,10 +30,12 @@ import errno
 import gzip
 import math
 import os
+import queue
 import select
 import socket
 import struct
 import sys
+import threading
 import time
 import zlib
 from collections import OrderedDict
@@ -98,7 +100,13 @@ FIO_S_IFDIR = 0x1000
 
 # Limits
 MAX_DATA_PAYLOAD = 1408  # Maximum UDPRDMA payload
-MAX_HANDLES = 32
+MAX_HANDLES = 64  # open handles per client (matches udpfsd; was 32 originally)
+
+# Multi-client session management
+SESSION_TIMEOUT = 300.0          # default seconds of peer inactivity before reaping (see --peer-timeout)
+SESSION_SWEEP_INTERVAL = 5.0     # how often the demux loop checks for idle sessions
+HAS_PREAD = hasattr(os, 'pread')     # POSIX: lock-free positional block-device reads
+HAS_PWRITE = hasattr(os, 'pwrite')
 
 # Flow control
 SEND_WINDOW = 8           # Max unacked packets in flight
@@ -277,6 +285,20 @@ class FileHandle:
             self.obj.close()
 
 
+def _session_prop(name):
+    """A property that proxies a per-client field to the calling worker thread's
+    Session (server._local.session). This lets every request handler keep using
+    self.tx_seq_nr / self.handles / self.write_* verbatim while the underlying
+    state is actually isolated per client."""
+    def getter(self):
+        return getattr(self._local.session, name)
+
+    def setter(self, value):
+        setattr(self._local.session, name, value)
+
+    return property(getter, setter)
+
+
 class UdpfsServer:
     """UDPFS Server over UDPRDMA - unified file and block device server"""
 
@@ -287,7 +309,10 @@ class UdpfsServer:
                  sector_size: int = 512,
                  read_only: bool = False, verbose: bool = False,
                  enable_compression: bool = False,
-                 compression_cache_size: int = 32):
+                 compression_cache_size: int = 32,
+                 peer_timeout: float = SESSION_TIMEOUT,
+                 metrics: bool = False,
+                 metrics_period: float = 60.0):
         self.root_dir = os.path.realpath(root_dir) if root_dir else None
         self.port = port
         self.bind_ip = bind_ip
@@ -296,6 +321,10 @@ class UdpfsServer:
         self.verbose = verbose
         self.enable_compression = enable_compression
         self.compression_cache_size = compression_cache_size
+        self.session_timeout = peer_timeout
+        self.metrics = metrics
+        self.metrics_period = metrics_period
+        self._last_metrics = time.monotonic()
 
         if self.root_dir and not os.path.isdir(self.root_dir):
             print(f"Error: '{root_dir}' is not a directory")
@@ -314,21 +343,26 @@ class UdpfsServer:
         self.dsock.bind((bind_ip, 0))
         self.dsock.setblocking(False)
         
-        # Protocol state
-        self.peer_addr: Optional[Tuple[str, int]] = None
-        self.tx_seq_nr = 0
-        self.tx_seq_nr_acked = 0  # Last ACKed seq (for send window)
-        self.rx_seq_nr_expected = 0
+        # Multi-client state: one Session per peer address, each with its own
+        # protocol state (sequence numbers, handle table, write state) and worker
+        # thread. The demultiplexer (run) never blocks on protocol work; per-client
+        # blocking waits read from that client's own queue. See class Session and
+        # the _session_prop(...) proxies below, which route the per-client fields
+        # the handler methods use (self.tx_seq_nr, self.handles, ...) to the
+        # calling worker thread's Session -- so the handler bodies are unchanged.
+        self._local = threading.local()      # _local.session = current worker's Session
+        self.sessions: Dict[Tuple[str, int], 'Session'] = {}
+        self.sessions_lock = threading.Lock()
+        self.send_lock = threading.Lock()    # serialize sends on the shared data socket
+        self.bd_lock = threading.Lock()      # guards the block-device seek+read fallback
+        self._shutdown = False
+        self._last_sweep = time.monotonic()
 
-        # TX buffer for retransmit
-        self.tx_buffer: List[Tuple[int, bytes]] = []
-        self.tx_start_seq = 0
-
-        # Handle management - dynamic handles start from 1
-        self.handles: Dict[int, FileHandle] = {}
-        self.next_handle = 1
-
-        # Block device setup (handle 0)
+        # Shared block device (handle 0): opened once, shared across all sessions.
+        # Concurrent access uses positional I/O (bd_read/bd_write), never the
+        # object's own file position.
+        self.bd_fh: Optional[FileHandle] = None
+        self.bd_fd: Optional[int] = None
         self.bd_sector_size = sector_size
         self.bd_sector_count = 0
         if block_device:
@@ -342,16 +376,11 @@ class UdpfsServer:
             bd_size = bd_file.tell()
             bd_file.seek(0)
             self.bd_sector_count = bd_size // sector_size
-            self.handles[BLOCK_DEVICE_HANDLE] = FileHandle(bd_file, is_dir=False)
-
-        # Write state (shared between file writes and block writes)
-        self.write_handle = -1
-        self.write_is_block = False
-        self.write_sector_nr = 0
-        self.write_sector_count = 0
-        self.write_data = bytearray()
-        self.write_total_chunks = 0
-        self.write_received_chunks = 0
+            self.bd_fh = FileHandle(bd_file, is_dir=False)
+            try:
+                self.bd_fd = bd_file.fileno()
+            except (OSError, AttributeError):
+                self.bd_fd = None
 
         # Statistics
         self.stats = {
@@ -378,12 +407,115 @@ class UdpfsServer:
         self._last_status_bytes = 0
         self._status_visible = False
 
+    # -- per-client state proxies (route to self._local.session; see Session) --
+    peer_addr = _session_prop('peer_addr')
+    tx_seq_nr = _session_prop('tx_seq_nr')
+    tx_seq_nr_acked = _session_prop('tx_seq_nr_acked')
+    rx_seq_nr_expected = _session_prop('rx_seq_nr_expected')
+    tx_buffer = _session_prop('tx_buffer')
+    tx_start_seq = _session_prop('tx_start_seq')
+    handles = _session_prop('handles')
+    next_handle = _session_prop('next_handle')
+    write_handle = _session_prop('write_handle')
+    write_is_block = _session_prop('write_is_block')
+    write_sector_nr = _session_prop('write_sector_nr')
+    write_sector_count = _session_prop('write_sector_count')
+    write_data = _session_prop('write_data')
+    write_total_chunks = _session_prop('write_total_chunks')
+    write_received_chunks = _session_prop('write_received_chunks')
+
+    # -- shared data-socket send + positional block-device I/O -------------
+    def _sendto(self, packet: bytes, addr):
+        """Send on the shared data socket under a lock (many worker threads)."""
+        sock = self.dsock
+        with self.send_lock:
+            sock.sendto(packet, addr)
+
+    def bd_read(self, offset: int, n: int) -> bytes:
+        """Thread-safe positional read of the shared block device."""
+        if HAS_PREAD and self.bd_fd is not None:
+            return os.pread(self.bd_fd, n, offset)
+        with self.bd_lock:
+            self.bd_fh.obj.seek(offset)
+            return self.bd_fh.obj.read(n)
+
+    def bd_write(self, offset: int, data: bytes) -> int:
+        """Thread-safe positional write to the shared block device."""
+        if HAS_PWRITE and self.bd_fd is not None:
+            return os.pwrite(self.bd_fd, data, offset)
+        with self.bd_lock:
+            self.bd_fh.obj.seek(offset)
+            n = self.bd_fh.obj.write(data)
+            self.bd_fh.obj.flush()
+            return n
+
+    # -- session lifecycle -------------------------------------------------
+    def _get_or_create_session(self, addr):
+        with self.sessions_lock:
+            sess = self.sessions.get(addr)
+            if sess is None:
+                sess = Session(self, addr)
+                self.sessions[addr] = sess
+                sess.start()
+            sess.last_activity = time.monotonic()
+            return sess
+
+    def _route_data(self, data: bytes, addr):
+        """Demux a data datagram to its peer's session queue (demux thread)."""
+        if len(data) < 2:
+            return
+        hdr = Header.unpack(data)
+        if hdr.packet_type != PacketType.DATA:
+            return
+        self._get_or_create_session(addr).queue.put((data, addr))
+
+    def _sweep_idle_sessions(self):
+        now = time.monotonic()
+        if now - self._last_sweep < SESSION_SWEEP_INTERVAL:
+            return
+        self._last_sweep = now
+        with self.sessions_lock:
+            idle = [a for a, s in self.sessions.items()
+                    if now - s.last_activity > self.session_timeout]
+            for a in idle:
+                self.sessions.pop(a).shutdown()
+
+    def _emit_metrics(self):
+        """Periodically log transfer/op stats when --metrics is enabled."""
+        if not self.metrics:
+            return
+        now = time.monotonic()
+        if now - self._last_metrics < self.metrics_period:
+            return
+        self._last_metrics = now
+        with self.sessions_lock:
+            nclients = len(self.sessions)
+        s = self.stats
+        self._print_event(
+            "[metrics] clients=%d read=%s written=%s "
+            "ops(open=%d read=%d bread=%d write=%d bwrite=%d dread=%d)" % (
+                nclients, self._format_bytes(s['bytes_read']),
+                self._format_bytes(s['bytes_written']),
+                s['open'], s['read'], s['bread'], s['write'], s['bwrite'], s['dread']))
+
+    def _shutdown_all_sessions(self):
+        self._shutdown = True
+        with self.sessions_lock:
+            sessions = list(self.sessions.values())
+            self.sessions.clear()
+        for s in sessions:
+            s.shutdown()
+        # Wait for worker threads to finish before the caller closes shared
+        # resources (the block device in _cleanup), avoiding a shutdown race.
+        for s in sessions:
+            s._thread.join(timeout=2.0)
+
     def run(self):
         """Main server loop"""
         print(f"UDPFS Server")
         if self.root_dir:
             print(f"  Root: {self.root_dir}")
-        if BLOCK_DEVICE_HANDLE in self.handles:
+        if self.bd_fh is not None:
             print(f"  Block device: handle={BLOCK_DEVICE_HANDLE}, "
                   f"sectors={self.bd_sector_count:,}, "
                   f"sector_size={self.bd_sector_size}")
@@ -401,9 +533,9 @@ class UdpfsServer:
 
         print(f"  Listening...")
         print()
-        while True:
+        while not self._shutdown:
             try:
-                r, _, _ = select.select([self.sock, self.dsock], [], [])
+                r, _, _ = select.select([self.sock, self.dsock], [], [], 1.0)
                 for ready in r:
                     if ready is self.sock:
                         try:
@@ -413,14 +545,17 @@ class UdpfsServer:
                             pass
                     elif ready is self.dsock:
                         try:
-                            data, addr = self.dsock.recvfrom(2048)
-                            self._handle_data(data, addr)
+                            data, addr = self.dsock.recvfrom(4096)
+                            self._route_data(data, addr)
                         except BlockingIOError:
                             pass
+                self._sweep_idle_sessions()
+                self._emit_metrics()
             except KeyboardInterrupt:
                 if self._status_visible:
                     sys.stdout.write(f"\r{'':<79}\r")
                 print("\nShutting down...")
+                self._shutdown_all_sessions()
                 self._cleanup()
                 self._print_stats()
                 break
@@ -475,13 +610,12 @@ class UdpfsServer:
         print(msg)
 
     def _cleanup(self):
-        """Close all open handles"""
-        for handle_id, fh in self.handles.items():
+        """Close the shared block device (each session closes its own handles)."""
+        if self.bd_fh is not None:
             try:
-                fh.close()
+                self.bd_fh.close()
             except Exception:
                 pass
-        self.handles.clear()
 
     def _resolve_path(self, client_path: str) -> Optional[str]:
         """Resolve client path to absolute path within root_dir."""
@@ -650,7 +784,8 @@ class UdpfsServer:
 
         self.stats['discovery'] += 1
 
-        self.peer_addr = addr
+        # Ensure a per-client session (and its worker thread) exists for this peer.
+        self._get_or_create_session(addr)
         self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY -> INFORM")
         self._send_inform(addr)
 
@@ -1039,9 +1174,14 @@ class UdpfsServer:
         expected_size = self.write_sector_count * sector_size
 
         try:
-            fh.obj.seek(self.write_sector_nr * sector_size)
-            fh.obj.write(self.write_data[:expected_size])
-            fh.obj.flush()
+            if self.write_handle == BLOCK_DEVICE_HANDLE:
+                # Shared block device: positional write (no shared file position).
+                self.bd_write(self.write_sector_nr * sector_size,
+                              bytes(self.write_data[:expected_size]))
+            else:
+                fh.obj.seek(self.write_sector_nr * sector_size)
+                fh.obj.write(self.write_data[:expected_size])
+                fh.obj.flush()
             self.stats['bytes_written'] += expected_size
 
             if self.verbose:
@@ -1315,8 +1455,12 @@ class UdpfsServer:
             self._print_event(f"[{addr[0]}:{addr[1]}] BREAD handle={handle} sector={sector_nr} count={sector_count} ({total_size} bytes)")
 
         try:
-            fh.obj.seek(sector_nr * sector_size)
-            data = fh.obj.read(total_size)
+            if handle == BLOCK_DEVICE_HANDLE:
+                # Shared block device: positional read (no shared file position).
+                data = self.bd_read(sector_nr * sector_size, total_size)
+            else:
+                fh.obj.seek(sector_nr * sector_size)
+                data = fh.obj.read(total_size)
         except OSError as e:
             self._print_event(f"[{addr[0]}:{addr[1]}] BREAD error: {e}")
             self._send_read_result(addr, -e.errno, b'')
@@ -1376,7 +1520,7 @@ class UdpfsServer:
         disc = DiscHeader(service_id=UDPRDMA_SVC_UDPFS, port = self.dsock.getsockname()[1])
 
         packet = hdr.pack() + disc.pack()
-        self.dsock.sendto(packet, addr)
+        self._sendto(packet, addr)
 
     def _send_ack(self, addr: Tuple[str, int], is_ack: bool = True):
         """Send ACK or NACK packet"""
@@ -1389,7 +1533,7 @@ class UdpfsServer:
         )
 
         packet = hdr.pack() + data_hdr.pack()
-        self.dsock.sendto(packet, addr)
+        self._sendto(packet, addr)
 
     def _send_data(self, addr: Tuple[str, int], payload: bytes):
         """Send DATA packet with payload (single packet, always FIN) and confirm receipt."""
@@ -1406,7 +1550,7 @@ class UdpfsServer:
 
         packet = hdr.pack() + data_hdr.pack() + padded_payload
         self.tx_buffer = [(self.tx_seq_nr, packet)]
-        self.dsock.sendto(packet, addr)
+        self._sendto(packet, addr)
         self.tx_seq_nr = (self.tx_seq_nr + 1) & 0xFFF
         self._wait_for_final_ack(addr)
 
@@ -1433,7 +1577,7 @@ class UdpfsServer:
 
         self.tx_buffer.append((self.tx_seq_nr, packet))
 
-        self.dsock.sendto(packet, addr)
+        self._sendto(packet, addr)
         self.tx_seq_nr = (self.tx_seq_nr + 1) & 0xFFF
 
     def _retransmit_from(self, addr: Tuple[str, int], from_seq: int):
@@ -1442,7 +1586,7 @@ class UdpfsServer:
         for seq, packet in self.tx_buffer:
             seq_diff = (seq - from_seq) & 0xFFF
             if seq_diff < 2048:
-                self.dsock.sendto(packet, addr)
+                self._sendto(packet, addr)
                 count += 1
         if self.verbose and count > 0:
             self._print_event(f"  Retransmitted {count} packets from seq={from_seq}")
@@ -1470,45 +1614,40 @@ class UdpfsServer:
         return best_chunk
 
     def _wait_for_window_ack(self, addr: Tuple[str, int]):
-        """Wait for window ACK/NACK during multi-packet send.
-        Updates tx_seq_nr_acked. On NACK, retransmits."""
-        self.dsock.settimeout(WINDOW_ACK_TIMEOUT)
-        try:
-            while True:
-                pkt, recv_addr = self.dsock.recvfrom(2048)
-                if len(pkt) < 6:
-                    continue
-                hdr = Header.unpack(pkt)
-                if hdr.packet_type != PacketType.DATA:
-                    continue
-                data_hdr = DataHeader.unpack(pkt[2:6])
-                if data_hdr.data_byte_count > 0 or data_hdr.hdr_word_count > 0:
-                    continue  # Not an ACK/NACK packet
-                if data_hdr.flags & DataFlags.ACK:
-                    # Window ACK - advance acked position
-                    self.tx_seq_nr_acked = data_hdr.seq_nr_ack
-                    self.tx_buffer = [
-                        (seq, pkt) for seq, pkt in self.tx_buffer
-                        if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
-                    ]
-                    return
-                else:
-                    # NACK - retransmit and keep waiting for the ACK that
-                    # confirms the retransmitted packets arrived. Returning
-                    # here would let the outer loop increment window_retries
-                    # on every duplicate NACK before the retransmit lands.
-                    self.tx_seq_nr_acked = (data_hdr.seq_nr_ack - 1) & 0xFFF
-                    self._retransmit_from(addr, data_hdr.seq_nr_ack)
-                    self.dsock.settimeout(WINDOW_ACK_TIMEOUT)  # reset timeout
-        except socket.timeout:
-            # No ACK received - retransmit all unacked
-            self.dsock.settimeout(None)
-            if self.tx_buffer:
-                start_seq = self.tx_buffer[0][0]
-                self._retransmit_from(addr, start_seq)
-            return
-        finally:
-            self.dsock.settimeout(None)
+        """Wait for a window ACK/NACK during a multi-packet send. Reads from this
+        client's session queue (the demux routes the client's ACKs there), so one
+        client's wait never blocks another. Updates tx_seq_nr_acked; retransmits on
+        NACK; retransmits unacked on timeout."""
+        sess = self._local.session
+        while True:
+            try:
+                pkt, _recv_addr = sess.queue.get(timeout=WINDOW_ACK_TIMEOUT)
+            except queue.Empty:
+                if self.tx_buffer:
+                    self._retransmit_from(addr, self.tx_buffer[0][0])
+                return
+            if pkt is None:
+                return  # session shutting down
+            if len(pkt) < 6:
+                continue
+            hdr = Header.unpack(pkt)
+            if hdr.packet_type != PacketType.DATA:
+                continue
+            data_hdr = DataHeader.unpack(pkt[2:6])
+            if data_hdr.data_byte_count > 0 or data_hdr.hdr_word_count > 0:
+                continue  # Not an ACK/NACK packet
+            if data_hdr.flags & DataFlags.ACK:
+                # Window ACK - advance acked position
+                self.tx_seq_nr_acked = data_hdr.seq_nr_ack
+                self.tx_buffer = [
+                    (seq, p) for seq, p in self.tx_buffer
+                    if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
+                ]
+                return
+            else:
+                # NACK - retransmit and keep waiting for the confirming ACK.
+                self.tx_seq_nr_acked = (data_hdr.seq_nr_ack - 1) & 0xFFF
+                self._retransmit_from(addr, data_hdr.seq_nr_ack)
 
     def _in_flight(self) -> int:
         """Number of unacknowledged packets in flight"""
@@ -1518,39 +1657,38 @@ class UdpfsServer:
         """Wait for ACK that confirms the FIN packet was received.
         Mid-stream window ACKs (seq_nr_ack < fin_seq) are handled but do
         not complete the wait — only an ACK covering the FIN does."""
+        sess = self._local.session
         fin_seq = (self.tx_seq_nr - 1) & 0xFFF
-        self.dsock.settimeout(timeout)
-        try:
-            while True:
-                pkt, recv_addr = self.dsock.recvfrom(2048)
-                if len(pkt) < 6:
-                    continue
-                hdr = Header.unpack(pkt)
-                if hdr.packet_type != PacketType.DATA:
-                    continue
-                data_hdr = DataHeader.unpack(pkt[2:6])
-                if data_hdr.data_byte_count == 0 and data_hdr.hdr_word_count == 0:
-                    if data_hdr.flags & DataFlags.ACK:
-                        # Always advance acked position and prune tx_buffer
-                        self.tx_seq_nr_acked = data_hdr.seq_nr_ack
-                        if self.tx_buffer:
-                            self.tx_buffer = [
-                                (seq, pkt) for seq, pkt in self.tx_buffer
-                                if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
-                            ]
-                        # Only accept as final ACK if it covers the FIN packet
-                        if data_hdr.seq_nr_ack == fin_seq:
-                            self.tx_buffer = []
-                            return True
-                        # else: mid-stream window ACK — keep waiting
-                    else:
-                        # NACK - retransmit and reset timeout
-                        self._retransmit_from(addr, data_hdr.seq_nr_ack)
-                        self.dsock.settimeout(timeout)
-        except socket.timeout:
-            return False
-        finally:
-            self.dsock.settimeout(None)
+        while True:
+            try:
+                pkt, _recv_addr = sess.queue.get(timeout=timeout)
+            except queue.Empty:
+                return False
+            if pkt is None:
+                return False  # session shutting down
+            if len(pkt) < 6:
+                continue
+            hdr = Header.unpack(pkt)
+            if hdr.packet_type != PacketType.DATA:
+                continue
+            data_hdr = DataHeader.unpack(pkt[2:6])
+            if data_hdr.data_byte_count == 0 and data_hdr.hdr_word_count == 0:
+                if data_hdr.flags & DataFlags.ACK:
+                    # Always advance acked position and prune tx_buffer
+                    self.tx_seq_nr_acked = data_hdr.seq_nr_ack
+                    if self.tx_buffer:
+                        self.tx_buffer = [
+                            (seq, p) for seq, p in self.tx_buffer
+                            if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
+                        ]
+                    # Only accept as final ACK if it covers the FIN packet
+                    if data_hdr.seq_nr_ack == fin_seq:
+                        self.tx_buffer = []
+                        return True
+                    # else: mid-stream window ACK — keep waiting
+                else:
+                    # NACK - retransmit and keep waiting
+                    self._retransmit_from(addr, data_hdr.seq_nr_ack)
 
     def _wait_for_final_ack(self, addr: Tuple[str, int]):
         """Confirm transfer completion: wait for ACK, retransmit on NACK or timeout.
@@ -1775,59 +1913,155 @@ class UdpfsServer:
                 print(f"  written      {self._format_bytes(total_written):>10s}  ({self._format_bytes(int(rate))}/s)")
 
 
+class Session:
+    """Per-client protocol state plus a worker thread that runs the server's
+    request handlers for exactly one peer. Created on first contact and reaped
+    after SESSION_TIMEOUT of inactivity. All per-client fields mirror the initial
+    values the single-client server used, so handler logic is unchanged."""
+
+    def __init__(self, server: 'UdpfsServer', addr):
+        self.server = server
+        self.addr = addr
+        # per-client protocol state
+        self.peer_addr = addr
+        self.tx_seq_nr = 0
+        self.tx_seq_nr_acked = 0
+        self.rx_seq_nr_expected = 0
+        self.tx_buffer: List[Tuple[int, bytes]] = []
+        self.tx_start_seq = 0
+        # handle 0 = the shared block device (same FileHandle across sessions;
+        # concurrent access uses server.bd_read/bd_write positional I/O).
+        self.handles: Dict[int, FileHandle] = {}
+        if server.bd_fh is not None:
+            self.handles[BLOCK_DEVICE_HANDLE] = server.bd_fh
+        self.next_handle = 1
+        self.write_handle = -1
+        self.write_is_block = False
+        self.write_sector_nr = 0
+        self.write_sector_count = 0
+        self.write_data = bytearray()
+        self.write_total_chunks = 0
+        self.write_received_chunks = 0
+        # concurrency plumbing
+        self.queue: "queue.Queue" = queue.Queue()
+        self.last_activity = time.monotonic()
+        self._closing = False
+        self._thread = threading.Thread(
+            target=self._run, name=f"udpfs-{addr[0]}:{addr[1]}", daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def shutdown(self):
+        self._closing = True
+        self.queue.put(None)  # wake the worker if it is blocked on get()
+
+    def _run(self):
+        # Bind this worker thread to its session so the server's _session_prop
+        # proxies resolve self.tx_seq_nr / self.handles / ... to THIS client.
+        self.server._local.session = self
+        while not self._closing and not self.server._shutdown:
+            try:
+                item = self.queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if item is None:
+                break
+            data, addr = item
+            try:
+                self.server._handle_data(data, addr)
+            except Exception as e:  # keep the session alive on a handler error
+                # Always surface handler errors -- silent swallowing makes
+                # multi-client issues very hard to debug.
+                self.server._print_event(
+                    f"[{addr[0]}:{addr[1]}] session error: {type(e).__name__}: {e}")
+        # Close this session's own file handles (never the shared block device).
+        for hid, fh in list(self.handles.items()):
+            if hid == BLOCK_DEVICE_HANDLE:
+                continue
+            try:
+                fh.close()
+            except Exception:
+                pass
+        self.handles.clear()
+
+
+def _env_bool(name, default=False):
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _env_int(name, default):
+    v = os.environ.get(name)
+    return int(v, 0) if v else default
+
+
+def _env_float(name, default):
+    v = os.environ.get(name)
+    return float(v) if v else default
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='UDPFS Server - Unified file and block device server over UDPRDMA',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
+    # Every option also reads an environment variable (container-friendly, like
+    # udpfsd); the CLI flag overrides the env var, which overrides the default.
     parser.add_argument(
-        '--block-device', '-b',
-        help='Block device or disk image to serve as handle 0'
+        '--block-device', '-b', default=os.environ.get('BDPATH'),
+        help='Block device or disk image to serve as handle 0 (env: BDPATH)'
     )
     parser.add_argument(
-        '--root-dir', '-d',
-        help='Root directory to serve files from'
+        '--root-dir', '-d', default=os.environ.get('FSROOT'),
+        help='Root directory to serve files from (env: FSROOT)'
     )
     parser.add_argument(
-        '--port', '-p',
-        type=lambda x: int(x, 0),
-        default=UDPFS_PORT,
-        help=f'UDP port to listen on (default: 0x{UDPFS_PORT:04X})'
+        '--port', '-p', type=lambda x: int(x, 0),
+        default=_env_int('PORT', UDPFS_PORT),
+        help=f'UDP port to listen on (default: 0x{UDPFS_PORT:04X}; env: PORT)'
     )
     parser.add_argument(
-        '--bind', '-i',
-        default='',
-        metavar='IP',
-        help='IP address to bind/listen on (default: all interfaces)'
+        '--bind', '-i', default=os.environ.get('BIND', ''), metavar='IP',
+        help='IP address to bind/listen on (default: all interfaces; env: BIND)'
     )
     parser.add_argument(
-        '--sector-size', '-s',
-        type=int,
-        default=512,
-        help='Sector size for block device (default: 512)'
+        '--sector-size', '-s', type=int, default=_env_int('SECTOR_SIZE', 512),
+        help='Sector size for block device (default: 512; env: SECTOR_SIZE)'
     )
     parser.add_argument(
-        '--read-only', '-r',
-        action='store_true',
-        help='Serve in read-only mode'
+        '--read-only', '-r', action='store_true', default=_env_bool('RO'),
+        help='Serve in read-only mode (env: RO)'
     )
     parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help='Verbose output'
+        '--verbose', '-v', action='store_true', default=_env_bool('VERBOSE'),
+        help='Verbose output (env: VERBOSE)'
     )
     parser.add_argument(
-        '--enable-compression', '-c',
-        action='store_true',
-        help='Enable transparent decompression of .zso (LZ4), .cso (zlib), and .chd (CHD v5) files. '
-             'Compressed files appear as .iso in directory listings.'
+        '--enable-compression', '-c', action='store_true',
+        default=_env_bool('ENABLE_COMPRESSION'),
+        help='Enable transparent decompression of .zso (LZ4), .cso (zlib), and .chd (CHD v5) '
+             'files. Compressed files appear as .iso in directory listings. (env: ENABLE_COMPRESSION)'
     )
     parser.add_argument(
-        '--compression-cache-size',
-        type=int,
-        default=32,
-        help='Number of decompressed blocks to cache per file (default: 32)'
+        '--compression-cache-size', type=int, default=_env_int('COMPRESSION_CACHE_SIZE', 32),
+        help='Number of decompressed blocks to cache per file (default: 32; env: COMPRESSION_CACHE_SIZE)'
+    )
+    parser.add_argument(
+        '--peer-timeout', type=float, default=_env_float('PEER_TIMEOUT', SESSION_TIMEOUT),
+        help=f'Seconds of client inactivity before its session is reaped '
+             f'(default: {int(SESSION_TIMEOUT)}; env: PEER_TIMEOUT)'
+    )
+    parser.add_argument(
+        '--metrics', action='store_true', default=_env_bool('METRICS'),
+        help='Periodically log transfer/op statistics (env: METRICS)'
+    )
+    parser.add_argument(
+        '--metrics-period', type=float, default=_env_float('METRICS_PERIOD', 60.0),
+        help='Seconds between metrics log lines (default: 60; env: METRICS_PERIOD)'
     )
 
     args = parser.parse_args()
@@ -1860,7 +2094,10 @@ def main():
         read_only=args.read_only,
         verbose=args.verbose,
         enable_compression=args.enable_compression,
-        compression_cache_size=args.compression_cache_size
+        compression_cache_size=args.compression_cache_size,
+        peer_timeout=args.peer_timeout,
+        metrics=args.metrics,
+        metrics_period=args.metrics_period
     )
     server.run()
 
