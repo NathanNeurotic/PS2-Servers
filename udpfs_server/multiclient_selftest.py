@@ -243,7 +243,7 @@ def test_concurrency(root, disc_port, files):
         c = UdpfsTestClient(('127.0.0.1', disc_port))
         try:
             c.discover()
-            barrier.wait()  # line up the two READ streams to overlap
+            barrier.wait(timeout=5.0)  # line up the two READ streams to overlap
             results[name] = c.read_file(name, len(files[name]))
         except Exception as e:  # noqa: BLE001 - report in the assert below
             errors[name] = e
@@ -291,7 +291,7 @@ def test_block_concurrency(disc_port, image_bytes, sector_size=512):
         c = UdpfsTestClient(('127.0.0.1', disc_port))
         try:
             c.discover()
-            barrier.wait()
+            barrier.wait(timeout=5.0)
             for sec, cnt in plan[name]:
                 got = c.bread(sec, cnt, sector_size)
                 exp = image_bytes[sec * sector_size:(sec + cnt) * sector_size]

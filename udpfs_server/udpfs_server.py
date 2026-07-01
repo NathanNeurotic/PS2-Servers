@@ -480,6 +480,10 @@ class UdpfsServer:
             self.sessions.clear()
         for s in sessions:
             s.shutdown()
+        # Wait for worker threads to finish before the caller closes shared
+        # resources (the block device in _cleanup), avoiding a shutdown race.
+        for s in sessions:
+            s._thread.join(timeout=2.0)
 
     def run(self):
         """Main server loop"""
@@ -1941,9 +1945,10 @@ class Session:
             try:
                 self.server._handle_data(data, addr)
             except Exception as e:  # keep the session alive on a handler error
-                if self.server.verbose:
-                    self.server._print_event(
-                        f"[{addr[0]}:{addr[1]}] session error: {type(e).__name__}: {e}")
+                # Always surface handler errors -- silent swallowing makes
+                # multi-client issues very hard to debug.
+                self.server._print_event(
+                    f"[{addr[0]}:{addr[1]}] session error: {type(e).__name__}: {e}")
         # Close this session's own file handles (never the shared block device).
         for hid, fh in list(self.handles.items()):
             if hid == BLOCK_DEVICE_HANDLE:
