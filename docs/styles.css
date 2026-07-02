@@ -177,6 +177,10 @@ h1 span { color: transparent; -webkit-text-stroke: 1px rgba(129, 245, 255, .92);
 .step h3 { margin: 0 0 8px; }
 .step p { margin: 0; color: var(--muted); line-height: 1.6; }
 
+.ps2-config { margin-top: 40px; }
+.ps2-config h3 { margin: 0 0 16px; color: var(--cyan); font-size: 1.28rem; letter-spacing: -.01em; }
+.ps2-config .ps2-note { margin: 18px 0 0; }
+
 .terminal {
   border: 1px solid rgba(83, 246, 255, .32);
   border-radius: 24px;
