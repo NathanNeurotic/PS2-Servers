@@ -41,7 +41,7 @@ It prints something like:
 
 ```
  RiptOPL SMBv1 server -- listening on 0.0.0.0:1111
- In OPL  ->  SMB Server IP: 192.168.1.50   Port: 1111   user/pass: blank (guest)
+ In OPL  ->  SMB Server IP: 192.168.1.50   Port: 1111   User: guest   Password: blank
             Share: games   ->   D:\PS2Games   (writable)
  (writable -- OPL can save settings + VMC-on-SMB here; pass --read-only to lock it)
 ```
@@ -54,7 +54,8 @@ Then in OPL → **Settings → Network**:
 | PC IP Address    | the LAN IP the server printed          |
 | **Port**         | **1111** (the printed port)            |
 | Share            | `games`                                |
-| User / Password  | **blank** (guest)                      |
+| User             | `guest`                                |
+| Password         | **blank** (leave empty)                |
 
 Save, and your network games should populate from the share.
 

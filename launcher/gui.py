@@ -112,7 +112,7 @@ def opl_hint(key, ip, values):
     if key == "smbv1":
         port = "445" if values.get("take_445") else str(values.get("port") or 1111)
         return ("In OPL → Network:  IP {}  ·  Port {}  ·  Share 'games'  "
-                "·  NetBIOS off  ·  user/pass blank".format(ip, port))
+                "·  NetBIOS off  ·  User 'guest'  ·  Password blank".format(ip, port))
     if key == "udpfs":
         return "In OPL → select UDPFS  ·  server IP {} (if prompted)".format(ip)
     if key == "udpbd":

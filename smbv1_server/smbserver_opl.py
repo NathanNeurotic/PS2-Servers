@@ -11,7 +11,7 @@
 #
 #   python smbserver_opl.py --share games=D:/PS2Games
 #   then in OPL: SMB IP = this PC's LAN IP, SMB Port = 1111 (the printed port), Share = games,
-#   user/pass blank (guest). Read-only by default; pass --writable for VMC-on-SMB.
+#   User = guest, Password = blank. Writable by default (OPL saves + VMC-on-SMB); pass --read-only to lock.
 #
 # License: same as the surrounding RiptOPL project.
 
@@ -916,7 +916,7 @@ def main(argv=None):
     ips = _lan_ips()
     print("=" * 64)
     print(" RiptOPL SMBv1 server -- listening on %s:%d" % (args.bind, bound))
-    print(" In OPL set:  SMB Port: %d   |   user/pass: blank (guest)" % bound)
+    print(" In OPL set:  SMB Port: %d   |   User: guest   Password: blank" % bound)
     if len(ips) == 1:
         print("              PC IP Address: %s" % ips[0])
     else:
