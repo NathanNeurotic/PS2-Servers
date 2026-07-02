@@ -32,7 +32,7 @@
         <div>
           <div class="kicker">SMBv1 · UDPFS · UDPBD</div>
           <h1>PS2 <span>Servers</span></h1>
-          <p class="lede">Network game-loading servers for PlayStation 2 and Open PS2 Loader, wrapped in a GUI that turns setup variables, terminal commands, ports, and launch scripts into a click-and-go control panel.</p>
+          <p class="lede">Run SMBv1, UDPFS, or UDPBD network servers for PlayStation 2 and Open PS2 Loader from one small GUI. Pick a server, point it at your games folder or disk image, press Start — the launcher shows your PC's LAN IP and the exact values to type on the PS2. No terminal, no config files.</p>
           <div class="cta-row">
             <a class="btn" href="https://github.com/NathanNeurotic/PS2-Servers/releases/latest">Download latest release</a>
             <a class="btn secondary" href="https://github.com/NathanNeurotic/PS2-Servers">View source</a>
@@ -54,18 +54,18 @@
         <div class="cards">
           <article class="card">
             <h3>SMBv1 / RiptOPL</h3>
-            <p>Share a games folder over SMB without relying on Windows 11's removed SMB1 stack. Useful for classic OPL SMB workflows with fewer operating-system traps.</p>
-            <p><code>Share: games</code></p>
+            <p>Shares a games folder over SMB. It speaks SMB itself, so it works on Windows 11 even though Windows removed its own SMB1 support — and it leaves your Windows file sharing untouched.</p>
+            <p><code>OPL: port 1111 · share games</code></p>
           </article>
           <article class="card">
             <h3>UDPFS</h3>
-            <p>Serve a folder or image over UDPFS, including compressed image workflows. A modern path for network loading through OPL and compatible forks.</p>
-            <p><code>Folder / image server</code></p>
+            <p>Serves a folder and/or a disk image over UDP — the newer protocol. Optionally decompresses CHD/CSO/ZSO images on the fly so they load as plain <code>.iso</code>.</p>
+            <p><code>OPL: select UDPFS</code></p>
           </article>
           <article class="card">
             <h3>UDPBD</h3>
-            <p>Serve a disk image as a UDP block device. The PS2 discovers it automatically, keeping the setup clean and fast for supported builds.</p>
-            <p><code>Auto-discovered</code></p>
+            <p>Serves a single disk image as a UDP block device. The PS2 finds the server by itself over the LAN — nothing to type on the console.</p>
+            <p><code>OPL: auto-discovered</code></p>
           </article>
         </div>
       </div>
@@ -73,20 +73,36 @@
 
     <section class="section" id="quickstart">
       <div class="container">
-        <h2>Boot the server, not a headache.</h2>
-        <p class="section-intro">The launcher is built for people who want to play games, not debug network services. Pick the server, choose the folder or image, press Start, then copy the displayed OPL settings.</p>
+        <h2>From download to in-game in four steps.</h2>
+        <p class="section-intro">Pick a server, choose the folder or image, press Start, then enter the displayed settings in OPL. The launcher fills in your LAN IP and the correct port for you.</p>
         <div class="steps">
           <article class="step"><h3>Download</h3><p>Grab the latest packaged build for your OS from GitHub Releases.</p></article>
           <article class="step"><h3>Choose</h3><p>Select SMBv1, UDPFS, or UDPBD from the launcher tabs.</p></article>
           <article class="step"><h3>Point</h3><p>Browse to your games folder or disk image. The app detects your LAN IP.</p></article>
           <article class="step"><h3>Start</h3><p>Click Start and enter the shown values in OPL.</p></article>
         </div>
+        <div class="ps2-config">
+          <h3>What you enter on the PS2</h3>
+          <div class="terminal">
+            <div class="terminal-bar"><span></span><span></span><span></span></div>
+            <pre><b>SMBv1 / RiptOPL</b>   —   OPL &rarr; Settings &rarr; Network
+Address type      IP address      (turn NetBIOS off)
+PC IP Address     the LAN IP the launcher shows after you press Start
+Port              1111
+Share             games
+User / Password   blank (guest)
+
+<b>UDPFS</b>   select UDPFS in OPL; enter the shown server IP only if OPL asks.
+<b>UDPBD</b>   select UDPBD in OPL; the PS2 finds the server automatically — no IP or port.</pre>
+          </div>
+          <p class="section-intro ps2-note">The launcher always prints these exact values while a server is running, so you never have to guess. You'll need a PS2 that boots homebrew and runs Open PS2 Loader (or PCSX2 with a network adapter) on the same LAN.</p>
+        </div>
       </div>
     </section>
 
     <section class="section" id="download">
       <div class="container">
-        <h2>Release assets built for normal humans.</h2>
+        <h2>Downloads</h2>
         <p class="section-intro"><b>On Windows, the folder build is the recommended download</b> — it is the same app without the self-extracting wrapper that makes the single-file <code>.exe</code> trip antivirus heuristics, so it comes up clean. A single-file build is also published per OS for convenience, and macOS ships as architecture-specific app zips.</p>
         <div class="terminal">
           <div class="terminal-bar"><span></span><span></span><span></span></div>
