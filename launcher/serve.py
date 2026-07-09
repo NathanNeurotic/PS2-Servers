@@ -29,7 +29,13 @@ def run_serve(key, server_args):
     # letting Python block-buffer them (works in both source and frozen builds).
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(line_buffering=True)
+            # line_buffering: prints reach our captured pipe line-by-line.
+            # errors='backslashreplace': never raise UnicodeEncodeError when a
+            # filename/path holds characters outside the console's legacy code
+            # page (e.g. Polish 'l-stroke' on a cp1252 console). Such a crash
+            # mid-handler would drop a directory-listing reply and stall the PS2
+            # -- an empty game list / black screen on Windows.
+            stream.reconfigure(line_buffering=True, errors='backslashreplace')
         except (AttributeError, ValueError):
             pass
 

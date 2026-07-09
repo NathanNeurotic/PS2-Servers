@@ -630,11 +630,23 @@ class UdpfsServer:
         self._status_visible = True
 
     def _print_event(self, msg: str):
-        """Print an event message, clearing the status line first"""
+        """Print an event message, clearing the status line first.
+
+        Never raises: a filename/path with characters outside the console's code
+        page (e.g. Polish 'l-stroke' on a cp1252 console) must not abort the
+        calling handler -- doing so would skip the reply sent after this log line
+        and stall the PS2 (empty game list / black screen). Belt-and-suspenders
+        alongside the stream-level errors='backslashreplace' set in serve.py, so
+        standalone runs (python udpfs_server.py ...) are covered too.
+        """
         if self._status_visible:
             sys.stdout.write(f"\r{'':<79}\r")
             self._status_visible = False
-        print(msg)
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            enc = sys.stdout.encoding or 'ascii'
+            print(msg.encode(enc, 'backslashreplace').decode(enc, 'replace'))
 
     def _cleanup(self):
         """Close the shared block device (each session closes its own handles)."""
