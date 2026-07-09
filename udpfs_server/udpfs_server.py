@@ -348,7 +348,22 @@ class UdpfsServer:
         self.dsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.dsock.bind((bind_ip, 0))
         self.dsock.setblocking(False)
-        
+
+        # Windows: a UDP recvfrom() raises ConnectionResetError (WinError 10054)
+        # when a *previous* sendto() drew an ICMP port-unreachable -- e.g. the PS2
+        # briefly not reading, or a transient network hiccup. UDP is
+        # connectionless, so these resets are spurious; left uncaught they kill the
+        # receive loop and drop the transfer mid-load (a "black screen on load" on
+        # Win11). SIO_UDP_CONNRESET tells Windows to stop reporting them. Harmless
+        # / unavailable no-op elsewhere.
+        if sys.platform == 'win32':
+            SIO_UDP_CONNRESET = 0x9800000C
+            for _s in (self.sock, self.dsock):
+                try:
+                    _s.ioctl(SIO_UDP_CONNRESET, struct.pack('I', 0))
+                except (OSError, AttributeError, ValueError):
+                    pass
+
         # Multi-client state: one Session per peer address, each with its own
         # protocol state (sequence numbers, handle table, write state) and worker
         # thread. The demultiplexer (run) never blocks on protocol work; per-client
@@ -547,13 +562,19 @@ class UdpfsServer:
                         try:
                             data, addr = self.sock.recvfrom(2048)
                             self._handle_discovery(data, addr)
-                        except BlockingIOError:
+                        except OSError:
+                            # BlockingIOError (no datagram) or a spurious Windows
+                            # ConnectionResetError -- never let one datagram's
+                            # error kill the whole server loop.
                             pass
                     elif ready is self.dsock:
                         try:
                             data, addr = self.dsock.recvfrom(4096)
                             self._route_data(data, addr)
-                        except BlockingIOError:
+                        except OSError:
+                            # BlockingIOError (no datagram) or a spurious Windows
+                            # ConnectionResetError -- never let one datagram's
+                            # error kill the whole server loop.
                             pass
                 self._sweep_idle_sessions()
                 self._emit_metrics()
