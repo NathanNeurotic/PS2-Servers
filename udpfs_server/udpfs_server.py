@@ -180,7 +180,13 @@ def get_compressed_info(file_path: str) -> Optional[Tuple[int, str]]:
                 # We present as 2048-byte/sector ISO, so correct the size.
                 _CD_FRAME_SIZE = 2448
                 _CD_CODECS = (0x63646c7a, 0x63647a6c, 0x6364666c)  # cdlz, cdzl, cdfl
-                if (any(c in _CD_CODECS for c in compressors if c != 0)
+                unit_size = struct.unpack('>I', header[60:64])[0]
+                # Same predicate as the CHD wrapper (compressed_iso/chd.py) and
+                # udpfsd: a CD unit size OR a CD codec, AND whole 2448-byte-frame
+                # hunks -- so the size reported here can never disagree with what
+                # the read path extracts.
+                if ((unit_size == _CD_FRAME_SIZE
+                     or any(c in _CD_CODECS for c in compressors if c != 0))
                         and hunk_size > 0 and hunk_size % _CD_FRAME_SIZE == 0):
                     frames_per_hunk = hunk_size // _CD_FRAME_SIZE
                     total_hunks = (uncompressed_size + hunk_size - 1) // hunk_size
