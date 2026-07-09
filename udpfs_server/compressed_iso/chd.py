@@ -255,12 +255,16 @@ class ChdFileWrapper(CompressedFileWrapper):
         self.block_size  = hunk_size
         self._num_blocks = (logical_bytes + hunk_size - 1) // hunk_size
 
-        # CD-format detection: cdlz/cdzl/cdfl codecs + 2448-byte units
+        # CD-format detection, mirroring udpfsd exactly: a CD unit size OR any CD
+        # codec (cdlz/cdzl/cdfl), AND a hunk that is a whole number of 2448-byte
+        # frames. Folding the hunk check into the flag keeps this size math and the
+        # read/extract path (which keys off _is_cd_format) from ever disagreeing.
         self._is_cd_format = (
-            unit_size == _CD_FRAME_SIZE
-            and any(c in _CD_CODECS for c in compressors if c != 0)
+            (unit_size == _CD_FRAME_SIZE
+             or any(c in _CD_CODECS for c in compressors if c != 0))
+            and hunk_size % _CD_FRAME_SIZE == 0
         )
-        if self._is_cd_format and hunk_size % _CD_FRAME_SIZE == 0:
+        if self._is_cd_format:
             self._frames_per_hunk  = hunk_size // _CD_FRAME_SIZE
             total_frames           = self._num_blocks * self._frames_per_hunk
             self.uncompressed_size = total_frames * _USER_DATA
