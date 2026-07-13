@@ -1293,7 +1293,7 @@ class UdpfsServer:
             
             if self.enable_compression:
                 lower_name = entry.name.lower()
-                if lower_name.endswith('.zso') or lower_name.endswith('.cso'):
+                if lower_name.endswith('.zso') or lower_name.endswith('.cso') or lower_name.endswith('.chd'):
                     # Transform name to .iso
                     display_name = self._transform_compressed_name(entry.name)
                     # Get uncompressed size
@@ -1339,12 +1339,12 @@ class UdpfsServer:
             return
 
         resolved = self._resolve_path(path)
-        if resolved is None:
+        if resolved is None or not os.path.exists(resolved):
             # Check for compressed version when .iso is requested
             if self.enable_compression and path.lower().endswith('.iso'):
                 # Try to find compressed version
                 base_path = path[:-4]  # Remove .iso
-                for ext in ['.zso', '.cso']:
+                for ext in ['.zso', '.cso', '.chd']:
                     compressed_path = base_path + ext
                     compressed_resolved = self._resolve_path(compressed_path)
                     if compressed_resolved and os.path.exists(compressed_resolved):
@@ -1358,7 +1358,8 @@ class UdpfsServer:
                                 return
                         except OSError:
                             pass
-            self._send_getstat_reply(addr, result=-errno.EACCES)
+            self._send_getstat_reply(
+                addr, result=-errno.EACCES if resolved is None else -errno.ENOENT)
             return
 
         try:
@@ -1368,7 +1369,7 @@ class UdpfsServer:
             # Check if this is a compressed file
             if self.enable_compression:
                 lower_path = resolved.lower()
-                if lower_path.endswith('.zso') or lower_path.endswith('.cso'):
+                if lower_path.endswith('.zso') or lower_path.endswith('.cso') or lower_path.endswith('.chd'):
                     compressed_stat = self._get_compressed_stat(resolved, st)
                     if compressed_stat:
                         stat_info = compressed_stat
