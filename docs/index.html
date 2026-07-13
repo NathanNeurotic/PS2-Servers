@@ -19,6 +19,7 @@
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#servers">Servers</a>
         <a href="#quickstart">Quick start</a>
+        <a href="#requirements">Requirements</a>
         <a href="#download">Download</a>
         <a href="falsepositives.html">Antivirus</a>
         <a href="https://github.com/NathanNeurotic/PS2-Servers">GitHub</a>
@@ -97,6 +98,44 @@ Password          leave blank
 <b>UDPBD</b>   select UDPBD in OPL; the PS2 finds the server automatically — no IP or port.</pre>
           </div>
           <p class="section-intro ps2-note">The launcher always prints these exact values while a server is running, so you never have to guess. You'll need a PS2 that boots homebrew and runs Open PS2 Loader (or PCSX2 with a network adapter) on the same LAN.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="requirements">
+      <div class="container">
+        <h2>What you need to run it.</h2>
+        <p class="section-intro">Two machines on the same home network: the PC that runs PS2 Servers, and the PS2 that loads your games from it. The PC side is deliberately light — no Python and no heavy runtime for the packaged app.</p>
+        <div class="cards">
+          <article class="card">
+            <h3>Your PC</h3>
+            <ul class="spec">
+              <li><b>OS</b> Windows 10/11, Linux, or macOS — all 64-bit</li>
+              <li><b>Packaged</b> No Python needed; the download bundles everything</li>
+              <li><b>From source</b> Python 3 + Tkinter (Linux: <code>python3-tk</code>)</li>
+              <li><b>Hardware</b> Any modern 64-bit PC — a small Tkinter app, not Electron</li>
+              <li><b>Network</b> Same LAN as the PS2; wired recommended for big games</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>Your PS2</h3>
+            <ul class="spec">
+              <li><b>Console</b> A PS2 that boots homebrew (FreeMcBoot, FreeDVDBoot, modchip…)</li>
+              <li><b>Loader</b> Open PS2 Loader or a fork such as RiptOPL</li>
+              <li><b>Adapter</b> PS2 Ethernet — built into slims, SCPH‑10281 on fat units</li>
+              <li><b>Emulator</b> PCSX2 with a network adapter works for testing too</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>Compressed images</h3>
+            <ul class="spec">
+              <li><b>Packaged</b> CHD, CSO and ZSO decode out of the box</li>
+              <li><b>ZSO</b> From source, add <code>lz4</code></li>
+              <li><b>CHD</b> From source, add a <code>libchdr</code> native library</li>
+              <li><b>CSO</b> Always available — pure Python</li>
+            </ul>
+            <p><code>UDPFS only · shown as .iso</code></p>
+          </article>
         </div>
       </div>
     </section>
