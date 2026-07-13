@@ -238,9 +238,16 @@ class ServerCard(ttk.LabelFrame):
         out = {}
         for key, var in self.vars.items():
             v = var.get()
+            if isinstance(v, bool):
+                # Persist booleans explicitly, including False. Most fields
+                # default off, but a field that defaults ON (enable_compression)
+                # needs a stored False to remember the user unticking it --
+                # otherwise the default would silently re-enable it next launch.
+                out[key] = v
+                continue
             if isinstance(v, str):
                 v = v.strip()
-            if v not in ("", False, None):
+            if v not in ("", None):
                 out[key] = v
         return out
 

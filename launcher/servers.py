@@ -220,8 +220,10 @@ UDPFS = ServerDef(
               help="Folder to serve files from (folder and/or image required)."),
         Field("block_device", "Disk image", "file", required=False,
               help="A single disk image to serve as a block device."),
-        Field("enable_compression", "Decompress CHD/CSO/ZSO", "bool", default=False,
-              help="Compressed images appear as .iso (needs lz4 for ZSO, libchdr for CHD)."),
+        Field("enable_compression", "Decompress CHD/CSO/ZSO", "bool", default=True,
+              help="On by default so CHD/CSO/ZSO images appear as playable .iso "
+              "(needs lz4 for ZSO, libchdr for CHD; formats without their library "
+              "are simply left as-is). Untick to serve files without decompression."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("port", "Port", "port", default=0xF5F6, advanced=True,
               help="UDP port (default 0xF5F6)."),
