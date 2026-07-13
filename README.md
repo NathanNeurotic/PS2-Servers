@@ -91,6 +91,39 @@ false positives on packaged builds)? **[udpfsd](https://github.com/pcm720/udpfsd
 pcm720 is a Go alternative — a single prebuilt binary with the same CHD/CSO/ZSO
 support. See [Credits & thanks](#credits--thanks).
 
+## Minimum system requirements
+
+You need two machines on the **same LAN**: the **PC** that runs PS2 Servers, and
+the **PS2** that loads games from it. The PC side is deliberately light — no
+Python and no heavy runtime for the packaged app.
+
+**Your PC (runs PS2 Servers)**
+
+| | Requirement |
+|---|---|
+| OS | Windows 10/11 (x64), Linux (x64), or macOS (Apple Silicon or Intel) |
+| Packaged app | No Python required — the download bundles everything |
+| From source | Python 3 with Tkinter (Linux: `sudo apt install python3-tk`); official builds use Python 3.12 |
+| Hardware | Any modern 64-bit PC — the launcher is a small Tkinter GUI, not Electron/Qt |
+| Network | Wired or Wi‑Fi LAN on the same subnet as the PS2 (wired recommended for large games) |
+| Disk | A few hundred MB for the app, plus room for your game files |
+
+**Your PS2 (loads over the network)**
+
+| | Requirement |
+|---|---|
+| Console | A PS2 that boots homebrew (FreeMcBoot / FreeDVDBoot / modchip / etc.) |
+| Loader | Open PS2 Loader (OPL) or a fork such as RiptOPL |
+| Network adapter | The PS2 Ethernet adapter — built into slims; SCPH‑10281 on fat units |
+| Emulator (optional) | PCSX2 with a configured network adapter also works for testing |
+
+**Optional — compressed images (UDPFS)**
+
+Packaged builds bundle CHD (libchdr) and ZSO (lz4) support, so CHD/CSO/ZSO images
+"just work" and appear as plain `.iso`. From source, install `lz4` for ZSO and a
+`libchdr` native library for CHD; CSO always works (Python standard library). See
+[docs/optional-compression-dependencies.md](docs/optional-compression-dependencies.md).
+
 ## Run a server on its own (terminal)
 
 Each server still runs standalone, and the launcher can run them too:

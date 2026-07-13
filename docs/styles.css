@@ -171,6 +171,12 @@ h1 span { color: transparent; -webkit-text-stroke: 1px rgba(129, 245, 255, .92);
 .card p { color: #c6d4f4; line-height: 1.65; }
 .card code { color: #e6fbff; background: rgba(0, 0, 0, .34); border: 1px solid rgba(83, 246, 255, .16); padding: 4px 7px; border-radius: 8px; }
 
+.spec { list-style: none; margin: 0; padding: 0; display: grid; gap: 11px; }
+.spec li { position: relative; padding-left: 18px; color: #c6d4f4; line-height: 1.55; }
+.spec li::before { content: ""; position: absolute; left: 0; top: .58em; width: 6px; height: 6px; border-radius: 2px; background: var(--cyan); box-shadow: 0 0 10px rgba(83, 246, 255, .85); }
+.spec b { color: var(--cyan); font-weight: 700; margin-right: 7px; letter-spacing: .01em; }
+.card .spec + p { margin: 18px 0 0; }
+
 .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; counter-reset: step; }
 .step { padding: 20px; border: 1px solid rgba(60, 149, 255, .28); border-radius: 20px; background: rgba(3, 11, 30, .68); }
 .step::before { counter-increment: step; content: "0" counter(step); display: inline-grid; place-items: center; width: 38px; height: 38px; margin-bottom: 16px; color: var(--cyan); border: 1px solid rgba(83, 246, 255, .5); border-radius: 12px; box-shadow: 0 0 18px rgba(83, 246, 255, .25); font-weight: 900; }

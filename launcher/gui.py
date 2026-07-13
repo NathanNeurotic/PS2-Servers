@@ -238,9 +238,16 @@ class ServerCard(ttk.LabelFrame):
         out = {}
         for key, var in self.vars.items():
             v = var.get()
+            if isinstance(v, bool):
+                # Persist booleans explicitly, including False. Most fields
+                # default off, but a field that defaults ON (enable_compression)
+                # needs a stored False to remember the user unticking it --
+                # otherwise the default would silently re-enable it next launch.
+                out[key] = v
+                continue
             if isinstance(v, str):
                 v = v.strip()
-            if v not in ("", False, None):
+            if v not in ("", None):
                 out[key] = v
         return out
 
@@ -609,20 +616,24 @@ class LauncherApp:
         def worker():
             setup_needed = True
             error = None
+            notes = []
             try:
-                setup_needed = windows_setup.needs_setup(key, values)
+                setup_needed = windows_setup.needs_setup(key, values, log=notes.append)
             except Exception as e:
                 error = str(e)
             self.root.after(0, lambda: self._handle_windows_setup_check(
-                key, values, setup_needed, error))
+                key, values, setup_needed, error, notes))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _handle_windows_setup_check(self, key, values, setup_needed, error=None):
+    def _handle_windows_setup_check(self, key, values, setup_needed, error=None, notes=None):
+        for note in (notes or []):
+            self._append_log(key, "[setup] {}\n".format(note))
         if error:
             self._append_log(key, "[setup] Windows setup check failed; elevation will retry: {}\n".format(error))
 
-        admin_required = setup_needed or (key == "smbv1" and values.get("take_445"))
+        take_445 = key == "smbv1" and bool(values.get("take_445"))
+        admin_required = setup_needed or take_445
         if admin_required and not elevate.is_admin():
             self._set_card_busy(key, False, "Start")
             if not elevate.can_elevate():
@@ -632,14 +643,19 @@ class LauncherApp:
                 return
 
             summary = windows_setup.setup_summary(key, values)
-            if messagebox.askyesno(
-                    "Administrator required",
-                    "PS2 Servers needs administrator rights to {}.\n\n"
-                    "This will not enable Windows SMB1. It only manages PS2 Servers "
-                    "firewall rules, and advanced port 445 mode only pauses Windows "
-                    "file sharing while that server is running.\n\n"
-                    "Restart the launcher as administrator now? Your settings are "
-                    "saved and the server will continue automatically.".format(summary)):
+            message = (
+                "PS2 Servers needs administrator rights to {}.\n\n"
+                "This will not enable Windows SMB1. It only manages PS2 Servers "
+                "firewall rules, and advanced port 445 mode only pauses Windows "
+                "file sharing while that server is running.\n\n"
+                "Restart the launcher as administrator now? Your settings are "
+                "saved and the server will continue automatically.".format(summary))
+            if not take_445:
+                message += (
+                    "\n\nChoose No to start the server anyway without firewall "
+                    "setup (if Windows Firewall is active, the PS2 may not be "
+                    "able to connect).")
+            if messagebox.askyesno("Administrator required", message):
                 self._save(pending_start=key)
                 if elevate.relaunch_as_admin():
                     self.stop_all()  # free ports before the elevated instance starts
@@ -650,6 +666,9 @@ class LauncherApp:
                     messagebox.showerror(
                         "Elevation failed",
                         "Could not restart as administrator.")
+            elif not take_445:
+                self._append_log(key, "[setup] firewall setup skipped by user; starting anyway\n")
+                self._launch_server(key, values)
             return
 
         if setup_needed and elevate.is_admin():

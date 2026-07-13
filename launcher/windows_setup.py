@@ -145,11 +145,21 @@ def _firewall_rules(key, values):
     return rules
 
 
-def needs_setup(key, values):
+def needs_setup(key, values, log=None):
     """True if an elevated firewall setup pass is needed before starting.
 
     Query failures deliberately return True: if Windows blocks the check, the
     elevated path is the safer and more useful fallback.
+
+    Exception: when the Windows Firewall service (mpssvc) is not running,
+    return False. A stopped firewall does not filter traffic, so allow rules
+    are pointless (and cannot be created); users on third-party firewalls or
+    with Windows Firewall disabled should not see an elevation prompt on every
+    start. The check runs on every start, so if the firewall is enabled later
+    the missing rules are detected then.
+
+    ``log``, when given, receives short human-readable strings explaining why
+    setup is or is not needed, for the per-server launcher log.
 
     Important: this check deliberately does not inspect or request Windows SMB1
     optional features. The bundled SMB server speaks the OPL-compatible SMB1/CIFS
@@ -157,12 +167,18 @@ def needs_setup(key, values):
     """
     if not is_windows():
         return False
+    if log is None:
+        log = lambda msg: None
 
     port_rule_names = _rule_names(key, values)[1:]
     rule_array = "@({})".format(",".join(_ps_quote(n) for n in port_rule_names))
     program = _ps_quote(os.path.abspath(_server_program_path()))
     app_rule = _ps_quote("PS2 Servers - App")
     script = "\n".join([
+        "$svc = Get-Service -Name mpssvc -ErrorAction SilentlyContinue",
+        "if ($svc -and $svc.Status -ne 'Running') {",
+        "  Write-Output 'FIREWALL_OFF'",
+        "} else {",
         "$appRuleName = {}".format(app_rule),
         "$appProgram = {}".format(program),
         "$appRule = Get-NetFirewallRule -DisplayName $appRuleName -ErrorAction SilentlyContinue",
@@ -179,14 +195,32 @@ def needs_setup(key, values):
         "    Write-Output ('NEED_RULE=' + $name)",
         "  }",
         "}",
+        "}",
     ])
     try:
         res = _powershell(script)
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
+        log("firewall check timed out after {}s; assuming setup is needed".format(
+            POWERSHELL_TIMEOUT))
+        return True
+    except OSError as e:
+        log("firewall check could not run ({}); assuming setup is needed".format(e))
         return True
     if res.returncode != 0:
+        log("firewall check failed; assuming setup is needed: {}".format(
+            ((res.stderr or "") + (res.stdout or "")).strip() or "unknown error"))
         return True
-    return bool((res.stdout or "").strip())
+    out = (res.stdout or "").strip()
+    if "FIREWALL_OFF" in out:
+        log("Windows Firewall service is not running; skipping firewall setup")
+        return False
+    if out:
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("NEED_RULE="):
+                log("missing firewall rule: {}".format(line[len("NEED_RULE="):]))
+        return True
+    return False
 
 
 def apply_setup(key, values):
