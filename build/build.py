@@ -66,6 +66,11 @@ def main():
         sys.executable, "-m", "nuitka",
         "--enable-plugin=tk-inter",
         "--assume-yes-for-downloads",
+        # The launcher re-executes this same binary with '--serve <key> ...'
+        # to run a server child. Nuitka's self-execution guard would abort
+        # (exit 2) if any bare '-c'/'-m' ever appears in that argv, so opt
+        # this one deliberate self-exec pattern out of the guard.
+        "--no-deployment-flag=self-execution",
         "--output-dir=" + os.path.join(ROOT, "dist"),
         "--output-filename=" + out,
         "--company-name=" + release_metadata.COMPANY_NAME,
