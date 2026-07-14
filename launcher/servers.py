@@ -149,20 +149,24 @@ def _udpfs_argv(v):
     if not v.get("root_dir") and not v.get("block_device"):
         raise ValueError("UDPFS needs a Games folder and/or a Disk image.")
     args = []
+    # Long flags only: the packaged app re-executes ITSELF to run a server,
+    # and Nuitka's self-execution guard aborts (exit 2) when a compiled binary
+    # is invoked with a bare '-c' (or '-m') followed by another argument --
+    # exactly what '-c -v' produced once compression became the default.
     if v.get("root_dir"):
-        args += ["-d", v["root_dir"]]
+        args += ["--root-dir", v["root_dir"]]
     if v.get("block_device"):
-        args += ["-b", v["block_device"]]
+        args += ["--block-device", v["block_device"]]
     if v.get("port"):
-        args += ["-p", str(v["port"])]
+        args += ["--port", str(v["port"])]
     if v.get("bind"):
-        args += ["-i", str(v["bind"])]
+        args += ["--bind", str(v["bind"])]
     if v.get("read_only"):
-        args.append("-r")
+        args.append("--read-only")
     if v.get("enable_compression"):
-        args.append("-c")
+        args.append("--enable-compression")
     if v.get("verbose"):
-        args.append("-v")
+        args.append("--verbose")
     return args
 
 

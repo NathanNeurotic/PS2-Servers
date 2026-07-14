@@ -27,6 +27,41 @@ def require_absent(rel, *needles):
     return []
 
 
+def check_server_argv_nuitka_safe():
+    """No server argv may contain a bare '-c' or '-m'.
+
+    The packaged launcher re-executes ITSELF ('PS2Servers.exe --serve <key>
+    ...') to run a server child, and Nuitka's self-execution guard aborts a
+    compiled binary (exit 2) whenever a bare '-c' or '-m' is followed by
+    another argument -- it assumes the CPython fork-bomb pattern. Passing
+    '-c' for --enable-compression shipped exactly that crash once compression
+    became the default, so server argv builders must use long flags for these.
+    """
+    sys.path.insert(0, str(ROOT))
+    from launcher import servers
+
+    errors = []
+    for key, server in servers.REGISTRY.items():
+        # Synthesize values that switch every flag on so every branch of the
+        # argv builder is exercised.
+        values = {}
+        for field in server.fields:
+            if field.kind == "bool":
+                values[field.key] = True
+            elif field.kind == "port":
+                values[field.key] = server.default_port or 1111
+            else:
+                values[field.key] = "X"
+        argv = server.build_argv(values)
+        for i, arg in enumerate(argv):
+            if arg in ("-c", "-m") and i + 1 < len(argv):
+                errors.append(
+                    "launcher/servers.py: '{}' argv contains bare '{}' followed by "
+                    "'{}' -- Nuitka's self-execution guard aborts the packaged "
+                    "binary on this; use the long flag".format(key, arg, argv[i + 1]))
+    return errors
+
+
 def main():
     errors = []
 
@@ -128,6 +163,8 @@ def main():
             "Disable-WindowsFeature",
             "SMB1Protocol",
         )
+
+    errors += check_server_argv_nuitka_safe()
 
     if errors:
         print("Release compliance check failed:")
