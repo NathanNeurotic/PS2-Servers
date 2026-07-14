@@ -694,8 +694,17 @@ class UdpfsServer:
         # Resolve
         resolved = os.path.realpath(os.path.join(self.root_dir, client_path))
 
-        # Ensure within root
-        if not resolved.startswith((self.root_dir + os.sep).replace('\\\\', '\\')) and resolved != self.root_dir:
+        # Ensure within root. Compare against root_dir verbatim: it was
+        # realpath()-normalized at startup, so it never needs cleanup here --
+        # a doubled backslash is only ever the legitimate lead of a UNC root
+        # (\\server\share\...), and collapsing it made every request against a
+        # NAS root fail containment (EACCES on all opens). Append os.sep only
+        # when missing: realpath keeps the trailing separator on bare drive
+        # roots ('C:\') and on '/', and blindly appending another would make
+        # serving a whole drive fail the same way.
+        prefix = (self.root_dir if self.root_dir.endswith(os.sep)
+                  else self.root_dir + os.sep)
+        if not resolved.startswith(prefix) and resolved != self.root_dir:
             return None
 
         return resolved

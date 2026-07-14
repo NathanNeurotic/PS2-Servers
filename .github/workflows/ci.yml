@@ -38,5 +38,8 @@ jobs:
       - name: Run UDPFS compression listing selftest
         run: python udpfs_server/compression_selftest.py
 
+      - name: Run UDPFS path-guard selftest
+        run: python udpfs_server/pathguard_selftest.py
+
       - name: Smoke build bundled libchdr
         run: python build/build_libchdr.py
