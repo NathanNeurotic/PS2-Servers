@@ -274,8 +274,15 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: PS2 Servers ${{ steps.tag.outputs.tag }}
+          # Rolling dev builds must never outrank tagged releases: publish as
+          # pre-release so GitHub's "Latest" badge always stays on the newest
+          # tagged vX.Y.Z release (a same-day merge repeatedly stole it).
+          prerelease: true
+          make_latest: false
           body: |
-            Automatic release from `main`.
+            Automatic development build from `main`, published as a
+            **pre-release**. For stable downloads use the
+            [latest tagged release](https://github.com/NathanNeurotic/PS2-Servers/releases/latest).
 
             Commit: ${{ github.sha }}
 
