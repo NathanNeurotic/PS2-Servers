@@ -29,7 +29,13 @@ import tempfile
 
 import udpfs_server as srv  # sys.path[0] is this dir when run as a script
 
-UNC_ROOT = r"\\192.168.0.111\Data\[ROMs&ISOs]\PS2"  # from the field report
+# Path shape from the field report, but on loopback: resolving a UNC path
+# makes Windows attempt a real SMB connection, and an unreachable LAN IP
+# stalls ~21s on the first call per boot (measured) -- or, worse, contacts
+# whatever actually lives at that address on the developer's network.
+# 127.0.0.1 fails/answers instantly and realpath still preserves the UNC
+# lead, which is all the guard's string logic needs.
+UNC_ROOT = r"\\127.0.0.1\Data\[ROMs&ISOs]\PS2"
 
 
 def check(cond, what):
