@@ -585,10 +585,19 @@ class UdpfsServer:
             return
         self._last_sweep = now
         with self.sessions_lock:
-            idle = [a for a, s in self.sessions.items()
+            idle = [(a, now - s.last_activity) for a, s in self.sessions.items()
                     if now - s.last_activity > self.session_timeout]
-            for a in idle:
+            for a, quiet in idle:
                 self.sessions.pop(a).shutdown()
+                # Not verbose-gated. A reap tells the client nothing (no packet
+                # exists to tell it with) and takes its open handles and their
+                # read positions with it, so if that console was only paused, its
+                # next read fails against a session that no longer knows it. This
+                # line is the sole trace anyone gets of why.
+                self._print_event(
+                    f"[{a[0]}:{a[1]}] idle {quiet:.0f}s > peer-timeout "
+                    f"{self.session_timeout:.0f}s -- dropped, its open files "
+                    f"closed (raise --peer-timeout if it was only paused)")
 
     def _emit_metrics(self):
         """Periodically log transfer/op stats when --metrics is enabled."""
