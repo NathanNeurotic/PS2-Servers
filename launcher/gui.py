@@ -315,6 +315,7 @@ class LauncherApp:
         self.out_queue = queue.Queue()
         self.logs = {}
         self.saved = config.load()
+        self._firewall_ok = set()   # _restore fills it; never read before it exists
         self._tray = None
         self._tray_option_widgets = []
         self.close_to_tray_var = tk.BooleanVar(
@@ -641,6 +642,17 @@ class LauncherApp:
             card.toggle_btn.config(text=text)
 
     def _begin_windows_setup_check(self, key, values):
+        # Windows charges for this by the machine's total rule count, not by how
+        # many rules we ask about: tens of seconds on a box with a thousand of
+        # them, every single start. Once an exe+ports combination has come back
+        # clean there is nothing to re-learn, so skip it until that changes.
+        fingerprint = windows_setup.setup_fingerprint(key, values)
+        if fingerprint and fingerprint in self._firewall_ok:
+            self._append_log(
+                key, "[setup] firewall already allowed for this app and ports\n")
+            self._launch_server(key, values)
+            return
+
         self._set_card_busy(key, True, "Checking")
         self._append_log(key, "[setup] checking Windows Firewall setup\n")
 
@@ -653,15 +665,23 @@ class LauncherApp:
             except Exception as e:
                 error = str(e)
             self.root.after(0, lambda: self._handle_windows_setup_check(
-                key, values, setup_needed, error, notes))
+                key, values, setup_needed, error, notes, fingerprint))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _handle_windows_setup_check(self, key, values, setup_needed, error=None, notes=None):
+    def _handle_windows_setup_check(self, key, values, setup_needed, error=None,
+                                    notes=None, fingerprint=None):
         for note in (notes or []):
             self._append_log(key, "[setup] {}\n".format(note))
         if error:
             self._append_log(key, "[setup] Windows setup check failed; elevation will retry: {}\n".format(error))
+
+        # Remember a clean answer so the next start skips the scan. Only a real
+        # clean one: an error means we never learned anything, and a timeout means
+        # we gave up rather than confirmed.
+        if fingerprint and not setup_needed and not error \
+                and not any("timed out" in n for n in (notes or [])):
+            self._remember_firewall_ok(fingerprint)
 
         take_445 = key == "smbv1" and bool(values.get("take_445"))
         admin_required = setup_needed or take_445
@@ -939,8 +959,23 @@ class LauncherApp:
 
         self._cleanup_windows_setup_async()
 
+    def _remember_firewall_ok(self, fingerprint):
+        if fingerprint in self._firewall_ok:
+            return
+        self._firewall_ok.add(fingerprint)
+        self._save()
+
+    def _forget_firewall_ok(self):
+        """Drop every cached clean answer: the rules behind them are gone."""
+        if not self._firewall_ok:
+            return
+        self._firewall_ok.clear()
+        self._save()
+
     def _cleanup_windows_setup_async(self):
         self._append_log("setup", "[setup] removing PS2 Servers firewall rules\n")
+        # The cache says "these rules exist and match". They are about to not.
+        self._forget_firewall_ok()
 
         def worker():
             try:
@@ -1037,6 +1072,10 @@ class LauncherApp:
         # definition, so the same check would throw it away on every launch.
         # The combo's values are what _build already detected; re-running
         # all_ipv4() here would block the startup path on getaddrinfo for nothing.
+        # Fingerprints whose firewall state we have already confirmed clean. A
+        # stale one only costs a rescan, never a wrong answer: the fingerprint
+        # changes whenever the exe or ports do.
+        self._firewall_ok = set(self.saved.get("firewall_ok") or [])
         ip = self.saved.get("ip")
         if ip and (ip in self.ip_combo["values"] or self.saved.get("ip_custom")):
             self.ip_var.set(ip)
@@ -1049,6 +1088,7 @@ class LauncherApp:
               pending_firewall_allow=False):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get(),
+                "firewall_ok": sorted(getattr(self, "_firewall_ok", ())),
                 # Not in the pick-list => the user typed it. See _restore.
                 # Must be the combo's values, not a fresh all_ipv4(): _save runs on
                 # every minimize/close-to-tray, so it would block the UI on
