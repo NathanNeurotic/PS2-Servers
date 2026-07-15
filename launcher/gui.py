@@ -30,6 +30,14 @@ APP_WINDOW_WIDTH = 1024
 APP_INITIAL_HEIGHT = 760
 APP_MIN_HEIGHT = 420
 
+# Field help wraps at a fixed pixel width: the window is width-locked (resizable(False, True)
+# plus _enforce_fixed_width) and the scroll canvas pins its content to APP_CONTENT_WIDTH, so
+# there is no horizontal resize for a wraplength to track. The 220px reserve clears the widest
+# field label (161px) plus card padding and grid padx at either placement below.
+HELP_WRAPLENGTH = APP_CONTENT_WIDTH - 220
+# Indent checkbox help past the indicator so it lines up under the label, not under the box.
+CHECK_HELP_INDENT = 27
+
 PROJECT_URL = "https://www.psx-place.com/resources/windows-linux-mac-ps2-servers-smbv1-udpbd-udpfs-for-everyone.1728/"
 REPO_URL = "https://github.com/NathanNeurotic/PS2-Servers"
 RELEASES_URL = "https://github.com/NathanNeurotic/PS2-Servers/releases"
@@ -182,6 +190,15 @@ class ServerCard(ttk.LabelFrame):
         self.hint.grid(row=row, column=0, columnspan=3, sticky="w",
                        padx=4, pady=(4, 0))
 
+    def _add_help(self, parent, text, row, column, indent):
+        # Own row, so help never overlaps the entry or Browse button. columnspan
+        # reaches the card's last column (2) from wherever it starts.
+        ttk.Label(parent, text=text, style="CardHelp.TLabel", font=("", 8),
+                  wraplength=HELP_WRAPLENGTH).grid(
+            row=row, column=column, columnspan=3 - column, sticky="w",
+            padx=(indent, 4), pady=(0, 4))
+        return row + 1
+
     def _add_field(self, parent, f, row):
         if f.kind == "bool":
             var = tk.BooleanVar(value=bool(f.default))
@@ -189,7 +206,10 @@ class ServerCard(ttk.LabelFrame):
                             style="Card.TCheckbutton").grid(
                 row=row, column=0, columnspan=3, sticky="w", padx=4, pady=2)
             self.vars[f.key] = var
-            return row + 1
+            row += 1
+            if f.help:
+                row = self._add_help(parent, f.help, row, 0, CHECK_HELP_INDENT)
+            return row
 
         ttk.Label(parent, text=f.label + ":", style="Card.TLabel").grid(
             row=row, column=0, sticky="w", padx=4, pady=2)
@@ -220,12 +240,8 @@ class ServerCard(ttk.LabelFrame):
                 row=row, column=1, sticky="ew", padx=6, pady=2)
         self.vars[f.key] = var
         row += 1
-        if f.help:  # on its own row so it never overlaps the entry/Browse button
-            ttk.Label(parent, text=f.help, style="CardHelp.TLabel",
-                      font=("", 8)).grid(
-                row=row, column=1, columnspan=2, sticky="w",
-                padx=6, pady=(0, 4))
-            row += 1
+        if f.help:
+            row = self._add_help(parent, f.help, row, 1, 6)
         return row
 
     def _toggle_advanced(self):
