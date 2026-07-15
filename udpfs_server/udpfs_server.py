@@ -1010,11 +1010,20 @@ class UdpfsServer:
 
         # Ensure a per-client session (and its worker thread) exists for this peer.
         sess = self._get_or_create_session(addr)
-        if self.modulo_compat:
+        if self.modulo_compat and not sess.rx_streaming:
             # Modulo's client keeps one monotonic sequence for its whole life -- it
             # never restarts at 0, not even across a server restart -- so the
             # reset-on-seq-0 path below never fires for it and every packet is NACKed
             # forever. Its own server resyncs off the DISCOVERY instead, so do that.
+            #
+            # But ONLY to open a stream, never to interrupt one. Modulo keeps a
+            # background DISCOVERY running while it reads: on hardware, a discovery
+            # carrying seq=0 arrived mid-transfer while the data stream was at 77,
+            # and resyncing on it left us demanding 1 forever -- the transfer
+            # desynced, exhausted its retries and stalled, over and over. The client
+            # carries straight on after those discoveries, which is what proves they
+            # are not re-establishing anything.
+            #
             # Assigned on the session, not through the _session_prop proxies: we are
             # on the demux thread, where _local.session is unset.
             sess.rx_seq_nr_expected = (hdr.seq_nr + 1) & 0xFFF
@@ -1085,6 +1094,7 @@ class UdpfsServer:
                 return
 
         self.rx_seq_nr_expected = (self.rx_seq_nr_expected + 1) & 0xFFF
+        self._local.session.rx_streaming = True
 
         # Immediate ACK - lets PS2's udprdma_send() return quickly,
         # so it can enter udprdma_recv() (5s timeout) while we process
@@ -2192,6 +2202,10 @@ class Session:
         self.write_data = bytearray()
         self.write_total_chunks = 0
         self.write_received_chunks = 0
+        # True once this peer's data stream is running. Only modulo_compat reads
+        # it: its client keeps a background DISCOVERY going while it streams, and
+        # a live stream must not be resynced out from under itself.
+        self.rx_streaming = False
         # concurrency plumbing
         self.queue: "queue.Queue" = queue.Queue()
         self.last_activity = time.monotonic()
