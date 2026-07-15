@@ -112,7 +112,14 @@ def _server_ports(key, values):
         port = 445 if values.get("take_445") else _parse_port(values.get("port"), 1111)
         return [("TCP", port, "SMBv1")]
     if key == "udpfs":
-        return [("UDP", _parse_port(values.get("port"), 0xF5F6), "UDPFS discovery")]
+        ports = [("UDP", _parse_port(values.get("port"), 0xF5F6), "UDPFS discovery")]
+        # The data socket is normally ephemeral and covered by the program-wide
+        # "PS2 Servers - App" rule. When the user pins it, allow it by port too so
+        # the setting is usable behind manual/port-based firewall rules.
+        data_port = _parse_port(values.get("data_port"), 0)
+        if data_port:
+            ports.append(("UDP", data_port, "UDPFS data"))
+        return ports
     if key == "udpbd":
         return [("UDP", UDPBD_PORT, "UDPBD")]
     return []

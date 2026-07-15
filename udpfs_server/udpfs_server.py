@@ -345,7 +345,9 @@ class UdpfsServer:
                  compression_cache_size: int = 32,
                  peer_timeout: float = SESSION_TIMEOUT,
                  metrics: bool = False,
-                 metrics_period: float = 60.0):
+                 metrics_period: float = 60.0,
+                 single_port: bool = False,
+                 data_port: int = 0):
         self.root_dir = os.path.realpath(root_dir) if root_dir else None
         self.port = port
         self.bind_ip = bind_ip
@@ -357,10 +359,20 @@ class UdpfsServer:
         self.session_timeout = peer_timeout
         self.metrics = metrics
         self.metrics_period = metrics_period
+        self.single_port = single_port
         self._last_metrics = time.monotonic()
 
         if self.root_dir and not os.path.isdir(self.root_dir):
             print(f"Error: '{root_dir}' is not a directory")
+            sys.exit(1)
+
+        # Two sockets on one port is not a shared-port mode -- SO_REUSEADDR lets
+        # both bind and then splits arriving datagrams between them, which silently
+        # breaks discovery. Refuse it and point at the mode that does this properly.
+        if not single_port and data_port and data_port == port:
+            print(f"Error: --data-port 0x{data_port:04X} is the same as the discovery "
+                  f"port. Pick a different data port, or use --single-port to serve "
+                  f"discovery and data on one port.")
             sys.exit(1)
 
         # Discovery socket, broadcast UDP
@@ -370,11 +382,25 @@ class UdpfsServer:
         self.sock.bind(('', port))
         self.sock.setblocking(False)
 
-        # Data socket
-        self.dsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.dsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.dsock.bind((bind_ip, 0))
-        self.dsock.setblocking(False)
+        if single_port:
+            # Compatibility mode: carry DISCOVERY *and* DATA on the one discovery
+            # port instead of handing the client off to a separate ephemeral data
+            # socket. Aliasing dsock to sock makes every send (INFORM included)
+            # leave from the discovery port, and makes _send_inform advertise that
+            # same port as the data port -- so a client that cannot follow the
+            # normal two-port handshake never has to move. Costs nothing but the
+            # per-peer port isolation, which nothing here relies on.
+            self.dsock = self.sock
+        else:
+            # Data socket. Port 0 = ephemeral (the default): fine when the app's
+            # own firewall rule allows the program on any port. Pin it with
+            # --data-port when the data endpoint has to be predictable -- manual
+            # firewall rules, port forwarding, or a restrictive NAT can't follow a
+            # port that changes every launch.
+            self.dsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.dsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.dsock.bind((bind_ip, data_port))
+            self.dsock.setblocking(False)
 
         # Windows: a UDP recvfrom() raises ConnectionResetError (WinError 10054)
         # when a *previous* sendto() drew an ICMP port-unreachable -- e.g. the PS2
@@ -569,7 +595,10 @@ class UdpfsServer:
                   f"sector_size={self.bd_sector_size}")
         print(f"  Discovery bind: 0.0.0.0:{self.port} (0x{self.port:04X})")
         addr, port = self.dsock.getsockname()
-        print(f"  Data bind: {addr}:{port} (0x{port:04X})")
+        if self.single_port:
+            print(f"  Data bind: {addr}:{port} (0x{port:04X}) [single-port mode]")
+        else:
+            print(f"  Data bind: {addr}:{port} (0x{port:04X})")
         print(f"  Mode: {'read-only' if self.read_only else 'read-write'}")
         if self.enable_compression:
             formats = [ext[1:].upper() for ext in COMPRESSED_EXTENSIONS]
@@ -579,12 +608,24 @@ class UdpfsServer:
         print()
         while not self._shutdown:
             try:
-                r, _, _ = select.select([self.sock, self.dsock], [], [], 1.0)
+                socks = [self.sock] if self.single_port else [self.sock, self.dsock]
+                r, _, _ = select.select(socks, [], [], 1.0)
                 for ready in r:
                     if ready is self.sock:
                         try:
-                            data, addr = self.sock.recvfrom(2048)
-                            self._handle_discovery(data, addr)
+                            if self.single_port:
+                                # One socket carries both packet types here, so
+                                # dispatch on the UDPRDMA type instead of on which
+                                # socket it arrived from.
+                                data, addr = self.sock.recvfrom(4096)
+                                if (len(data) >= 2 and Header.unpack(data).packet_type
+                                        == PacketType.DISCOVERY):
+                                    self._handle_discovery(data, addr)
+                                else:
+                                    self._route_data(data, addr)
+                            else:
+                                data, addr = self.sock.recvfrom(2048)
+                                self._handle_discovery(data, addr)
                         except OSError:
                             # BlockingIOError (no datagram) or a spurious Windows
                             # ConnectionResetError -- never let one datagram's
@@ -2153,6 +2194,19 @@ def main():
         help='Number of decompressed blocks to cache per file (default: 32; env: COMPRESSION_CACHE_SIZE)'
     )
     parser.add_argument(
+        '--data-port', type=lambda x: int(x, 0), default=_env_int('DATA_PORT', 0),
+        help='Pin the UDP data port instead of using an ephemeral one (default: 0 = '
+             'auto). Use when the data endpoint must be predictable for a manual '
+             'firewall rule, port forwarding, or NAT. Ignored with --single-port '
+             '(env: DATA_PORT)'
+    )
+    parser.add_argument(
+        '--single-port', action='store_true', default=_env_bool('SINGLE_PORT'),
+        help='Serve DISCOVERY and DATA on the one discovery port instead of handing '
+             'clients off to a separate data port. Compatibility mode for clients that '
+             'cannot follow the standard two-port UDPFS handshake (env: SINGLE_PORT)'
+    )
+    parser.add_argument(
         '--peer-timeout', type=float, default=_env_float('PEER_TIMEOUT', SESSION_TIMEOUT),
         help=f'Seconds of client inactivity before its session is reaped '
              f'(default: {int(SESSION_TIMEOUT)}; env: PEER_TIMEOUT)'
@@ -2199,7 +2253,9 @@ def main():
         compression_cache_size=args.compression_cache_size,
         peer_timeout=args.peer_timeout,
         metrics=args.metrics,
-        metrics_period=args.metrics_period
+        metrics_period=args.metrics_period,
+        single_port=args.single_port,
+        data_port=args.data_port
     )
     server.run()
 
