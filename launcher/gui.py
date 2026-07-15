@@ -1033,10 +1033,12 @@ class LauncherApp:
             card.set_values(servers.get(key, {}))
         # An auto-detected IP is only restored if this host still has it, so moving
         # between networks re-detects instead of showing a stale address. A typed
-        # one is restored unconditionally -- it is not in all_ipv4() by definition,
-        # so the same check would throw it away on every launch.
+        # one is restored unconditionally -- it is not in the detected list by
+        # definition, so the same check would throw it away on every launch.
+        # The combo's values are what _build already detected; re-running
+        # all_ipv4() here would block the startup path on getaddrinfo for nothing.
         ip = self.saved.get("ip")
-        if ip and (ip in netinfo.all_ipv4() or self.saved.get("ip_custom")):
+        if ip and (ip in self.ip_combo["values"] or self.saved.get("ip_custom")):
             self.ip_var.set(ip)
         self.close_to_tray_var.set(
             self._saved_bool("close_to_tray", self.close_to_tray_var.get()))
@@ -1047,8 +1049,13 @@ class LauncherApp:
               pending_firewall_allow=False):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get(),
-                # Not one of ours => the user typed it. See _restore.
-                "ip_custom": self.ip_var.get() not in netinfo.all_ipv4(),
+                # Not in the pick-list => the user typed it. See _restore.
+                # Must be the combo's values, not a fresh all_ipv4(): _save runs on
+                # every minimize/close-to-tray, so it would block the UI on
+                # getaddrinfo -- and worse, an address that vanished since startup
+                # (roamed, DHCP, cable out) would be misread as hand-typed and then
+                # persist forever, defeating the stale check above.
+                "ip_custom": self.ip_var.get() not in self.ip_combo["values"],
                 "close_to_tray": bool(self.close_to_tray_var.get()),
                 "minimize_to_tray": bool(self.minimize_to_tray_var.get())}
         if pending_start:
