@@ -467,8 +467,13 @@ class LauncherApp:
         ttk.Label(header, text="LAN IP", font=("", 10, "bold"),
                   style="TopStripTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.ip_var = tk.StringVar(value=netinfo.best_lan_ip())
+        # Editable, not readonly: detection leans on getaddrinfo(gethostname()),
+        # which misses or mis-ranks addresses on hosts with VPN/Hyper-V/WSL/Docker
+        # adapters or a second NIC. When the right address is not in the list the
+        # user has to be able to type it. This value only feeds the OPL hint text
+        # -- what a server binds to is its own Bind address field.
         self.ip_combo = ttk.Combobox(header, textvariable=self.ip_var, width=18,
-                                     values=netinfo.all_ipv4(), state="readonly")
+                                     values=netinfo.all_ipv4(), state="normal")
         self.ip_combo.grid(row=0, column=1, sticky="w", padx=(10, 6))
         ttk.Button(header, text="Refresh", command=self._refresh_ips).grid(
             row=0, column=2, sticky="w")
@@ -1026,8 +1031,12 @@ class LauncherApp:
         servers = self.saved.get("servers", {})
         for key, card in self.cards.items():
             card.set_values(servers.get(key, {}))
+        # An auto-detected IP is only restored if this host still has it, so moving
+        # between networks re-detects instead of showing a stale address. A typed
+        # one is restored unconditionally -- it is not in all_ipv4() by definition,
+        # so the same check would throw it away on every launch.
         ip = self.saved.get("ip")
-        if ip and ip in netinfo.all_ipv4():
+        if ip and (ip in netinfo.all_ipv4() or self.saved.get("ip_custom")):
             self.ip_var.set(ip)
         self.close_to_tray_var.set(
             self._saved_bool("close_to_tray", self.close_to_tray_var.get()))
@@ -1038,6 +1047,8 @@ class LauncherApp:
               pending_firewall_allow=False):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get(),
+                # Not one of ours => the user typed it. See _restore.
+                "ip_custom": self.ip_var.get() not in netinfo.all_ipv4(),
                 "close_to_tray": bool(self.close_to_tray_var.get()),
                 "minimize_to_tray": bool(self.minimize_to_tray_var.get())}
         if pending_start:
