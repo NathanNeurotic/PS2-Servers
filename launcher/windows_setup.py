@@ -15,17 +15,21 @@ from .servers import frozen_self_exe, is_frozen
 
 UDPBD_PORT = 0xBDBD
 FIREWALL_RULE_PREFIX = "PS2 Servers - "
-# Windows Firewall queries are far slower than they look, and the cost scales with
-# how many rules the machine has -- not with how many we ask about. Measured on a
-# 1091-rule Windows 11 box, cold, in a fresh powershell.exe:
-#   Get-NetFirewallRule per name (what we used to do)   48.1s
-#   one wildcard Get-NetFirewallRule                    69.2s   (batching is WORSE)
-#   HNetCfg.FwPolicy2 COM, one pass                     16.8s   (but 48.5s under load)
-# At 30s the check timed out, needs_setup fell back to "assume setup is needed",
-# the elevated apply blew the same budget, and nothing was ever fixed -- an
+# Windows Firewall queries are far slower than they look, and almost none of the
+# cost is the query. Measured on a 1091-rule Windows 11 box, in a fresh
+# powershell.exe, asking about two rules:
+#   Get-NetFirewallRule per name (what we used to do)   48.1s cold
+#   one wildcard Get-NetFirewallRule                    69.2s cold (batching is WORSE)
+#   HNetCfg.FwPolicy2                                   16.8s cold ... 1.2s warm
+# The same COM script measured 16.8s, then 48.5s, then 1.2s across one session:
+# what actually costs tens of seconds is the firewall service's rule store being
+# cold, not walking it. That is why this was intermittent -- the first start after
+# a boot paid it and later ones did not -- and why no rewrite of the query fixes
+# it. At 30s the cold path timed out, needs_setup fell back to "assume setup is
+# needed", the elevated apply blew the same budget, and nothing was ever fixed: an
 # un-exitable UAC loop on a machine whose rules were already correct. The check
-# runs on a worker thread and only delays a server start, so a budget that cannot
-# be blown by a slow machine is worth far more than a tight one.
+# runs on a worker thread and only delays a server start, so a budget a slow
+# machine cannot blow is worth far more than a tight one.
 POWERSHELL_TIMEOUT = 120
 
 
@@ -212,10 +216,14 @@ def needs_setup(key, values, log=None):
     rule_array = "@({})".format(",".join(_ps_quote(n) for n in port_rule_names))
     program = _ps_quote(os.path.abspath(_server_program_path()))
     app_rule = _ps_quote("PS2 Servers - App")
-    # One COM pass over the rule set, not one Get-NetFirewallRule per name. Same
-    # answers (verified against a missing app rule, a missing port rule, a stale
-    # program path, and both missing) at a third of the cost -- see the note on
-    # POWERSHELL_TIMEOUT for why that gap decides whether this works at all.
+    # COM, looking each rule up by name, rather than Get-NetFirewallRule per name.
+    # Same answers -- verified against a missing app rule, a missing port rule, a
+    # stale program path, and both missing.
+    #
+    # Rules.Item() raises when a name is absent, so absence is the catch, not a
+    # return value. It also returns only one rule per name where iterating saw
+    # every match; apply_setup removes by name before creating, so duplicates do
+    # not accumulate.
     script = "\n".join([
         "$svc = Get-Service -Name mpssvc -ErrorAction SilentlyContinue",
         "if ($svc -and $svc.Status -ne 'Running') {",
@@ -225,20 +233,17 @@ def needs_setup(key, values, log=None):
         "$appProgram = {}".format(program),
         "$wanted = {}".format(rule_array),
         "$fw = New-Object -ComObject HNetCfg.FwPolicy2",
-        "$sawApp = $false",
-        "$appPrograms = @()",
-        "$seen = @{}",
-        "foreach ($r in $fw.Rules) {",
-        "  if ($r.Name -eq $appRuleName) { $sawApp = $true; $appPrograms += $r.ApplicationName }",
-        "  if ($wanted -contains $r.Name) { $seen[$r.Name] = $true }",
-        "}",
-        "if (-not $sawApp) {",
+        "$appFound = $null",
+        "try { $appFound = $fw.Rules.Item($appRuleName) } catch {}",
+        "if (-not $appFound) {",
         "  Write-Output ('NEED_RULE=' + $appRuleName)",
-        "} elseif ($appPrograms -notcontains $appProgram) {",
+        "} elseif ($appFound.ApplicationName -ne $appProgram) {",
         "  Write-Output ('NEED_RULE=' + $appRuleName)",
         "}",
         "foreach ($name in $wanted) {",
-        "  if (-not $seen.ContainsKey($name)) { Write-Output ('NEED_RULE=' + $name) }",
+        "  $found = $null",
+        "  try { $found = $fw.Rules.Item($name) } catch {}",
+        "  if (-not $found) { Write-Output ('NEED_RULE=' + $name) }",
         "}",
         "}",
     ])
