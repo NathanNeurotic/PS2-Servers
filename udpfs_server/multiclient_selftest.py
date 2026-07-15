@@ -191,9 +191,10 @@ def _free_udp_port():
     return port
 
 
-def _start_server(root_dir, disc_port, block_device=None):
+def _start_server(root_dir, disc_port, block_device=None, single_port=False):
     server = srv.UdpfsServer(root_dir=root_dir, block_device=block_device,
-                             port=disc_port, bind_ip='127.0.0.1')
+                             port=disc_port, bind_ip='127.0.0.1',
+                             single_port=single_port)
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
     time.sleep(0.4)  # let the select loop come up
@@ -226,6 +227,43 @@ def test_baseline(root, disc_port, files):
                   f" (equal={got == expected})")
             ok = False
     print("  BASELINE PASSED" if ok else "  BASELINE FAILED")
+    return ok
+
+
+def test_single_port(root, files):
+    """--single-port compatibility mode: DISCOVERY *and* DATA must both work on
+    the one discovery port, and the INFORM must advertise that same port (so a
+    client that never leaves the discovery port still completes the handshake).
+    This is what the launcher's 'Modulo UDPFS mode' turns on."""
+    print("Single-port compatibility mode:")
+    disc_port = _free_udp_port()
+    server = _start_server(root, disc_port, single_port=True)
+    ok = True
+    try:
+        name, expected = next(iter(files.items()))
+        c = UdpfsTestClient(('127.0.0.1', disc_port))
+        try:
+            c.discover()
+            # The whole point: the advertised data port IS the discovery port.
+            if c.data_addr[1] == disc_port:
+                print(f"  INFORM ok: data port == discovery port ({disc_port})")
+            else:
+                print(f"  INFORM FAIL: advertised data port {c.data_addr[1]},"
+                      f" expected discovery port {disc_port}")
+                ok = False
+            got = c.read_file(name, len(expected))
+        finally:
+            c.close()
+        if got == expected:
+            print(f"  READ  ok: '{name}' ({len(expected)} bytes) served entirely"
+                  f" over port {disc_port}")
+        else:
+            print(f"  READ  FAIL: got {len(got)} bytes, expected {len(expected)}")
+            ok = False
+    finally:
+        server._shutdown = True
+        time.sleep(0.3)
+    print("  SINGLE-PORT PASSED" if ok else "  SINGLE-PORT FAILED")
     return ok
 
 
@@ -348,6 +386,8 @@ def main():
                           {k: files[k] for k in ("fileA.bin", "fileB.bin")}) and ok
     print()
     ok = test_block_concurrency(disc_port, image_bytes, sector_size) and ok
+    print()
+    ok = test_single_port(tmp, {"fileA.bin": files["fileA.bin"]}) and ok
 
     print()
     print("ALL UDPFS TESTS PASSED" if ok else "UDPFS TESTS FAILED")
