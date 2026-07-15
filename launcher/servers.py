@@ -145,6 +145,11 @@ def _parse_seconds(raw):
         value = int(float(text))
     except ValueError:
         return None
+    except OverflowError:
+        # float() takes "inf"/"infinity"/"1e400" happily and int() then refuses
+        # them. Someone reaching for a way to switch the timeout off will type
+        # exactly that, so it must not throw out of build_argv.
+        return None
     return value if value > 0 else None
 
 

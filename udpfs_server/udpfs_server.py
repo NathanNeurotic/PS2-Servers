@@ -326,8 +326,13 @@ def _clamp_peer_timeout(seconds, warn=True):
         value = float(seconds)
     except (TypeError, ValueError):
         value = SESSION_TIMEOUT
-    if value != value:  # NaN: every comparison below would be False, so it would
-        value = SESSION_TIMEOUT  # sail through the clamp and disable reaping.
+    except OverflowError:
+        # An int too big for a float (10**1000) is still a number, just an
+        # unrepresentable one, so clamp it by sign like inf/-inf rather than
+        # silently resetting it to the default and ignoring what was asked for.
+        value = SESSION_TIMEOUT_MAX if seconds > 0 else SESSION_TIMEOUT_MIN
+    if math.isnan(value):  # every comparison against NaN is False, so it would
+        value = SESSION_TIMEOUT  # sail through the clamp and disable reaping
     clamped = min(max(value, SESSION_TIMEOUT_MIN), SESSION_TIMEOUT_MAX)
     if warn and clamped != value:
         print(f"Warning: --peer-timeout {value:g} is outside the supported "
