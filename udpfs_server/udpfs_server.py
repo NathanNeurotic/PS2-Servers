@@ -130,7 +130,22 @@ MAX_DATA_PAYLOAD = 1408  # Maximum UDPRDMA payload
 MAX_HANDLES = 64  # open handles per client (matches udpfsd; was 32 originally)
 
 # Multi-client session management
-SESSION_TIMEOUT = 300.0          # default seconds of peer inactivity before reaping (see --peer-timeout)
+#
+# A reap closes the peer's open file handles (see Session._run), and UDPFS has no
+# DISCONNECT packet -- DISCOVERY/INFORM/DATA is the whole protocol -- so a paused
+# console and a powered-off one are indistinguishable: both simply go quiet. The
+# timeout is therefore a guess about which one we are looking at, and guessing
+# wrong on a paused game costs the player their handles. Default matches upstream
+# udpfsd (1 hour), which is field-proven and forgiving of idle play and long
+# transfers. It cannot be disabled: without it, every console reboot strands a
+# session (thread + queue + handles) until the server exits.
+SESSION_TIMEOUT = 3600.0         # default seconds of peer inactivity before reaping (see --peer-timeout)
+# Floor: 12x SESSION_SWEEP_INTERVAL (a reap is only ever +/-5s accurate) and 12x
+# the client's own 5s udprdma_recv timeout, so a peer mid-operation can never be
+# reaped. Ceiling: past a day it is "never" in all but name, and each stranded
+# session holds a thread and up to MAX_HANDLES descriptors.
+SESSION_TIMEOUT_MIN = 60.0
+SESSION_TIMEOUT_MAX = 86400.0
 SESSION_SWEEP_INTERVAL = 5.0     # how often the demux loop checks for idle sessions
 HAS_PREAD = hasattr(os, 'pread')     # POSIX: lock-free positional block-device reads
 HAS_PWRITE = hasattr(os, 'pwrite')
@@ -305,6 +320,27 @@ class DataHeader:
         return struct.pack('<I', val)
 
 
+def _clamp_peer_timeout(seconds, warn=True):
+    """Hold --peer-timeout inside [SESSION_TIMEOUT_MIN, SESSION_TIMEOUT_MAX]."""
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        value = SESSION_TIMEOUT
+    except OverflowError:
+        # An int too big for a float (10**1000) is still a number, just an
+        # unrepresentable one, so clamp it by sign like inf/-inf rather than
+        # silently resetting it to the default and ignoring what was asked for.
+        value = SESSION_TIMEOUT_MAX if seconds > 0 else SESSION_TIMEOUT_MIN
+    if math.isnan(value):  # every comparison against NaN is False, so it would
+        value = SESSION_TIMEOUT  # sail through the clamp and disable reaping
+    clamped = min(max(value, SESSION_TIMEOUT_MIN), SESSION_TIMEOUT_MAX)
+    if warn and clamped != value:
+        print(f"Warning: --peer-timeout {value:g} is outside the supported "
+              f"{SESSION_TIMEOUT_MIN:g}-{SESSION_TIMEOUT_MAX:g}s range; "
+              f"using {clamped:g}.")
+    return clamped
+
+
 class FileHandle:
     """Represents an open file handle on the server"""
     def __init__(self, obj, is_dir: bool = False):
@@ -356,7 +392,12 @@ class UdpfsServer:
         self.verbose = verbose
         self.enable_compression = enable_compression
         self.compression_cache_size = compression_cache_size
-        self.session_timeout = peer_timeout
+        # Clamped here rather than in argparse so the CLI, PEER_TIMEOUT and the
+        # launcher all get the same bounds. Clamp instead of reject: a bad number
+        # should not stop someone from serving their games. 0 is NOT "disabled" --
+        # it would reap every peer at the next sweep -- so it clamps up like any
+        # other out-of-range value.
+        self.session_timeout = _clamp_peer_timeout(peer_timeout)
         self.metrics = metrics
         self.metrics_period = metrics_period
         self.single_port = single_port
@@ -549,10 +590,19 @@ class UdpfsServer:
             return
         self._last_sweep = now
         with self.sessions_lock:
-            idle = [a for a, s in self.sessions.items()
+            idle = [(a, now - s.last_activity) for a, s in self.sessions.items()
                     if now - s.last_activity > self.session_timeout]
-            for a in idle:
+            for a, quiet in idle:
                 self.sessions.pop(a).shutdown()
+                # Not verbose-gated. A reap tells the client nothing (no packet
+                # exists to tell it with) and takes its open handles and their
+                # read positions with it, so if that console was only paused, its
+                # next read fails against a session that no longer knows it. This
+                # line is the sole trace anyone gets of why.
+                self._print_event(
+                    f"[{a[0]}:{a[1]}] idle {quiet:.0f}s > peer-timeout "
+                    f"{self.session_timeout:.0f}s -- dropped, its open files "
+                    f"closed (raise --peer-timeout if it was only paused)")
 
     def _emit_metrics(self):
         """Periodically log transfer/op stats when --metrics is enabled."""
@@ -2208,7 +2258,11 @@ def main():
     )
     parser.add_argument(
         '--peer-timeout', type=float, default=_env_float('PEER_TIMEOUT', SESSION_TIMEOUT),
-        help=f'Seconds of client inactivity before its session is reaped '
+        help=f'Seconds of client inactivity before its session is reaped, closing '
+             f'the files it had open. Clamped to '
+             f'{int(SESSION_TIMEOUT_MIN)}-{int(SESSION_TIMEOUT_MAX)}; 0 does not '
+             f'disable it (there is nothing to disable -- a stranded session holds '
+             f'a thread and its handles until the server exits) '
              f'(default: {int(SESSION_TIMEOUT)}; env: PEER_TIMEOUT)'
     )
     parser.add_argument(

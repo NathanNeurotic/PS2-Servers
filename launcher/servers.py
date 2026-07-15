@@ -130,6 +130,29 @@ class ServerDef:
 # --------------------------------------------------------------------------- #
 # Argument builders (values dict -> server CLI args)
 # --------------------------------------------------------------------------- #
+def _parse_seconds(raw):
+    """A whole-second count from a text field, or None to leave it to the server.
+
+    The server clamps the range and owns the default; this only rejects what is
+    not a number at all, so a typo can't become an argv the server must guess at.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        value = int(float(text))
+    except ValueError:
+        return None
+    except OverflowError:
+        # float() takes "inf"/"infinity"/"1e400" happily and int() then refuses
+        # them. Someone reaching for a way to switch the timeout off will type
+        # exactly that, so it must not throw out of build_argv.
+        return None
+    return value if value > 0 else None
+
+
 def _smbv1_argv(v):
     args = ["--share", "games={}".format(v["games_folder"])]
     if v.get("port"):
@@ -163,6 +186,11 @@ def _udpfs_argv(v):
         args += ["--data-port", str(v["data_port"])]
     if v.get("bind"):
         args += ["--bind", str(v["bind"])]
+    # Blank/garbage means "leave it alone" -- the server owns the default and the
+    # clamp, so don't pass a flag we'd only have to second-guess here.
+    timeout = _parse_seconds(v.get("peer_timeout"))
+    if timeout is not None:
+        args += ["--peer-timeout", str(timeout)]
     if v.get("read_only"):
         args.append("--read-only")
     if v.get("enable_compression"):
@@ -251,6 +279,13 @@ UDPFS = ServerDef(
                    "follow the auto port, which changes every launch. Setting it "
                    "also adds a matching firewall rule. Ignored in Modulo mode."),
         Field("bind", "Bind address", "text", default="", advanced=True),
+        Field("peer_timeout", "Idle timeout (seconds)", "text", default="3600",
+              advanced=True,
+              help="Drop a console after this long with no traffic, closing the "
+                   "files it had open (60-86400, default 3600 = 1 hour). UDPFS has "
+                   "no disconnect, so a paused game and an unplugged PS2 look "
+                   "identical — set it too low and a long pause loses its game. "
+                   "Lower it only to clear stale consoles faster."),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
     ],
     _build_argv=_udpfs_argv,
