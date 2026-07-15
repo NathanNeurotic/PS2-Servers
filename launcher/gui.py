@@ -963,15 +963,14 @@ class LauncherApp:
         """The pick-list as plain strings.
 
         Tk hands ["values"] back as whatever Tcl made of it: a tuple of str here,
-        but a bare '' when the list is empty, and on other builds a tuple of
-        Tcl_Obj. Against Tcl_Obj a str compares unequal, so a PICKED address would
-        read as hand-typed and keep its stale-address check from ever running --
-        silently, and only on someone else's platform.
+        a bare '' when the list is empty, and on other builds Tcl_Obj. Against
+        Tcl_Obj a str compares unequal, so a PICKED address would read as
+        hand-typed and keep its stale-address check from ever running -- silently,
+        and only on someone else's platform. splitlist asks Tcl to unpack its own
+        value rather than guessing at the Python type it arrived as, which also
+        covers a scalar Tcl_Obj that is neither a str nor iterable.
         """
-        values = self.ip_combo["values"]
-        if isinstance(values, str):
-            return [values] if values else []
-        return [str(v) for v in values]
+        return [str(v) for v in self.ip_combo.tk.splitlist(self.ip_combo["values"])]
 
     def _remember_firewall_ok(self, fingerprint):
         if fingerprint in self._firewall_ok:
