@@ -194,10 +194,17 @@ class ServerCard(ttk.LabelFrame):
         ttk.Label(parent, text=f.label + ":", style="Card.TLabel").grid(
             row=row, column=0, sticky="w", padx=4, pady=2)
         if f.kind == "port":
-            # A port field with a falsy default (0/None) means "auto": leave the box
-            # blank. Prefilling the server's own listen port would be wrong, and for
-            # a data port it would collide with the discovery socket.
-            var = tk.StringVar(value=self.server.port_display() if f.default else "")
+            # Format the FIELD's own default, never the server's listen port:
+            # port_display() always returns ServerDef.default_port, so every port
+            # field on a server would prefill with the main port. A falsy default
+            # (0/None) means "auto" and renders blank -- prefilling a data port with
+            # the discovery port would collide with the discovery socket.
+            if f.default:
+                default_val = (("0x%04X" % f.default) if self.server.port_is_hex
+                               else str(f.default))
+            else:
+                default_val = ""
+            var = tk.StringVar(value=default_val)
             ttk.Entry(parent, textvariable=var, width=12).grid(
                 row=row, column=1, sticky="w", padx=6, pady=2)
         elif f.kind in ("folder", "file"):
