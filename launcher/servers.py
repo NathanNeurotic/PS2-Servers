@@ -159,12 +159,16 @@ def _udpfs_argv(v):
         args += ["--block-device", v["block_device"]]
     if v.get("port"):
         args += ["--port", str(v["port"])]
+    if v.get("data_port"):
+        args += ["--data-port", str(v["data_port"])]
     if v.get("bind"):
         args += ["--bind", str(v["bind"])]
     if v.get("read_only"):
         args.append("--read-only")
     if v.get("enable_compression"):
         args.append("--enable-compression")
+    if v.get("single_port"):
+        args.append("--single-port")
     if v.get("verbose"):
         args.append("--verbose")
     return args
@@ -228,9 +232,22 @@ UDPFS = ServerDef(
               help="On by default so CHD/CSO/ZSO images appear as playable .iso "
               "(needs lz4 for ZSO, libchdr for CHD; formats without their library "
               "are simply left as-is). Untick to serve files without decompression."),
+        Field("single_port", "Modulo UDPFS mode", "bool", default=False, advanced=True,
+              help="Only needed for Modulo. Modulo's client does not follow the "
+                   "standard UDPFS discovery handshake — it cannot switch to the "
+                   "server's data port — so this serves all UDPFS traffic on the "
+                   "single Port set below (default 0xF5F6) instead. This is a Modulo "
+                   "bug; every other client (NHDDL, RiptOPL, POPSTARTER, POPSLOADER, "
+                   "wLaunchELF-R3Z) works without it. Leave off unless you use Modulo."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("port", "Port", "port", default=0xF5F6, advanced=True,
-              help="UDP port (default 0xF5F6)."),
+              help="UDP port (default 0xF5F6). In Modulo UDPFS mode this single "
+                   "port carries everything."),
+        Field("data_port", "Data port", "port", default=0, advanced=True,
+              help="Leave 0 (auto) unless the data port must be predictable — a "
+                   "manual firewall rule, port forwarding, or a strict NAT can't "
+                   "follow the auto port, which changes every launch. Setting it "
+                   "also adds a matching firewall rule. Ignored in Modulo mode."),
         Field("bind", "Bind address", "text", default="", advanced=True),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
     ],

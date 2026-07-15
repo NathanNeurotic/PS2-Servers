@@ -194,7 +194,10 @@ class ServerCard(ttk.LabelFrame):
         ttk.Label(parent, text=f.label + ":", style="Card.TLabel").grid(
             row=row, column=0, sticky="w", padx=4, pady=2)
         if f.kind == "port":
-            var = tk.StringVar(value=self.server.port_display())
+            # A port field with a falsy default (0/None) means "auto": leave the box
+            # blank. Prefilling the server's own listen port would be wrong, and for
+            # a data port it would collide with the discovery socket.
+            var = tk.StringVar(value=self.server.port_display() if f.default else "")
             ttk.Entry(parent, textvariable=var, width=12).grid(
                 row=row, column=1, sticky="w", padx=6, pady=2)
         elif f.kind in ("folder", "file"):
