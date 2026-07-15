@@ -15,7 +15,22 @@ from .servers import frozen_self_exe, is_frozen
 
 UDPBD_PORT = 0xBDBD
 FIREWALL_RULE_PREFIX = "PS2 Servers - "
-POWERSHELL_TIMEOUT = 30
+# Windows Firewall queries are far slower than they look, and almost none of the
+# cost is the query. Measured on a 1091-rule Windows 11 box, in a fresh
+# powershell.exe, asking about two rules:
+#   Get-NetFirewallRule per name (what we used to do)   48.1s cold
+#   one wildcard Get-NetFirewallRule                    69.2s cold (batching is WORSE)
+#   HNetCfg.FwPolicy2                                   16.8s cold ... 1.2s warm
+# The same COM script measured 16.8s, then 48.5s, then 1.2s across one session:
+# what actually costs tens of seconds is the firewall service's rule store being
+# cold, not walking it. That is why this was intermittent -- the first start after
+# a boot paid it and later ones did not -- and why no rewrite of the query fixes
+# it. At 30s the cold path timed out, needs_setup fell back to "assume setup is
+# needed", the elevated apply blew the same budget, and nothing was ever fixed: an
+# un-exitable UAC loop on a machine whose rules were already correct. The check
+# runs on a worker thread and only delays a server start, so a budget a slow
+# machine cannot blow is worth far more than a tight one.
+POWERSHELL_TIMEOUT = 120
 
 
 class WindowsSetupError(RuntimeError):
@@ -138,6 +153,22 @@ def _rule_names(key, values):
     return rules
 
 
+def setup_fingerprint(key, values):
+    """Everything needs_setup's answer depends on, as one string.
+
+    The check costs tens of seconds because Windows charges by how many rules the
+    machine has, not by how many we ask about -- so a caller that has already seen
+    a clean answer can skip it while this string is unchanged. It covers the two
+    things that can turn a clean answer dirty: the program in the App rule, and the
+    per-port rule names (which embed the ports). Anything else that could invalidate
+    it -- someone deleting the rules behind our back -- is what 'Allow through
+    firewall' is for.
+    """
+    if not is_windows():
+        return ""
+    return "|".join([os.path.abspath(_server_program_path())] + _rule_names(key, values))
+
+
 def _firewall_rules(key, values):
     program = os.path.abspath(_server_program_path())
     rules = [{
@@ -185,6 +216,14 @@ def needs_setup(key, values, log=None):
     rule_array = "@({})".format(",".join(_ps_quote(n) for n in port_rule_names))
     program = _ps_quote(os.path.abspath(_server_program_path()))
     app_rule = _ps_quote("PS2 Servers - App")
+    # COM, looking each rule up by name, rather than Get-NetFirewallRule per name.
+    # Same answers -- verified against a missing app rule, a missing port rule, a
+    # stale program path, and both missing.
+    #
+    # Rules.Item() raises when a name is absent, so absence is the catch, not a
+    # return value. It also returns only one rule per name where iterating saw
+    # every match; apply_setup removes by name before creating, so duplicates do
+    # not accumulate.
     script = "\n".join([
         "$svc = Get-Service -Name mpssvc -ErrorAction SilentlyContinue",
         "if ($svc -and $svc.Status -ne 'Running') {",
@@ -192,28 +231,38 @@ def needs_setup(key, values, log=None):
         "} else {",
         "$appRuleName = {}".format(app_rule),
         "$appProgram = {}".format(program),
-        "$appRule = Get-NetFirewallRule -DisplayName $appRuleName -ErrorAction SilentlyContinue",
-        "if (-not $appRule) {",
+        "$wanted = {}".format(rule_array),
+        "$fw = New-Object -ComObject HNetCfg.FwPolicy2",
+        "$appFound = $null",
+        "try { $appFound = $fw.Rules.Item($appRuleName) } catch {}",
+        "if (-not $appFound) {",
         "  Write-Output ('NEED_RULE=' + $appRuleName)",
-        "} else {",
-        "  $appFilter = $appRule | Get-NetFirewallApplicationFilter",
-        "  $programs = @($appFilter | ForEach-Object { $_.Program })",
-        "  if ($programs -notcontains $appProgram) { Write-Output ('NEED_RULE=' + $appRuleName) }",
+        "} elseif ($appFound.ApplicationName -ne $appProgram) {",
+        "  Write-Output ('NEED_RULE=' + $appRuleName)",
         "}",
-        "$rules = {}".format(rule_array),
-        "foreach ($name in $rules) {",
-        "  if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {",
-        "    Write-Output ('NEED_RULE=' + $name)",
-        "  }",
+        "foreach ($name in $wanted) {",
+        "  $found = $null",
+        "  try { $found = $fw.Rules.Item($name) } catch {}",
+        "  if (-not $found) { Write-Output ('NEED_RULE=' + $name) }",
         "}",
         "}",
     ])
     try:
         res = _powershell(script)
     except subprocess.TimeoutExpired:
-        log("firewall check timed out after {}s; assuming setup is needed".format(
-            POWERSHELL_TIMEOUT))
-        return True
+        # Explicitly NOT "assume setup is needed". Elevating only helps if the
+        # elevated pass can then succeed, and it cannot: apply_setup drives the
+        # same Windows Firewall cmdlets that just ran out of time, so it blows the
+        # same budget and changes nothing. Answering True here is what turned a
+        # slow machine into an un-exitable UAC loop -- prompt, fail, prompt --
+        # while its rules were already correct. Start instead, and say so: the
+        # server is far more likely to work than not, and "Allow through firewall"
+        # is one click away if it does not. Other failures below still elevate;
+        # only a timeout is known to be unhelped by it.
+        log("firewall check timed out after {}s; starting anyway. If the PS2 "
+            "cannot see this server, click 'Allow through firewall'.".format(
+                POWERSHELL_TIMEOUT))
+        return False
     except OSError as e:
         log("firewall check could not run ({}); assuming setup is needed".format(e))
         return True
