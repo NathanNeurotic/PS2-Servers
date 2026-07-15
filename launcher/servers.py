@@ -195,8 +195,9 @@ def _udpfs_argv(v):
         args.append("--read-only")
     if v.get("enable_compression"):
         args.append("--enable-compression")
-    if v.get("single_port"):
-        args.append("--single-port")
+    if v.get("modulo_mode"):
+        # Implies --single-port server-side; passing both would be redundant.
+        args.append("--modulo-mode")
     if v.get("verbose"):
         args.append("--verbose")
     return args
@@ -262,11 +263,12 @@ UDPFS = ServerDef(
               "are simply left as-is). Untick to serve files without decompression."),
         # Deliberately NOT advanced: the users who need this are the least likely
         # to go looking under a disclosure triangle for it.
-        Field("single_port", "Check this if you are using Modulo", "bool",
+        Field("modulo_mode", "Check this if you are using Modulo", "bool",
               default=False,
-              help="Only tick this for Modulo. Modulo uses improper UDPFS protocol "
-                   "— it can't switch to the server's data port — so everything runs "
-                   "on one port (0xF5F6 by default, set under Advanced). Modulo's "
+              help="Only tick this for Modulo. Modulo uses improper UDPFS protocol, "
+                   "and only ever worked against the patched server bundled in its "
+                   "own repo — so this serves everything on one port (0xF5F6, under "
+                   "Advanced) and answers exactly the way that server does. Modulo's "
                    "bug: NHDDL, RiptOPL, POPSTARTER, POPSLOADER and wLaunchELF-R3Z "
                    "all work without it."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
