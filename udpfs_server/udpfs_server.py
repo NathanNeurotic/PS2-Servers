@@ -409,8 +409,13 @@ class UdpfsServer:
         self.single_port = single_port
         # Only ever sent in modulo_compat: its server advertises a friendly name in
         # the INFORM so its loader can label the source. Shares stay empty, matching
-        # its CLI server (only its GUI wrapper ever fills them in).
-        self.server_name = socket.gethostname().split('.')[0]
+        # its CLI server (only its GUI wrapper ever fills them in). gethostname can
+        # raise on a container or a host with no resolvable name, and this runs for
+        # everyone -- a cosmetic label must not stop a server nobody asked to name.
+        try:
+            self.server_name = socket.gethostname().split('.')[0]
+        except OSError:
+            self.server_name = 'UDPFS'
         self.share_names: List[str] = []
         self._last_metrics = time.monotonic()
 
@@ -1734,9 +1739,15 @@ class UdpfsServer:
         words. Only sent in modulo_compat -- udpfsd and every conformant client
         expect a bare 6-byte INFORM.
         """
+        # Sliced in chars like Modulo's, but shares is sliced AFTER encoding: 95
+        # chars of 4-byte UTF-8 is 380 bytes and bytes([380]) raises. Modulo's has
+        # that landmine too (its GUI wrapper is what fills shares in), and matching
+        # a crash is not parity worth having. name needs no such guard -- 31 chars
+        # cannot exceed 124 bytes -- and byte-slicing it would only add a way to
+        # split a character mid-sequence.
         name = (self.server_name or '')[:31].encode('utf-8', 'ignore')
         shares_str = ', '.join(self.share_names) if self.share_names else ''
-        shares = shares_str[:95].encode('utf-8', 'ignore')
+        shares = shares_str.encode('utf-8', 'ignore')[:95]
         payload = bytes([len(name)]) + name + bytes([len(shares)]) + shares
         if len(payload) % 4:
             payload += b'\x00' * (4 - len(payload) % 4)
