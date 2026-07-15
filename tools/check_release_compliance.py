@@ -28,14 +28,18 @@ def require_absent(rel, *needles):
 
 
 def check_server_argv_nuitka_safe():
-    """No server argv may contain a bare '-c' or '-m'.
+    """No server argv may contain a bare '-c' or '-m' -- not even a trailing one.
 
     The packaged launcher re-executes ITSELF ('PS2Servers.exe --serve <key>
     ...') to run a server child, and Nuitka's self-execution guard aborts a
     compiled binary (exit 2) whenever a bare '-c' or '-m' is followed by
-    another argument -- it assumes the CPython fork-bomb pattern. Passing
-    '-c' for --enable-compression shipped exactly that crash once compression
-    became the default, so server argv builders must use long flags for these.
+    another argument -- it assumes the CPython fork-bomb pattern.
+
+    We ban them outright rather than only when something follows, because
+    "safe while it happens to sit last" is precisely how v0.2.0 shipped
+    broken: '-c' (--enable-compression) was harmless as the final argument
+    until compression became the default and '-v' landed after it. A trailing
+    bare '-c' is a landmine, not a pass.
     """
     sys.path.insert(0, str(ROOT))
     from launcher import servers
@@ -53,12 +57,13 @@ def check_server_argv_nuitka_safe():
             else:
                 values[field.key] = "X"
         argv = server.build_argv(values)
-        for i, arg in enumerate(argv):
-            if arg in ("-c", "-m") and i + 1 < len(argv):
+        for arg in argv:
+            if arg in ("-c", "-m"):
                 errors.append(
-                    "launcher/servers.py: '{}' argv contains bare '{}' followed by "
-                    "'{}' -- Nuitka's self-execution guard aborts the packaged "
-                    "binary on this; use the long flag".format(key, arg, argv[i + 1]))
+                    "launcher/servers.py: '{}' argv contains bare '{}' -- Nuitka's "
+                    "self-execution guard aborts the packaged binary as soon as any "
+                    "argument follows it, so even a trailing one is a landmine (that "
+                    "is how v0.2.0 shipped broken). Use the long flag.".format(key, arg))
     return errors
 
 

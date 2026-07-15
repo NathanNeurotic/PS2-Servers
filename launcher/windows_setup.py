@@ -115,10 +115,13 @@ def _server_ports(key, values):
         ports = [("UDP", _parse_port(values.get("port"), 0xF5F6), "UDPFS discovery")]
         # The data socket is normally ephemeral and covered by the program-wide
         # "PS2 Servers - App" rule. When the user pins it, allow it by port too so
-        # the setting is usable behind manual/port-based firewall rules.
-        data_port = _parse_port(values.get("data_port"), 0)
-        if data_port:
-            ports.append(("UDP", data_port, "UDPFS data"))
+        # the setting is usable behind manual/port-based firewall rules. Skipped in
+        # single-port mode, where the server ignores data_port entirely -- a rule
+        # there would open a port nothing ever listens on.
+        if not values.get("single_port"):
+            data_port = _parse_port(values.get("data_port"), 0)
+            if data_port:
+                ports.append(("UDP", data_port, "UDPFS data"))
         return ports
     if key == "udpbd":
         return [("UDP", UDPBD_PORT, "UDPBD")]

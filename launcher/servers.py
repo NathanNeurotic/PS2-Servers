@@ -233,12 +233,11 @@ UDPFS = ServerDef(
               "(needs lz4 for ZSO, libchdr for CHD; formats without their library "
               "are simply left as-is). Untick to serve files without decompression."),
         Field("single_port", "Modulo UDPFS mode", "bool", default=False, advanced=True,
-              help="Only needed for Modulo. Modulo's client does not follow the "
-                   "standard UDPFS discovery handshake — it cannot switch to the "
-                   "server's data port — so this serves all UDPFS traffic on the "
-                   "single Port set below (default 0xF5F6) instead. This is a Modulo "
-                   "bug; every other client (NHDDL, RiptOPL, POPSTARTER, POPSLOADER, "
-                   "wLaunchELF-R3Z) works without it. Leave off unless you use Modulo."),
+              help="Tick this only for Modulo. Modulo's client ignores the UDPFS "
+                   "discovery handshake and can't switch to the server's data port, "
+                   "so this serves everything on the single Port below. Modulo's bug "
+                   "— NHDDL, RiptOPL, POPSTARTER, POPSLOADER and wLaunchELF-R3Z all "
+                   "work without it."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("port", "Port", "port", default=0xF5F6, advanced=True,
               help="UDP port (default 0xF5F6). In Modulo UDPFS mode this single "
