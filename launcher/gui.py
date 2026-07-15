@@ -959,6 +959,19 @@ class LauncherApp:
 
         self._cleanup_windows_setup_async()
 
+    def _detected_ips(self):
+        """The pick-list as plain strings.
+
+        Tk hands ["values"] back as whatever Tcl made of it: a tuple of str here,
+        a bare '' when the list is empty, and on other builds Tcl_Obj. Against
+        Tcl_Obj a str compares unequal, so a PICKED address would read as
+        hand-typed and keep its stale-address check from ever running -- silently,
+        and only on someone else's platform. splitlist asks Tcl to unpack its own
+        value rather than guessing at the Python type it arrived as, which also
+        covers a scalar Tcl_Obj that is neither a str nor iterable.
+        """
+        return [str(v) for v in self.ip_combo.tk.splitlist(self.ip_combo["values"])]
+
     def _remember_firewall_ok(self, fingerprint):
         if fingerprint in self._firewall_ok:
             return
@@ -1077,7 +1090,7 @@ class LauncherApp:
         # changes whenever the exe or ports do.
         self._firewall_ok = set(self.saved.get("firewall_ok") or [])
         ip = self.saved.get("ip")
-        if ip and (ip in self.ip_combo["values"] or self.saved.get("ip_custom")):
+        if ip and (ip in self._detected_ips() or self.saved.get("ip_custom")):
             self.ip_var.set(ip)
         self.close_to_tray_var.set(
             self._saved_bool("close_to_tray", self.close_to_tray_var.get()))
@@ -1095,7 +1108,7 @@ class LauncherApp:
                 # getaddrinfo -- and worse, an address that vanished since startup
                 # (roamed, DHCP, cable out) would be misread as hand-typed and then
                 # persist forever, defeating the stale check above.
-                "ip_custom": self.ip_var.get() not in self.ip_combo["values"],
+                "ip_custom": self.ip_var.get() not in self._detected_ips(),
                 "close_to_tray": bool(self.close_to_tray_var.get()),
                 "minimize_to_tray": bool(self.minimize_to_tray_var.get())}
         if pending_start:
