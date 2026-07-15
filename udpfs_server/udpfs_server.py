@@ -383,7 +383,13 @@ class UdpfsServer:
                  metrics: bool = False,
                  metrics_period: float = 60.0,
                  single_port: bool = False,
+                 modulo_compat: bool = False,
                  data_port: int = 0):
+        # Modulo's client only ever talked to Modulo's own bundled server, which is
+        # single-socket, so the two always travel together.
+        if modulo_compat:
+            single_port = True
+        self.modulo_compat = modulo_compat
         self.root_dir = os.path.realpath(root_dir) if root_dir else None
         self.port = port
         self.bind_ip = bind_ip
@@ -401,6 +407,11 @@ class UdpfsServer:
         self.metrics = metrics
         self.metrics_period = metrics_period
         self.single_port = single_port
+        # Only ever sent in modulo_compat: its server advertises a friendly name in
+        # the INFORM so its loader can label the source. Shares stay empty, matching
+        # its CLI server (only its GUI wrapper ever fills them in).
+        self.server_name = socket.gethostname().split('.')[0]
+        self.share_names: List[str] = []
         self._last_metrics = time.monotonic()
 
         if self.root_dir and not os.path.isdir(self.root_dir):
@@ -993,9 +1004,17 @@ class UdpfsServer:
         self.stats['discovery'] += 1
 
         # Ensure a per-client session (and its worker thread) exists for this peer.
-        self._get_or_create_session(addr)
+        sess = self._get_or_create_session(addr)
+        if self.modulo_compat:
+            # Modulo's client keeps one monotonic sequence for its whole life -- it
+            # never restarts at 0, not even across a server restart -- so the
+            # reset-on-seq-0 path below never fires for it and every packet is NACKed
+            # forever. Its own server resyncs off the DISCOVERY instead, so do that.
+            # Assigned on the session, not through the _session_prop proxies: we are
+            # on the demux thread, where _local.session is unset.
+            sess.rx_seq_nr_expected = (hdr.seq_nr + 1) & 0xFFF
         self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY -> INFORM")
-        self._send_inform(addr)
+        self._send_inform(addr, sess)
 
     def _handle_data(self, data: bytes, addr: Tuple[str, int]):
         """Handle DATA packet containing UDPFS message"""
@@ -1707,8 +1726,35 @@ class UdpfsServer:
 
     # --- Send helpers ---
 
-    def _send_inform(self, addr: Tuple[str, int]):
+    def _info_payload(self) -> bytes:
+        """Name + shares trailer that Modulo's server appends to its INFORM.
+
+        Byte-for-byte parity with it: length-prefixed name, length-prefixed shares,
+        padded to a multiple of 4 because the PS2 reads the SMAP RX FIFO in 32-bit
+        words. Only sent in modulo_compat -- udpfsd and every conformant client
+        expect a bare 6-byte INFORM.
+        """
+        name = (self.server_name or '')[:31].encode('utf-8', 'ignore')
+        shares_str = ', '.join(self.share_names) if self.share_names else ''
+        shares = shares_str[:95].encode('utf-8', 'ignore')
+        payload = bytes([len(name)]) + name + bytes([len(shares)]) + shares
+        if len(payload) % 4:
+            payload += b'\x00' * (4 - len(payload) % 4)
+        return payload
+
+    def _send_inform(self, addr: Tuple[str, int], sess=None):
         """Send INFORM packet"""
+        if self.modulo_compat and sess is not None:
+            # Modulo's server informs from its running tx_seq_nr, leaves the second
+            # DiscHeader field 0 (its client takes the data port from the INFORM's
+            # UDP source port, as udpfsd documents), and appends the name trailer.
+            hdr = Header(packet_type=PacketType.INFORM, seq_nr=sess.tx_seq_nr)
+            disc = DiscHeader(service_id=UDPRDMA_SVC_UDPFS, port=0)
+            self._sendto(hdr.pack() + disc.pack() + self._info_payload(), addr)
+            sess.tx_seq_nr = (sess.tx_seq_nr + 1) & 0xFFF
+            sess.tx_seq_nr_acked = (sess.tx_seq_nr - 1) & 0xFFF  # the INFORM we just sent
+            return
+
         hdr = Header(packet_type=PacketType.INFORM, seq_nr=1) # INFORM sequence number is always 1
         disc = DiscHeader(service_id=UDPRDMA_SVC_UDPFS, port = self.dsock.getsockname()[1])
 
@@ -2257,6 +2303,15 @@ def main():
              'cannot follow the standard two-port UDPFS handshake (env: SINGLE_PORT)'
     )
     parser.add_argument(
+        '--modulo-mode', action='store_true', default=_env_bool('MODULO_MODE'),
+        help='Compatibility mode for Modulo, whose client only ever worked against '
+             'the patched single-socket server bundled in its own repo: serve on one '
+             'port, resync the peer sequence off its DISCOVERY, and send that '
+             "server's INFORM (running seq_nr, zeroed port field, name trailer). "
+             'Implies --single-port. Deviates from udpfsd on purpose -- leave it off '
+             'for every other client (env: MODULO_MODE)'
+    )
+    parser.add_argument(
         '--peer-timeout', type=float, default=_env_float('PEER_TIMEOUT', SESSION_TIMEOUT),
         help=f'Seconds of client inactivity before its session is reaped, closing '
              f'the files it had open. Clamped to '
@@ -2309,6 +2364,7 @@ def main():
         metrics=args.metrics,
         metrics_period=args.metrics_period,
         single_port=args.single_port,
+        modulo_compat=args.modulo_mode,
         data_port=args.data_port
     )
     server.run()

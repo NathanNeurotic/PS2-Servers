@@ -26,6 +26,10 @@ import time
 
 import udpfs_server as srv  # sys.path[0] is this dir when run as a script
 
+# The reap test never waits this out (it backdates the clocks instead); it only
+# has to be a value the server's own clamp accepts unchanged.
+SESSION_TIMEOUT_TEST = 60.0
+
 
 # --------------------------------------------------------------------------- #
 # Minimal in-process UDPFS/UDPRDMA client
@@ -104,8 +108,11 @@ class UdpfsTestClient:
             return dh, data[6:6 + payload_size]
 
     # -- protocol operations ----------------------------------------------
-    def discover(self):
-        pkt = (srv.Header(srv.PacketType.DISCOVERY, 0).pack()
+    def discover(self, seq=0):
+        """DISCOVERY -> INFORM. seq lets a test pose as a peer whose counter did
+        not start at 0 (Modulo does exactly that); it does not touch self.tx_seq,
+        because a conformant peer still opens its data stream at 0."""
+        pkt = (srv.Header(srv.PacketType.DISCOVERY, seq).pack()
                + srv.DiscHeader(srv.UDPRDMA_SVC_UDPFS, 0).pack())
         self.sock.sendto(pkt, self.disc_addr)
         deadline = time.monotonic() + 5.0
@@ -117,7 +124,10 @@ class UdpfsTestClient:
             if hdr.packet_type != srv.PacketType.INFORM:
                 continue
             disc = srv.DiscHeader.unpack(data[2:6])
-            self.data_addr = (self.disc_addr[0], disc.port)
+            # A zeroed port field means "use the INFORM's UDP source port", which is
+            # what udpfsd documents and what --modulo-mode sends.
+            self.data_addr = ((self.disc_addr[0], disc.port) if disc.port
+                              else addr)
             return
         raise UdpfsError("no INFORM reply to DISCOVERY")
 
@@ -191,10 +201,12 @@ def _free_udp_port():
     return port
 
 
-def _start_server(root_dir, disc_port, block_device=None, single_port=False):
+def _start_server(root_dir, disc_port, block_device=None, single_port=False,
+                  peer_timeout=srv.SESSION_TIMEOUT, modulo_compat=False):
     server = srv.UdpfsServer(root_dir=root_dir, block_device=block_device,
                              port=disc_port, bind_ip='127.0.0.1',
-                             single_port=single_port)
+                             single_port=single_port, peer_timeout=peer_timeout,
+                             modulo_compat=modulo_compat)
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
     time.sleep(0.4)  # let the select loop come up
@@ -264,6 +276,164 @@ def test_single_port(root, files):
         server._shutdown = True
         time.sleep(0.3)
     print("  SINGLE-PORT PASSED" if ok else "  SINGLE-PORT FAILED")
+    return ok
+
+
+def test_modulo_mode(root, files):
+    """--modulo-mode: parity with the patched server bundled in Modulo's own repo.
+
+    Modulo's client keeps ONE monotonic sequence for its whole life and never
+    restarts it at 0 -- observed on hardware climbing 8,9,10,11,12 straight across
+    a full server restart. Our conformant path (and udpfsd's) only resets on seq 0,
+    so it NACKs such a peer forever. Modulo's server resyncs off the DISCOVERY, and
+    this mode does the same. Asserted both ways: a seq-8 peer must connect here, and
+    must still be refused by default, or the deviation has leaked into the five
+    clients that work today.
+    """
+    print("Modulo compatibility mode:")
+    name, expected = next(iter(files.items()))
+    ok = True
+
+    for modulo, want_ok in ((True, True), (False, False)):
+        disc_port = _free_udp_port()
+        server = _start_server(root, disc_port, single_port=True, modulo_compat=modulo)
+        try:
+            c = UdpfsTestClient(('127.0.0.1', disc_port))
+            try:
+                # Pose as Modulo: DISCOVERY at 7, data stream carrying on at 8.
+                # Its counter never was 0, so the reset-on-seq-0 path cannot save it.
+                c.discover(seq=7)
+                c.tx_seq = 8
+                if modulo:
+                    # Modulo's INFORM is packet 0 of the server's OWN tx stream (it
+                    # informs at tx_seq_nr, then increments), so the first reply back
+                    # is seq 1 -- unlike the conformant INFORM, which is a constant 1
+                    # outside the stream and leaves the server's first reply at 0.
+                    c.rx_expected = 1
+                try:
+                    got = c.read_file(name, len(expected)) == expected
+                except Exception:
+                    got = False
+            finally:
+                c.close()
+        finally:
+            server._shutdown = True
+            time.sleep(0.3)
+
+        label = "--modulo-mode" if modulo else "default"
+        if got == want_ok:
+            print("  %-14s seq-8 peer %s  ok" % (
+                label, "served" if got else "refused (udpfsd parity kept)"))
+        else:
+            print("  %-14s FAIL: seq-8 peer %s, expected %s" % (
+                label, "served" if got else "refused",
+                "served" if want_ok else "refused"))
+            ok = False
+
+    print("  MODULO-MODE PASSED" if ok else "  MODULO-MODE FAILED")
+    return ok
+
+
+def test_peer_timeout_clamp():
+    """--peer-timeout is clamped, never obeyed blindly. 0 is the one that matters:
+    it reads as 'off' but the sweep would reap every peer within 5s, so it must
+    clamp UP. nan is the other: every comparison with it is False, so an unclamped
+    nan would silently disable reaping."""
+    print("Peer-timeout clamp:")
+    cases = [
+        (3600.0, 3600.0), (60.0, 60.0), (86400.0, 86400.0),   # in range, untouched
+        (600.0, 600.0),                                        # R3Z3N's value
+        (0.0, 60.0), (-1.0, 60.0), (5.0, 60.0),                # would reap live peers
+        (1e9, 86400.0), (float('inf'), 86400.0),               # "never" in all but name
+        (float('nan'), 3600.0),                                # would disable the sweep
+    ]
+    ok = True
+    for given, want in cases:
+        got = srv._clamp_peer_timeout(given, warn=False)
+        if got != want:
+            print(f"  FAIL: peer_timeout={given!r} clamped to {got!r}, expected {want!r}")
+            ok = False
+    if ok:
+        print(f"  CLAMP ok: {len(cases)} values held inside "
+              f"{srv.SESSION_TIMEOUT_MIN:g}-{srv.SESSION_TIMEOUT_MAX:g}s "
+              f"(0/-1/nan cannot disable or over-tighten the reap)")
+    print("  CLAMP PASSED" if ok else "  CLAMP FAILED")
+    return ok
+
+
+def test_peer_timeout_reap(root, files):
+    """The idle reap, asserted without waiting a timeout out.
+
+    The sweep decides from two clocks -- the session's last_activity and the
+    server's _last_sweep -- so backdating both drives the REAL
+    _sweep_idle_sessions() to the same decision it would reach after peer_timeout
+    seconds of silence. Sleeping it out is not an option: the default is an hour,
+    and SESSION_TIMEOUT_MIN forbids configuring one short enough to wait for.
+    """
+    print("Idle-session reap (--peer-timeout):")
+    ok = True
+    disc_port = _free_udp_port()
+    server = _start_server(root, disc_port, peer_timeout=SESSION_TIMEOUT_TEST)
+    try:
+        name = next(iter(files))
+        c = UdpfsTestClient(('127.0.0.1', disc_port))
+        try:
+            c.discover()
+            handle, _size = c.open(name)
+            with server.sessions_lock:
+                live = list(server.sessions.items())
+            # Not a formality: a sweep that reaps unconditionally empties this
+            # before the assertions below, and StopIteration here would crash the
+            # suite instead of reporting which behaviour broke.
+            if len(live) != 1:
+                print(f"  SETUP FAIL: expected 1 session after OPEN, got {len(live)}"
+                      f" -- the sweep is reaping peers it should not")
+                return False
+            addr, sess = live[0]
+            fh = sess.handles.get(handle)
+            if fh is None or fh.obj.closed:
+                print("  SETUP FAIL: no open file handle to observe")
+                return False
+
+            # A peer inside its window must survive an otherwise-identical sweep.
+            # Without this, a reap test passes even if the sweep reaps everything.
+            server._last_sweep -= srv.SESSION_SWEEP_INTERVAL
+            server._sweep_idle_sessions()
+            with server.sessions_lock:
+                kept = addr in server.sessions
+            if kept:
+                print("  KEEP  ok: a peer inside its window survives a sweep")
+            else:
+                print("  KEEP  FAIL: an active session was reaped")
+                ok = False
+
+            # Age it past the timeout: the same sweep must now drop it.
+            with server.sessions_lock:
+                sess.last_activity -= (server.session_timeout + 1.0)
+            server._last_sweep -= srv.SESSION_SWEEP_INTERVAL
+            server._sweep_idle_sessions()
+            with server.sessions_lock:
+                reaped = addr not in server.sessions
+            sess._thread.join(timeout=2.0)
+            if reaped and not sess._thread.is_alive():
+                print(f"  REAP  ok: peer idle > {server.session_timeout:g}s dropped,"
+                      f" worker thread exited")
+            else:
+                print(f"  REAP  FAIL: reaped={reaped},"
+                      f" worker_alive={sess._thread.is_alive()}")
+                ok = False
+
+            # The point of the reap: the files the peer held are released.
+            if fh.obj.closed and not sess.handles:
+                print("  FREE  ok: reaped session closed the file it had open")
+            else:
+                print(f"  FREE  FAIL: closed={fh.obj.closed}, handles={sess.handles}")
+                ok = False
+        finally:
+            c.close()
+    finally:
+        server._shutdown = True
+    print("  REAP PASSED" if ok else "  REAP FAILED")
     return ok
 
 
@@ -388,6 +558,12 @@ def main():
     ok = test_block_concurrency(disc_port, image_bytes, sector_size) and ok
     print()
     ok = test_single_port(tmp, {"fileA.bin": files["fileA.bin"]}) and ok
+    print()
+    ok = test_modulo_mode(tmp, {"fileA.bin": files["fileA.bin"]}) and ok
+    print()
+    ok = test_peer_timeout_clamp() and ok
+    print()
+    ok = test_peer_timeout_reap(tmp, {"fileA.bin": files["fileA.bin"]}) and ok
 
     print()
     print("ALL UDPFS TESTS PASSED" if ok else "UDPFS TESTS FAILED")

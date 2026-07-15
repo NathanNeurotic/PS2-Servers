@@ -117,8 +117,9 @@ def _server_ports(key, values):
         # "PS2 Servers - App" rule. When the user pins it, allow it by port too so
         # the setting is usable behind manual/port-based firewall rules. Skipped in
         # single-port mode, where the server ignores data_port entirely -- a rule
-        # there would open a port nothing ever listens on.
-        if not values.get("single_port"):
+        # there would open a port nothing ever listens on. Modulo mode implies
+        # single-port, so it takes the same branch.
+        if not values.get("modulo_mode"):
             data_port = _parse_port(values.get("data_port"), 0)
             if data_port:
                 ports.append(("UDP", data_port, "UDPFS data"))
