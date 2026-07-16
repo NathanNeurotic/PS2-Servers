@@ -408,6 +408,8 @@ class LauncherApp:
             self.root.after(350, self._direct_link_pending)
         elif self.saved.get("pending_direct_link_off"):
             self.root.after(350, self._direct_link_off_pending)
+        elif self.saved.get("pending_direct_link_restore"):
+            self.root.after(350, self._direct_link_recovery_pending)
         elif self.saved.get("pending_start"):
             self.root.after(350, self._start_pending)
         elif (self.saved.get("direct_link") or {}).get("enabled"):
@@ -906,7 +908,7 @@ class LauncherApp:
             configured = None
             try:
                 configured = directlink.apply_adapter_config(
-                    cfg["if_index"], cfg["server_ip"],
+                    cfg["if_index"], cfg["server_ip"], cfg["client_ip"],
                     cfg.get("prefix", directlink.PREFIX_LENGTH))
                 firewall = windows_setup.apply_setup(
                     "directlink", {"server_ip": cfg["server_ip"]})
@@ -938,6 +940,10 @@ class LauncherApp:
                 output.replace("\n", "\n[setup] ")))
         cfg = self.saved.get("direct_link") or {}
         if not self._start_direct_responder():
+            # The adapter and firewall were already configured. Keep recovery
+            # state until an asynchronous DHCP restore succeeds, so a failed
+            # cleanup remains retryable instead of stranding a static port.
+            self._rollback_failed_direct_responder(cfg)
             return
         cfg["enabled"] = True
         self.saved["direct_link"] = cfg
@@ -979,6 +985,19 @@ class LauncherApp:
                 self._direct_proc.stop()
                 self._append_log("directlink", "[launcher] DHCP helper stopped\n")
             self._direct_proc = None
+
+    def _rollback_failed_direct_responder(self, cfg) -> None:
+        cfg["enabled"] = False
+        self.saved["direct_link"] = cfg
+        self.saved["pending_direct_link_restore"] = True
+        persisted = self._save()
+        if not persisted:
+            self._append_log(
+                "directlink",
+                "[launcher] WARNING: could not save the pending DHCP "
+                "recovery; waiting for this restore attempt before exit\n")
+        self._direct_link_restore_async(
+            cfg, clear_saved=True, daemon=bool(persisted))
 
     def _direct_link_begin_disable(self):
         cfg = self.saved.get("direct_link") or {}
@@ -1039,7 +1058,7 @@ class LauncherApp:
         self._save()
         self._direct_link_restore_async(cfg)
 
-    def _direct_link_restore_async(self, cfg):
+    def _direct_link_restore_async(self, cfg, clear_saved=False, daemon=True):
         self._set_direct_checkbox(False, busy=True)
         self._set_direct_status(
             "Returning '{}' to automatic (DHCP)…".format(cfg.get("adapter")))
@@ -1053,14 +1072,24 @@ class LauncherApp:
                     "Could not return the port to automatic (DHCP):\n\n{}"
                     .format(err), title="Direct link cleanup failed"))
                 return
-            self.root.after(0, lambda: self._direct_link_restored(output))
+            self.root.after(
+                0, lambda: self._direct_link_restored(output, clear_saved))
 
-        threading.Thread(target=worker, daemon=True).start()
+        # A non-daemon worker is used when the crash-recovery marker could not
+        # be saved.  That keeps process shutdown from abandoning the only DHCP
+        # restore attempt that can prevent a stranded static adapter.
+        threading.Thread(target=worker, daemon=daemon).start()
 
-    def _direct_link_restored(self, output):
+    def _direct_link_restored(self, output, clear_saved=False):
         if output:
             self._append_log("directlink", "[setup] {}\n".format(
                 output.replace("\n", "\n[setup] ")))
+        recovery_was_pending = bool(
+            self.saved.pop("pending_direct_link_restore", None))
+        if clear_saved:
+            self.saved.pop("direct_link", None)
+        if clear_saved or recovery_was_pending:
+            self._save()
         self._set_direct_checkbox(False)
         self._set_direct_status(self._DIRECT_STATUS_OFF)
 
@@ -1099,6 +1128,31 @@ class LauncherApp:
         if not cfg.get("if_index"):
             return
         self._direct_link_restore_async(cfg)
+
+    def _direct_link_recovery_pending(self):
+        """Resume a DHCP restore that may have been interrupted by exit/crash."""
+        cfg = self.saved.get("direct_link") or {}
+        if not cfg.get("server_ip"):
+            self.saved.pop("pending_direct_link_restore", None)
+            self._save()
+            return
+        self.nb.select(self.terminal_tab)
+        self._append_log(
+            "directlink",
+            "[launcher] resuming interrupted direct-link recovery\n")
+        if not elevate.is_admin():
+            if elevate.can_elevate() and elevate.relaunch_as_admin():
+                self.stop_all()
+                if self._tray:
+                    self._tray.stop()
+                self.root.destroy()
+            else:
+                self._set_direct_checkbox(False)
+                self._set_direct_status(
+                    "Direct-link recovery still needs administrator rights. "
+                    "Restart PS2 Servers or use firewall cleanup to retry.")
+            return
+        self._direct_link_restore_async(cfg, clear_saved=True)
 
     def _direct_link_startup(self):
         """Re-arm an already-configured direct link on launch.
@@ -1140,20 +1194,12 @@ class LauncherApp:
     def _direct_link_startup_done(self, problem):
         cfg = self.saved.get("direct_link") or {}
         if problem:
-            cfg["enabled"] = False
-            self.saved["direct_link"] = cfg
-            self._save()
             self._append_log("directlink",
                              "[launcher] direct link not re-armed: {}\n".format(problem))
-            self._set_direct_checkbox(False)
-            self._set_direct_status(
-                "Direct link is off: {}. Tick the box to set it up again."
-                .format(problem))
+            self._rollback_failed_direct_responder(cfg)
             return
         if not self._start_direct_responder():
-            cfg["enabled"] = False
-            self.saved["direct_link"] = cfg
-            self._save()
+            self._rollback_failed_direct_responder(cfg)
             return
         self._set_direct_checkbox(True)
         self._set_direct_status(self._direct_ready_status(cfg))
@@ -1579,6 +1625,7 @@ class LauncherApp:
         self._append_log("directlink", "[setup] {}\n".format(
             output.replace("\n", "\n[setup] ")))
         self.saved.pop("direct_link", None)
+        self.saved.pop("pending_direct_link_restore", None)
         self._save()
         self._set_direct_checkbox(False)
         self._set_direct_status(self._DIRECT_STATUS_OFF)
@@ -1677,6 +1724,9 @@ class LauncherApp:
                 self._set_direct_status(
                     "The DHCP helper stopped (code {}) — see the TERMINAL "
                     "tab. Untick and tick the box to retry.".format(code))
+            cfg = self.saved.get("direct_link") or {}
+            if cfg.get("server_ip"):
+                self._rollback_failed_direct_responder(cfg)
         self.root.after(600, self._poll_status)
 
     # -- config ----------------------------------------------------------- #
@@ -1708,7 +1758,7 @@ class LauncherApp:
 
     def _save(self, pending_start=None, pending_cleanup=False,
               pending_firewall_allow=False, pending_direct_link=False,
-              pending_direct_link_off=False):
+              pending_direct_link_off=False) -> bool:
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get(),
                 "firewall_ok": sorted(getattr(self, "_firewall_ok", ())),
@@ -1723,6 +1773,8 @@ class LauncherApp:
                 "minimize_to_tray": bool(self.minimize_to_tray_var.get())}
         if self.saved.get("direct_link"):
             data["direct_link"] = self.saved["direct_link"]
+        if self.saved.get("pending_direct_link_restore"):
+            data["pending_direct_link_restore"] = True
         if pending_start:
             data["pending_start"] = pending_start
         if pending_cleanup:
@@ -1736,7 +1788,8 @@ class LauncherApp:
         try:
             config.save(data)
         except OSError:
-            pass
+            return False
+        return True
 
     def on_close(self):
         self.exit_app(confirm=False)

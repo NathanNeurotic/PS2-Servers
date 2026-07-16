@@ -333,7 +333,7 @@ class ConfigurationSafetyTests(unittest.TestCase):
         with mock.patch.object(directlink, "_powershell") as powershell:
             with self.assertRaises(WindowsSetupError):
                 directlink.apply_adapter_config(
-                    3, "192.168.137.1'; Remove-Item C:\\ -Recurse; '")
+                    3, "192.168.137.1'; Remove-Item C:\\ -Recurse; '", CLIENT)
         powershell.assert_not_called()
 
     def test_invalid_restore_guard_is_rejected_before_powershell(self):
@@ -346,17 +346,40 @@ class ConfigurationSafetyTests(unittest.TestCase):
     def test_configuration_script_contains_failure_rollback(self):
         result = mock.Mock(returncode=0, stdout="CONFIGURED=Ethernet", stderr="")
         with mock.patch.object(directlink, "_powershell", return_value=result) as ps:
-            directlink.apply_adapter_config(3, SERVER)
+            directlink.apply_adapter_config(3, SERVER, CLIENT)
         script = ps.call_args.args[0]
         self.assertIn("catch {", script)
         self.assertIn("-Dhcp Enabled", script)
         self.assertIn("throw $originalError", script)
+
+    def test_invalid_client_topology_is_rejected_before_powershell(self):
+        with mock.patch.object(directlink, "_powershell") as powershell:
+            with self.assertRaises(WindowsSetupError):
+                directlink.apply_adapter_config(
+                    3, SERVER, "192.168.138.10", 24)
+        powershell.assert_not_called()
 
     def test_responder_refuses_non_windows(self):
         args = ["--server-ip", SERVER, "--client-ip", CLIENT,
                 "--adapter", "Ethernet", "--if-index", "3"]
         with mock.patch.object(directlink, "is_windows", return_value=False):
             self.assertEqual(directlink.run_responder(args), 3)
+
+    def test_topology_rejects_invalid_prefix(self):
+        for prefix in (0, 31, 32, 33):
+            with self.subTest(prefix=prefix), self.assertRaises(WindowsSetupError):
+                directlink._validate_topology(SERVER, CLIENT, prefix)
+
+    def test_topology_rejects_invalid_client_addresses(self):
+        for client in (SERVER, "192.168.137.0", "192.168.137.255",
+                       "192.168.138.10"):
+            with self.subTest(client=client), self.assertRaises(WindowsSetupError):
+                directlink._validate_topology(SERVER, client, 24)
+
+    def test_topology_accepts_distinct_hosts_in_same_subnet(self):
+        self.assertEqual(
+            directlink._validate_topology(SERVER, CLIENT, 24),
+            (SERVER, CLIENT, 24))
 
 
 class FirewallSafetyTests(unittest.TestCase):
@@ -392,10 +415,13 @@ class LauncherLifecycleTests(unittest.TestCase):
     def test_enable_is_not_saved_when_helper_fails_to_start(self):
         app = self.app()
         app._start_direct_responder = mock.Mock(return_value=False)
+        app._direct_link_restore_async = mock.Mock()
         app.ip_var = mock.Mock()
         LauncherApp._direct_link_enabled(app, "")
         self.assertFalse(app.saved["direct_link"]["enabled"])
-        app._save.assert_not_called()
+        app._save.assert_called_once_with()
+        app._direct_link_restore_async.assert_called_once_with(
+            app.saved["direct_link"], clear_saved=True, daemon=True)
         app.ip_var.set.assert_not_called()
 
     def test_firewall_failure_restores_configured_adapter(self):
@@ -418,6 +444,21 @@ class LauncherLifecycleTests(unittest.TestCase):
         app._direct_link_fail.assert_called_once()
         self.assertIn("returned to automatic", app._direct_link_fail.call_args.args[0])
 
+    def test_unexpected_helper_exit_restores_adapter(self):
+        app = self.app()
+        app.saved["direct_link"]["enabled"] = True
+        app.procs = {}
+        app._direct_expected = True
+        app._direct_proc = mock.Mock()
+        app._direct_proc.is_running.return_value = False
+        app._direct_proc.returncode = 3
+        app._rollback_failed_direct_responder = mock.Mock()
+        app.root = mock.Mock()
+        LauncherApp._poll_status(app)
+        app._rollback_failed_direct_responder.assert_called_once_with(
+            app.saved["direct_link"])
+        app.root.after.assert_called_once_with(600, app._poll_status)
+
     def test_stop_all_also_stops_direct_responder(self):
         app = self.app()
         app.procs = {}
@@ -436,6 +477,64 @@ class LauncherLifecycleTests(unittest.TestCase):
         LauncherApp._finish_direct_cleanup(app, "RESTORED=automatic (DHCP)")
         self.assertNotIn("direct_link", app.saved)
         app._save.assert_called_once_with()
+
+    def test_start_failure_restore_clears_recovery_state(self):
+        app = self.app()
+        app.saved["pending_direct_link_restore"] = True
+        LauncherApp._direct_link_restored(
+            app, "RESTORED=automatic (DHCP)", clear_saved=True)
+        self.assertNotIn("direct_link", app.saved)
+        self.assertNotIn("pending_direct_link_restore", app.saved)
+        app._save.assert_called_once_with()
+
+    def test_failed_helper_persists_recovery_before_worker(self):
+        app = self.app()
+        app._direct_link_restore_async = mock.Mock()
+        cfg = app.saved["direct_link"]
+        LauncherApp._rollback_failed_direct_responder(app, cfg)
+        self.assertTrue(app.saved["pending_direct_link_restore"])
+        self.assertFalse(cfg["enabled"])
+        app._save.assert_called_once_with()
+        app._direct_link_restore_async.assert_called_once_with(
+            cfg, clear_saved=True, daemon=True)
+
+    def test_failed_recovery_save_uses_non_daemon_restore(self):
+        app = self.app()
+        app._save.return_value = False
+        app._direct_link_restore_async = mock.Mock()
+        cfg = app.saved["direct_link"]
+        LauncherApp._rollback_failed_direct_responder(app, cfg)
+        app._direct_link_restore_async.assert_called_once_with(
+            cfg, clear_saved=True, daemon=False)
+        self.assertIn("could not save", app._append_log.call_args.args[1])
+
+    def test_restore_worker_honors_non_daemon_policy(self):
+        app = self.app()
+        with mock.patch("launcher.gui.threading.Thread") as thread:
+            LauncherApp._direct_link_restore_async(
+                app, app.saved["direct_link"], daemon=False)
+        self.assertFalse(thread.call_args.kwargs["daemon"])
+        thread.return_value.start.assert_called_once_with()
+
+    def test_pending_recovery_resumes_after_restart(self):
+        app = self.app()
+        app.saved["pending_direct_link_restore"] = True
+        app.nb = mock.Mock()
+        app.terminal_tab = object()
+        app._direct_link_restore_async = mock.Mock()
+        with mock.patch("launcher.gui.elevate.is_admin", return_value=True):
+            LauncherApp._direct_link_recovery_pending(app)
+        app._direct_link_restore_async.assert_called_once_with(
+            app.saved["direct_link"], clear_saved=True)
+        self.assertTrue(app.saved["pending_direct_link_restore"])
+
+    def test_startup_preflight_failure_enters_recovery(self):
+        app = self.app()
+        app.saved["direct_link"]["enabled"] = True
+        app._rollback_failed_direct_responder = mock.Mock()
+        LauncherApp._direct_link_startup_done(app, "adapter reaches a router")
+        app._rollback_failed_direct_responder.assert_called_once_with(
+            app.saved["direct_link"])
 
 
 if __name__ == "__main__":
