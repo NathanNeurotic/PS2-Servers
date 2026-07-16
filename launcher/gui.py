@@ -122,10 +122,15 @@ TAB_TITLES = {
 }
 
 
-def tab_label(key, running):
-    """Tab text carrying the server's state, so it reads from any tab."""
+def tab_label(key, running, fallback=None):
+    """Tab text carrying the server's state, so it reads from any tab.
+
+    fallback keeps what the tabs did before they carried state: a server with no
+    TAB_TITLES entry showed its own label, not a shouted key.
+    """
     dot = TAB_DOT_RUNNING if running else TAB_DOT_STOPPED
-    return "{} {}".format(dot, TAB_TITLES.get(key, key.upper()))
+    title = TAB_TITLES.get(key, fallback or key.upper())
+    return "{} {}".format(dot, title)
 
 
 def opl_hint(key, ip, values):
@@ -214,7 +219,8 @@ class ServerCard(ttk.LabelFrame):
         if tab is None or nb is None:
             return
         try:
-            nb.tab(tab, text=tab_label(self.server.key, running))
+            nb.tab(tab, text=tab_label(self.server.key, running,
+                                       fallback=self.server.label))
         except tk.TclError:
             pass
 
@@ -521,7 +527,8 @@ class LauncherApp:
             tab.columnconfigure(0, weight=1)
             card = ServerCard(tab, self, server)
             card.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-            self.nb.add(tab, text=tab_label(server.key, False))
+            self.nb.add(tab, text=tab_label(server.key, running=False,
+                                            fallback=server.label))
             self.server_tabs[server.key] = tab
             self.cards[server.key] = card
 
