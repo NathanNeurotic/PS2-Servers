@@ -333,7 +333,7 @@ class ConfigurationSafetyTests(unittest.TestCase):
         with mock.patch.object(directlink, "_powershell") as powershell:
             with self.assertRaises(WindowsSetupError):
                 directlink.apply_adapter_config(
-                    3, "192.168.137.1'; Remove-Item C:\\ -Recurse; '")
+                    3, "192.168.137.1'; Remove-Item C:\\ -Recurse; '", CLIENT)
         powershell.assert_not_called()
 
     def test_invalid_restore_guard_is_rejected_before_powershell(self):
@@ -346,11 +346,18 @@ class ConfigurationSafetyTests(unittest.TestCase):
     def test_configuration_script_contains_failure_rollback(self):
         result = mock.Mock(returncode=0, stdout="CONFIGURED=Ethernet", stderr="")
         with mock.patch.object(directlink, "_powershell", return_value=result) as ps:
-            directlink.apply_adapter_config(3, SERVER)
+            directlink.apply_adapter_config(3, SERVER, CLIENT)
         script = ps.call_args.args[0]
         self.assertIn("catch {", script)
         self.assertIn("-Dhcp Enabled", script)
         self.assertIn("throw $originalError", script)
+
+    def test_invalid_client_topology_is_rejected_before_powershell(self):
+        with mock.patch.object(directlink, "_powershell") as powershell:
+            with self.assertRaises(WindowsSetupError):
+                directlink.apply_adapter_config(
+                    3, SERVER, "192.168.138.10", 24)
+        powershell.assert_not_called()
 
     def test_responder_refuses_non_windows(self):
         args = ["--server-ip", SERVER, "--client-ip", CLIENT,
@@ -436,6 +443,21 @@ class LauncherLifecycleTests(unittest.TestCase):
         restore.assert_called_once_with(3, expect_ip=SERVER)
         app._direct_link_fail.assert_called_once()
         self.assertIn("returned to automatic", app._direct_link_fail.call_args.args[0])
+
+    def test_unexpected_helper_exit_restores_adapter(self):
+        app = self.app()
+        app.saved["direct_link"]["enabled"] = True
+        app.procs = {}
+        app._direct_expected = True
+        app._direct_proc = mock.Mock()
+        app._direct_proc.is_running.return_value = False
+        app._direct_proc.returncode = 3
+        app._rollback_failed_direct_responder = mock.Mock()
+        app.root = mock.Mock()
+        LauncherApp._poll_status(app)
+        app._rollback_failed_direct_responder.assert_called_once_with(
+            app.saved["direct_link"])
+        app.root.after.assert_called_once_with(600, app._poll_status)
 
     def test_stop_all_also_stops_direct_responder(self):
         app = self.app()

@@ -304,18 +304,16 @@ def choose_subnet(taken):
 # --------------------------------------------------------------------------- #
 # Adapter configure / restore (need administrator rights)
 # --------------------------------------------------------------------------- #
-def apply_adapter_config(if_index, server_ip, prefixlen=PREFIX_LENGTH):
+def apply_adapter_config(if_index, server_ip, client_ip,
+                         prefixlen=PREFIX_LENGTH):
     """Give the chosen adapter the fixed server address (elevated).
 
     The gateway/lease refusals run again HERE, inside the elevated pass, so a
     stale answer from the earlier scan (or a cable moved in between) cannot
     configure the wrong port.
     """
-    server_ip = _canonical_ipv4(server_ip, "direct-link server address")
-    prefixlen = int(prefixlen)
-    if not 1 <= prefixlen <= 30:
-        raise WindowsSetupError(
-            "Invalid direct-link prefix length: {}".format(prefixlen))
+    server_ip, _client_ip, prefixlen = _validate_topology(
+        server_ip, client_ip, prefixlen)
     script = "\n".join([
         "$ErrorActionPreference = 'Stop'",
         "$idx = {}".format(int(if_index)),

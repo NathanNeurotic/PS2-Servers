@@ -906,7 +906,7 @@ class LauncherApp:
             configured = None
             try:
                 configured = directlink.apply_adapter_config(
-                    cfg["if_index"], cfg["server_ip"],
+                    cfg["if_index"], cfg["server_ip"], cfg["client_ip"],
                     cfg.get("prefix", directlink.PREFIX_LENGTH))
                 firewall = windows_setup.apply_setup(
                     "directlink", {"server_ip": cfg["server_ip"]})
@@ -941,10 +941,7 @@ class LauncherApp:
             # The adapter and firewall were already configured. Keep recovery
             # state until an asynchronous DHCP restore succeeds, so a failed
             # cleanup remains retryable instead of stranding a static port.
-            cfg["enabled"] = False
-            self.saved["direct_link"] = cfg
-            self._save()
-            self._direct_link_restore_async(cfg, clear_saved=True)
+            self._rollback_failed_direct_responder(cfg)
             return
         cfg["enabled"] = True
         self.saved["direct_link"] = cfg
@@ -986,6 +983,12 @@ class LauncherApp:
                 self._direct_proc.stop()
                 self._append_log("directlink", "[launcher] DHCP helper stopped\n")
             self._direct_proc = None
+
+    def _rollback_failed_direct_responder(self, cfg):
+        cfg["enabled"] = False
+        self.saved["direct_link"] = cfg
+        self._save()
+        self._direct_link_restore_async(cfg, clear_saved=True)
 
     def _direct_link_begin_disable(self):
         cfg = self.saved.get("direct_link") or {}
@@ -1162,9 +1165,7 @@ class LauncherApp:
                 .format(problem))
             return
         if not self._start_direct_responder():
-            cfg["enabled"] = False
-            self.saved["direct_link"] = cfg
-            self._save()
+            self._rollback_failed_direct_responder(cfg)
             return
         self._set_direct_checkbox(True)
         self._set_direct_status(self._direct_ready_status(cfg))
@@ -1688,6 +1689,9 @@ class LauncherApp:
                 self._set_direct_status(
                     "The DHCP helper stopped (code {}) — see the TERMINAL "
                     "tab. Untick and tick the box to retry.".format(code))
+            cfg = self.saved.get("direct_link") or {}
+            if cfg.get("server_ip"):
+                self._rollback_failed_direct_responder(cfg)
         self.root.after(600, self._poll_status)
 
     # -- config ----------------------------------------------------------- #
