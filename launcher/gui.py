@@ -14,7 +14,9 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
+
+from . import status_dot
 
 from . import config, directlink, elevate, netinfo, tray, windows_setup
 from .process import ServerProcess
@@ -23,11 +25,12 @@ from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_comm
 
 APP_VERSION_LABEL = "v" + DISPLAY_VERSION
 
-DOT_RUNNING = "●"  # filled circle
-# Tab-header state. Filled = up, hollow = down, on the tab you can see without
-# opening it. Deliberately not a red/green glyph: ttk.Notebook has no per-tab
-# foreground, and a coloured emoji renders as a box wherever the font lacks it --
-# shape survives every platform and every colourblindness.
+DOT_RUNNING = "●"  # filled circle, used in the in-card status label
+# Per-tab running state. The primary indicator is a small coloured image dot
+# (green disc = running, grey ring = stopped) set as the tab's image -- a tab's
+# text is a single colour, so a glyph could never be just-the-dot green, but a
+# per-tab image carries its own colour and renders identically everywhere. These
+# glyphs remain the fallback for the rare case image generation is unavailable.
 TAB_DOT_RUNNING = "●"
 TAB_DOT_STOPPED = "○"
 COLOR_RUNNING = "#2e9e44"
@@ -143,6 +146,17 @@ def tab_label(key, running, fallback=None):
     return "{} {}".format(dot, title)
 
 
+def tab_text(label):
+    """The padded tab text, matching StyledNotebook.add's own wrapping.
+
+    Both the initial nb.add() (via StyledNotebook) and the later nb.tab()
+    refreshes must produce identical text, or the label shifts on the first
+    status change. Making this the single source of truth removes that coupling
+    -- and keeps them consistent even where StyledNotebook is not in play.
+    """
+    return "  {}  ".format(label.strip())
+
+
 def opl_hint(key, ip, values):
     if key == "smbv1":
         port = "445" if values.get("take_445") else str(values.get("port") or 1111)
@@ -228,9 +242,14 @@ class ServerCard(ttk.LabelFrame):
         nb = getattr(self.app, "nb", None)
         if tab is None or nb is None:
             return
+        img = self.app._tab_dot_image(running)
         try:
-            nb.tab(tab, text=tab_label(self.server.key, running,
-                                       fallback=self.server.label))
+            if img is not None:
+                title = TAB_TITLES.get(self.server.key, self.server.label)
+                nb.tab(tab, text=tab_text(title), image=img, compound="left")
+            else:  # image generation unavailable: fall back to the glyph
+                nb.tab(tab, text=tab_text(tab_label(
+                    self.server.key, running, fallback=self.server.label)))
         except tk.TclError:
             pass
 
@@ -578,14 +597,21 @@ class LauncherApp:
         self.nb = ttk.Notebook(parent)
         self.nb.pack(fill="x", padx=16, pady=(0, 12))
         self.server_tabs = {}
+        self._init_tab_dots()
 
         for server in REGISTRY.values():
             tab = ttk.Frame(self.nb)
             tab.columnconfigure(0, weight=1)
             card = ServerCard(tab, self, server)
             card.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-            self.nb.add(tab, text=tab_label(server.key, running=False,
-                                            fallback=server.label))
+            img = self._tab_dot_image(running=False)
+            if img is not None:
+                title = TAB_TITLES.get(server.key, server.label)
+                self.nb.add(tab, text=tab_text(title), image=img,
+                            compound="left")
+            else:
+                self.nb.add(tab, text=tab_text(tab_label(
+                    server.key, running=False, fallback=server.label)))
             self.server_tabs[server.key] = tab
             self.cards[server.key] = card
 
@@ -707,6 +733,34 @@ class LauncherApp:
             webbrowser.open_new_tab(url)
         except Exception as e:
             messagebox.showerror("Cannot open link", str(e))
+
+    # -- per-tab running/stopped dots ------------------------------------- #
+    def _init_tab_dots(self):
+        """Build the two shared tab-status images (running / stopped), once.
+
+        Sized from the tab font so the dot scales with the label at any DPI, and
+        coloured to match the in-card status label. Any failure leaves
+        self._tab_dots None, and the tabs fall back to the text glyph -- a dot is
+        decoration and must never be able to take the window down.
+        """
+        self._tab_dots = None
+        try:
+            linespace = tkfont.Font(root=self.root, font=("", 10, "bold")).metrics(
+                "linespace")
+            diameter = max(9, min(48, round(linespace * 0.6)))
+            online = tk.PhotoImage(data=status_dot.dot_png_base64(
+                diameter, COLOR_RUNNING, filled=True))
+            offline = tk.PhotoImage(data=status_dot.dot_png_base64(
+                diameter, COLOR_STOPPED, filled=False))
+            self._tab_dots = (online, offline)  # kept referenced so Tk won't GC them
+        except Exception:
+            self._tab_dots = None
+
+    def _tab_dot_image(self, running):
+        dots = getattr(self, "_tab_dots", None)
+        if not dots:
+            return None
+        return dots[0] if running else dots[1]
 
     # -- IP --------------------------------------------------------------- #
     def current_ip(self):
