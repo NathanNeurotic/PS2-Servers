@@ -358,6 +358,22 @@ class ConfigurationSafetyTests(unittest.TestCase):
         with mock.patch.object(directlink, "is_windows", return_value=False):
             self.assertEqual(directlink.run_responder(args), 3)
 
+    def test_topology_rejects_invalid_prefix(self):
+        for prefix in (0, 31, 32, 33):
+            with self.subTest(prefix=prefix), self.assertRaises(WindowsSetupError):
+                directlink._validate_topology(SERVER, CLIENT, prefix)
+
+    def test_topology_rejects_invalid_client_addresses(self):
+        for client in (SERVER, "192.168.137.0", "192.168.137.255",
+                       "192.168.138.10"):
+            with self.subTest(client=client), self.assertRaises(WindowsSetupError):
+                directlink._validate_topology(SERVER, client, 24)
+
+    def test_topology_accepts_distinct_hosts_in_same_subnet(self):
+        self.assertEqual(
+            directlink._validate_topology(SERVER, CLIENT, 24),
+            (SERVER, CLIENT, 24))
+
 
 class FirewallSafetyTests(unittest.TestCase):
     def test_directlink_rule_is_address_scoped_without_app_wildcard(self):
@@ -392,10 +408,13 @@ class LauncherLifecycleTests(unittest.TestCase):
     def test_enable_is_not_saved_when_helper_fails_to_start(self):
         app = self.app()
         app._start_direct_responder = mock.Mock(return_value=False)
+        app._direct_link_restore_async = mock.Mock()
         app.ip_var = mock.Mock()
         LauncherApp._direct_link_enabled(app, "")
         self.assertFalse(app.saved["direct_link"]["enabled"])
-        app._save.assert_not_called()
+        app._save.assert_called_once_with()
+        app._direct_link_restore_async.assert_called_once_with(
+            app.saved["direct_link"], clear_saved=True)
         app.ip_var.set.assert_not_called()
 
     def test_firewall_failure_restores_configured_adapter(self):
@@ -434,6 +453,13 @@ class LauncherLifecycleTests(unittest.TestCase):
     def test_successful_cleanup_clears_recovery_state(self):
         app = self.app()
         LauncherApp._finish_direct_cleanup(app, "RESTORED=automatic (DHCP)")
+        self.assertNotIn("direct_link", app.saved)
+        app._save.assert_called_once_with()
+
+    def test_start_failure_restore_clears_recovery_state(self):
+        app = self.app()
+        LauncherApp._direct_link_restored(
+            app, "RESTORED=automatic (DHCP)", clear_saved=True)
         self.assertNotIn("direct_link", app.saved)
         app._save.assert_called_once_with()
 

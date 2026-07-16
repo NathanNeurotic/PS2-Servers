@@ -938,6 +938,13 @@ class LauncherApp:
                 output.replace("\n", "\n[setup] ")))
         cfg = self.saved.get("direct_link") or {}
         if not self._start_direct_responder():
+            # The adapter and firewall were already configured. Keep recovery
+            # state until an asynchronous DHCP restore succeeds, so a failed
+            # cleanup remains retryable instead of stranding a static port.
+            cfg["enabled"] = False
+            self.saved["direct_link"] = cfg
+            self._save()
+            self._direct_link_restore_async(cfg, clear_saved=True)
             return
         cfg["enabled"] = True
         self.saved["direct_link"] = cfg
@@ -1039,7 +1046,7 @@ class LauncherApp:
         self._save()
         self._direct_link_restore_async(cfg)
 
-    def _direct_link_restore_async(self, cfg):
+    def _direct_link_restore_async(self, cfg, clear_saved=False):
         self._set_direct_checkbox(False, busy=True)
         self._set_direct_status(
             "Returning '{}' to automatic (DHCP)…".format(cfg.get("adapter")))
@@ -1053,14 +1060,18 @@ class LauncherApp:
                     "Could not return the port to automatic (DHCP):\n\n{}"
                     .format(err), title="Direct link cleanup failed"))
                 return
-            self.root.after(0, lambda: self._direct_link_restored(output))
+            self.root.after(
+                0, lambda: self._direct_link_restored(output, clear_saved))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _direct_link_restored(self, output):
+    def _direct_link_restored(self, output, clear_saved=False):
         if output:
             self._append_log("directlink", "[setup] {}\n".format(
                 output.replace("\n", "\n[setup] ")))
+        if clear_saved:
+            self.saved.pop("direct_link", None)
+            self._save()
         self._set_direct_checkbox(False)
         self._set_direct_status(self._DIRECT_STATUS_OFF)
 

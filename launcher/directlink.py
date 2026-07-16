@@ -78,6 +78,29 @@ def _canonical_ipv4(value, label="IPv4 address"):
             "Invalid {}: {!r}".format(label, value)) from None
 
 
+def _validate_topology(server_ip, client_ip, prefixlen):
+    server_ip = _canonical_ipv4(server_ip, "direct-link server address")
+    client_ip = _canonical_ipv4(client_ip, "direct-link client address")
+    prefixlen = int(prefixlen)
+    # DHCP needs distinct server/client hosts plus network and broadcast.
+    if not 1 <= prefixlen <= 30:
+        raise WindowsSetupError(
+            "Invalid direct-link prefix length: {}".format(prefixlen))
+    network = ipaddress.IPv4Network(
+        "{}/{}".format(server_ip, prefixlen), strict=False)
+    server = ipaddress.IPv4Address(server_ip)
+    client = ipaddress.IPv4Address(client_ip)
+    unusable = {network.network_address, network.broadcast_address, server}
+    if server in (network.network_address, network.broadcast_address):
+        raise WindowsSetupError(
+            "The direct-link server address is not a usable host address.")
+    if client not in network or client in unusable:
+        raise WindowsSetupError(
+            "The direct-link client address must be a different usable host "
+            "in the server subnet.")
+    return server_ip, client_ip, prefixlen
+
+
 def _ip_to_int(ip):
     return struct.unpack("!I", socket.inet_aton(ip))[0]
 
@@ -290,7 +313,7 @@ def apply_adapter_config(if_index, server_ip, prefixlen=PREFIX_LENGTH):
     """
     server_ip = _canonical_ipv4(server_ip, "direct-link server address")
     prefixlen = int(prefixlen)
-    if not 1 <= prefixlen <= 32:
+    if not 1 <= prefixlen <= 30:
         raise WindowsSetupError(
             "Invalid direct-link prefix length: {}".format(prefixlen))
     script = "\n".join([
@@ -761,10 +784,10 @@ def run_responder(argv):
         if not is_windows():
             raise DirectLinkRefused(
                 "direct-link DHCP is supported only on Windows")
-        server_ip = _canonical_ipv4(args.server_ip, "direct-link server address")
-        client_ip = _canonical_ipv4(args.client_ip, "direct-link client address")
+        server_ip, client_ip, prefixlen = _validate_topology(
+            args.server_ip, args.client_ip, args.prefix)
         _startup_adapter_check(args.adapter, args.if_index, server_ip)
-        responder = DhcpResponder(server_ip, client_ip, args.prefix,
+        responder = DhcpResponder(server_ip, client_ip, prefixlen,
                                   adapter_name=args.adapter, log=log)
         responder.open_socket()
         responder.serve_forever()
