@@ -314,10 +314,18 @@ def _parse_linux_adapters(addr_json, route_json, is_wireless, is_physical):
         addrs = json.loads(addr_json or "[]")
     except ValueError:
         addrs = []
+    # Routes gate collision avoidance, so unparseable route data must fail
+    # closed (a refusal) rather than silently become "no routes" -- that would
+    # strip gateway/VPN evidence and let a real network be picked. An explicit
+    # empty list from `ip` (a host with no routes) is legitimate and stays [].
     try:
         routes = json.loads(route_json or "[]")
-    except ValueError:
-        routes = []
+    except ValueError as e:
+        raise WindowsSetupError(
+            "Could not parse the Linux routing table: {}".format(e)) from None
+    if not isinstance(routes, list):
+        raise WindowsSetupError(
+            "Unexpected Linux routing-table format (expected a list).")
     gw_ifaces = {r.get("dev") for r in routes
                  if r.get("dst") == "default" and r.get("dev")}
     adapters = []

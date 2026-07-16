@@ -80,6 +80,24 @@ class LinuxEnumTests(unittest.TestCase):
         candidates, _rej = directlink.find_candidates(_linux_parsed())
         self.assertEqual([a["name"] for a in candidates], ["eth1"])
 
+    def test_malformed_route_json_fails_closed(self):
+        # Unparseable route data must refuse, not silently drop to "no routes"
+        # (which would hide gateway/VPN collisions and let a real network be
+        # picked). Both non-JSON and valid-JSON-but-not-a-list must raise.
+        w = (lambda _n: False)
+        p = (lambda _n: True)
+        with self.assertRaises(WindowsSetupError):
+            directlink._parse_linux_adapters(LINUX_ADDR, "{not json", w, p)
+        with self.assertRaises(WindowsSetupError):
+            directlink._parse_linux_adapters(LINUX_ADDR, '{"dst":"default"}',
+                                             w, p)
+
+    def test_empty_route_list_is_allowed(self):
+        # A host that legitimately has no routes parses fine as empty routes.
+        parsed = directlink._parse_linux_adapters(
+            LINUX_ADDR, "[]", (lambda _n: False), (lambda _n: True))
+        self.assertEqual(parsed["routes"], [])
+
 
 MAC_PORTS = """Hardware Port: Wi-Fi
 Device: en0
