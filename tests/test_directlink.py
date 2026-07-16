@@ -184,6 +184,41 @@ class HandleTests(unittest.TestCase):
         self.assertIsNone(second)
 
 
+class ServeTests(unittest.TestCase):
+    class StopLoop(Exception):
+        pass
+
+    class FakeSocket:
+        def __init__(self, first_error):
+            self.first_error = first_error
+            self.calls = 0
+
+        def settimeout(self, _seconds):
+            pass
+
+        def recvfrom(self, _size):
+            self.calls += 1
+            if self.calls == 1:
+                raise self.first_error
+            raise ServeTests.StopLoop()
+
+    def assert_reset_is_ignored(self, error):
+        r = responder()
+        r.sock = self.FakeSocket(error)
+        with self.assertRaises(self.StopLoop):
+            r.serve_forever()
+        self.assertEqual(r.sock.calls, 2)
+
+    def test_connection_reset_is_ignored(self):
+        self.assert_reset_is_ignored(
+            ConnectionResetError(10054, "connection reset by peer"))
+
+    def test_windows_udp_reset_is_ignored(self):
+        error = OSError("ICMP port unreachable")
+        error.winerror = 10054
+        self.assert_reset_is_ignored(error)
+
+
 class SubnetTests(unittest.TestCase):
     def test_overlap(self):
         n = _ip_to_int

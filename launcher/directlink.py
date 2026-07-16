@@ -665,6 +665,13 @@ class DhcpResponder:
             except socket.timeout:
                 continue
             except OSError as e:
+                # Windows reports an ICMP "port unreachable" for an earlier
+                # UDP reply as WSAECONNRESET on the next recvfrom().  That says
+                # nothing about the health of this listening socket: the PS2
+                # may simply have moved between DHCP states.  Keep serving.
+                if (isinstance(e, ConnectionResetError)
+                        or getattr(e, "winerror", None) == 10054):
+                    continue
                 raise DirectLinkRefused("socket error: {}".format(e))
             result = self.handle_packet(data, src)
             if result is None:
