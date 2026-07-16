@@ -19,7 +19,14 @@ def install(app, gui):
         if field.kind == "bool":
             return bool(field.default)
         if field.kind == "port":
-            return card.server.port_display()
+            # The FIELD's own default, never server.port_display() -- that returns
+            # ServerDef.default_port, so Revert handed every port field the server's
+            # main port and set Data port to the discovery port, which the server
+            # refuses to start on. A falsy default means "auto" and renders blank.
+            if not field.default:
+                return ""
+            return ("0x%04X" % field.default if card.server.port_is_hex
+                    else str(field.default))
         return "" if field.default is None else str(field.default)
 
     def reset_to_defaults(card):
@@ -69,6 +76,47 @@ def install(app, gui):
         original_build(card)
         add_page_actions(card)
 
+    def normalized_port(value):
+        """A port as a number, so 0xF5F6 and 62966 stop looking like a change.
+
+        base=0 reads both the hex the field prefills and the decimal someone may
+        retype. Anything unparseable falls back to its text: a port field holding
+        junk is the user's business, not a reason to raise here.
+        """
+        if not value:
+            return ""
+        try:
+            return int(str(value).strip(), 0)
+        except (TypeError, ValueError):
+            return str(value).strip()
+
+    def pending_launch_changes(app_obj, card, key):
+        """Field labels whose value differs from what the running server started on.
+
+        ServerCard._active_values is the snapshot taken at launch and cleared at
+        stop, so it is the only honest answer to "what is this process actually
+        using" -- the widgets have moved on. Ports compare as numbers and flags as
+        bools, so a port retyped 62966 after launching as 0xF5F6 is not a change:
+        prompting to restart over how a number is spelled would teach people to
+        click through the prompt, which is how a confirm stops protecting anything.
+        """
+        was = getattr(card, "_active_values", None)
+        if not was:
+            return []
+        now = card.values()
+        changed = []
+        for field in card.server.fields:
+            before, after = was.get(field.key), now.get(field.key)
+            if field.kind == "bool" or isinstance(before, bool) or isinstance(after, bool):
+                same = bool(before) == bool(after)
+            elif field.kind == "port":
+                same = normalized_port(before) == normalized_port(after)
+            else:
+                same = str(before or "") == str(after or "")
+            if not same:
+                changed.append(field.label)
+        return changed
+
     def apply_page_settings(card):
         card.app.apply_server_settings(card.server.key)
 
@@ -89,11 +137,38 @@ def install(app, gui):
         card.refresh_status(app_obj.is_running(key))
         label = gui.TAB_TITLES.get(key, key.upper())
         app_obj._append_log("setup", "[settings] applied {} page settings\n".format(label))
-        if app_obj.is_running(key):
+        if not app_obj.is_running(key):
+            return
+
+        # Settings only reach a server through its command line, so a running one
+        # keeps whatever it launched with -- ticking "Modulo" mid-session changes
+        # nothing until it restarts, and nothing said so except a log line nobody
+        # reads. Offer the restart instead. Never do it silently: a restart drops
+        # whatever the console is doing, and a game mid-load is a bad thing to end
+        # on someone's behalf without asking.
+        changed = pending_launch_changes(app_obj, card, key)
+        if not changed:
             app_obj._append_log(
                 "setup",
-                "[settings] {} is already running; restart this server to use changed launch settings\n".format(label),
+                "[settings] {} is already running; nothing it launched with has changed\n".format(label),
             )
+            return
+
+        if not gui.messagebox.askyesno(
+                "Restart {} to apply?".format(label),
+                "{} is running, and these settings only take effect at start:\n\n"
+                "{}\n\n"
+                "Restart it now? Anything the PS2 is currently loading will stop.".format(
+                    label, "\n".join("  • " + c for c in changed))):
+            app_obj._append_log(
+                "setup",
+                "[settings] {} left running; restart it to use the changed settings\n".format(label),
+            )
+            return
+
+        app_obj._append_log("setup", "[settings] restarting {} to apply\n".format(label))
+        app_obj.stop_server(key)
+        app_obj.start_server(key)
 
     def revert_server_defaults(app_obj, key):
         app_obj._save()
