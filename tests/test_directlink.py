@@ -278,38 +278,47 @@ class ProbeTests(unittest.TestCase):
     def test_foreign_offer_detected(self):
         offer = make_offer(0x1111, "192.168.1.1")
         self.assertEqual(
-            _foreign_offer_server_id(offer, 0x1111, "192.168.137.1"),
-            "192.168.1.1")
+            _foreign_offer_server_id(offer, 0x1111), "192.168.1.1")
 
-    def test_our_own_offer_is_not_foreign(self):
-        # The periodic re-probe hears our own responder; server-id == our IP.
+    def test_same_ip_reply_is_still_foreign(self):
+        # Our own responder provably never answers the probe (single-threaded,
+        # and handle_packet drops the probe MAC), so a reply claiming our own
+        # address is a foreign machine using it -- a neighboring Windows ICS
+        # host is literally 192.168.137.1. It must be detected, not excused.
         offer = make_offer(0x2222, "192.168.137.1")
-        self.assertIsNone(
-            _foreign_offer_server_id(offer, 0x2222, "192.168.137.1"))
+        self.assertEqual(
+            _foreign_offer_server_id(offer, 0x2222), "192.168.137.1")
 
     def test_wrong_xid_ignored(self):
         offer = make_offer(0x3333, "192.168.1.1")
-        self.assertIsNone(
-            _foreign_offer_server_id(offer, 0x9999, "192.168.137.1"))
+        self.assertIsNone(_foreign_offer_server_id(offer, 0x9999))
 
     def test_offer_without_server_id_uses_siaddr(self):
         offer = make_offer(0x4444, "192.168.1.1", include_server_id=False,
                            siaddr="192.168.1.5")
         self.assertEqual(
-            _foreign_offer_server_id(offer, 0x4444, "192.168.137.1"),
-            "192.168.1.5")
+            _foreign_offer_server_id(offer, 0x4444), "192.168.1.5")
 
     def test_bootrequest_is_not_a_foreign_reply(self):
         # A client's DISCOVER (op=1) must never read as a server answering.
         disc = _build_discover(0x5555, b"\x02\x00\x00\x00\x00\x01")
-        self.assertIsNone(
-            _foreign_offer_server_id(disc, 0x5555, "192.168.137.1"))
+        self.assertIsNone(_foreign_offer_server_id(disc, 0x5555))
 
     def test_junk_is_not_a_foreign_reply(self):
-        self.assertIsNone(
-            _foreign_offer_server_id(b"\x00" * 300, 0x1, "192.168.137.1"))
-        self.assertIsNone(
-            _foreign_offer_server_id(b"short", 0x1, "192.168.137.1"))
+        self.assertIsNone(_foreign_offer_server_id(b"\x00" * 300, 0x1))
+        self.assertIsNone(_foreign_offer_server_id(b"short", 0x1))
+
+    def test_probe_rx_honors_wildcard_mode(self):
+        # A machine that forced the responder into wildcard mode would not
+        # deliver broadcast OFFERs to a specifically-bound probe socket
+        # either; the probe must mirror the responder's receive mode.
+        for mode, expected in (("wildcard", True), ("specific", False)):
+            r = responder(mode=mode)
+            with mock.patch.object(directlink, "probe_for_foreign_dhcp_server",
+                                   return_value=None) as probe:
+                r.check_for_foreign_dhcp_server()
+            self.assertEqual(probe.call_args.kwargs.get("wildcard_rx"),
+                             expected, mode)
 
     def test_check_raises_on_foreign_server(self):
         r = responder()
