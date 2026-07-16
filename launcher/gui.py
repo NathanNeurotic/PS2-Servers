@@ -1948,15 +1948,30 @@ class LauncherApp:
             # confirmed, so a crash mid-cleanup still recovers on the next launch.
             self._rollback_failed_direct_responder(cfg)
             return
-        # Unix: the helper runs as root and removes the address itself on the way
-        # out (its finally). The address is additive and session-only -- it does
-        # not survive a reboot, and _direct_link_reset_stale_unix reconciles any
-        # leftover "enabled" at startup -- so there is no persistent port for the
-        # launcher (not root here) to restore. Just clear the saved state.
+        # Unix: the root helper removes its additive address in a finally on a
+        # clean exit, but a forced kill (SIGKILL) can bypass that and strand the
+        # address for the rest of the session (a reboot always clears it). The
+        # launcher is not root here, so it cannot remove the address -- but a
+        # read-only check needs no root, so confirm removal before reporting a
+        # clean teardown we did not verify. _direct_link_reset_stale_unix
+        # reconciles the leftover "enabled" on the next launch regardless.
         cfg["enabled"] = False
         self.saved["direct_link"] = cfg
         self._save()
         self._set_direct_checkbox(False)
+        adapter_id = cfg.get("id") or cfg.get("adapter", "")
+        if adapter_id and directlink.unix_interface_has_ipv4(
+                adapter_id, cfg.get("server_ip", "")):
+            self._set_direct_status(
+                "The helper stopped without cleaning up: '{}' may still hold "
+                "the temporary address {} until you reboot or remove it "
+                "manually (see the TERMINAL tab).".format(
+                    cfg.get("adapter") or adapter_id, cfg.get("server_ip")))
+            self._append_log(
+                "directlink",
+                "[launcher] note: '{}' may still hold the temporary address "
+                "{}; a reboot clears it, or remove it manually.\n".format(
+                    adapter_id, cfg.get("server_ip")))
 
     @staticmethod
     def _parse_rehome(lines):

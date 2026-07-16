@@ -301,6 +301,54 @@ class MacosEnumFailClosedTests(unittest.TestCase):
         self.assertEqual([a["id"] for a in candidates], ["en5"])
 
 
+class UnixAddressCheckTests(unittest.TestCase):
+    """The read-only recheck that confirms the responder's additive address was
+    actually removed (a forced kill can bypass its cleanup)."""
+
+    def test_text_has_inet_is_boundary_aware(self):
+        linux = ("5: en0    inet 192.168.137.1/24 brd 192.168.137.255 "
+                 "scope global en0")
+        self.assertTrue(directlink._text_has_inet(linux, "192.168.137.1"))
+        # .1 must not match .10 / .11 on the same line.
+        self.assertFalse(directlink._text_has_inet(
+            "inet 192.168.137.10/24 scope global", "192.168.137.1"))
+        mac = ("\tinet 192.168.137.1 netmask 0xffffff00 "
+               "broadcast 192.168.137.255\n")
+        self.assertTrue(directlink._text_has_inet(mac, "192.168.137.1"))
+        self.assertFalse(directlink._text_has_inet(mac, "192.168.137.2"))
+        self.assertFalse(directlink._text_has_inet("", "192.168.137.1"))
+
+    def test_linux_interface_has_ipv4(self):
+        out = "5: en0    inet 192.168.137.1/24 scope global en0"
+        with mock.patch.object(directlink, "_run", return_value=_Proc(out, 0)):
+            self.assertTrue(directlink.unix_interface_has_ipv4(
+                "en0", "192.168.137.1", os_name="Linux"))
+            self.assertFalse(directlink.unix_interface_has_ipv4(
+                "en0", "192.168.137.9", os_name="Linux"))
+
+    def test_macos_interface_has_ipv4(self):
+        out = ("en5: flags=8863<UP,BROADCAST,RUNNING> mtu 1500\n"
+               "\tinet 192.168.137.1 netmask 0xffffff00 "
+               "broadcast 192.168.137.255\n\tstatus: active\n")
+        with mock.patch.object(directlink, "_run", return_value=_Proc(out, 0)):
+            self.assertTrue(directlink.unix_interface_has_ipv4(
+                "en5", "192.168.137.1", os_name="Darwin"))
+
+    def test_unreadable_interface_under_warns(self):
+        # A nonzero result or a missing tool must return False (do not cry wolf).
+        with mock.patch.object(directlink, "_run", return_value=_Proc("", 1)):
+            self.assertFalse(directlink.unix_interface_has_ipv4(
+                "en0", "192.168.137.1", os_name="Linux"))
+        with mock.patch.object(directlink, "_run",
+                               side_effect=FileNotFoundError()):
+            self.assertFalse(directlink.unix_interface_has_ipv4(
+                "en0", "192.168.137.1", os_name="Linux"))
+
+    def test_unknown_os_is_false(self):
+        self.assertFalse(directlink.unix_interface_has_ipv4(
+            "eth0", "192.168.137.1", os_name="Windows"))
+
+
 @unittest.skipUnless(hasattr(os, "getpgid"),
                      "POSIX-only: os.kill(pid, 0) is a liveness check there; on "
                      "Windows signal 0 is CTRL_C_EVENT, and _pid_alive is Unix-only")

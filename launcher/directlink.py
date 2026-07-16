@@ -719,6 +719,52 @@ def restore_local_ip(adapter_id, server_ip, prefixlen, log=print):
                 server_ip, adapter_id, e))
 
 
+def _text_has_inet(text, ip):
+    """Whether an `inet <ip>` (as its own field) appears in ip/ifconfig output.
+
+    Boundary-aware so 192.168.137.1 does not match 192.168.137.10: the address
+    must be followed by '/', whitespace, or end-of-line.
+    """
+    try:
+        ip = _canonical_ipv4(ip)
+    except WindowsSetupError:
+        return False
+    for line in (text or "").splitlines():
+        idx = line.find("inet ")
+        while idx != -1:
+            rest = line[idx + 5:].lstrip()
+            if rest == ip or rest.startswith(ip + "/") or rest[:len(ip) + 1] == ip + " ":
+                return True
+            idx = line.find("inet ", idx + 5)
+    return False
+
+
+def unix_interface_has_ipv4(adapter_id, ip, os_name=None):
+    """Whether `adapter_id` still carries `ip` (read-only; needs no root).
+
+    Used after the responder exits to confirm its additive address was actually
+    removed. A clean stop removes it in the responder's finally, but a forced
+    kill (SIGKILL) can bypass that and leave it for the rest of the session.
+    Returns False when the interface cannot be read (os_name is injectable so
+    the command shapes are unit-testable off-platform), so an unreadable state
+    under-warns rather than crying wolf.
+    """
+    os_name = os_name or platform.system()
+    if os_name == "Linux":
+        argv = ["ip", "-o", "-4", "addr", "show", "dev", adapter_id]
+    elif os_name == "Darwin":
+        argv = ["ifconfig", adapter_id]
+    else:
+        return False
+    try:
+        res = _run(argv, timeout=4)
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+    if res.returncode != 0:
+        return False
+    return _text_has_inet(res.stdout, ip)
+
+
 # --------------------------------------------------------------------------- #
 # Coexisting with a device already on the wire (a PS2 with a leftover static IP)
 # --------------------------------------------------------------------------- #

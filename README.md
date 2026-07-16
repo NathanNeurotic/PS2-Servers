@@ -205,8 +205,10 @@ setup and DHCP both need root there, so ticking the box runs the helper as
 administrator (via `pkexec` on Linux, the standard admin prompt on macOS). It adds
 the address to the chosen port for the session and normally removes it again when
 the helper stops (on unticking the box, a crash, or the launcher exiting). Because
-the address is only *added*, it is not persistent — a reboot clears it — so even a
-forced kill that skips the cleanup leaves nothing behind after a restart. If
+the address is only *added*, it is not persistent — a reboot always clears it. If
+the helper is force-killed in a way that skips its cleanup, the launcher checks
+the port afterwards and, if the temporary address is still there, tells you so
+rather than reporting a clean stop; a reboot or a manual removal clears it. If
 anything looks off, untick the box and send the TERMINAL output.
 
 ## Run a server on its own (terminal)
