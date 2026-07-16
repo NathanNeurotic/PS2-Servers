@@ -986,12 +986,18 @@ class LauncherApp:
                 self._append_log("directlink", "[launcher] DHCP helper stopped\n")
             self._direct_proc = None
 
-    def _rollback_failed_direct_responder(self, cfg):
+    def _rollback_failed_direct_responder(self, cfg) -> None:
         cfg["enabled"] = False
         self.saved["direct_link"] = cfg
         self.saved["pending_direct_link_restore"] = True
-        self._save()
-        self._direct_link_restore_async(cfg, clear_saved=True)
+        persisted = self._save()
+        if not persisted:
+            self._append_log(
+                "directlink",
+                "[launcher] WARNING: could not save the pending DHCP "
+                "recovery; waiting for this restore attempt before exit\n")
+        self._direct_link_restore_async(
+            cfg, clear_saved=True, daemon=bool(persisted))
 
     def _direct_link_begin_disable(self):
         cfg = self.saved.get("direct_link") or {}
@@ -1052,7 +1058,7 @@ class LauncherApp:
         self._save()
         self._direct_link_restore_async(cfg)
 
-    def _direct_link_restore_async(self, cfg, clear_saved=False):
+    def _direct_link_restore_async(self, cfg, clear_saved=False, daemon=True):
         self._set_direct_checkbox(False, busy=True)
         self._set_direct_status(
             "Returning '{}' to automatic (DHCP)…".format(cfg.get("adapter")))
@@ -1610,7 +1616,10 @@ class LauncherApp:
                 return
             self.root.after(0, lambda: self._finish_cleanup_success(result))
 
-        threading.Thread(target=worker, daemon=True).start()
+        # A non-daemon worker is used when the crash-recovery marker could not
+        # be saved.  That keeps process shutdown from abandoning the only DHCP
+        # restore attempt that can prevent a stranded static adapter.
+        threading.Thread(target=worker, daemon=daemon).start()
 
     def _finish_direct_cleanup(self, output):
         self._append_log("directlink", "[setup] {}\n".format(
@@ -1749,7 +1758,7 @@ class LauncherApp:
 
     def _save(self, pending_start=None, pending_cleanup=False,
               pending_firewall_allow=False, pending_direct_link=False,
-              pending_direct_link_off=False):
+              pending_direct_link_off=False) -> bool:
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get(),
                 "firewall_ok": sorted(getattr(self, "_firewall_ok", ())),
@@ -1779,7 +1788,8 @@ class LauncherApp:
         try:
             config.save(data)
         except OSError:
-            pass
+            return False
+        return True
 
     def on_close(self):
         self.exit_app(confirm=False)

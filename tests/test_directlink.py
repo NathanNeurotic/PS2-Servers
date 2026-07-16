@@ -421,7 +421,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertFalse(app.saved["direct_link"]["enabled"])
         app._save.assert_called_once_with()
         app._direct_link_restore_async.assert_called_once_with(
-            app.saved["direct_link"], clear_saved=True)
+            app.saved["direct_link"], clear_saved=True, daemon=True)
         app.ip_var.set.assert_not_called()
 
     def test_firewall_failure_restores_configured_adapter(self):
@@ -496,7 +496,17 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertFalse(cfg["enabled"])
         app._save.assert_called_once_with()
         app._direct_link_restore_async.assert_called_once_with(
-            cfg, clear_saved=True)
+            cfg, clear_saved=True, daemon=True)
+
+    def test_failed_recovery_save_uses_non_daemon_restore(self):
+        app = self.app()
+        app._save.return_value = False
+        app._direct_link_restore_async = mock.Mock()
+        cfg = app.saved["direct_link"]
+        LauncherApp._rollback_failed_direct_responder(app, cfg)
+        app._direct_link_restore_async.assert_called_once_with(
+            cfg, clear_saved=True, daemon=False)
+        self.assertIn("could not save", app._append_log.call_args.args[1])
 
     def test_pending_recovery_resumes_after_restart(self):
         app = self.app()
