@@ -125,7 +125,7 @@ that tells them apart, and it does so by guessing.
 Default **3600s (1 hour)**, matching udpfsd, bounded 60–86400. Lower it only to
 clear stale consoles faster (handy with several PS2s sharing one address). Too low
 and a long pause loses its game: `0` does **not** disable it and never did, so it
-clamps up like any other out-of-range value.
+clamps up to the 60s minimum like any other out-of-range value.
 
 CLI: `--peer-timeout SECONDS` (env `PEER_TIMEOUT`).
 
@@ -138,7 +138,7 @@ port** in that case and a matching firewall rule is added for it.
 
 `--single-port` serves discovery and data on the one port instead, for clients or
 networks that cannot handle the two-port handshake. Unlike Modulo mode it changes
-no protocol behaviour, so normal clients keep working.
+no protocol behavior, so normal clients keep working.
 
 CLI: `--port`, `--data-port`, `--single-port`.
 
