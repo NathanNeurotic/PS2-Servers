@@ -480,10 +480,43 @@ class LauncherLifecycleTests(unittest.TestCase):
 
     def test_start_failure_restore_clears_recovery_state(self):
         app = self.app()
+        app.saved["pending_direct_link_restore"] = True
         LauncherApp._direct_link_restored(
             app, "RESTORED=automatic (DHCP)", clear_saved=True)
         self.assertNotIn("direct_link", app.saved)
+        self.assertNotIn("pending_direct_link_restore", app.saved)
         app._save.assert_called_once_with()
+
+    def test_failed_helper_persists_recovery_before_worker(self):
+        app = self.app()
+        app._direct_link_restore_async = mock.Mock()
+        cfg = app.saved["direct_link"]
+        LauncherApp._rollback_failed_direct_responder(app, cfg)
+        self.assertTrue(app.saved["pending_direct_link_restore"])
+        self.assertFalse(cfg["enabled"])
+        app._save.assert_called_once_with()
+        app._direct_link_restore_async.assert_called_once_with(
+            cfg, clear_saved=True)
+
+    def test_pending_recovery_resumes_after_restart(self):
+        app = self.app()
+        app.saved["pending_direct_link_restore"] = True
+        app.nb = mock.Mock()
+        app.terminal_tab = object()
+        app._direct_link_restore_async = mock.Mock()
+        with mock.patch("launcher.gui.elevate.is_admin", return_value=True):
+            LauncherApp._direct_link_recovery_pending(app)
+        app._direct_link_restore_async.assert_called_once_with(
+            app.saved["direct_link"], clear_saved=True)
+        self.assertTrue(app.saved["pending_direct_link_restore"])
+
+    def test_startup_preflight_failure_enters_recovery(self):
+        app = self.app()
+        app.saved["direct_link"]["enabled"] = True
+        app._rollback_failed_direct_responder = mock.Mock()
+        LauncherApp._direct_link_startup_done(app, "adapter reaches a router")
+        app._rollback_failed_direct_responder.assert_called_once_with(
+            app.saved["direct_link"])
 
 
 if __name__ == "__main__":

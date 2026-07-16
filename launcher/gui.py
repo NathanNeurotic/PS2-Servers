@@ -408,6 +408,8 @@ class LauncherApp:
             self.root.after(350, self._direct_link_pending)
         elif self.saved.get("pending_direct_link_off"):
             self.root.after(350, self._direct_link_off_pending)
+        elif self.saved.get("pending_direct_link_restore"):
+            self.root.after(350, self._direct_link_recovery_pending)
         elif self.saved.get("pending_start"):
             self.root.after(350, self._start_pending)
         elif (self.saved.get("direct_link") or {}).get("enabled"):
@@ -987,6 +989,7 @@ class LauncherApp:
     def _rollback_failed_direct_responder(self, cfg):
         cfg["enabled"] = False
         self.saved["direct_link"] = cfg
+        self.saved["pending_direct_link_restore"] = True
         self._save()
         self._direct_link_restore_async(cfg, clear_saved=True)
 
@@ -1072,8 +1075,11 @@ class LauncherApp:
         if output:
             self._append_log("directlink", "[setup] {}\n".format(
                 output.replace("\n", "\n[setup] ")))
+        recovery_was_pending = bool(
+            self.saved.pop("pending_direct_link_restore", None))
         if clear_saved:
             self.saved.pop("direct_link", None)
+        if clear_saved or recovery_was_pending:
             self._save()
         self._set_direct_checkbox(False)
         self._set_direct_status(self._DIRECT_STATUS_OFF)
@@ -1113,6 +1119,31 @@ class LauncherApp:
         if not cfg.get("if_index"):
             return
         self._direct_link_restore_async(cfg)
+
+    def _direct_link_recovery_pending(self):
+        """Resume a DHCP restore that may have been interrupted by exit/crash."""
+        cfg = self.saved.get("direct_link") or {}
+        if not cfg.get("server_ip"):
+            self.saved.pop("pending_direct_link_restore", None)
+            self._save()
+            return
+        self.nb.select(self.terminal_tab)
+        self._append_log(
+            "directlink",
+            "[launcher] resuming interrupted direct-link recovery\n")
+        if not elevate.is_admin():
+            if elevate.can_elevate() and elevate.relaunch_as_admin():
+                self.stop_all()
+                if self._tray:
+                    self._tray.stop()
+                self.root.destroy()
+            else:
+                self._set_direct_checkbox(False)
+                self._set_direct_status(
+                    "Direct-link recovery still needs administrator rights. "
+                    "Restart PS2 Servers or use firewall cleanup to retry.")
+            return
+        self._direct_link_restore_async(cfg, clear_saved=True)
 
     def _direct_link_startup(self):
         """Re-arm an already-configured direct link on launch.
@@ -1154,15 +1185,9 @@ class LauncherApp:
     def _direct_link_startup_done(self, problem):
         cfg = self.saved.get("direct_link") or {}
         if problem:
-            cfg["enabled"] = False
-            self.saved["direct_link"] = cfg
-            self._save()
             self._append_log("directlink",
                              "[launcher] direct link not re-armed: {}\n".format(problem))
-            self._set_direct_checkbox(False)
-            self._set_direct_status(
-                "Direct link is off: {}. Tick the box to set it up again."
-                .format(problem))
+            self._rollback_failed_direct_responder(cfg)
             return
         if not self._start_direct_responder():
             self._rollback_failed_direct_responder(cfg)
@@ -1591,6 +1616,7 @@ class LauncherApp:
         self._append_log("directlink", "[setup] {}\n".format(
             output.replace("\n", "\n[setup] ")))
         self.saved.pop("direct_link", None)
+        self.saved.pop("pending_direct_link_restore", None)
         self._save()
         self._set_direct_checkbox(False)
         self._set_direct_status(self._DIRECT_STATUS_OFF)
@@ -1738,6 +1764,8 @@ class LauncherApp:
                 "minimize_to_tray": bool(self.minimize_to_tray_var.get())}
         if self.saved.get("direct_link"):
             data["direct_link"] = self.saved["direct_link"]
+        if self.saved.get("pending_direct_link_restore"):
+            data["pending_direct_link_restore"] = True
         if pending_start:
             data["pending_start"] = pending_start
         if pending_cleanup:
