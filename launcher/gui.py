@@ -364,6 +364,7 @@ class LauncherApp:
         self._build()
         self._refresh_scroll_body()
         self._restore()
+        self._ip_trace_ready = True   # edits after this are the user's, not ours
 
         # On Windows, run from the system tray: closing or minimizing hides the
         # window (servers keep running) and the tray menu restores or quits.
@@ -511,9 +512,16 @@ class LauncherApp:
         self.ip_combo = ttk.Combobox(header, textvariable=self.ip_var, width=18,
                                      values=netinfo.all_ipv4(), state="normal")
         self.ip_combo.grid(row=0, column=1, sticky="w", padx=(10, 6))
+        # A typed address applies as you type: the OPL hint on any running card
+        # follows it, and it persists without waiting for something else to save.
+        # Without this, typing gave no feedback at all until the next start/stop,
+        # which read as "it did not take".
+        self.ip_var.trace_add("write", self._on_ip_edited)
         ttk.Button(header, text="Refresh", command=self._refresh_ips).grid(
             row=0, column=2, sticky="w")
-        ttk.Label(header, text="Enter this in OPL where it asks for the PC/server IP.",
+        ttk.Label(header, text="Enter this in OPL where it asks for the PC/server IP. "
+                  "Pick from the list, or type your own if the right address "
+                  "isn't shown -- it saves as you type.",
                   style="TopStripHint.TLabel", wraplength=420).grid(
             row=0, column=3, sticky="w", padx=(12, 0))
 
@@ -642,6 +650,26 @@ class LauncherApp:
     # -- IP --------------------------------------------------------------- #
     def current_ip(self):
         return self.ip_var.get()
+
+    def _on_ip_edited(self, *_args):
+        # The trace is live before _restore() runs, so restoring the saved IP at
+        # startup would schedule a pointless save of what was just loaded. An
+        # explicit flag, not a probe of some unrelated attribute that happens to
+        # be born at the right time.
+        if not getattr(self, "_ip_trace_ready", False):
+            return
+        # Debounced: fires per keystroke, and half-typed addresses are not worth
+        # saving or showing. 700ms after the last edit is "done typing".
+        if getattr(self, "_ip_edit_job", None):
+            self.root.after_cancel(self._ip_edit_job)
+        self._ip_edit_job = self.root.after(700, self._commit_ip_edit)
+
+    def _commit_ip_edit(self):
+        self._ip_edit_job = None
+        for key, card in self.cards.items():
+            if self.is_running(key):
+                card.refresh_status(running=True)
+        self._save()
 
     def _refresh_ips(self):
         self.ip_combo.config(values=netinfo.all_ipv4())
