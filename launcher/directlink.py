@@ -12,6 +12,19 @@ The one real hazard is answering DHCP on a network that already has a DHCP
 server (a "rogue DHCP server" can hand garbage leases to every device on a
 LAN). Containment is layered:
 
+  * Active foreign-server detection. Before answering anything, and again
+    periodically, the responder itself acts as a DHCP client on the chosen
+    port: it broadcasts a DISCOVER and listens for any reply. Our own
+    responder never answers the probe (it is single-threaded and ignores its
+    own probe MAC), so ANY reply -- even one claiming our own address, as a
+    neighboring Windows ICS host would, since ICS hosts are 192.168.137.1 --
+    means the port is on a real network, and the responder refuses/stops. On
+    a true direct link nothing answers (a PS2 is a client, not a server) and
+    it proceeds. This is the only guard that observes what the wire is
+    actually connected to -- the adapter-config refusals below are blind to
+    that, because our own setup leaves the port with a static address, no
+    gateway, and no lease, which is indistinguishable from a genuine direct
+    link.
   * The responder binds to the chosen adapter's own address. Windows delivers
     broadcasts to specifically-bound sockets (verified empirically), so the
     socket cannot even hear DHCP traffic arriving on other interfaces. A
@@ -26,6 +39,10 @@ LAN). Containment is layered:
   * A tripwire while running: a direct link has exactly one device, so seeing
     a second distinct client MAC means this is not a direct link; the
     responder stops rather than keep answering.
+  * Never NAK by broadcast. A single-lease responder is authoritative for one
+    address only, so a request for any other address is answered with silence,
+    never a DHCPNAK -- a broadcast NAK would kick a real network's clients off
+    valid leases, and we have no business telling anyone their address is wrong.
   * One lease, one address, and rate-limited replies.
 
 Windows ICS does this job too but is flaky across updates, drags internet
@@ -35,6 +52,7 @@ sharing along, and is not ours to debug; this is ~150 lines we can fix.
 import errno
 import ipaddress
 import json
+import os
 import socket
 import struct
 import time
@@ -477,6 +495,167 @@ def _mac_text(mac):
     return ":".join("{:02x}".format(b) for b in mac)
 
 
+def _synthetic_probe_mac():
+    """A locally-administered unicast MAC for our own DHCP-client probes.
+
+    Locally-administered (bit 0x02 of the first octet) and unicast (0x01
+    clear) so it can never collide with a real Sony NIC's globally-unique
+    address; random tail so two launchers probing at once do not look like one
+    device to each other.
+    """
+    tail = os.urandom(5)
+    return bytes([0x02]) + tail
+
+
+# --------------------------------------------------------------------------- #
+# Active foreign-DHCP-server detection
+# --------------------------------------------------------------------------- #
+def probe_for_foreign_dhcp_server(server_ip, probe_mac, timeout=4.0, log=None,
+                                  wildcard_rx=False):
+    """Return a foreign DHCP server's identity if one answers, else None.
+
+    Acts as an ordinary DHCP client on the chosen adapter: binds the client
+    port, broadcasts a DISCOVER, and watches for ANY reply to it. Our own
+    responder provably never answers the probe -- it is single-threaded (the
+    probe runs before serving or while the serve loop is blocked in it) and
+    handle_packet drops the probe MAC -- and a PS2 is a DHCP *client* that
+    never answers a DISCOVER either. So on a genuine direct link nothing
+    replies and this returns None, and any reply at all means a real network.
+    That includes a reply claiming our own address: a neighboring Windows ICS
+    host IS 192.168.137.1, the very address we prefer, so a same-IP reply is
+    evidence of a foreign server, never of ourselves.
+
+    wildcard_rx mirrors the responder's own receive mode: on the (rare)
+    machines where a specifically-bound socket does not receive broadcasts,
+    the probe's receive socket must not be specifically bound either, or the
+    very OFFER that should stop us would be missed. The transmit side stays
+    bound to the adapter's address in both modes so the probe only ever
+    egresses the chosen port; the xid filter keeps replies to other
+    interfaces' DHCP traffic from counting.
+
+    Returns:
+      * a server-id string  -> a foreign DHCP server is present (REFUSE)
+      * None                -> nobody answered within `timeout` (proceed)
+      * "" (empty string)   -> could not run the probe (port 68 unavailable);
+                               caller decides, but this is fail-open by default
+                               since the other containment layers still apply.
+
+    Bounded and side-effect-light: it only ever DISCOVERs, never REQUESTs, so
+    no lease is consumed on whatever network this turns out to be -- exactly
+    what any booting client does.
+    """
+    log = log or (lambda _m: None)
+    rx_addr = "0.0.0.0" if wildcard_rx else server_ip
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    rx.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    try:
+        rx.bind((rx_addr, DHCP_CLIENT_PORT))
+    except OSError as e:
+        rx.close()
+        log("could not open the DHCP-client port to check for another DHCP "
+            "server ({}); relying on the other safety checks".format(e))
+        return ""
+    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    tx.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    try:
+        tx.bind((server_ip, 0))
+    except OSError as e:
+        rx.close()
+        tx.close()
+        log("could not send a DHCP probe ({}); relying on the other safety "
+            "checks".format(e))
+        return ""
+
+    xid = struct.unpack("!I", os.urandom(4))[0]
+    discover = _build_discover(xid, probe_mac)
+    rx.settimeout(0.5)
+    deadline = time.monotonic() + timeout
+    next_send = 0.0
+    try:
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_send:
+                try:
+                    tx.sendto(discover, ("255.255.255.255", DHCP_SERVER_PORT))
+                except OSError:
+                    pass
+                next_send = now + 1.0
+            try:
+                data, _src = rx.recvfrom(2048)
+            except socket.timeout:
+                continue
+            except OSError:
+                # Windows ICMP-port-unreachable feedback; keep listening.
+                continue
+            server_id = _foreign_offer_server_id(data, xid)
+            if server_id is not None:
+                return server_id
+    finally:
+        rx.close()
+        tx.close()
+    return None
+
+
+def _build_discover(xid, mac):
+    """A minimal BOOTREQUEST/DHCPDISCOVER with the broadcast flag set.
+
+    The broadcast flag asks the server to broadcast its reply, so we hear the
+    OFFER on a socket that has no address the server would unicast to.
+    """
+    chaddr = mac + b"\x00" * (16 - len(mac))
+    header = _BOOTP.pack(1, 1, len(mac), 0, xid, 0, 0x8000,
+                         0, 0, 0, 0, chaddr, b"", b"")
+    options = bytes([53, 1, MSG_DISCOVER, 55, 1, 1]) + b"\xff"
+    return header + MAGIC_COOKIE + options
+
+
+def _foreign_offer_server_id(data, xid):
+    """Server-id of a DHCP reply to our probe, or None.
+
+    None means "not evidence of a foreign server": junk, not a reply, or a
+    reply to a different transaction. There is deliberately NO same-address
+    exclusion: our own responder never answers the probe (single-threaded,
+    and handle_packet drops the probe MAC), so a reply bearing our own
+    address is a foreign machine using it -- a neighboring Windows ICS host
+    is literally 192.168.137.1 -- and must refuse like any other.
+    """
+    pkt = parse_packet(data)
+    # parse_packet only accepts BOOTREQUEST (op==1); a server's reply is a
+    # BOOTREPLY, so parse the pieces we need directly.
+    if pkt is not None:
+        return None
+    if len(data) < 240 or data[236:240] != MAGIC_COOKIE:
+        return None
+    if data[0] != 2:  # not a BOOTREPLY
+        return None
+    if struct.unpack("!I", data[4:8])[0] != xid:
+        return None
+    options, i = {}, 240
+    while i < len(data):
+        tag = data[i]
+        if tag == 0:
+            i += 1
+            continue
+        if tag == 255 or i + 1 >= len(data):
+            break
+        length = data[i + 1]
+        options[tag] = data[i + 2:i + 2 + length]
+        i += 2 + length
+    mtype = options.get(53)
+    if not mtype or mtype[0] not in (MSG_OFFER, MSG_ACK, MSG_NAK):
+        return None
+    sid = options.get(54)
+    if sid and len(sid) == 4:
+        return socket.inet_ntoa(sid)
+    # A reply with no server-id but our xid still means *something* is
+    # answering DHCP out there; name it by the sender's siaddr if present.
+    siaddr = struct.unpack("!I", data[20:24])[0]
+    if siaddr:
+        return _int_to_ip(siaddr)
+    return "unknown DHCP server"
+
+
 # --------------------------------------------------------------------------- #
 # The responder
 # --------------------------------------------------------------------------- #
@@ -489,14 +668,23 @@ class DhcpResponder:
     REPLY_BURST = 8          # token bucket: at most this many queued replies
     REPLY_RATE = 4.0         # ...refilled at this many per second
     IP_RECHECK_SECONDS = 30  # confirm our address still exists this often
+    # Re-run the active foreign-server probe this often while serving, so a
+    # cable moved from the PS2 onto a real LAN mid-session is caught without
+    # waiting for a relaunch. Long enough that the stray DISCOVER is rare.
+    REPROBE_SECONDS = 300
+    REPROBE_TIMEOUT = 2.0
 
     def __init__(self, server_ip, client_ip, prefixlen=PREFIX_LENGTH,
-                 adapter_name="", log=print):
+                 adapter_name="", log=print, probe_mac=None):
         self.server_ip = server_ip
         self.client_ip = client_ip
         self.prefixlen = prefixlen
         self.adapter_name = adapter_name
         self.log = log
+        # Our own DHCP-client probe MAC. handle_packet ignores it, so the
+        # periodic re-probe (which our own responder hears on port 67) never
+        # trips the single-MAC tripwire or draws an offer from us.
+        self.probe_mac = probe_mac or _synthetic_probe_mac()
         self.sock = None
         self.mode = None  # 'specific' | 'wildcard'
         self.macs_seen = set()
@@ -505,6 +693,23 @@ class DhcpResponder:
         self._token_stamp = time.monotonic()
         self._server_ip_bytes = struct.pack("!I", _ip_to_int(server_ip))
         self._client_ip_bytes = struct.pack("!I", _ip_to_int(client_ip))
+
+    def check_for_foreign_dhcp_server(self, timeout=None):
+        """Probe once; raise DirectLinkRefused if a real DHCP server answers.
+
+        The probe's receive socket mirrors our own receive mode: a machine
+        that forced open_socket into wildcard mode would not deliver the
+        broadcast OFFER to a specifically-bound probe socket either.
+        """
+        server_id = probe_for_foreign_dhcp_server(
+            self.server_ip, self.probe_mac,
+            timeout=self.REPROBE_TIMEOUT if timeout is None else timeout,
+            log=self.log, wildcard_rx=self.mode == "wildcard")
+        if server_id:
+            raise DirectLinkRefused(
+                "another DHCP server ({}) is answering on this port -- it is a "
+                "real network, not a direct PS2 link. Stopping so a real "
+                "network is never disrupted.".format(server_id))
 
     # -- sockets ----------------------------------------------------------- #
     def open_socket(self):
@@ -635,6 +840,10 @@ class DhcpResponder:
         if mtype not in (MSG_DISCOVER, MSG_REQUEST, MSG_DECLINE, MSG_RELEASE,
                          MSG_INFORM):
             return None  # server-to-server chatter or junk
+        if pkt["mac"] == self.probe_mac:
+            # Our own foreign-server probe, heard back on port 67. Never track
+            # it (it would trip the single-MAC tripwire) and never answer it.
+            return None
         self._track_mac(pkt["mac"])
         mac = _mac_text(pkt["mac"])
 
@@ -678,17 +887,22 @@ class DhcpResponder:
             return (build_reply(pkt, MSG_ACK, self.server_ip, self.client_ip,
                                 self.prefixlen),
                     self._reply_dest(pkt, src))
+        # A request for any other address gets SILENCE, never a DHCPNAK. We are
+        # authoritative for exactly one address, so we have no standing to tell
+        # anyone theirs is wrong -- and a broadcast NAK on a wire that turned
+        # out to be a real network would kick its clients off valid leases
+        # (an INIT-REBOOT/REBINDING request carries no server-id, so it cannot
+        # be filtered out the way a foreign SELECTING request is). A real PS2
+        # simply times out and re-DISCOVERs, and we OFFER it our address.
         want = (socket.inet_ntoa(requested) if requested and len(requested) == 4
                 else "?")
-        self.log("client {} asked for {}; sending NAK so it re-discovers"
-                 .format(mac, want))
-        return (build_reply(pkt, MSG_NAK, self.server_ip, self.client_ip,
-                            self.prefixlen),
-                self._reply_dest(pkt, src, nak=True))
+        self.log("client {} asked for {} (not ours); staying silent so it "
+                 "re-discovers".format(mac, want))
+        return None
 
-    def _reply_dest(self, pkt, src, nak=False):
+    def _reply_dest(self, pkt, src):
         # A renewing client already has an address and expects unicast.
-        if not nak and pkt["ciaddr"] and src and src[0] not in ("0.0.0.0", ""):
+        if pkt["ciaddr"] and src and src[0] not in ("0.0.0.0", ""):
             return (src[0], DHCP_CLIENT_PORT)
         if self.mode == "wildcard":
             # Containment: a subnet-directed broadcast routes out the chosen
@@ -703,6 +917,7 @@ class DhcpResponder:
     def serve_forever(self):
         self.sock.settimeout(1.0)
         last_check = time.monotonic()
+        last_probe = time.monotonic()  # a full probe already ran before serving
         self.log("waiting for the PS2 to ask for an address "
                  "(it will get {})".format(self.client_ip))
         while True:
@@ -713,6 +928,13 @@ class DhcpResponder:
                     raise DirectLinkRefused(
                         "{} is no longer configured on this PC; "
                         "stopping".format(self.server_ip))
+            if now - last_probe > self.REPROBE_SECONDS:
+                last_probe = now
+                # Catches a cable moved from the PS2 onto a real LAN while we
+                # were already running. Blocks the loop for a couple of seconds,
+                # which is harmless: a console that already has its lease is not
+                # talking to port 67. Raises DirectLinkRefused on a real server.
+                self.check_for_foreign_dhcp_server()
             try:
                 data, src = self.sock.recvfrom(2048)
             except socket.timeout:
@@ -787,7 +1009,12 @@ def run_responder(argv):
         _startup_adapter_check(args.adapter, args.if_index, server_ip)
         responder = DhcpResponder(server_ip, client_ip, prefixlen,
                                   adapter_name=args.adapter, log=log)
-        responder.open_socket()
+        responder.open_socket()  # waits for the link, then binds the port
+        # Authoritative safety gate: with the link now up, act as a DHCP client
+        # and see whether a real DHCP server answers. On a genuine direct link
+        # nothing does; on a real network this refuses before we answer anyone.
+        log("checking for another DHCP server on this port…")
+        responder.check_for_foreign_dhcp_server(timeout=4.0)
         responder.serve_forever()
     except DirectLinkRefused as e:
         log("REFUSED: {}".format(e))

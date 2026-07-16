@@ -18,7 +18,10 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import config, directlink, elevate, netinfo, tray, windows_setup
 from .process import ServerProcess
+from .release_metadata import PRODUCT_VERSION
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
+
+APP_VERSION_LABEL = "v" + PRODUCT_VERSION
 
 DOT_RUNNING = "●"  # filled circle
 # Tab-header state. Filled = up, hollow = down, on the tab you can see without
@@ -368,7 +371,7 @@ class LauncherApp:
         self.minimize_to_tray_var = tk.BooleanVar(
             value=self._saved_bool("minimize_to_tray", tray.AVAILABLE))
 
-        root.title("PS2 Servers")
+        root.title("PS2 Servers " + APP_VERSION_LABEL)
         self._configure_window()
         self.content = self._build_scroll_body()
         self._build()
@@ -523,6 +526,11 @@ class LauncherApp:
         header.columnconfigure(3, weight=1)
         ttk.Label(header, text="LAN IP", font=("", 10, "bold"),
                   style="TopStripTitle.TLabel").grid(row=0, column=0, sticky="w")
+        # Always-visible version, so a tester can read it off the screen without
+        # opening About. Right-aligned in the header's stretchy column.
+        ttk.Label(header, text="PS2 Servers " + APP_VERSION_LABEL,
+                  style="TopStripHint.TLabel").grid(row=0, column=4, sticky="e",
+                                                    padx=(12, 0))
         self.ip_var = tk.StringVar(value=netinfo.best_lan_ip())
         # Editable, not readonly: detection leans on getaddrinfo(gethostname()),
         # which misses or mis-ranks addresses on hosts with VPN/Hyper-V/WSL/Docker
@@ -638,8 +646,19 @@ class LauncherApp:
             brand.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
             tk.Label(brand, image=logo, bd=0, highlightthickness=0,
                      background=self.root.cget("background")).pack(side="left")
-            ttk.Label(brand, text="PS2 Servers", font=("", 14, "bold")).pack(
-                side="left", padx=(10, 0))
+            title_box = ttk.Frame(brand)
+            title_box.pack(side="left", padx=(10, 0))
+            ttk.Label(title_box, text="PS2 Servers", font=("", 14, "bold")).pack(
+                anchor="w")
+            ttk.Label(title_box, text=APP_VERSION_LABEL,
+                      style="Muted.TLabel").pack(anchor="w")
+            row += 1
+        else:
+            # No logo asset (e.g. source runs without theme assets): still show
+            # the version so it is never hidden behind an optional image.
+            ttk.Label(about, text="PS2 Servers " + APP_VERSION_LABEL,
+                      font=("", 12, "bold")).grid(row=row, column=0, sticky="w",
+                                                  padx=8, pady=(8, 0))
             row += 1
 
         links = ttk.LabelFrame(about, text=" Links ")
