@@ -18,10 +18,10 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import config, directlink, elevate, netinfo, tray, windows_setup
 from .process import ServerProcess
-from .release_metadata import PRODUCT_VERSION
+from .release_metadata import DISPLAY_VERSION
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
 
-APP_VERSION_LABEL = "v" + PRODUCT_VERSION
+APP_VERSION_LABEL = "v" + DISPLAY_VERSION
 
 DOT_RUNNING = "●"  # filled circle
 # Tab-header state. Filled = up, hollow = down, on the tab you can see without

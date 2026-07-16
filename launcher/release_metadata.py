@@ -6,8 +6,16 @@ WINDOWS_EXE_NAME = EXECUTABLE_BASENAME + ".exe"
 WINDOWS_PACKAGE_NAME = EXECUTABLE_BASENAME + "-windows-x64.zip"
 COMPANY_NAME = "NathanNeurotic"
 PRODUCT_NAME = APP_NAME
-PRODUCT_VERSION = "0.4.1"
+# Numeric only -- both feed Nuitka's --product-version/--file-version, which
+# reject anything that is not a dotted number. A pre-release qualifier like
+# "-rc1" lives in VERSION_QUALIFIER instead and is shown to the user via
+# DISPLAY_VERSION, never handed to the build.
+PRODUCT_VERSION = "0.4.5"
 FILE_VERSION = PRODUCT_VERSION
+# "" for a normal release; "-rc1" / "-beta1" while a version is under test.
+VERSION_QUALIFIER = "-rc1"
+# What the GUI shows and what a tester should quote in a report.
+DISPLAY_VERSION = PRODUCT_VERSION + VERSION_QUALIFIER
 FILE_DESCRIPTION = "PS2 Servers launcher for Open PS2 Loader local network servers"
 COPYRIGHT = "Copyright (c) NathanNeurotic and PS2 Servers contributors"
 

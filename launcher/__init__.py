@@ -4,9 +4,11 @@ A small GUI/engine that lets any user pick and run one or more of the PS2 OPL
 network servers (SMBv1, UDPBD, UDPFS) without touching a terminal.
 """
 
-from .release_metadata import PRODUCT_VERSION
+from .release_metadata import DISPLAY_VERSION
 
-__version__ = PRODUCT_VERSION
+# The human-facing version, including any pre-release qualifier (e.g. 0.4.5-rc1).
+# The numeric build version lives in release_metadata.PRODUCT_VERSION.
+__version__ = DISPLAY_VERSION
 
 
 def _install_dependency_panel_hook():
