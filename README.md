@@ -91,6 +91,57 @@ false positives on packaged builds)? **[udpfsd](https://github.com/pcm720/udpfsd
 pcm720 is a Go alternative — a single prebuilt binary with the same CHD/CSO/ZSO
 support. See [Credits & thanks](#credits--thanks).
 
+## UDPFS settings worth knowing
+
+Defaults are right for every client we know of. These are the ones you might change.
+
+### "Check this if you are using Modulo"
+
+**Either/or — tick it only while you are actually using Modulo.**
+
+[Modulo](https://github.com/AdityaKumar7209/Modulo-R1-Beta-Preview---PS2)'s client
+does not follow the UDPFS protocol. It never restarts its sequence counter (on
+hardware it climbs straight across a full server restart), and it cannot move to
+the server's data port. That is not specific to us: it fails against
+[pcm720's udpfsd](https://github.com/pcm720/udpfsd) for the same reasons. Modulo's
+own repository ships a patched copy of a server to work around both, which is how
+we established exactly what it expects.
+
+This mode answers the way that patched server does. A correct client cannot follow
+it — its INFORM consumes a sequence number, so the server's first reply arrives one
+ahead of where a conformant client is listening. **While this is on, NHDDL, RiptOPL,
+POPSTARTER, POPSLOADER and wLaunchELF-R3Z will not connect.** Untick it and they are
+back. Nothing is lost either way; it is one at a time.
+
+CLI: `--modulo-mode` (implies `--single-port`; env `MODULO_MODE`).
+
+### Idle timeout
+
+UDPFS drops a console once it goes quiet for this long, **closing whatever files it
+had open**. UDPFS has no disconnect packet — a paused game and an unplugged console
+are identical on the wire, both simply silent — so the timeout is the only thing
+that tells them apart, and it does so by guessing.
+
+Default **3600s (1 hour)**, matching udpfsd, bounded 60–86400. Lower it only to
+clear stale consoles faster (handy with several PS2s sharing one address). Too low
+and a long pause loses its game: `0` does **not** disable it and never did, so it
+clamps up to the 60s minimum like any other out-of-range value.
+
+CLI: `--peer-timeout SECONDS` (env `PEER_TIMEOUT`).
+
+### Port and Data port
+
+Leave both alone unless something needs them predictable. UDPFS normally serves
+discovery on `0xF5F6` and hands each console off to an ephemeral data port, which a
+manual firewall rule, port forwarding or a strict NAT cannot follow — pin **Data
+port** in that case and a matching firewall rule is added for it.
+
+`--single-port` serves discovery and data on the one port instead, for clients or
+networks that cannot handle the two-port handshake. Unlike Modulo mode it changes
+no protocol behavior, so normal clients keep working.
+
+CLI: `--port`, `--data-port`, `--single-port`.
+
 ## Minimum system requirements
 
 You need two machines on the **same LAN**: the **PC** that runs PS2 Servers, and

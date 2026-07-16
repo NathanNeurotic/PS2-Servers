@@ -19,6 +19,7 @@
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#servers">Servers</a>
         <a href="#quickstart">Quick start</a>
+        <a href="#udpfs-settings">UDPFS settings</a>
         <a href="#requirements">Requirements</a>
         <a href="#download">Download</a>
         <a href="falsepositives.html">Antivirus</a>
@@ -98,6 +99,33 @@ Password          leave blank
 <b>UDPBD</b>   select UDPBD in OPL; the PS2 finds the server automatically — no IP or port.</pre>
           </div>
           <p class="section-intro ps2-note">The launcher always prints these exact values while a server is running, so you never have to guess. You'll need a PS2 that boots homebrew and runs Open PS2 Loader (or PCSX2 with a network adapter) on the same LAN.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="udpfs-settings">
+      <div class="container">
+        <h2>UDPFS settings worth knowing.</h2>
+        <p class="section-intro">The defaults are right for every client we know of — NHDDL, RiptOPL, POPSTARTER, POPSLOADER and wLaunchELF-R3Z all work out of the box. These are the ones you might change.</p>
+        <div class="cards">
+          <article class="card">
+            <h3>Using Modulo?</h3>
+            <p>There's a checkbox for it on the UDPFS tab. <strong>It's either/or</strong> — while it's on, the normal clients won't connect. Untick it and they're back.</p>
+            <p><a href="https://github.com/AdityaKumar7209/Modulo-R1-Beta-Preview---PS2">Modulo</a>'s client doesn't follow the UDPFS protocol: it never restarts its sequence counter, and it can't move to the server's data port. That isn't specific to us — it fails against <a href="https://github.com/pcm720/udpfsd">pcm720's udpfsd</a> for the same reasons. Modulo's own repo ships a patched server to work around both, so this mode answers the way that server does. A correct client can't follow it.</p>
+            <p><code>--modulo-mode</code></p>
+          </article>
+          <article class="card">
+            <h3>Idle timeout</h3>
+            <p>UDPFS drops a console once it goes quiet, closing whatever files it had open. There's no disconnect packet in the protocol — a paused game and an unplugged console look identical on the wire — so the timeout is the only thing that tells them apart.</p>
+            <p>Default <strong>1 hour</strong>, matching udpfsd, adjustable 60s–24h under Advanced. Lower it only to clear stale consoles faster; too low and a long pause loses its game.</p>
+            <p><code>--peer-timeout SECONDS</code></p>
+          </article>
+          <article class="card">
+            <h3>Ports</h3>
+            <p>Leave them alone unless something needs them predictable. Discovery is <code>0xF5F6</code>; each console is then handed to an ephemeral data port, which a manual firewall rule or a strict NAT can't follow — pin <strong>Data port</strong> in that case.</p>
+            <p>Single-port mode serves both on one port for networks that can't handle the two-port handshake. Unlike Modulo mode it changes no protocol behavior, so normal clients keep working.</p>
+            <p><code>--port · --data-port · --single-port</code></p>
+          </article>
         </div>
       </div>
     </section>
