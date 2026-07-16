@@ -374,17 +374,54 @@ class MissingIpDiagnosisTests(unittest.TestCase):
         self.assertIn("another device", str(caught.exception))
 
     def test_serve_forever_rehomes_when_a_device_shares_our_address(self):
-        # A console statically on our address removes ours (DAD); a neighbour is
-        # visible at our address -> coexist by re-homing, not refusing.
+        # A console statically on our address removes ours (DAD). Exercise the
+        # REAL neighbour contract: Get-NetNeighbor reports .1, and because our
+        # address is gone we must NOT filter it out (our_ips is empty), so the
+        # conflict is seen and we coexist by re-homing instead of refusing.
         r = responder()
+        r.if_index = 12
         r.sock = ServeTests.FakeSocket(socket.timeout())
+        neigh = mock.Mock(returncode=0, stdout='["192.168.137.1"]')
         with mock.patch.object(r, "_server_ip_still_present", return_value=False), \
                 mock.patch.object(directlink.DhcpResponder,
                                   "IP_RECHECK_SECONDS", -1), \
-                mock.patch.object(directlink, "interface_neighbors",
-                                  return_value=["192.168.137.1"]):
+                mock.patch.object(directlink, "is_windows", return_value=True), \
+                mock.patch.object(directlink, "_powershell", return_value=neigh):
             with self.assertRaises(directlink._Rehome) as caught:
                 r.serve_forever()
+        self.assertEqual(caught.exception.server_ip, "192.168.137.2")
+
+    def test_plan_rehome_now_keeps_our_address_while_present(self):
+        # While we still hold our address it is filtered from the neighbour list
+        # (it is ours, not a device), so an idle wire yields no move.
+        r = responder()
+        r.if_index = 3
+        neigh = mock.Mock(returncode=0, stdout='["192.168.137.1"]')  # only us
+        with mock.patch.object(directlink, "is_windows", return_value=True), \
+                mock.patch.object(directlink, "_powershell", return_value=neigh):
+            self.assertIsNone(r._plan_rehome_now(server_ip_present=True))
+
+    def test_open_socket_rehomes_on_startup_conflict(self):
+        # A console already holding our address at launch makes bind() fail with
+        # EADDRNOTAVAIL forever; once a device is seen, coexist via re-home.
+        import errno
+        r = responder()
+        r.if_index = 7
+
+        def fail_bind(*_a, **_k):
+            err = OSError("address not available")
+            err.errno = errno.EADDRNOTAVAIL
+            raise err
+
+        fake = mock.Mock()
+        fake.bind.side_effect = fail_bind
+        with mock.patch.object(directlink.socket, "socket", return_value=fake), \
+                mock.patch.object(directlink.time, "sleep"), \
+                mock.patch.object(
+                    r, "_plan_rehome_now",
+                    return_value=("192.168.137.2", "192.168.137.10", 24)):
+            with self.assertRaises(directlink._Rehome) as caught:
+                r.open_socket()
         self.assertEqual(caught.exception.server_ip, "192.168.137.2")
 
 

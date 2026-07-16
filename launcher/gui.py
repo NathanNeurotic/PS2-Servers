@@ -103,7 +103,7 @@ Direct PS2-to-PC link
 
 A PS2 cabled straight into the PC has no router on the wire, so nothing hands the console an IP address and every network app fails the same way. Ticking "PS2 is plugged directly into this PC" fixes that: PS2 Servers gives the chosen network port a fixed address (one administrator prompt), allows DHCP through the firewall, and runs a small DHCP helper that answers only on that port, so the console configures itself.
 
-You do not configure anything on the PS2. If the console already has a leftover static IP from an earlier setup, the helper notices the device on the wire and quietly moves THIS PC to a compatible address so the two coexist — including onto the console's own subnet if it is on a different one. The console finds the server by broadcasting, so it never needs to know the PC's address, and you never have to touch its network settings.
+You normally do not configure anything on the PS2. If the console already has a leftover static IP from an earlier setup, the helper notices the device on the wire and quietly moves THIS PC to a compatible address so the two coexist — including onto the console's own subnet if it is on a different one. The console finds the server by broadcasting, so it usually needs no changes. Only when no shared address can be found does the launcher fall back to asking you to set the PS2 to DHCP or a different static IP.
 
 The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if several devices start asking. Unticking the box stops the helper and returns the port to automatic (DHCP); "Remove PS2 Servers firewall rules" also undoes it. Direct link mode is currently Windows-only.
 
@@ -1851,7 +1851,13 @@ class LauncherApp:
         cfg["server_ip"] = server_ip
         cfg["client_ip"] = client_ip
         cfg["prefix"] = prefix
+        cfg["enabled"] = True
         self.saved["direct_link"] = cfg
+        # Persist the recovery marker BEFORE touching the adapter, so a crash or
+        # failure mid-move still returns the port to DHCP on the next launch
+        # instead of stranding it static.
+        self.saved["pending_direct_link_restore"] = True
+        self._save()
         self._set_direct_checkbox(True, busy=True)
         self._set_direct_status(
             "A device is already on this cable — moving this PC to {} so they "
@@ -1862,12 +1868,22 @@ class LauncherApp:
                 out = directlink.apply_adapter_config(
                     cfg["if_index"], server_ip, client_ip, prefix)
             except Exception as e:
-                self.root.after(0, lambda err=e: self._direct_link_fail(
-                    "Could not move the direct-link address:\n\n{}".format(err)))
+                self.root.after(0, lambda err=e: self._direct_link_rehome_failed(err))
                 return
             self.root.after(0, lambda: self._direct_link_rehome_done(out))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _direct_link_rehome_failed(self, err):
+        self._append_log("directlink",
+                         "[launcher] could not move the direct-link address: "
+                         "{}\n".format(err))
+        self._set_direct_status(
+            "Couldn't move the direct-link address — see the TERMINAL tab. "
+            "Untick and tick to retry.")
+        # Route through the recovery path: it returns the port to DHCP and
+        # clears the saved direct-link state.
+        self._rollback_failed_direct_responder(self.saved.get("direct_link") or {})
 
     def _direct_link_rehome_done(self, output):
         if output:
@@ -1876,7 +1892,13 @@ class LauncherApp:
         cfg = self.saved.get("direct_link") or {}
         self._direct_proc = None
         if not self._start_direct_responder():
+            # The port was reconfigured but the helper won't start: recover
+            # rather than leave a stranded static port.
+            self._rollback_failed_direct_responder(cfg)
             return
+        # Configured and serving on the new address -> the move is committed;
+        # drop the crash-recovery marker.
+        self.saved.pop("pending_direct_link_restore", None)
         self.ip_var.set(cfg["server_ip"])
         self._save()
         self._set_direct_checkbox(True)

@@ -880,6 +880,7 @@ class DhcpResponder:
         retransmits, so coming up a few seconds after the link does is fine.
         """
         waiting_logged = False
+        waits = 0
         while True:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -896,6 +897,16 @@ class DhcpResponder:
                         "service running (Windows ICS, or a leftover PS2 "
                         "Servers helper)?".format(
                             self.server_ip, DHCP_SERVER_PORT, e))
+                waits += 1
+                # A device already holding our address (a console on a leftover
+                # static IP present at launch) makes the bind fail exactly like a
+                # down link does. After giving the link a moment to settle, look
+                # at the wire: if someone is there, coexist (re-home) rather than
+                # wait forever for a "console" that is actually the conflict.
+                if waits >= 2:
+                    plan = self._plan_rehome_now(server_ip_present=False)
+                    if plan is not None:
+                        raise _Rehome(plan)
                 if not waiting_logged:
                     waiting_logged = True
                     self.log("waiting for the link to come up ({} is not "
@@ -976,7 +987,7 @@ class DhcpResponder:
         """
         generic = "{} is no longer configured on this PC".format(self.server_ip)
         try:
-            adapter = adapter_state(0, self.adapter_name or None)
+            adapter = adapter_state(self.if_index, self.adapter_name or None)
         except Exception:
             adapter = None
         if adapter is None:
@@ -1112,7 +1123,12 @@ class DhcpResponder:
         network's static IP). No console reconfiguration -- it finds us by
         broadcasting UDPFS discovery regardless of our address.
         """
-        neighbors = interface_neighbors(self.if_index, our_ips=[self.server_ip])
+        # Exclude our own address from the neighbour list ONLY while we still
+        # hold it. If a duplicate-address conflict has removed it, the device
+        # now answering for that address IS the conflict we must see -- filtering
+        # it here would drop exactly the evidence plan_rehome needs.
+        our_ips = [self.server_ip] if server_ip_present else []
+        neighbors = interface_neighbors(self.if_index, our_ips=our_ips)
         if not neighbors:
             return None
         return plan_rehome(self.server_ip, self.client_ip, self.prefixlen,
