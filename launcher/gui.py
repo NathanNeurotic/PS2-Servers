@@ -103,7 +103,9 @@ Direct PS2-to-PC link
 
 A PS2 cabled straight into the PC has no router on the wire, so nothing hands the console an IP address and every network app fails the same way. Ticking "PS2 is plugged directly into this PC" fixes that: PS2 Servers gives the chosen network port a fixed address (one administrator prompt), allows DHCP through the firewall, and runs a small DHCP helper that answers only on that port, so the console configures itself.
 
-The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if a second device starts asking. Unticking the box stops the helper and returns the port to automatic (DHCP); "Remove PS2 Servers firewall rules" also undoes it. Direct link mode is currently Windows-only.
+You do not configure anything on the PS2. If the console already has a leftover static IP from an earlier setup, the helper notices the device on the wire and quietly moves THIS PC to a compatible address so the two coexist — including onto the console's own subnet if it is on a different one. The console finds the server by broadcasting, so it never needs to know the PC's address, and you never have to touch its network settings.
+
+The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if several devices start asking. Unticking the box stops the helper and returns the port to automatic (DHCP); "Remove PS2 Servers firewall rules" also undoes it. Direct link mode is currently Windows-only.
 
 No terminal required
 
@@ -383,6 +385,7 @@ class LauncherApp:
         self._direct_proc = None            # the DHCP helper child, when running
         self._direct_expected = False       # we started it and expect it alive
         self._direct_busy = False           # an enable/disable flow is mid-flight
+        self._direct_rehomes = 0            # times we moved to coexist this run
         self._tray = None
         self._tray_option_widgets = []
         self.close_to_tray_var = tk.BooleanVar(
@@ -1011,6 +1014,7 @@ class LauncherApp:
         if output:
             self._append_log("directlink", "[setup] {}\n".format(
                 output.replace("\n", "\n[setup] ")))
+        self._direct_rehomes = 0  # fresh coexist budget for this enable
         cfg = self.saved.get("direct_link") or {}
         if not self._start_direct_responder():
             # The adapter and firewall were already configured. Keep recovery
@@ -1786,21 +1790,97 @@ class LauncherApp:
         if (self._direct_expected and self._direct_proc is not None
                 and not self._direct_proc.is_running()):
             code = self._direct_proc.returncode
+            plan = self._parse_rehome(self._direct_proc.lines)
             self._direct_expected = False
             self._append_log("directlink",
                              "[launcher] DHCP helper exited (code {})\n".format(code))
-            if code == 3:  # a safety refusal; the helper said why in the log
+            if code == 5 and plan:
+                self._direct_link_rehome(plan)
+            elif code == 3:  # a safety refusal; the helper said why in the log
                 self._set_direct_status(
                     "The DHCP helper stopped itself for safety — see the "
                     "TERMINAL tab. Untick and tick the box to retry.")
+                self._finish_direct_exit()
             else:
                 self._set_direct_status(
                     "The DHCP helper stopped (code {}) — see the TERMINAL "
                     "tab. Untick and tick the box to retry.".format(code))
-            cfg = self.saved.get("direct_link") or {}
-            if cfg.get("server_ip"):
-                self._rollback_failed_direct_responder(cfg)
+                self._finish_direct_exit()
         self.root.after(600, self._poll_status)
+
+    def _finish_direct_exit(self):
+        cfg = self.saved.get("direct_link") or {}
+        if cfg.get("server_ip"):
+            self._rollback_failed_direct_responder(cfg)
+
+    @staticmethod
+    def _parse_rehome(lines):
+        """(server_ip, client_ip, prefix) from the helper's last REHOME line."""
+        for line in reversed(list(lines or [])):
+            if "REHOME " not in line:
+                continue
+            fields = {}
+            for token in line.split("REHOME ", 1)[1].split():
+                key, _, val = token.partition("=")
+                fields[key] = val
+            try:
+                return (fields["server_ip"], fields["client_ip"],
+                        int(fields.get("prefix", directlink.PREFIX_LENGTH)))
+            except (KeyError, ValueError):
+                return None
+        return None
+
+    _MAX_REHOMES = 4
+
+    def _direct_link_rehome(self, plan):
+        """The helper found a device already on the wire; move this PC's address
+        to coexist with it and restart the helper. No console reconfiguration."""
+        server_ip, client_ip, prefix = plan
+        cfg = self.saved.get("direct_link") or {}
+        if self._direct_rehomes >= self._MAX_REHOMES:
+            self._append_log("directlink",
+                             "[launcher] stopped moving after {} tries; the "
+                             "wire looks busier than a single console\n".format(
+                                 self._direct_rehomes))
+            self._set_direct_status(
+                "Couldn't find a clear address to share this link — see the "
+                "TERMINAL tab. Untick and tick to retry.")
+            self._finish_direct_exit()
+            return
+        self._direct_rehomes += 1
+        cfg["server_ip"] = server_ip
+        cfg["client_ip"] = client_ip
+        cfg["prefix"] = prefix
+        self.saved["direct_link"] = cfg
+        self._set_direct_checkbox(True, busy=True)
+        self._set_direct_status(
+            "A device is already on this cable — moving this PC to {} so they "
+            "share the link (nothing to change on the PS2)…".format(server_ip))
+
+        def worker():
+            try:
+                out = directlink.apply_adapter_config(
+                    cfg["if_index"], server_ip, client_ip, prefix)
+            except Exception as e:
+                self.root.after(0, lambda err=e: self._direct_link_fail(
+                    "Could not move the direct-link address:\n\n{}".format(err)))
+                return
+            self.root.after(0, lambda: self._direct_link_rehome_done(out))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _direct_link_rehome_done(self, output):
+        if output:
+            self._append_log("directlink", "[setup] {}\n".format(
+                output.replace("\n", "\n[setup] ")))
+        cfg = self.saved.get("direct_link") or {}
+        self._direct_proc = None
+        if not self._start_direct_responder():
+            return
+        self.ip_var.set(cfg["server_ip"])
+        self._save()
+        self._set_direct_checkbox(True)
+        self._set_direct_status(self._direct_ready_status(cfg))
 
     # -- config ----------------------------------------------------------- #
     def _saved_bool(self, key, default=False):
