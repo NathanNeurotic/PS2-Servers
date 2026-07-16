@@ -195,8 +195,11 @@ stops itself if a second device starts asking.
 Direct link works on Windows. On **Linux and macOS it is experimental**: the port
 setup and DHCP both need root there, so ticking the box runs the helper as
 administrator (via `pkexec` on Linux, the standard admin prompt on macOS). It adds
-the address to the chosen port for the session and removes it again when the helper
-stops. If anything looks off, untick the box and send the TERMINAL output.
+the address to the chosen port for the session and normally removes it again when
+the helper stops (on unticking the box, a crash, or the launcher exiting). Because
+the address is only *added*, it is not persistent — a reboot clears it — so even a
+forced kill that skips the cleanup leaves nothing behind after a restart. If
+anything looks off, untick the box and send the TERMINAL output.
 
 ## Run a server on its own (terminal)
 

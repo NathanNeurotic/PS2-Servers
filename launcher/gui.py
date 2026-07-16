@@ -909,10 +909,16 @@ class LauncherApp:
         current = [i["ip"] for i in adapter.get("ipv4", [])
                    if i["ip"] and not i["ip"].startswith("169.254.")]
         note = ""
-        if current:
+        if current and windows_setup.is_windows():
             note = ("\n\nIts current address ({}) will be replaced; unticking "
                     "the box returns the port to automatic (DHCP), not to "
                     "that address.".format(", ".join(current)))
+        elif current:
+            # Unix keeps the existing address and adds ours alongside it, then
+            # removes just ours again when the helper stops.
+            note = ("\n\nIts current address ({}) is kept; ours is added "
+                    "alongside for the session and removed again when you "
+                    "untick the box.".format(", ".join(current)))
         firewall_line = ("• allow DHCP (UDP 67) through the firewall\n"
                          if windows_setup.is_windows() else "")
         prompt_line = ("This needs one administrator prompt."
@@ -1135,7 +1141,11 @@ class LauncherApp:
             except OSError:
                 pass
             args += ["--adapter-id", str(cfg.get("id") or cfg.get("adapter", "")),
-                     "--configure-ip", "--stop-file", stop_file]
+                     "--configure-ip", "--stop-file", stop_file,
+                     # Watch THIS launcher's pid: the pkexec/osascript wrapper
+                     # sits between us and the root helper, so the helper cannot
+                     # notice us dying via its parent -- give it our pid to poll.
+                     "--watch-pid", str(os.getpid())]
             command = elevate.unix_privileged_command(
                 serve_command("directlink", args))
         self._append_log("directlink",

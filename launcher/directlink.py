@@ -79,8 +79,27 @@ def _run(argv, timeout=20):
     callers translate into a clear 'this tool is not installed' message.
     """
     return subprocess.run(argv, capture_output=True, text=True,
-                          errors="replace", timeout=timeout,
+                          errors="replace", timeout=timeout, check=False,
                           **_hidden_subprocess_kwargs())
+
+
+def _pid_alive(pid):
+    """Whether process `pid` still exists (Unix). Fails safe to True.
+
+    Used by the root responder to notice the (unprivileged) launcher dying, so
+    it can restore the port even if no signal reached it.
+    """
+    if not pid:
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True   # it exists, just not ours to signal
+    except OSError:
+        return True   # unknown -> do not tear down on a guess
 
 DHCP_SERVER_PORT = 67
 DHCP_CLIENT_PORT = 68
@@ -345,6 +364,14 @@ def _enumerate_linux():
     if addr.returncode != 0:
         raise WindowsSetupError("Could not list network adapters: {}".format(
             (addr.stderr or "").strip() or "ip addr failed"))
+    if route.returncode != 0:
+        # Fail closed: without the routing table we cannot tell whether our
+        # chosen address collides with a network this host already reaches
+        # (a VPN, a second NIC), so refuse rather than pick blindly.
+        raise WindowsSetupError(
+            "Could not read the routing table (needed to choose a "
+            "non-conflicting address): {}".format(
+                (route.stderr or "").strip() or "ip route failed"))
     return _parse_linux_adapters(addr.stdout, route.stdout,
                                  _linux_is_wireless, _linux_is_physical)
 
@@ -378,6 +405,16 @@ def _parse_macos_ifconfig(text):
     return status, ipv4
 
 
+def _macos_service_is_dhcp(getinfo_text):
+    """Whether `networksetup -getinfo <service>` reports a DHCP lease.
+
+    ifconfig alone cannot say DHCP-vs-manual on macOS; networksetup can, and it
+    is what lets classify_adapter reject a macOS port that holds a real DHCP
+    lease (a real network) rather than treating everything as manual.
+    """
+    return (getinfo_text or "").lstrip().lower().startswith("dhcp configuration")
+
+
 def _parse_macos_hardware_ports(text):
     """[(hardware_port_name, device), ...] from `networksetup -listallhardwareports`."""
     ports, name = [], None
@@ -391,10 +428,43 @@ def _parse_macos_hardware_ports(text):
     return ports
 
 
-def _parse_macos_adapters(hardware_ports_text, ifconfig_by_dev, default_dev):
+def _is_full_ipv4(text):
+    parts = (text or "").split(".")
+    return len(parts) == 4 and all(
+        p.isdigit() and 0 <= int(p) <= 255 for p in parts)
+
+
+def _parse_macos_routes(netstat_text):
+    """Explicit IPv4 routes from `netstat -rn -f inet`, as [{prefix, if_id}].
+
+    Only destinations already in CIDR (10.8.0.0/24) or full dotted form are
+    taken; macOS abbreviates directly-connected nets ('192.168.5', 'link#4',
+    'default'), which are already captured from the interface addresses, so
+    skipping them loses nothing and avoids mis-expanding an abbreviation into
+    the wrong network. if_id is left blank -- a route we cannot attribute is
+    simply counted as taken, which only makes subnet selection more cautious.
+    """
+    routes = []
+    for line in (netstat_text or "").splitlines():
+        dst = (line.split() or [""])[0]
+        if "/" in dst:
+            ip, _, plen = dst.partition("/")
+            if _is_full_ipv4(ip) and plen.isdigit():
+                routes.append({"prefix": dst, "if_id": ""})
+        elif _is_full_ipv4(dst):
+            routes.append({"prefix": dst + "/32", "if_id": ""})
+    return routes
+
+
+def _parse_macos_adapters(hardware_ports_text, ifconfig_by_dev, default_dev,
+                          dhcp_by_dev=None, routes=None):
+    dhcp_by_dev = dhcp_by_dev or {}
     adapters = []
     for port_name, dev in _parse_macos_hardware_ports(hardware_ports_text):
         status, ipv4 = _parse_macos_ifconfig(ifconfig_by_dev.get(dev, ""))
+        if dhcp_by_dev.get(dev):
+            for entry in ipv4:
+                entry["origin"] = "dhcp"
         low = port_name.lower()
         adapters.append({
             "name": port_name, "if_index": 0, "id": dev, "desc": dev,
@@ -407,7 +477,7 @@ def _parse_macos_adapters(hardware_ports_text, ifconfig_by_dev, default_dev):
             "has_gateway": dev == default_dev,
             "ipv4": ipv4,
         })
-    return {"adapters": adapters, "routes": []}
+    return {"adapters": adapters, "routes": routes or []}
 
 
 def _enumerate_macos():
@@ -416,13 +486,18 @@ def _enumerate_macos():
     except FileNotFoundError:
         raise WindowsSetupError(
             "Could not list network adapters: 'networksetup' was not found.")
-    devs = [d for _n, d in _parse_macos_hardware_ports(ports.stdout)]
     ifconfig_by_dev = {}
-    for dev in devs:
+    dhcp_by_dev = {}
+    for port_name, dev in _parse_macos_hardware_ports(ports.stdout):
         try:
             ifconfig_by_dev[dev] = _run(["ifconfig", dev]).stdout
         except (FileNotFoundError, subprocess.SubprocessError):
             ifconfig_by_dev[dev] = ""
+        try:
+            dhcp_by_dev[dev] = _macos_service_is_dhcp(
+                _run(["networksetup", "-getinfo", port_name]).stdout)
+        except (FileNotFoundError, subprocess.SubprocessError):
+            dhcp_by_dev[dev] = False
     default_dev = ""
     try:
         got = _run(["route", "-n", "get", "default"])
@@ -432,7 +507,13 @@ def _enumerate_macos():
                 break
     except (FileNotFoundError, subprocess.SubprocessError):
         pass
-    return _parse_macos_adapters(ports.stdout, ifconfig_by_dev, default_dev)
+    routes = []
+    try:
+        routes = _parse_macos_routes(_run(["netstat", "-rn", "-f", "inet"]).stdout)
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+    return _parse_macos_adapters(ports.stdout, ifconfig_by_dev, default_dev,
+                                 dhcp_by_dev, routes)
 
 
 def classify_adapter(adapter, allow_down=False):
@@ -975,18 +1056,21 @@ class DhcpResponder:
         self._server_ip_bytes = struct.pack("!I", _ip_to_int(server_ip))
         self._client_ip_bytes = struct.pack("!I", _ip_to_int(client_ip))
         # Unix stop signals (unused on Windows). stop_file: the launcher touches
-        # it to ask us to stop; watch_ppid: our starting parent -- if it changes,
-        # the launcher died and we should clean up. Both make teardown work
-        # regardless of how (or whether) a signal reaches a root-owned child.
+        # it to ask us to stop; watch_pid: the launcher's PID -- if THAT process
+        # is gone we clean up. Watching the launcher's pid directly (not
+        # getppid) is robust to the elevation wrapper: pkexec/osascript can sit
+        # between us and the launcher, so our parent is the wrapper, not the
+        # launcher, and getppid would never notice the launcher dying.
         self.stop_file = None
-        self._watch_ppid = None
+        self.watch_pid = None
 
     def _stop_requested(self):
         if self.stop_file and os.path.exists(self.stop_file):
             self.log("stop requested by the launcher")
             return True
-        if self._watch_ppid is not None and os.getppid() != self._watch_ppid:
-            self.log("the launcher exited; stopping")
+        if self.watch_pid is not None and not _pid_alive(self.watch_pid):
+            self.log("the launcher (pid {}) exited; stopping".format(
+                self.watch_pid))
             return True
         return False
 
@@ -1357,6 +1441,7 @@ def run_responder(argv):
     parser.add_argument("--adapter-id", default="")   # OS-native config id
     parser.add_argument("--configure-ip", action="store_true")  # Unix: self-config the NIC
     parser.add_argument("--stop-file", default="")    # Unix: touch to stop
+    parser.add_argument("--watch-pid", type=int, default=0)  # Unix: launcher pid
     args = parser.parse_args(argv)
 
     def log(msg):
@@ -1405,7 +1490,12 @@ def _run_responder_unix(args, server_ip, client_ip, prefixlen, log):
             "the direct-link helper needs root on this OS (to bind DHCP port 67 "
             "and set the address); it should be started elevated")
     adapter_id = args.adapter_id or args.adapter
-    _verify_unix_adapter(adapter_id, args.adapter)
+    # Configure the adapter that verification actually MATCHED, not the id we
+    # were handed: _verify_unix_adapter can match by stable name when the id is
+    # stale (interface ids are not stable across reboots), and configuring a
+    # different port than the one we vetted could touch a real LAN.
+    verified = _verify_unix_adapter(adapter_id, args.adapter)
+    adapter_id = verified["id"]
 
     configured = False
     _install_unix_signal_stop()
@@ -1416,7 +1506,7 @@ def _run_responder_unix(args, server_ip, client_ip, prefixlen, log):
         responder = DhcpResponder(server_ip, client_ip, prefixlen,
                                   adapter_name=args.adapter, log=log)
         responder.stop_file = args.stop_file or None
-        responder._watch_ppid = os.getppid()
+        responder.watch_pid = args.watch_pid or None
         responder.open_socket()
         log("checking for another DHCP server on this port…")
         responder.check_for_foreign_dhcp_server(timeout=4.0)

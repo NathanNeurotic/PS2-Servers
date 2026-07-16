@@ -6,6 +6,7 @@ output, so the Linux/macOS logic is verified without a Linux/macOS host.
 Run:  python -m unittest tests.test_directlink_unix -v
 """
 
+import os
 import unittest
 
 from launcher import directlink, elevate
@@ -35,8 +36,12 @@ LINUX_ROUTE = r"""
 
 
 def _linux_parsed():
-    wireless = lambda n: n == "wlan0"
-    physical = lambda n: True
+    def wireless(name):
+        return name == "wlan0"
+
+    def physical(_name):
+        return True
+
     return directlink._parse_linux_adapters(LINUX_ADDR, LINUX_ROUTE,
                                             wireless, physical)
 
@@ -163,6 +168,69 @@ class LocalIpCommandTests(unittest.TestCase):
         from launcher.windows_setup import WindowsSetupError
         with self.assertRaises(WindowsSetupError):
             directlink.local_ip_commands("eth0", "not-an-ip", 24, os_name="Linux")
+
+
+class MacosDhcpOriginTests(unittest.TestCase):
+    def test_getinfo_dhcp_detected(self):
+        self.assertTrue(directlink._macos_service_is_dhcp(
+            "DHCP Configuration\nIP address: 192.168.1.5\n"))
+        self.assertFalse(directlink._macos_service_is_dhcp(
+            "Manual Configuration\nIP address: 192.168.1.5\n"))
+        self.assertFalse(directlink._macos_service_is_dhcp(""))
+
+    def test_dhcp_origin_makes_interface_a_real_network(self):
+        # en5 (the otherwise-eligible wired port) now holds a DHCP lease -> it
+        # must be rejected as a real network, not offered as a direct link.
+        parsed = directlink._parse_macos_adapters(
+            MAC_PORTS, MAC_IFCONFIG, "en0", dhcp_by_dev={"en5": True})
+        by = {a["id"]: a for a in parsed["adapters"]}
+        self.assertEqual(by["en5"]["ipv4"][0]["origin"], "dhcp")
+        candidates, _rej = directlink.find_candidates(parsed)
+        self.assertEqual(candidates, [])  # nothing eligible now
+
+
+class MacosRouteTests(unittest.TestCase):
+    NETSTAT = """Routing tables
+
+Internet:
+Destination        Gateway            Flags        Netif Expire
+default            192.168.1.1        UGScg          en0
+127                127.0.0.1          UCS            lo0
+10.8.0.0/24        utun3              USc            utun3
+192.168.5          link#6             UCS            en5
+192.168.9.4        192.168.1.1        UGHS           en0
+"""
+
+    def test_explicit_cidr_and_hosts_taken_abbreviated_skipped(self):
+        routes = directlink._parse_macos_routes(self.NETSTAT)
+        prefixes = {r["prefix"] for r in routes}
+        self.assertIn("10.8.0.0/24", prefixes)      # explicit CIDR (a VPN)
+        self.assertIn("192.168.9.4/32", prefixes)   # full dotted host
+        self.assertNotIn("192.168.5", prefixes)     # abbreviated -> skipped
+        self.assertNotIn("default", str(prefixes))
+
+    def test_vpn_route_blocks_a_colliding_subnet(self):
+        # A VPN route on 192.168.137.0/24 must push the chooser off .137.
+        netstat = "Internet:\n192.168.137.0/24   utun0   USc   utun0\n"
+        routes = directlink._parse_macos_routes(netstat)
+        taken = directlink.taken_networks({"adapters": [], "routes": routes})
+        server, _client = directlink.choose_subnet(taken)
+        self.assertNotEqual(server, "192.168.137.1")
+
+
+@unittest.skipUnless(hasattr(os, "getpgid"),
+                     "POSIX-only: os.kill(pid, 0) is a liveness check there; on "
+                     "Windows signal 0 is CTRL_C_EVENT, and _pid_alive is Unix-only")
+class PidWatchTests(unittest.TestCase):
+    def test_current_pid_alive(self):
+        self.assertTrue(directlink._pid_alive(os.getpid()))
+
+    def test_none_is_alive(self):
+        self.assertTrue(directlink._pid_alive(None))
+        self.assertTrue(directlink._pid_alive(0))
+
+    def test_dead_pid_detected(self):
+        self.assertFalse(directlink._pid_alive(2 ** 22))
 
 
 class UnixElevationTests(unittest.TestCase):
