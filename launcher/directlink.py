@@ -85,6 +85,18 @@ class DirectLinkRefused(RuntimeError):
     """A safety refusal: the situation does not look like a direct PS2 link."""
 
 
+class _Rehome(Exception):
+    """Internal: move the PC's address to coexist with a device on the wire.
+
+    Carries (server_ip, client_ip, prefixlen). run_responder turns it into a
+    'REHOME=...' line + exit code 5; the launcher reconfigures and restarts.
+    """
+
+    def __init__(self, plan):
+        self.server_ip, self.client_ip, self.prefixlen = plan
+        super().__init__("re-home to {}".format(self.server_ip))
+
+
 # --------------------------------------------------------------------------- #
 # Small IPv4 helpers
 # --------------------------------------------------------------------------- #
@@ -317,6 +329,141 @@ def choose_subnet(taken):
             return ("{}.{}".format(base, SERVER_HOST_NUM),
                     "{}.{}".format(base, CLIENT_HOST_NUM))
     return None, None
+
+
+# --------------------------------------------------------------------------- #
+# Coexisting with a device already on the wire (a PS2 with a leftover static IP)
+# --------------------------------------------------------------------------- #
+def _network_of_int(ip_int, prefixlen):
+    mask = (0xFFFFFFFF << (32 - prefixlen)) & 0xFFFFFFFF if prefixlen else 0
+    return ip_int & mask
+
+
+def _free_host(network_int, prefixlen, avoid_ints):
+    """Lowest usable host address (as int) in the /prefixlen not in avoid_ints."""
+    network = _network_of_int(network_int, prefixlen)
+    broadcast = network | (0xFFFFFFFF >> prefixlen)
+    for host in range(network + 1, broadcast):
+        if host not in avoid_ints:
+            return host
+    return None
+
+
+def plan_rehome(server_ip, client_ip, prefixlen, neighbors, our_ip_present):
+    """Move the PC's address to coexist with a device already on the wire.
+
+    Returns (new_server_ip, new_client_ip, prefixlen) or None if no move is
+    needed. The whole point of PS2 Servers is that nothing is configured on the
+    console, so when a PS2 turns up with a leftover static IP we adapt the PC
+    instead of asking the user to change the PS2:
+
+      * a device SHARES our subnet and collides with (or sits on) our address
+        -> step the PC to a free host in the same subnet;
+      * a device is on a DIFFERENT subnet (a static left over from another
+        network) -> adopt its /24, so the PC can unicast back to it. The console
+        finds the server by broadcasting UDPFS discovery, so it needs no address
+        of ours -- it just needs us reachable in its subnet.
+
+    neighbors are the IPv4 addresses seen on the direct-link interface (already
+    filtered of link-local/multicast/our own). our_ip_present is whether our
+    current address is still on the adapter (False + a neighbour at our address
+    == a duplicate-address conflict).
+    """
+    prefixlen = int(prefixlen)
+    server_int = _ip_to_int(server_ip)
+    our_net = _network_of_int(server_int, prefixlen)
+    neigh_ints = []
+    for n in neighbors:
+        try:
+            neigh_ints.append(_ip_to_int(n))
+        except OSError:
+            pass
+    avoid = set(neigh_ints)
+
+    # Case C: a neighbour on a different subnet -> adopt its /24.
+    off_subnet = [n for n in neigh_ints
+                  if _network_of_int(n, prefixlen) != our_net]
+    if off_subnet:
+        target_net = _network_of_int(off_subnet[0], 24)
+        new_server = _free_host(target_net, 24, avoid)
+        if new_server is not None:
+            new_client = _free_host(target_net, 24, avoid | {new_server})
+            if new_client is not None:
+                return (_int_to_ip(new_server), _int_to_ip(new_client), 24)
+
+    # Case B: a neighbour shares our subnet and our address is contested.
+    same_subnet = any(_network_of_int(n, prefixlen) == our_net
+                      for n in neigh_ints)
+    contested = (not our_ip_present) or (server_int in neigh_ints)
+    if same_subnet and contested:
+        new_server = _free_host(our_net, prefixlen, avoid | {server_int})
+        if new_server is not None:
+            client_int = _ip_to_int(client_ip)
+            if client_int in avoid or client_int == new_server:
+                new_client = _free_host(our_net, prefixlen,
+                                        avoid | {server_int, new_server})
+            else:
+                new_client = client_int
+            if new_client is not None:
+                return (_int_to_ip(new_server), _int_to_ip(new_client),
+                        prefixlen)
+    return None
+
+
+def _parse_neighbors(json_text, our_ips=()):
+    """Usable neighbour IPv4 addresses from the Get-NetNeighbor JSON output.
+
+    Drops our own addresses, loopback/link-local/all-zero, multicast and higher
+    (>=224), and network/broadcast host numbers -- what is left is a real device
+    the PC has exchanged frames with (the directly-attached PS2).
+    """
+    try:
+        data = json.loads((json_text or "").strip() or "[]")
+    except ValueError:
+        return []
+    if isinstance(data, str):
+        data = [data]
+    our = set(our_ips)
+    out = []
+    for ip in data:
+        if not isinstance(ip, str) or ip in our:
+            continue
+        if ip.startswith(("127.", "169.254.", "0.")):
+            continue
+        try:
+            octets = [int(o) for o in ip.split(".")]
+        except ValueError:
+            continue
+        if len(octets) != 4 or octets[0] >= 224 or octets[3] in (0, 255):
+            continue
+        out.append(ip)
+    return out
+
+
+def _neighbor_script(if_index):
+    return ("Get-NetNeighbor -InterfaceIndex " + str(int(if_index)) +
+            " -AddressFamily IPv4 -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.State -in 'Reachable','Stale','Delay','Probe',"
+            "'Permanent' } | ForEach-Object { [string]$_.IPAddress } | "
+            "ConvertTo-Json")
+
+
+def interface_neighbors(if_index, our_ips=()):
+    """IPv4 addresses of devices seen on this interface, or [] on any failure.
+
+    Windows-only (Get-NetNeighbor). The neighbour cache is populated as a side
+    effect of frames the PC receives, so an active console -- one broadcasting
+    UDPFS discovery -- turns up here within seconds.
+    """
+    if not is_windows():
+        return []
+    try:
+        res = _powershell(_neighbor_script(if_index))
+    except Exception:
+        return []
+    if res.returncode != 0:
+        return []
+    return _parse_neighbors(res.stdout, our_ips)
 
 
 # --------------------------------------------------------------------------- #
@@ -667,19 +814,28 @@ class DhcpResponder:
     MAX_DISTINCT_MACS = 1
     REPLY_BURST = 8          # token bucket: at most this many queued replies
     REPLY_RATE = 4.0         # ...refilled at this many per second
-    IP_RECHECK_SECONDS = 30  # confirm our address still exists this often
+    IP_RECHECK_SECONDS = 5   # confirm our address still exists this often
+    # ...short, because the common reason it vanishes is a duplicate-address
+    # conflict (another device on the wire using our address), and Windows
+    # removes ours within seconds of that device ARPing. Catching it fast turns
+    # a confusing flap into one clear message. The check is a cheap socket bind;
+    # only the failure path does the (slower) adapter lookup to diagnose why.
     # Re-run the active foreign-server probe this often while serving, so a
     # cable moved from the PS2 onto a real LAN mid-session is caught without
     # waiting for a relaunch. Long enough that the stray DISCOVER is rare.
     REPROBE_SECONDS = 300
     REPROBE_TIMEOUT = 2.0
+    # How often to look at who else is on the wire, so a console with a leftover
+    # static IP can be coexisted with (re-home) instead of fought over.
+    REHOME_CHECK_SECONDS = 15
 
     def __init__(self, server_ip, client_ip, prefixlen=PREFIX_LENGTH,
-                 adapter_name="", log=print, probe_mac=None):
+                 adapter_name="", log=print, probe_mac=None, if_index=0):
         self.server_ip = server_ip
         self.client_ip = client_ip
         self.prefixlen = prefixlen
         self.adapter_name = adapter_name
+        self.if_index = if_index
         self.log = log
         # Our own DHCP-client probe MAC. handle_packet ignores it, so the
         # periodic re-probe (which our own responder hears on port 67) never
@@ -724,6 +880,7 @@ class DhcpResponder:
         retransmits, so coming up a few seconds after the link does is fine.
         """
         waiting_logged = False
+        waits = 0
         while True:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -740,6 +897,16 @@ class DhcpResponder:
                         "service running (Windows ICS, or a leftover PS2 "
                         "Servers helper)?".format(
                             self.server_ip, DHCP_SERVER_PORT, e))
+                waits += 1
+                # A device already holding our address (a console on a leftover
+                # static IP present at launch) makes the bind fail exactly like a
+                # down link does. After giving the link a moment to settle, look
+                # at the wire: if someone is there, coexist (re-home) rather than
+                # wait forever for a "console" that is actually the conflict.
+                if waits >= 2:
+                    plan = self._plan_rehome_now(server_ip_present=False)
+                    if plan is not None:
+                        raise _Rehome(plan)
                 if not waiting_logged:
                     waiting_logged = True
                     self.log("waiting for the link to come up ({} is not "
@@ -807,6 +974,40 @@ class DhcpResponder:
             return False
         finally:
             s.close()
+
+    def _diagnose_missing_server_ip(self):
+        """Why our address vanished, in words a user can act on.
+
+        The case worth naming is a duplicate-address conflict: another device
+        on the wire is already using our address, so Windows' duplicate-address
+        detection strips it from this PC within seconds -- which is exactly the
+        confusing 'it keeps disconnecting' failure a PS2 left on a static IP
+        equal to our server address produces. That reads completely differently
+        from the console simply being switched off (the link would be down).
+        """
+        generic = "{} is no longer configured on this PC".format(self.server_ip)
+        try:
+            adapter = adapter_state(self.if_index, self.adapter_name or None)
+        except Exception:
+            adapter = None
+        if adapter is None:
+            # Could not read the adapter (lookup failed, or it is gone) -- do
+            # not guess a cause; the bare fact is still useful.
+            return generic
+        status = (adapter.get("status") or "").lower()
+        if status == "up":
+            return (generic + " -- Windows removed it, which means another "
+                    "device on this cable is already using {ip}. If your PS2 "
+                    "is set to a static IP of {ip}, switch it to DHCP "
+                    "(automatic), or to a different address such as {client}."
+                    .format(ip=self.server_ip, client=self.client_ip))
+        # Only an explicitly-recognized down state gets the link-down wording;
+        # a missing or unfamiliar status is "unknown cause", not a guess.
+        if status in ("disconnected", "down", "not present", "disabled",
+                      "not operational", "inactive", "lowerlayerdown"):
+            return (generic + "; the link went down -- the cable was unplugged "
+                    "or the console was switched off")
+        return generic
 
     # -- refusals ---------------------------------------------------------- #
     def _take_token(self):
@@ -913,21 +1114,51 @@ class DhcpResponder:
             return (bcast, DHCP_CLIENT_PORT)
         return ("255.255.255.255", DHCP_CLIENT_PORT)
 
+    def _plan_rehome_now(self, server_ip_present):
+        """A coexist plan if a device on the wire needs us to move, else None.
+
+        Looks at who else is on the interface and, per plan_rehome, either steps
+        the PC to a free host in the same subnet (a console statically on our
+        address) or adopts the console's subnet (a console left on another
+        network's static IP). No console reconfiguration -- it finds us by
+        broadcasting UDPFS discovery regardless of our address.
+        """
+        # Exclude our own address from the neighbour list ONLY while we still
+        # hold it. If a duplicate-address conflict has removed it, the device
+        # now answering for that address IS the conflict we must see -- filtering
+        # it here would drop exactly the evidence plan_rehome needs.
+        our_ips = [self.server_ip] if server_ip_present else []
+        neighbors = interface_neighbors(self.if_index, our_ips=our_ips)
+        if not neighbors:
+            return None
+        return plan_rehome(self.server_ip, self.client_ip, self.prefixlen,
+                           neighbors, server_ip_present)
+
     # -- main loop ---------------------------------------------------------- #
     def serve_forever(self):
         self.sock.settimeout(1.0)
         last_check = time.monotonic()
+        last_neigh = time.monotonic()
         last_probe = time.monotonic()  # a full probe already ran before serving
         self.log("waiting for the PS2 to ask for an address "
                  "(it will get {})".format(self.client_ip))
         while True:
             now = time.monotonic()
+            present = True
             if now - last_check > self.IP_RECHECK_SECONDS:
                 last_check = now
-                if not self._server_ip_still_present():
-                    raise DirectLinkRefused(
-                        "{} is no longer configured on this PC; "
-                        "stopping".format(self.server_ip))
+                present = self._server_ip_still_present()
+            # Look at the wire when our address just went missing (a conflict),
+            # or on the slower rehome cadence. If a device is present we can
+            # coexist with, re-home to it; only if there is no such plan AND our
+            # address is gone do we refuse with the diagnosis.
+            if (not present) or (now - last_neigh > self.REHOME_CHECK_SECONDS):
+                last_neigh = now
+                plan = self._plan_rehome_now(present)
+                if plan is not None:
+                    raise _Rehome(plan)
+                if not present:
+                    raise DirectLinkRefused(self._diagnose_missing_server_ip())
             if now - last_probe > self.REPROBE_SECONDS:
                 last_probe = now
                 # Catches a cable moved from the PS2 onto a real LAN while we
@@ -1008,7 +1239,8 @@ def run_responder(argv):
             args.server_ip, args.client_ip, args.prefix)
         _startup_adapter_check(args.adapter, args.if_index, server_ip)
         responder = DhcpResponder(server_ip, client_ip, prefixlen,
-                                  adapter_name=args.adapter, log=log)
+                                  adapter_name=args.adapter, log=log,
+                                  if_index=args.if_index)
         responder.open_socket()  # waits for the link, then binds the port
         # Authoritative safety gate: with the link now up, act as a DHCP client
         # and see whether a real DHCP server answers. On a genuine direct link
@@ -1016,6 +1248,15 @@ def run_responder(argv):
         log("checking for another DHCP server on this port…")
         responder.check_for_foreign_dhcp_server(timeout=4.0)
         responder.serve_forever()
+    except _Rehome as r:
+        # Coexist with a device already on the wire: ask the launcher to move
+        # this PC's address (one elevated reconfigure) and restart us. The
+        # console is never touched -- it finds us by broadcast.
+        log("a device is already using this wire; moving this PC to {} so they "
+            "can coexist (the PS2 needs no changes)".format(r.server_ip))
+        print("REHOME server_ip={} client_ip={} prefix={}".format(
+            r.server_ip, r.client_ip, r.prefixlen), flush=True)
+        return 5
     except DirectLinkRefused as e:
         log("REFUSED: {}".format(e))
         return 3

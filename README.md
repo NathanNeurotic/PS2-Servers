@@ -186,11 +186,19 @@ runs a tiny DHCP helper on that port only, so the console — which asks for an
 address by itself — just gets one. The LAN IP box fills in with the address to use
 in OPL. Unticking the box undoes all of it.
 
+**You normally never configure the PS2.** If the console still has a leftover
+static IP from an earlier setup, the helper sees the device on the wire and
+quietly moves *this PC* to a compatible address so the two coexist — stepping off
+a clashing address, or even adopting the console's subnet if it is on a different
+one. The console finds the server by broadcasting, so it usually needs no changes.
+Only if no shared address can be found — an unusually busy wire — does the
+launcher fall back to asking you to set the PS2 to DHCP or a different static IP.
+
 The helper is deliberately paranoid, because a DHCP server answering on a real
 network could hand bad addresses to everything on it. It binds only to the
 direct-link port, refuses to start if that port reaches a router or already got an
 address from a real DHCP server, serves exactly one address to one console, and
-stops itself if a second device starts asking. Windows-only for now.
+stops itself if several devices start asking. Windows-only for now.
 
 ## Run a server on its own (terminal)
 
