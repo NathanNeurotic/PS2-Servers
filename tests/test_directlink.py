@@ -600,6 +600,30 @@ class SubnetTests(unittest.TestCase):
         self.assertNotIn((_ip_to_int("169.254.0.0"), 16), nets)
         self.assertNotIn((_ip_to_int("224.0.0.0"), 4), nets)
 
+    def test_taken_networks_additive_retains_selected(self):
+        # Unix setup is additive: the selected port KEEPS its address, so with
+        # no exclusion its network and its route must stay in the taken set, or
+        # choose_subnet could pick a subnet that collides with the very port we
+        # are adding to. The Windows replacement flow (exclude_id) drops them.
+        enumerated = {
+            "adapters": [
+                {"id": 7, "ipv4": [
+                    {"ip": "192.168.137.1", "prefix": 24, "origin": "Manual"},
+                ]},
+            ],
+            "routes": [
+                {"prefix": "192.168.137.0/24", "if_id": 7},
+                {"prefix": "10.50.0.0/16", "if_id": 7},
+            ],
+        }
+        keep = {(net, plen) for net, plen in taken_networks(enumerated)}
+        self.assertIn((_ip_to_int("192.168.137.0"), 24), keep)
+        self.assertIn((_ip_to_int("10.50.0.0"), 16), keep)
+        drop = {(net, plen) for net, plen
+                in taken_networks(enumerated, exclude_id=7)}
+        self.assertNotIn((_ip_to_int("192.168.137.0"), 24), drop)
+        self.assertNotIn((_ip_to_int("10.50.0.0"), 16), drop)
+
 
 class ClassifyTests(unittest.TestCase):
     def adapter(self, **overrides):

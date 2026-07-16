@@ -114,7 +114,7 @@ Direct PS2-to-PC link
 
 A PS2 cabled straight into the PC has no router on the wire, so nothing hands the console an IP address and every network app fails the same way. Ticking "PS2 is plugged directly into this PC" fixes that: PS2 Servers gives the chosen network port a fixed address (one administrator prompt), allows DHCP through the firewall, and runs a small DHCP helper that answers only on that port, so the console configures itself.
 
-You normally do not configure anything on the PS2. If the console already has a leftover static IP from an earlier setup, the helper notices the device on the wire and quietly moves THIS PC to a compatible address so the two coexist — including onto the console's own subnet if it is on a different one. The console finds the server by broadcasting, so it usually needs no changes. Only when no shared address can be found does the launcher fall back to asking you to set the PS2 to DHCP or a different static IP.
+You normally do not configure anything on the PS2. On Windows, if the console already has a leftover static IP from an earlier setup, the helper notices the device on the wire and quietly moves THIS PC to a compatible address so the two coexist — including onto the console's own subnet if it is on a different one. The console finds the server by broadcasting, so it usually needs no changes. Only when no shared address can be found does the launcher fall back to asking you to set the PS2 to DHCP or a different static IP. (This automatic coexistence is Windows-only for now; on Linux and macOS a console with a leftover static IP may need setting to DHCP or a matching static address.)
 
 The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if several devices start asking. Unticking the box stops the helper and returns the port to automatic (DHCP); "Remove PS2 Servers firewall rules" also undoes it. Direct link mode works on Windows, and is experimental on Linux and macOS (there it runs the helper as administrator to configure the port and set it back when it stops; if anything looks wrong, untick it and send the TERMINAL output).
 
@@ -900,8 +900,13 @@ class LauncherApp:
             self._set_direct_status(self._DIRECT_STATUS_OFF)
             return
 
-        taken = directlink.taken_networks(enumerated,
-                                          exclude_id=adapter["id"])
+        # Windows REPLACES the port's config, so its current networks are about
+        # to disappear and are excluded. Unix ADDS our address alongside, so the
+        # port keeps its existing networks -- they must still count as taken, or
+        # we could pick a direct-link subnet that collides with one still live
+        # on that very port.
+        exclude = adapter["id"] if windows_setup.is_windows() else None
+        taken = directlink.taken_networks(enumerated, exclude_id=exclude)
         server_ip, client_ip = directlink.choose_subnet(taken)
         if not server_ip:
             self._direct_link_fail(
@@ -1923,7 +1928,11 @@ class LauncherApp:
             self._direct_expected = False
             self._append_log("directlink",
                              "[launcher] DHCP helper exited (code {})\n".format(code))
-            if code == 5 and plan:
+            if code == 5 and plan and windows_setup.is_windows():
+                # Auto-coexist re-home is Windows-only: it re-configures the NIC
+                # via PowerShell (apply_adapter_config). The Unix helper never
+                # emits a REHOME (neighbour discovery is Windows-only), but guard
+                # the dispatch so a stray code 5 there can't hit the Windows path.
                 self._direct_link_rehome(plan)
             elif code == 3:  # a safety refusal; the helper said why in the log
                 self._set_direct_status(

@@ -597,9 +597,11 @@ def taken_networks(enumerated, exclude_id=None):
     """Every IPv4 network this host can already reach, as (net_int, prefixlen).
 
     Both adapter subnets and routing-table entries count: a VPN's remote
-    subnet would collide just as hard as a local one. The chosen adapter's own
-    networks are excluded (by its OS-native id) -- it is about to be
-    reconfigured.
+    subnet would collide just as hard as a local one. Pass exclude_id (an
+    OS-native adapter id) ONLY when the chosen adapter is about to be
+    reconfigured away from its current networks -- the Windows replacement
+    flow. Unix setup is additive (the port keeps its address), so leave
+    exclude_id None there or its still-live networks would be hidden.
     """
     taken = []
     for adapter in enumerated["adapters"]:
