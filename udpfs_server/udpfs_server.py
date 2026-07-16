@@ -2341,8 +2341,10 @@ def main():
              'the patched single-socket server bundled in its own repo: serve on one '
              'port, resync the peer sequence off its DISCOVERY, and send that '
              "server's INFORM (running seq_nr, zeroed port field, name trailer). "
-             'Implies --single-port. Deviates from udpfsd on purpose -- leave it off '
-             'for every other client (env: MODULO_MODE)'
+             'Implies --single-port. EITHER/OR: that INFORM consumes a sequence '
+             'number, so a conformant client never sees the reply and times out -- '
+             'NHDDL, RiptOPL, POPSTARTER, POPSLOADER and wLaunchELF-R3Z cannot '
+             'connect while this is on (env: MODULO_MODE)'
     )
     parser.add_argument(
         '--peer-timeout', type=float, default=_env_float('PEER_TIMEOUT', SESSION_TIMEOUT),

@@ -334,6 +334,54 @@ def test_modulo_mode(root, files):
     return ok
 
 
+def test_modulo_mode_is_exclusive(root, files):
+    """--modulo-mode locks out conformant clients, and that must stay documented.
+
+    Parity with Modulo's server means answering the way it does, and its INFORM
+    consumes a sequence number where the conformant one is a constant 1 outside the
+    stream. So the server's first reply lands at seq 1 while a correct client is
+    still expecting 0: it never sees the reply and times out. There is no answering
+    both at once, which is exactly why the flag is off by default and why the GUI
+    hint has to say either/or rather than "the others work without it".
+
+    Asserted so nobody can claim otherwise without a failing test -- the claim
+    "they aren't affected either way" was almost shipped to users on the strength of
+    never having been checked.
+    """
+    print("Modulo mode is exclusive:")
+    name, expected = next(iter(files.items()))
+    ok = True
+
+    for modulo, want_ok in ((False, True), (True, False)):
+        disc_port = _free_udp_port()
+        server = _start_server(root, disc_port, single_port=True, modulo_compat=modulo)
+        try:
+            c = UdpfsTestClient(('127.0.0.1', disc_port), timeout=4.0)
+            try:
+                c.discover()          # conformant: seq 0, no modulo fixups
+                got = c.read_file(name, len(expected)) == expected
+            except Exception:
+                got = False
+            finally:
+                c.close()
+        finally:
+            server._shutdown = True
+            time.sleep(0.3)
+
+        label = "--modulo-mode" if modulo else "default"
+        if got == want_ok:
+            print("  %-14s conformant client %s  ok" % (
+                label, "served" if got else "locked out (as documented)"))
+        else:
+            print("  %-14s FAIL: conformant client %s, expected %s" % (
+                label, "served" if got else "locked out",
+                "served" if want_ok else "locked out"))
+            ok = False
+
+    print("  EXCLUSIVITY PASSED" if ok else "  EXCLUSIVITY FAILED")
+    return ok
+
+
 def test_peer_timeout_clamp():
     """--peer-timeout is clamped, never obeyed blindly. 0 is the one that matters:
     it reads as 'off' but the sweep would reap every peer within 5s, so it must
@@ -560,6 +608,8 @@ def main():
     ok = test_single_port(tmp, {"fileA.bin": files["fileA.bin"]}) and ok
     print()
     ok = test_modulo_mode(tmp, {"fileA.bin": files["fileA.bin"]}) and ok
+    print()
+    ok = test_modulo_mode_is_exclusive(tmp, {"fileA.bin": files["fileA.bin"]}) and ok
     print()
     ok = test_peer_timeout_clamp() and ok
     print()

@@ -265,12 +265,12 @@ UDPFS = ServerDef(
         # to go looking under a disclosure triangle for it.
         Field("modulo_mode", "Check this if you are using Modulo", "bool",
               default=False,
-              help="Only tick this for Modulo. Modulo uses improper UDPFS protocol, "
-                   "and only ever worked against the patched server bundled in its "
-                   "own repo — so this serves everything on one port (0xF5F6, under "
-                   "Advanced) and answers exactly the way that server does. Modulo's "
-                   "bug: NHDDL, RiptOPL, POPSTARTER, POPSLOADER and wLaunchELF-R3Z "
-                   "all work without it."),
+              help="Tick this ONLY while you are using Modulo — it is either/or. "
+                   "Modulo uses improper UDPFS protocol and only ever worked against "
+                   "the patched server in its own repo, so this answers the way that "
+                   "server does, which a correct client cannot follow: NHDDL, "
+                   "RiptOPL, POPSTARTER, POPSLOADER and wLaunchELF-R3Z will not "
+                   "connect while this is on. Untick it and they are back."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("port", "Port", "port", default=0xF5F6, advanced=True,
               help="UDP port (default 0xF5F6). In Modulo UDPFS mode this single "
