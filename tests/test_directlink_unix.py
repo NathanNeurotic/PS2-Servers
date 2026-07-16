@@ -8,8 +8,10 @@ Run:  python -m unittest tests.test_directlink_unix -v
 
 import os
 import unittest
+from unittest import mock
 
 from launcher import directlink, elevate
+from launcher.windows_setup import WindowsSetupError
 
 
 LINUX_ADDR = r"""
@@ -216,6 +218,87 @@ default            192.168.1.1        UGScg          en0
         taken = directlink.taken_networks({"adapters": [], "routes": routes})
         server, _client = directlink.choose_subnet(taken)
         self.assertNotEqual(server, "192.168.137.1")
+
+
+class _Proc:
+    """Stand-in for subprocess.CompletedProcess in _run mocks."""
+    def __init__(self, stdout="", returncode=0, stderr=""):
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
+
+
+def _macos_fake_run(getinfo_rc=0, netstat_rc=0, ports_rc=0,
+                    route_stdout="Internet:\n  interface: en0\n", route_rc=0):
+    """A fake directlink._run for _enumerate_macos, defaulting to a healthy Mac
+    where en5 (the wired USB LAN) is the only direct-link candidate."""
+    getinfo = {
+        "Wi-Fi": "DHCP Configuration\nIP address: 192.168.1.20\n",
+        "USB 10/100/1000 LAN": "Manual Configuration\nIP address: 169.254.10.20\n",
+        "Thunderbolt Bridge": "Manual Configuration\n",
+    }
+
+    def fake(argv, timeout=20):
+        if argv[:2] == ["networksetup", "-listallhardwareports"]:
+            return _Proc(MAC_PORTS, ports_rc)
+        if argv[0] == "ifconfig":
+            return _Proc(MAC_IFCONFIG.get(argv[1], ""), 0)
+        if argv[:2] == ["networksetup", "-getinfo"]:
+            return _Proc(getinfo.get(argv[2], ""), getinfo_rc)
+        if argv[:3] == ["route", "-n", "get"]:
+            return _Proc(route_stdout, route_rc)
+        if argv[0] == "netstat":
+            return _Proc("Internet:\n", netstat_rc)
+        raise AssertionError("unexpected command: {!r}".format(argv))
+
+    return fake
+
+
+class MacosEnumFailClosedTests(unittest.TestCase):
+    """_enumerate_macos must fail closed: an unreadable safety signal never
+    turns into 'no DHCP / no gateway / no routes' that could offer a real
+    network as a direct link."""
+
+    def test_healthy_mac_offers_the_wired_port(self):
+        with mock.patch.object(directlink, "_run", _macos_fake_run()):
+            parsed = directlink._enumerate_macos()
+        candidates, _rej = directlink.find_candidates(parsed)
+        self.assertEqual([a["id"] for a in candidates], ["en5"])
+
+    def test_getinfo_failure_marks_port_dhcp(self):
+        # networksetup -getinfo failing must not leave the wired port looking
+        # manually configured and eligible -- we cannot rule out a real DHCP
+        # network, so it is treated as one and rejected.
+        with mock.patch.object(directlink, "_run",
+                               _macos_fake_run(getinfo_rc=1)):
+            parsed = directlink._enumerate_macos()
+        by = {a["id"]: a for a in parsed["adapters"]}
+        self.assertEqual(by["en5"]["ipv4"][0]["origin"], "dhcp")
+        candidates, _rej = directlink.find_candidates(parsed)
+        self.assertEqual(candidates, [])
+
+    def test_netstat_failure_refuses(self):
+        # No route table => cannot check subnet collisions => refuse.
+        with mock.patch.object(directlink, "_run",
+                               _macos_fake_run(netstat_rc=1)):
+            with self.assertRaises(WindowsSetupError):
+                directlink._enumerate_macos()
+
+    def test_listallhardwareports_failure_refuses(self):
+        with mock.patch.object(directlink, "_run",
+                               _macos_fake_run(ports_rc=1)):
+            with self.assertRaises(WindowsSetupError):
+                directlink._enumerate_macos()
+
+    def test_no_default_route_is_not_a_failure(self):
+        # `route get default` exits nonzero when there is NO default route --
+        # exactly the direct-link case -- so enumeration must still succeed and
+        # the gateway-free wired port stays a candidate.
+        with mock.patch.object(directlink, "_run",
+                               _macos_fake_run(route_stdout="", route_rc=1)):
+            parsed = directlink._enumerate_macos()
+        candidates, _rej = directlink.find_candidates(parsed)
+        self.assertEqual([a["id"] for a in candidates], ["en5"])
 
 
 @unittest.skipUnless(hasattr(os, "getpgid"),

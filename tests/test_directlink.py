@@ -6,6 +6,7 @@ Everything here is socket-free: handle_packet() is deliberately pure so the
 protocol and the refusals can be tested without a wire.
 """
 
+import socket
 import struct
 import unittest
 from unittest import mock
@@ -15,7 +16,7 @@ from launcher.directlink import (
     DhcpResponder, DirectLinkRefused, MAGIC_COOKIE,
     MSG_ACK, MSG_DISCOVER, MSG_NAK, MSG_OFFER, MSG_REQUEST,
     build_reply, choose_subnet, classify_adapter, networks_overlap,
-    parse_packet, taken_networks, _BOOTP, _ip_to_int,
+    parse_packet, plan_rehome, taken_networks, _BOOTP, _free_host, _ip_to_int,
     _build_discover, _foreign_offer_server_id, _synthetic_probe_mac,
 )
 from launcher.gui import LauncherApp
@@ -242,6 +243,209 @@ class ServeTests(unittest.TestCase):
         error = OSError("ICMP port unreachable")
         error.winerror = 10054
         self.assert_reset_is_ignored(error)
+
+
+class RehomeTests(unittest.TestCase):
+    # PC default is 192.168.137.1, DHCP client .10.
+    def test_no_neighbors_no_move(self):
+        self.assertIsNone(plan_rehome("192.168.137.1", "192.168.137.10", 24,
+                                      [], our_ip_present=True))
+
+    def test_neighbor_in_subnet_not_contesting_no_move(self):
+        # A console at .10 (not our address) with our address still present:
+        # nothing to fix.
+        self.assertIsNone(plan_rehome("192.168.137.1", "192.168.137.10", 24,
+                                      ["192.168.137.10"], our_ip_present=True))
+
+    def test_conflict_steps_to_next_free_host(self):
+        # GZAst's case: a console statically at 192.168.137.1 (our address);
+        # Windows removed ours. Step the PC to a free host in the same subnet.
+        plan = plan_rehome("192.168.137.1", "192.168.137.10", 24,
+                           ["192.168.137.1"], our_ip_present=False)
+        self.assertIsNotNone(plan)
+        new_server, new_client, prefix = plan
+        self.assertEqual(new_server, "192.168.137.2")   # .1 avoided
+        self.assertEqual(new_client, "192.168.137.10")  # unchanged, free
+        self.assertEqual(prefix, 24)
+
+    def test_conflict_moves_client_if_it_would_collide(self):
+        # Console occupies BOTH .1 and the client host .10 -> both move off.
+        plan = plan_rehome("192.168.137.1", "192.168.137.10", 24,
+                           ["192.168.137.1", "192.168.137.10"],
+                           our_ip_present=False)
+        new_server, new_client, _p = plan
+        self.assertEqual(new_server, "192.168.137.2")
+        self.assertNotIn(new_client, ("192.168.137.1", "192.168.137.10",
+                                      new_server))
+
+    def test_offsubnet_neighbor_adopts_its_subnet(self):
+        # Console left static on an old router subnet (192.168.1.50): adopt
+        # 192.168.1.x so the PC can reach it; it finds us by broadcast.
+        plan = plan_rehome("192.168.137.1", "192.168.137.10", 24,
+                           ["192.168.1.50"], our_ip_present=True)
+        self.assertIsNotNone(plan)
+        new_server, new_client, prefix = plan
+        self.assertTrue(new_server.startswith("192.168.1."))
+        self.assertNotEqual(new_server, "192.168.1.50")   # avoid the console
+        self.assertNotEqual(new_client, "192.168.1.50")
+        self.assertNotEqual(new_client, new_server)
+        self.assertEqual(prefix, 24)
+
+    def test_free_host_skips_avoided(self):
+        net = _ip_to_int("192.168.137.0")
+        first = _free_host(net, 24, {_ip_to_int("192.168.137.1")})
+        self.assertEqual(first, _ip_to_int("192.168.137.2"))
+
+    def test_parse_neighbors_filters(self):
+        js = ('["192.168.137.1", "169.254.9.9", "224.0.0.251", '
+              '"192.168.137.255", "192.168.137.2", "127.0.0.1"]')
+        got = directlink._parse_neighbors(js, our_ips=("192.168.137.2",))
+        self.assertEqual(got, ["192.168.137.1"])  # the rest are filtered
+
+    def test_parse_neighbors_single_and_empty(self):
+        self.assertEqual(directlink._parse_neighbors('"10.0.0.5"'), ["10.0.0.5"])
+        self.assertEqual(directlink._parse_neighbors(""), [])
+        self.assertEqual(directlink._parse_neighbors("not json"), [])
+
+
+class MissingIpDiagnosisTests(unittest.TestCase):
+    def test_up_adapter_means_address_conflict(self):
+        # Link up but our address gone -> another device is using it.
+        with mock.patch.object(directlink, "adapter_state",
+                               return_value={"name": "Ethernet 2", "status": "Up",
+                                             "ipv4": []}):
+            msg = responder()._diagnose_missing_server_ip()
+        self.assertIn("another", msg)
+        self.assertIn("DHCP", msg)
+        self.assertIn(CLIENT, msg)   # suggests the non-colliding address
+
+    def test_down_adapter_means_cable_or_console(self):
+        with mock.patch.object(directlink, "adapter_state",
+                               return_value={"name": "Ethernet 2",
+                                             "status": "Disconnected", "ipv4": []}):
+            msg = responder()._diagnose_missing_server_ip()
+        self.assertIn("link went down", msg)
+        self.assertNotIn("another device", msg)
+
+    def test_adapter_lookup_failure_is_safe(self):
+        with mock.patch.object(directlink, "adapter_state",
+                               side_effect=RuntimeError("boom")):
+            msg = responder()._diagnose_missing_server_ip()
+        self.assertIn("no longer configured", msg)  # never raises
+        # A failed lookup must NOT be reported as either specific cause.
+        self.assertNotIn("link went down", msg)
+        self.assertNotIn("another device", msg)
+
+    def test_adapter_absent_is_generic(self):
+        # adapter_state returning None (port gone) is also "unknown cause".
+        with mock.patch.object(directlink, "adapter_state", return_value=None):
+            msg = responder()._diagnose_missing_server_ip()
+        self.assertIn("no longer configured", msg)
+        self.assertNotIn("link went down", msg)
+        self.assertNotIn("another device", msg)
+
+    def test_unknown_status_is_generic(self):
+        # A missing/unfamiliar status must not be guessed as a link-down.
+        for status in ("", None, "weird"):
+            with mock.patch.object(directlink, "adapter_state",
+                                   return_value={"name": "Ethernet 2",
+                                                 "status": status, "ipv4": []}):
+                msg = responder()._diagnose_missing_server_ip()
+            self.assertNotIn("link went down", msg, status)
+            self.assertNotIn("another device", msg, status)
+            self.assertIn("no longer configured", msg, status)
+
+    def test_serve_forever_refuses_with_diagnosis_when_ip_vanishes(self):
+        # Exercise the real refusal path: the periodic recheck finds the
+        # address gone, no coexist plan exists, and serve_forever raises with
+        # the conflict diagnosis.
+        r = responder()
+        r.sock = ServeTests.FakeSocket(socket.timeout())  # recvfrom never reached
+        with mock.patch.object(r, "_server_ip_still_present", return_value=False), \
+                mock.patch.object(directlink.DhcpResponder,
+                                  "IP_RECHECK_SECONDS", -1), \
+                mock.patch.object(directlink, "interface_neighbors",
+                                  return_value=[]), \
+                mock.patch.object(directlink, "adapter_state",
+                                  return_value={"name": "Ethernet 2",
+                                                "status": "Up", "ipv4": []}):
+            with self.assertRaises(DirectLinkRefused) as caught:
+                r.serve_forever()
+        self.assertIn("another device", str(caught.exception))
+
+    def test_serve_forever_rehomes_when_a_device_shares_our_address(self):
+        # A console statically on our address removes ours (DAD). Exercise the
+        # REAL neighbour contract: Get-NetNeighbor reports .1, and because our
+        # address is gone we must NOT filter it out (our_ips is empty), so the
+        # conflict is seen and we coexist by re-homing instead of refusing.
+        r = responder()
+        r.if_index = 12
+        r.sock = ServeTests.FakeSocket(socket.timeout())
+        neigh = mock.Mock(returncode=0, stdout='["192.168.137.1"]')
+        with mock.patch.object(r, "_server_ip_still_present", return_value=False), \
+                mock.patch.object(directlink.DhcpResponder,
+                                  "IP_RECHECK_SECONDS", -1), \
+                mock.patch.object(directlink, "is_windows", return_value=True), \
+                mock.patch.object(directlink, "_powershell", return_value=neigh):
+            with self.assertRaises(directlink._Rehome) as caught:
+                r.serve_forever()
+        self.assertEqual(caught.exception.server_ip, "192.168.137.2")
+
+    def test_plan_rehome_now_keeps_our_address_while_present(self):
+        # While we still hold our address it is filtered from the neighbour list
+        # (it is ours, not a device), so an idle wire yields no move.
+        r = responder()
+        r.if_index = 3
+        neigh = mock.Mock(returncode=0, stdout='["192.168.137.1"]')  # only us
+        with mock.patch.object(directlink, "is_windows", return_value=True), \
+                mock.patch.object(directlink, "_powershell", return_value=neigh):
+            self.assertIsNone(r._plan_rehome_now(server_ip_present=True))
+
+    def test_open_socket_rehomes_on_startup_conflict(self):
+        # A console already holding our address at launch makes bind() fail with
+        # EADDRNOTAVAIL forever; once a device is seen, coexist via re-home.
+        import errno
+        r = responder()
+        r.if_index = 7
+
+        def fail_bind(*_a, **_k):
+            err = OSError("address not available")
+            err.errno = errno.EADDRNOTAVAIL
+            raise err
+
+        fake = mock.Mock()
+        fake.bind.side_effect = fail_bind
+        with mock.patch.object(directlink.socket, "socket", return_value=fake), \
+                mock.patch.object(directlink.time, "sleep"), \
+                mock.patch.object(
+                    r, "_plan_rehome_now",
+                    return_value=("192.168.137.2", "192.168.137.10", 24)):
+            with self.assertRaises(directlink._Rehome) as caught:
+                r.open_socket()
+        self.assertEqual(caught.exception.server_ip, "192.168.137.2")
+
+    def test_open_socket_stops_when_teardown_requested_while_waiting(self):
+        # While bind() keeps failing (link down / no console), an unticked box
+        # or an exited launcher must still tear the helper down instead of
+        # sleeping forever -- the stop check has to run inside the wait loop,
+        # even after the re-home probe finds nothing.
+        import errno
+        r = responder()
+
+        def fail_bind(*_a, **_k):
+            err = OSError("address not available")
+            err.errno = errno.EADDRNOTAVAIL
+            raise err
+
+        fake = mock.Mock()
+        fake.bind.side_effect = fail_bind
+        with mock.patch.object(directlink.socket, "socket", return_value=fake), \
+                mock.patch.object(directlink.time, "sleep"), \
+                mock.patch.object(r, "_plan_rehome_now", return_value=None), \
+                mock.patch.object(r, "_stop_requested",
+                                  side_effect=[False, True]):
+            with self.assertRaises(directlink._StopResponder):
+                r.open_socket()
 
 
 def make_offer(xid, server_ip, offered_ip="192.168.137.10", msg_type=MSG_OFFER,
@@ -572,12 +776,32 @@ class LauncherLifecycleTests(unittest.TestCase):
         app._direct_proc = mock.Mock()
         app._direct_proc.is_running.return_value = False
         app._direct_proc.returncode = 3
+        app._direct_proc.lines = []  # no REHOME line -> normal exit path
         app._rollback_failed_direct_responder = mock.Mock()
         app.root = mock.Mock()
         LauncherApp._poll_status(app)
         app._rollback_failed_direct_responder.assert_called_once_with(
             app.saved["direct_link"])
         app.root.after.assert_called_once_with(600, app._poll_status)
+
+    def test_rehome_exit_triggers_coexist_not_rollback(self):
+        app = self.app()
+        app.saved["direct_link"]["enabled"] = True
+        app.procs = {}
+        app._direct_expected = True
+        app._direct_proc = mock.Mock()
+        app._direct_proc.is_running.return_value = False
+        app._direct_proc.returncode = 5
+        app._direct_proc.lines = [
+            "[direct link] moving…",
+            "REHOME server_ip=192.168.1.1 client_ip=192.168.1.10 prefix=24"]
+        app._direct_link_rehome = mock.Mock()
+        app._rollback_failed_direct_responder = mock.Mock()
+        app.root = mock.Mock()
+        LauncherApp._poll_status(app)
+        app._direct_link_rehome.assert_called_once_with(
+            ("192.168.1.1", "192.168.1.10", 24))
+        app._rollback_failed_direct_responder.assert_not_called()
 
     def test_stop_all_also_stops_direct_responder(self):
         app = self.app()
