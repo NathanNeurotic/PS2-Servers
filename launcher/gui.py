@@ -7,6 +7,7 @@ terminal required. The GUI never blocks on a server; each runs as a subprocess
 drained on the Tk main thread.
 """
 
+import os
 import platform
 import queue
 import subprocess
@@ -17,6 +18,16 @@ import webbrowser
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from . import status_dot
+
+
+def _direct_link_supported():
+    """OSes where the direct-link checkbox is offered at all."""
+    return platform.system() in ("Windows", "Linux", "Darwin")
+
+
+def _direct_link_experimental():
+    """Non-Windows: the setup path is real but unverified on hardware."""
+    return platform.system() in ("Linux", "Darwin")
 
 from . import config, directlink, elevate, netinfo, tray, windows_setup
 from .process import ServerProcess
@@ -101,11 +112,11 @@ Removing those rules returns Windows to having no PS2 Servers-specific firewall 
 
 Direct PS2-to-PC link
 
-A PS2 cabled straight into the PC has no router on the wire, so nothing hands the console an IP address and every network app fails the same way. Ticking "PS2 is plugged directly into this PC" fixes that: PS2 Servers gives the chosen network port a fixed address (one administrator prompt), allows DHCP through the firewall, and runs a small DHCP helper that answers only on that port, so the console configures itself.
+A PS2 cabled straight into the PC has no router on the wire, so nothing hands the console an IP address and every network app fails the same way. Ticking "PS2 is plugged directly into this PC" fixes that: PS2 Servers gives the chosen network port a working address (one administrator prompt), and runs a small DHCP helper that answers only on that port, so the console configures itself. On Windows it also allows DHCP through the firewall and sets the port to a fixed address; on Linux and macOS it instead adds a temporary address to the port for the session and leaves the port's existing configuration untouched.
 
-You normally do not configure anything on the PS2. If the console already has a leftover static IP from an earlier setup, the helper notices the device on the wire and quietly moves THIS PC to a compatible address so the two coexist — including onto the console's own subnet if it is on a different one. The console finds the server by broadcasting, so it usually needs no changes. Only when no shared address can be found does the launcher fall back to asking you to set the PS2 to DHCP or a different static IP.
+You normally do not configure anything on the PS2. On Windows, if the console already has a leftover static IP from an earlier setup, the helper notices the device on the wire and quietly moves THIS PC to a compatible address so the two coexist — including onto the console's own subnet if it is on a different one. The console finds the server by broadcasting, so it usually needs no changes. Only when no shared address can be found does the launcher fall back to asking you to set the PS2 to DHCP or a different static IP. (This automatic coexistence is Windows-only for now; on Linux and macOS a console with a leftover static IP may need setting to DHCP or a matching static address.)
 
-The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if several devices start asking. Unticking the box stops the helper and returns the port to automatic (DHCP); "Remove PS2 Servers firewall rules" also undoes it. Direct link mode is currently Windows-only.
+The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if several devices start asking. Unticking the box stops the helper; on Windows it returns the port to automatic (DHCP) and "Remove PS2 Servers firewall rules" also undoes it, while on Linux and macOS it simply removes the temporary address it added and leaves your existing configuration as it was. Direct link mode works on Windows, and is experimental on Linux and macOS (there it runs the helper as administrator to configure the port and set it back when it stops; if anything looks wrong, untick it and send the TERMINAL output).
 
 No terminal required
 
@@ -438,9 +449,16 @@ class LauncherApp:
         elif self.saved.get("pending_start"):
             self.root.after(350, self._start_pending)
         elif (self.saved.get("direct_link") or {}).get("enabled"):
-            # Re-arm the DHCP helper for an already-configured direct link.
-            # Skipped while any pending flow runs: those flows own the state.
-            self.root.after(600, self._direct_link_startup)
+            if windows_setup.is_windows():
+                # Re-arm the DHCP helper for an already-configured direct link
+                # (the static address persists across reboots on Windows).
+                # Skipped while a pending flow runs: those flows own the state.
+                self.root.after(600, self._direct_link_startup)
+            else:
+                # Unix direct link is session-only: the additive address does
+                # not survive a restart, and re-arming would re-prompt for a
+                # password. Show it as off; the user re-ticks to set it up.
+                self.root.after(600, self._direct_link_reset_stale_unix)
 
     def _configure_window(self):
         screen_height = self.root.winfo_screenheight()
@@ -576,8 +594,9 @@ class LauncherApp:
             row=0, column=3, sticky="w", padx=(12, 0))
 
         # direct PS2-to-PC link: adapter setup + DHCP helper behind one checkbox.
-        # Windows-only for now -- adapter configuration is per-OS plumbing.
-        if windows_setup.is_windows():
+        # Available on every desktop OS; the per-OS network plumbing differs, and
+        # the non-Windows paths are experimental (unverified on real hardware).
+        if _direct_link_supported():
             direct = ttk.Frame(parent, style="TopStrip.TFrame", padding=(12, 8))
             direct.pack(fill="x", padx=16, pady=(0, 8))
             direct.columnconfigure(1, weight=1)
@@ -591,6 +610,14 @@ class LauncherApp:
                 direct, text=self._DIRECT_STATUS_OFF,
                 style="TopStripHint.TLabel", wraplength=640)
             self._direct_status.grid(row=0, column=1, sticky="w", padx=(12, 0))
+            if _direct_link_experimental():
+                osname = "macOS" if platform.system() == "Darwin" else "Linux"
+                ttk.Label(
+                    direct, style="TopStripHint.TLabel", wraplength=900,
+                    text="Experimental on {}: it sets up the port and needs your "
+                         "password. If anything looks off, untick it and send the "
+                         "TERMINAL output.".format(osname)).grid(
+                    row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
         else:
             self.direct_link_var = None
             self._direct_check = None
@@ -873,8 +900,13 @@ class LauncherApp:
             self._set_direct_status(self._DIRECT_STATUS_OFF)
             return
 
-        taken = directlink.taken_networks(enumerated,
-                                          exclude_if_index=adapter["if_index"])
+        # Windows REPLACES the port's config, so its current networks are about
+        # to disappear and are excluded. Unix ADDS our address alongside, so the
+        # port keeps its existing networks -- they must still count as taken, or
+        # we could pick a direct-link subnet that collides with one still live
+        # on that very port.
+        exclude = adapter["id"] if windows_setup.is_windows() else None
+        taken = directlink.taken_networks(enumerated, exclude_id=exclude)
         server_ip, client_ip = directlink.choose_subnet(taken)
         if not server_ip:
             self._direct_link_fail(
@@ -885,24 +917,35 @@ class LauncherApp:
         current = [i["ip"] for i in adapter.get("ipv4", [])
                    if i["ip"] and not i["ip"].startswith("169.254.")]
         note = ""
-        if current:
+        if current and windows_setup.is_windows():
             note = ("\n\nIts current address ({}) will be replaced; unticking "
                     "the box returns the port to automatic (DHCP), not to "
                     "that address.".format(", ".join(current)))
+        elif current:
+            # Unix keeps the existing address and adds ours alongside it, then
+            # removes just ours again when the helper stops.
+            note = ("\n\nIts current address ({}) is kept; ours is added "
+                    "alongside for the session and removed again when you "
+                    "untick the box.".format(", ".join(current)))
+        firewall_line = ("• allow DHCP (UDP 67) through the firewall\n"
+                         if windows_setup.is_windows() else "")
+        prompt_line = ("This needs one administrator prompt."
+                       if windows_setup.is_windows()
+                       else "You'll be asked for your password once.")
         if not messagebox.askyesno(
                 "Set up the direct PS2 link?",
                 "Use '{name}' ({desc}) as the direct PS2 link?\n\n"
                 "PS2 Servers will:\n"
                 "• give this PC the fixed address {server} on that port\n"
-                "• allow DHCP (UDP 67) through the firewall\n"
+                "{fw}"
                 "• run a small DHCP helper that answers ONLY on that port, "
                 "handing the PS2 {client}\n\n"
-                "This needs one administrator prompt. The helper refuses to "
-                "run if that port turns out to be a real network (router or "
-                "DHCP server present). Untick the box to undo everything."
-                "{note}".format(name=adapter["name"], desc=adapter["desc"],
-                                server=server_ip, client=client_ip,
-                                note=note)):
+                "{prompt} The helper refuses to run if that port turns out to "
+                "be a real network (router or DHCP server present). Untick the "
+                "box to undo everything.{note}".format(
+                    name=adapter["name"], desc=adapter["desc"],
+                    server=server_ip, client=client_ip, fw=firewall_line,
+                    prompt=prompt_line, note=note)):
             self._set_direct_checkbox(False)
             self._set_direct_status(self._DIRECT_STATUS_OFF)
             return
@@ -911,10 +954,15 @@ class LauncherApp:
             "enabled": False,
             "adapter": adapter["name"],
             "if_index": adapter["if_index"],
+            "id": adapter["id"],
             "server_ip": server_ip,
             "client_ip": client_ip,
             "prefix": directlink.PREFIX_LENGTH,
         }
+
+        if not windows_setup.is_windows():
+            self._direct_link_enable_unix()
+            return
 
         if not elevate.is_admin():
             if not elevate.can_elevate():
@@ -935,6 +983,54 @@ class LauncherApp:
             return
 
         self._direct_link_apply_async()
+
+    # -- direct link: Unix (Linux/macOS, experimental) -------------------- #
+    def _direct_stop_file(self):
+        """Path the launcher touches to ask the root responder to stop.
+
+        In the user's config dir (root can read it), so teardown works even
+        when the launcher cannot signal a root-owned process directly.
+        """
+        return os.path.join(config.config_dir(), "directlink.stop")
+
+    def _direct_link_enable_unix(self):
+        """Start the responder elevated; it configures the port and, on exit,
+        always removes the address again. Session-only: not re-armed on the
+        next launch (that would re-prompt for a password)."""
+        if not elevate.unix_privileged_tool():
+            need = ("Install 'pkexec' (part of polkit) to let PS2 Servers set "
+                    "this up for you." if platform.system() == "Linux"
+                    else "This needs macOS's built-in 'osascript', which was "
+                    "not found.")
+            self._direct_link_fail(
+                "The direct link needs to run one command as administrator, but "
+                "no graphical password prompt is available.\n\n" + need)
+            return
+        cfg = self.saved.get("direct_link") or {}
+        self._set_direct_checkbox(True, busy=True)
+        self._set_direct_status(
+            "Setting up '{}' — you'll be asked for your password…".format(
+                cfg.get("adapter")))
+        self.nb.select(self.terminal_tab)
+        if not self._start_direct_responder():
+            return  # _start_direct_responder already reported the failure
+        cfg["enabled"] = True
+        self.saved["direct_link"] = cfg
+        self.ip_var.set(cfg["server_ip"])
+        self._save()
+        self._set_direct_checkbox(True)
+        self._set_direct_status(self._direct_ready_status(cfg))
+
+    def _direct_link_reset_stale_unix(self):
+        """A Unix direct link marked enabled from a previous session is stale
+        (session-only). Clear it so the checkbox honestly reads off."""
+        cfg = self.saved.get("direct_link") or {}
+        if cfg.get("enabled"):
+            cfg["enabled"] = False
+            self.saved["direct_link"] = cfg
+            self._save()
+        self._set_direct_checkbox(False)
+        self._set_direct_status(self._DIRECT_STATUS_OFF)
 
     def _pick_adapter_dialog(self, candidates):
         win = tk.Toplevel(self.root)
@@ -1038,9 +1134,29 @@ class LauncherApp:
         args = ["--server-ip", cfg["server_ip"],
                 "--client-ip", cfg["client_ip"],
                 "--prefix", str(cfg.get("prefix", directlink.PREFIX_LENGTH)),
-                "--adapter", cfg.get("adapter", ""),
-                "--if-index", str(cfg.get("if_index", 0))]
-        command = serve_command("directlink", args)
+                "--adapter", cfg.get("adapter", "")]
+        if windows_setup.is_windows():
+            # Windows configured the NIC already; the helper binds port 67
+            # unprivileged and just serves.
+            args += ["--if-index", str(cfg.get("if_index", 0))]
+            command = serve_command("directlink", args)
+        else:
+            # Unix: port 67 is privileged, so the helper runs as root and
+            # configures the port itself. Clear any stale stop-file first, then
+            # wrap the command in the OS graphical elevation (pkexec/osascript).
+            stop_file = self._direct_stop_file()
+            try:
+                os.remove(stop_file)
+            except OSError:
+                pass
+            args += ["--adapter-id", str(cfg.get("id") or cfg.get("adapter", "")),
+                     "--configure-ip", "--stop-file", stop_file,
+                     # Watch THIS launcher's pid: the pkexec/osascript wrapper
+                     # sits between us and the root helper, so the helper cannot
+                     # notice us dying via its parent -- give it our pid to poll.
+                     "--watch-pid", str(os.getpid())]
+            command = elevate.unix_privileged_command(
+                serve_command("directlink", args))
         self._append_log("directlink",
                          "[launcher] starting DHCP helper: {}\n".format(
                              " ".join(command)))
@@ -1057,6 +1173,14 @@ class LauncherApp:
 
     def _stop_direct_responder(self):
         self._direct_expected = False
+        # Unix: the helper runs as root, which we may not be able to signal, so
+        # ask it to stop via the stop-file (it restores the port on exit). Do
+        # this before terminating the process so a clean self-restore can win.
+        if not windows_setup.is_windows():
+            try:
+                open(self._direct_stop_file(), "w").close()
+            except OSError:
+                pass
         if self._direct_proc is not None:
             if self._direct_proc.is_running():
                 self._direct_proc.stop()
@@ -1080,6 +1204,16 @@ class LauncherApp:
         cfg = self.saved.get("direct_link") or {}
         if not cfg.get("enabled"):
             self._stop_direct_responder()
+            self._set_direct_checkbox(False)
+            self._set_direct_status(self._DIRECT_STATUS_OFF)
+            return
+        if not windows_setup.is_windows():
+            # Unix: no separate restore step -- the root helper removes the
+            # address itself when it stops. Just stop it.
+            self._stop_direct_responder()
+            cfg["enabled"] = False
+            self.saved["direct_link"] = cfg
+            self._save()
             self._set_direct_checkbox(False)
             self._set_direct_status(self._DIRECT_STATUS_OFF)
             return
@@ -1794,7 +1928,11 @@ class LauncherApp:
             self._direct_expected = False
             self._append_log("directlink",
                              "[launcher] DHCP helper exited (code {})\n".format(code))
-            if code == 5 and plan:
+            if code == 5 and plan and windows_setup.is_windows():
+                # Auto-coexist re-home is Windows-only: it re-configures the NIC
+                # via PowerShell (apply_adapter_config). The Unix helper never
+                # emits a REHOME (neighbour discovery is Windows-only), but guard
+                # the dispatch so a stray code 5 there can't hit the Windows path.
                 self._direct_link_rehome(plan)
             elif code == 3:  # a safety refusal; the helper said why in the log
                 self._set_direct_status(
@@ -1810,8 +1948,39 @@ class LauncherApp:
 
     def _finish_direct_exit(self):
         cfg = self.saved.get("direct_link") or {}
-        if cfg.get("server_ip"):
+        if not cfg.get("server_ip"):
+            return
+        if windows_setup.is_windows():
+            # Windows configured the NIC separately, so a helper exit leaves a
+            # static port that must be returned to DHCP. _rollback keeps the
+            # pending_direct_link_restore marker set until that restore is
+            # confirmed, so a crash mid-cleanup still recovers on the next launch.
             self._rollback_failed_direct_responder(cfg)
+            return
+        # Unix: the root helper removes its additive address in a finally on a
+        # clean exit, but a forced kill (SIGKILL) can bypass that and strand the
+        # address for the rest of the session (a reboot always clears it). The
+        # launcher is not root here, so it cannot remove the address -- but a
+        # read-only check needs no root, so confirm removal before reporting a
+        # clean teardown we did not verify. _direct_link_reset_stale_unix
+        # reconciles the leftover "enabled" on the next launch regardless.
+        cfg["enabled"] = False
+        self.saved["direct_link"] = cfg
+        self._save()
+        self._set_direct_checkbox(False)
+        adapter_id = cfg.get("id") or cfg.get("adapter", "")
+        if adapter_id and directlink.unix_interface_has_ipv4(
+                adapter_id, cfg.get("server_ip", "")):
+            self._set_direct_status(
+                "The helper stopped without cleaning up: '{}' may still hold "
+                "the temporary address {} until you reboot or remove it "
+                "manually (see the TERMINAL tab).".format(
+                    cfg.get("adapter") or adapter_id, cfg.get("server_ip")))
+            self._append_log(
+                "directlink",
+                "[launcher] note: '{}' may still hold the temporary address "
+                "{}; a reboot clears it, or remove it manually.\n".format(
+                    adapter_id, cfg.get("server_ip")))
 
     @staticmethod
     def _parse_rehome(lines):

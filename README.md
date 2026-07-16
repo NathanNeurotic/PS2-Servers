@@ -186,19 +186,33 @@ runs a tiny DHCP helper on that port only, so the console — which asks for an
 address by itself — just gets one. The LAN IP box fills in with the address to use
 in OPL. Unticking the box undoes all of it.
 
-**You normally never configure the PS2.** If the console still has a leftover
-static IP from an earlier setup, the helper sees the device on the wire and
-quietly moves *this PC* to a compatible address so the two coexist — stepping off
-a clashing address, or even adopting the console's subnet if it is on a different
-one. The console finds the server by broadcasting, so it usually needs no changes.
-Only if no shared address can be found — an unusually busy wire — does the
-launcher fall back to asking you to set the PS2 to DHCP or a different static IP.
+**You normally never configure the PS2.** On Windows, if the console still has a
+leftover static IP from an earlier setup, the helper sees the device on the wire
+and quietly moves *this PC* to a compatible address so the two coexist — stepping
+off a clashing address, or even adopting the console's subnet if it is on a
+different one. The console finds the server by broadcasting, so it usually needs
+no changes. Only if no shared address can be found — an unusually busy wire —
+does the launcher fall back to asking you to set the PS2 to DHCP or a different
+static IP. (This automatic coexistence is Windows-only for now; on Linux and
+macOS a console with a leftover static IP may need setting to DHCP or a matching
+static address.)
 
 The helper is deliberately paranoid, because a DHCP server answering on a real
 network could hand bad addresses to everything on it. It binds only to the
 direct-link port, refuses to start if that port reaches a router or already got an
 address from a real DHCP server, serves exactly one address to one console, and
-stops itself if several devices start asking. Windows-only for now.
+stops itself if several devices start asking.
+
+Direct link works on Windows. On **Linux and macOS it is experimental**: the port
+setup and DHCP both need root there, so ticking the box runs the helper as
+administrator (via `pkexec` on Linux, the standard admin prompt on macOS). It adds
+the address to the chosen port for the session and normally removes it again when
+the helper stops (on unticking the box, a crash, or the launcher exiting). Because
+the address is only *added*, it is not persistent — a reboot always clears it. If
+the helper is force-killed in a way that skips its cleanup, the launcher checks
+the port afterwards and, if the temporary address is still there, tells you so
+rather than reporting a clean stop; a reboot or a manual removal clears it. If
+anything looks off, untick the box and send the TERMINAL output.
 
 ## Run a server on its own (terminal)
 

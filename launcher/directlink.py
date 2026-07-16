@@ -53,11 +53,53 @@ import errno
 import ipaddress
 import json
 import os
+import platform
 import socket
 import struct
+import subprocess
 import time
 
-from .windows_setup import (WindowsSetupError, _powershell, is_windows)
+from .windows_setup import (WindowsSetupError, _hidden_subprocess_kwargs,
+                            _powershell, is_windows)
+
+
+def is_linux():
+    return platform.system() == "Linux"
+
+
+def is_macos():
+    return platform.system() == "Darwin"
+
+
+def _run(argv, timeout=20):
+    """Run a short command and return CompletedProcess (never raises on rc).
+
+    Used for the non-Windows adapter tools (ip / networksetup / ifconfig). The
+    caller inspects returncode; a missing binary raises FileNotFoundError, which
+    callers translate into a clear 'this tool is not installed' message.
+    """
+    return subprocess.run(argv, capture_output=True, text=True,
+                          errors="replace", timeout=timeout, check=False,
+                          **_hidden_subprocess_kwargs())
+
+
+def _pid_alive(pid):
+    """Whether process `pid` still exists (Unix). Fails safe to True.
+
+    Used by the root responder to notice the (unprivileged) launcher dying, so
+    it can restore the port even if no signal reached it.
+    """
+    if not pid:
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True   # it exists, just not ours to signal
+    except OSError:
+        return True   # unknown -> do not tear down on a guess
 
 DHCP_SERVER_PORT = 67
 DHCP_CLIENT_PORT = 68
@@ -153,8 +195,25 @@ def networks_overlap(net1, plen1, net2, plen2):
 
 
 # --------------------------------------------------------------------------- #
-# Adapter enumeration and classification (Windows)
+# Adapter enumeration and classification
 # --------------------------------------------------------------------------- #
+def enumerate_adapters():
+    """All adapters plus the IPv4 routing table, as plain dicts.
+
+    Returns {"adapters": [...], "routes": [...]}, the same shape on every OS.
+    Each adapter: name, if_index, desc, status, media, physical, has_gateway,
+    ipv4: [{ip, prefix, origin}, ...]. Read-only and unprivileged everywhere.
+    """
+    if is_windows():
+        return _enumerate_windows()
+    if is_linux():
+        return _enumerate_linux()
+    if is_macos():
+        return _enumerate_macos()
+    raise WindowsSetupError(
+        "Direct link mode is not supported on this operating system.")
+
+
 _ENUMERATE_SCRIPT = r"""
 $ErrorActionPreference = 'SilentlyContinue'
 $phys = @{}
@@ -194,15 +253,7 @@ ConvertTo-Json -InputObject @{ adapters = $adapters; routes = $routes } -Depth 6
 """
 
 
-def enumerate_adapters():
-    """All adapters plus the IPv4 routing table, as plain dicts.
-
-    Returns {"adapters": [...], "routes": [...]}. Each adapter:
-      name, if_index, desc, status, media, physical, has_gateway,
-      ipv4: [{ip, prefix, origin}, ...]
-    """
-    if not is_windows():
-        raise WindowsSetupError("Direct link mode is only supported on Windows.")
+def _enumerate_windows():
     res = _powershell(_ENUMERATE_SCRIPT)
     if res.returncode != 0:
         raise WindowsSetupError(
@@ -223,9 +274,15 @@ def enumerate_adapters():
         ipv4 = a.get("ipv4") or []
         if isinstance(ipv4, dict):
             ipv4 = [ipv4]
+        if_index = int(a.get("ifIndex") or 0)
         out.append({
             "name": a.get("name") or "",
-            "if_index": int(a.get("ifIndex") or 0),
+            "if_index": if_index,
+            # OS-native identifier used for config and route matching. On
+            # Windows it is the interface index; Linux/macOS use the interface
+            # name. Kept alongside if_index so the tested Windows apply/restore
+            # (which takes if_index) is untouched.
+            "id": if_index,
             "desc": a.get("desc") or "",
             "status": a.get("status") or "",
             "media": a.get("media") or "",
@@ -235,7 +292,274 @@ def enumerate_adapters():
                       "prefix": int(i.get("prefix") or 0),
                       "origin": i.get("origin") or ""} for i in ipv4],
         })
-    return {"adapters": out, "routes": routes}
+    route_out = [{"prefix": r.get("prefix") or "", "if_id": r.get("ifIndex")}
+                 for r in routes]
+    return {"adapters": out, "routes": route_out}
+
+
+# --------------------------------------------------------------------------- #
+# Linux adapter enumeration (iproute2 JSON; read-only, unprivileged)
+# --------------------------------------------------------------------------- #
+def _linux_status(flags):
+    return "up" if ("UP" in flags and "LOWER_UP" in flags) else "down"
+
+
+def _parse_linux_adapters(addr_json, route_json, is_wireless, is_physical):
+    """Pure parser for `ip -j addr` + `ip -j route`, so it is unit-testable.
+
+    is_wireless(name) / is_physical(name) are injected (they read /sys on a real
+    box) so the parse logic can be exercised without a Linux host.
+    """
+    try:
+        addrs = json.loads(addr_json or "[]")
+    except ValueError:
+        addrs = []
+    # Routes gate collision avoidance, so unparseable route data must fail
+    # closed (a refusal) rather than silently become "no routes" -- that would
+    # strip gateway/VPN evidence and let a real network be picked. An explicit
+    # empty list from `ip` (a host with no routes) is legitimate and stays [].
+    try:
+        routes = json.loads(route_json or "[]")
+    except ValueError as e:
+        raise WindowsSetupError(
+            "Could not parse the Linux routing table: {}".format(e)) from None
+    if not isinstance(routes, list):
+        raise WindowsSetupError(
+            "Unexpected Linux routing-table format (expected a list).")
+    gw_ifaces = {r.get("dev") for r in routes
+                 if r.get("dst") == "default" and r.get("dev")}
+    adapters = []
+    for a in addrs:
+        name = a.get("ifname") or ""
+        flags = a.get("flags") or []
+        if not name or name == "lo" or "LOOPBACK" in flags:
+            continue
+        ipv4 = []
+        for ai in a.get("addr_info") or []:
+            if ai.get("family") != "inet" or not ai.get("local"):
+                continue
+            # A 'dynamic' address is one the kernel holds on a lease (DHCP/RA).
+            ipv4.append({"ip": ai.get("local"),
+                         "prefix": int(ai.get("prefixlen") or 0),
+                         "origin": "dhcp" if ai.get("dynamic") else "manual"})
+        adapters.append({
+            "name": name, "if_index": int(a.get("ifindex") or 0), "id": name,
+            "desc": name,
+            "status": _linux_status(flags),
+            "media": "802.11" if is_wireless(name) else "802.3",
+            "physical": bool(is_physical(name)),
+            "has_gateway": name in gw_ifaces,
+            "ipv4": ipv4,
+        })
+    route_out = []
+    for r in routes:
+        dst = r.get("dst") or ""
+        if not dst or dst == "default":
+            continue
+        route_out.append({"prefix": dst if "/" in dst else dst + "/32",
+                          "if_id": r.get("dev") or ""})
+    return {"adapters": adapters, "routes": route_out}
+
+
+def _linux_is_wireless(name):
+    return os.path.isdir("/sys/class/net/{}/wireless".format(name)) or \
+        os.path.exists("/sys/class/net/{}/phy80211".format(name))
+
+
+def _linux_is_physical(name):
+    # A real NIC has a backing device in sysfs; virtual ones (veth, bridge,
+    # docker0, tun, wg) do not. Wireless is physical too -- classify_adapter
+    # rejects wireless separately.
+    return os.path.exists("/sys/class/net/{}/device".format(name))
+
+
+def _enumerate_linux():
+    try:
+        addr = _run(["ip", "-j", "-4", "addr", "show"])
+        route = _run(["ip", "-j", "-4", "route", "show"])
+    except FileNotFoundError:
+        raise WindowsSetupError(
+            "Could not list network adapters: the 'ip' command (iproute2) was "
+            "not found.")
+    if addr.returncode != 0:
+        raise WindowsSetupError("Could not list network adapters: {}".format(
+            (addr.stderr or "").strip() or "ip addr failed"))
+    if route.returncode != 0:
+        # Fail closed: without the routing table we cannot tell whether our
+        # chosen address collides with a network this host already reaches
+        # (a VPN, a second NIC), so refuse rather than pick blindly.
+        raise WindowsSetupError(
+            "Could not read the routing table (needed to choose a "
+            "non-conflicting address): {}".format(
+                (route.stderr or "").strip() or "ip route failed"))
+    return _parse_linux_adapters(addr.stdout, route.stdout,
+                                 _linux_is_wireless, _linux_is_physical)
+
+
+# --------------------------------------------------------------------------- #
+# macOS adapter enumeration (networksetup + ifconfig; read-only, unprivileged)
+# --------------------------------------------------------------------------- #
+def _macos_hex_mask_to_prefix(value):
+    try:
+        bits = bin(int(value, 16)).count("1") if value.startswith("0x") \
+            else sum(bin(int(o)).count("1") for o in value.split("."))
+        return bits
+    except (ValueError, AttributeError):
+        return 24
+
+
+def _parse_macos_ifconfig(text):
+    """(status, [{ip, prefix, origin}]) from one interface's ifconfig block."""
+    status, ipv4 = "down", []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line.startswith("status:"):
+            status = "up" if "active" in line else "down"
+        elif line.startswith("inet "):
+            parts = line.split()
+            ip = parts[1]
+            prefix = 24
+            if "netmask" in parts:
+                prefix = _macos_hex_mask_to_prefix(parts[parts.index("netmask") + 1])
+            ipv4.append({"ip": ip, "prefix": prefix, "origin": "manual"})
+    return status, ipv4
+
+
+def _macos_service_is_dhcp(getinfo_text):
+    """Whether `networksetup -getinfo <service>` reports a DHCP lease.
+
+    ifconfig alone cannot say DHCP-vs-manual on macOS; networksetup can, and it
+    is what lets classify_adapter reject a macOS port that holds a real DHCP
+    lease (a real network) rather than treating everything as manual.
+    """
+    return (getinfo_text or "").lstrip().lower().startswith("dhcp configuration")
+
+
+def _parse_macos_hardware_ports(text):
+    """[(hardware_port_name, device), ...] from `networksetup -listallhardwareports`."""
+    ports, name = [], None
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line.startswith("Hardware Port:"):
+            name = line.split(":", 1)[1].strip()
+        elif line.startswith("Device:") and name is not None:
+            ports.append((name, line.split(":", 1)[1].strip()))
+            name = None
+    return ports
+
+
+def _is_full_ipv4(text):
+    parts = (text or "").split(".")
+    return len(parts) == 4 and all(
+        p.isdigit() and 0 <= int(p) <= 255 for p in parts)
+
+
+def _parse_macos_routes(netstat_text):
+    """Explicit IPv4 routes from `netstat -rn -f inet`, as [{prefix, if_id}].
+
+    Only destinations already in CIDR (10.8.0.0/24) or full dotted form are
+    taken; macOS abbreviates directly-connected nets ('192.168.5', 'link#4',
+    'default'), which are already captured from the interface addresses, so
+    skipping them loses nothing and avoids mis-expanding an abbreviation into
+    the wrong network. if_id is left blank -- a route we cannot attribute is
+    simply counted as taken, which only makes subnet selection more cautious.
+    """
+    routes = []
+    for line in (netstat_text or "").splitlines():
+        dst = (line.split() or [""])[0]
+        if "/" in dst:
+            ip, _, plen = dst.partition("/")
+            if _is_full_ipv4(ip) and plen.isdigit():
+                routes.append({"prefix": dst, "if_id": ""})
+        elif _is_full_ipv4(dst):
+            routes.append({"prefix": dst + "/32", "if_id": ""})
+    return routes
+
+
+def _parse_macos_adapters(hardware_ports_text, ifconfig_by_dev, default_dev,
+                          dhcp_by_dev=None, routes=None):
+    dhcp_by_dev = dhcp_by_dev or {}
+    adapters = []
+    for port_name, dev in _parse_macos_hardware_ports(hardware_ports_text):
+        status, ipv4 = _parse_macos_ifconfig(ifconfig_by_dev.get(dev, ""))
+        if dhcp_by_dev.get(dev):
+            for entry in ipv4:
+                entry["origin"] = "dhcp"
+        low = port_name.lower()
+        adapters.append({
+            "name": port_name, "if_index": 0, "id": dev, "desc": dev,
+            "status": status,
+            "media": "802.11" if ("wi-fi" in low or "airport" in low) else "802.3",
+            # Hardware ports listed by networksetup are physical; bridges/vlans
+            # are not reported here.
+            "physical": not any(v in low for v in ("bridge", "vlan", "vpn",
+                                                   "bluetooth", "thunderbolt bridge")),
+            "has_gateway": dev == default_dev,
+            "ipv4": ipv4,
+        })
+    return {"adapters": adapters, "routes": routes or []}
+
+
+def _enumerate_macos():
+    try:
+        ports = _run(["networksetup", "-listallhardwareports"])
+    except FileNotFoundError:
+        raise WindowsSetupError(
+            "Could not list network adapters: 'networksetup' was not found.")
+    if ports.returncode != 0:
+        raise WindowsSetupError(
+            "Could not list network adapters: 'networksetup "
+            "-listallhardwareports' failed ({}).".format(
+                (ports.stderr or "").strip() or "no output"))
+    ifconfig_by_dev = {}
+    dhcp_by_dev = {}
+    for port_name, dev in _parse_macos_hardware_ports(ports.stdout):
+        try:
+            ifconfig_by_dev[dev] = _run(["ifconfig", dev]).stdout
+        except (FileNotFoundError, subprocess.SubprocessError):
+            ifconfig_by_dev[dev] = ""
+        try:
+            info = _run(["networksetup", "-getinfo", port_name])
+        except (FileNotFoundError, subprocess.SubprocessError):
+            info = None
+        # Fail closed: if a port's DHCP state cannot be read we must not later
+        # treat it as manually configured and offer it as a direct link -- a
+        # real DHCP'd port (a live network) would slip through. Mark it DHCP so
+        # classify_adapter rejects any address it holds.
+        if info is None or info.returncode != 0:
+            dhcp_by_dev[dev] = True
+        else:
+            dhcp_by_dev[dev] = _macos_service_is_dhcp(info.stdout)
+    default_dev = ""
+    try:
+        got = _run(["route", "-n", "get", "default"])
+    except (FileNotFoundError, subprocess.SubprocessError):
+        got = None
+    # A nonzero `route get default` is the NORMAL "no default route" signal --
+    # exactly the direct-link case (no gateway) -- so it is not a failure to
+    # refuse on; it simply leaves default_dev empty, which is what we want.
+    if got is not None and got.returncode == 0:
+        for line in got.stdout.splitlines():
+            if "interface:" in line:
+                default_dev = line.split(":", 1)[1].strip()
+                break
+    # The routing table gates subnet-collision avoidance. If we cannot read it,
+    # fail closed rather than risk choosing a direct-link subnet that clashes
+    # with a real network this Mac already routes.
+    try:
+        netstat = _run(["netstat", "-rn", "-f", "inet"])
+    except (FileNotFoundError, subprocess.SubprocessError) as e:
+        raise WindowsSetupError(
+            "Could not read the routing table to check for network collisions "
+            "({}); refusing rather than risk disrupting a real network.".format(e))
+    if netstat.returncode != 0:
+        raise WindowsSetupError(
+            "Could not read the routing table to check for network collisions "
+            "(netstat failed); refusing rather than risk disrupting a real "
+            "network.")
+    routes = _parse_macos_routes(netstat.stdout)
+    return _parse_macos_adapters(ports.stdout, ifconfig_by_dev, default_dev,
+                                 dhcp_by_dev, routes)
 
 
 def classify_adapter(adapter, allow_down=False):
@@ -277,16 +601,19 @@ def find_candidates(enumerated):
     return candidates, rejected
 
 
-def taken_networks(enumerated, exclude_if_index=None):
+def taken_networks(enumerated, exclude_id=None):
     """Every IPv4 network this host can already reach, as (net_int, prefixlen).
 
     Both adapter subnets and routing-table entries count: a VPN's remote
-    subnet would collide just as hard as a local one. The chosen adapter's own
-    networks are excluded -- it is about to be reconfigured.
+    subnet would collide just as hard as a local one. Pass exclude_id (an
+    OS-native adapter id) ONLY when the chosen adapter is about to be
+    reconfigured away from its current networks -- the Windows replacement
+    flow. Unix setup is additive (the port keeps its address), so leave
+    exclude_id None there or its still-live networks would be hidden.
     """
     taken = []
     for adapter in enumerated["adapters"]:
-        if exclude_if_index is not None and adapter["if_index"] == exclude_if_index:
+        if exclude_id is not None and adapter.get("id") == exclude_id:
             continue
         for entry in adapter["ipv4"]:
             ip = entry["ip"]
@@ -295,7 +622,7 @@ def taken_networks(enumerated, exclude_if_index=None):
             plen = entry["prefix"] or 32
             taken.append((_network_of(ip, plen), plen))
     for route in enumerated.get("routes", []):
-        if exclude_if_index is not None and route.get("ifIndex") == exclude_if_index:
+        if exclude_id is not None and route.get("if_id") == exclude_id:
             continue
         prefix = route.get("prefix") or ""
         if "/" not in prefix:
@@ -329,6 +656,123 @@ def choose_subnet(taken):
             return ("{}.{}".format(base, SERVER_HOST_NUM),
                     "{}.{}".format(base, CLIENT_HOST_NUM))
     return None, None
+
+
+# --------------------------------------------------------------------------- #
+# Local IP configuration on Unix (run as root by the responder itself)
+# --------------------------------------------------------------------------- #
+def _prefix_to_netmask(prefixlen):
+    mask = (0xFFFFFFFF << (32 - int(prefixlen))) & 0xFFFFFFFF if prefixlen else 0
+    return _int_to_ip(mask)
+
+
+def local_ip_commands(adapter_id, server_ip, prefixlen, teardown=False,
+                      os_name=None):
+    """Command(s) to add (or teardown=True, remove) the direct-link address.
+
+    Deliberately ADDITIVE (`ip addr add` / `ifconfig alias`): it adds a second
+    address to the port for the session and removes it on exit, rather than
+    replacing the port's configuration the way the Windows path does. That makes
+    teardown a clean inverse, and a crash leaves nothing persistent behind --
+    addresses added this way do not survive a reboot either. `os_name` is
+    injectable so the command shapes are unit-testable off-platform.
+    """
+    os_name = os_name or platform.system()
+    server_ip = _canonical_ipv4(server_ip, "direct-link server address")
+    plen = int(prefixlen)
+    cidr = "{}/{}".format(server_ip, plen)
+    if os_name == "Linux":
+        if teardown:
+            return [["ip", "addr", "del", cidr, "dev", adapter_id]]
+        return [["ip", "link", "set", "dev", adapter_id, "up"],
+                ["ip", "addr", "add", cidr, "dev", adapter_id]]
+    if os_name == "Darwin":
+        if teardown:
+            return [["ifconfig", adapter_id, "inet", server_ip, "-alias"]]
+        return [["ifconfig", adapter_id, "inet", server_ip,
+                 "netmask", _prefix_to_netmask(plen), "alias"]]
+    raise WindowsSetupError(
+        "Direct-link IP setup is not supported on this operating system.")
+
+
+def apply_local_ip(adapter_id, server_ip, prefixlen, log=print):
+    """Run the add-address command(s) as root. Raises DirectLinkRefused if the
+    port cannot be configured."""
+    for argv in local_ip_commands(adapter_id, server_ip, prefixlen):
+        try:
+            res = _run(argv)
+        except FileNotFoundError as e:
+            raise DirectLinkRefused(
+                "cannot configure the port -- {} is not installed ({})".format(
+                    argv[0], e))
+        if res.returncode != 0:
+            raise DirectLinkRefused("could not set {} on {}: {}".format(
+                server_ip, adapter_id,
+                (res.stderr or res.stdout or "").strip() or " ".join(argv)))
+    log("configured {} on {}".format(server_ip, adapter_id))
+
+
+def restore_local_ip(adapter_id, server_ip, prefixlen, log=print):
+    """Best-effort removal of the added address. Never raises -- this is the
+    cleanup path and must run to completion on any exit."""
+    for argv in local_ip_commands(adapter_id, server_ip, prefixlen,
+                                  teardown=True):
+        try:
+            res = _run(argv)
+            if res.returncode == 0:
+                log("returned {} to its previous state".format(adapter_id))
+            else:
+                log("note: could not remove {} from {}: {}".format(
+                    server_ip, adapter_id, (res.stderr or "").strip()))
+        except Exception as e:  # cleanup must never raise
+            log("note: error removing {} from {}: {}".format(
+                server_ip, adapter_id, e))
+
+
+def _text_has_inet(text, ip):
+    """Whether an `inet <ip>` (as its own field) appears in ip/ifconfig output.
+
+    Boundary-aware so 192.168.137.1 does not match 192.168.137.10: the address
+    must be followed by '/', whitespace, or end-of-line.
+    """
+    try:
+        ip = _canonical_ipv4(ip)
+    except WindowsSetupError:
+        return False
+    for line in (text or "").splitlines():
+        idx = line.find("inet ")
+        while idx != -1:
+            rest = line[idx + 5:].lstrip()
+            if rest == ip or rest.startswith(ip + "/") or rest[:len(ip) + 1] == ip + " ":
+                return True
+            idx = line.find("inet ", idx + 5)
+    return False
+
+
+def unix_interface_has_ipv4(adapter_id, ip, os_name=None):
+    """Whether `adapter_id` still carries `ip` (read-only; needs no root).
+
+    Used after the responder exits to confirm its additive address was actually
+    removed. A clean stop removes it in the responder's finally, but a forced
+    kill (SIGKILL) can bypass that and leave it for the rest of the session.
+    Returns False when the interface cannot be read (os_name is injectable so
+    the command shapes are unit-testable off-platform), so an unreadable state
+    under-warns rather than crying wolf.
+    """
+    os_name = os_name or platform.system()
+    if os_name == "Linux":
+        argv = ["ip", "-o", "-4", "addr", "show", "dev", adapter_id]
+    elif os_name == "Darwin":
+        argv = ["ifconfig", adapter_id]
+    else:
+        return False
+    try:
+        res = _run(argv, timeout=4)
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+    if res.returncode != 0:
+        return False
+    return _text_has_inet(res.stdout, ip)
 
 
 # --------------------------------------------------------------------------- #
@@ -849,6 +1293,24 @@ class DhcpResponder:
         self._token_stamp = time.monotonic()
         self._server_ip_bytes = struct.pack("!I", _ip_to_int(server_ip))
         self._client_ip_bytes = struct.pack("!I", _ip_to_int(client_ip))
+        # Unix stop signals (unused on Windows). stop_file: the launcher touches
+        # it to ask us to stop; watch_pid: the launcher's PID -- if THAT process
+        # is gone we clean up. Watching the launcher's pid directly (not
+        # getppid) is robust to the elevation wrapper: pkexec/osascript can sit
+        # between us and the launcher, so our parent is the wrapper, not the
+        # launcher, and getppid would never notice the launcher dying.
+        self.stop_file = None
+        self.watch_pid = None
+
+    def _stop_requested(self):
+        if self.stop_file and os.path.exists(self.stop_file):
+            self.log("stop requested by the launcher")
+            return True
+        if self.watch_pid is not None and not _pid_alive(self.watch_pid):
+            self.log("the launcher (pid {}) exited; stopping".format(
+                self.watch_pid))
+            return True
+        return False
 
     def check_for_foreign_dhcp_server(self, timeout=None):
         """Probe once; raise DirectLinkRefused if a real DHCP server answers.
@@ -907,6 +1369,12 @@ class DhcpResponder:
                     plan = self._plan_rehome_now(server_ip_present=False)
                     if plan is not None:
                         raise _Rehome(plan)
+                # Honour teardown while still waiting for the link: without this
+                # a Unix helper whose launcher has exited (or whose box was
+                # unticked) would sleep here forever, since the stop-file /
+                # watch-pid checks otherwise only run once serving begins.
+                if self._stop_requested():
+                    raise _StopResponder()
                 if not waiting_logged:
                     waiting_logged = True
                     self.log("waiting for the link to come up ({} is not "
@@ -1144,6 +1612,8 @@ class DhcpResponder:
                  "(it will get {})".format(self.client_ip))
         while True:
             now = time.monotonic()
+            if self._stop_requested():
+                raise _StopResponder()
             present = True
             if now - last_check > self.IP_RECHECK_SECONDS:
                 last_check = now
@@ -1192,8 +1662,28 @@ class DhcpResponder:
 # --------------------------------------------------------------------------- #
 # --serve directlink entry point
 # --------------------------------------------------------------------------- #
+class _StopResponder(Exception):
+    """Internal: a clean stop request (stop-file, SIGTERM, or parent exit).
+
+    Distinct from DirectLinkRefused (a safety refusal) so a normal "the user
+    unticked the box" teardown is not logged as a scary REFUSED line.
+    """
+
+
+def _adapter_by_id_or_name(adapter_id, adapter_name):
+    """The current adapter matching this id or name, or None. Cross-platform."""
+    enumerated = enumerate_adapters()
+    by_id = None
+    for adapter in enumerated["adapters"]:
+        if adapter_name and adapter["name"] == adapter_name:
+            return adapter
+        if adapter_id not in (None, "", 0) and adapter.get("id") == adapter_id:
+            by_id = adapter
+    return by_id
+
+
 def _startup_adapter_check(adapter_name, if_index, server_ip):
-    """Re-verify the refusals in the responder process itself.
+    """Re-verify the refusals in the responder process itself (Windows).
 
     The parent checked, the elevated configure pass checked; this third check
     covers the daily case -- the responder auto-starting on a later launch,
@@ -1217,6 +1707,46 @@ def _startup_adapter_check(adapter_name, if_index, server_ip):
                 adapter["name"], server_ip))
 
 
+def _verify_unix_adapter(adapter_id, adapter_name):
+    """Confirm the chosen port still looks like a direct link (Unix).
+
+    Unlike the Windows check there is no 'has the address' test: on Unix the
+    responder adds the address itself a moment later, so it is not there yet.
+    Gateway / DHCP-lease / wireless stay hard refusals, and they are the ones
+    that matter -- they are what says 'this is a real network'.
+    """
+    adapter = _adapter_by_id_or_name(adapter_id, adapter_name)
+    if adapter is None:
+        raise DirectLinkRefused(
+            "the direct-link network port ({}) is no longer present".format(
+                adapter_name or adapter_id))
+    ok, reason = classify_adapter(adapter, allow_down=True)
+    if not ok:
+        raise DirectLinkRefused(
+            "refusing to answer DHCP on '{}': {}".format(adapter["name"], reason))
+    return adapter
+
+
+def _install_unix_signal_stop():
+    """Turn SIGTERM/SIGHUP into a clean stop so the restore in `finally` runs.
+
+    Without this, SIGTERM's default action kills the process outright and the
+    port keeps its static address. SIGINT already raises KeyboardInterrupt.
+    """
+    import signal
+
+    def handler(_signum, _frame):
+        raise _StopResponder()
+
+    for name in ("SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, handler)
+            except (ValueError, OSError):
+                pass  # not on the main thread / unsupported: watchdog covers it
+
+
 def run_responder(argv):
     """`--serve directlink` target. Long flags only (Nuitka self-exec guard)."""
     import argparse
@@ -1226,28 +1756,25 @@ def run_responder(argv):
     parser.add_argument("--prefix", type=int, default=PREFIX_LENGTH)
     parser.add_argument("--adapter", default="")
     parser.add_argument("--if-index", type=int, default=0)
+    # Cross-platform additions (ignored on the Windows path):
+    parser.add_argument("--adapter-id", default="")   # OS-native config id
+    parser.add_argument("--configure-ip", action="store_true")  # Unix: self-config the NIC
+    parser.add_argument("--stop-file", default="")    # Unix: touch to stop
+    parser.add_argument("--watch-pid", type=int, default=0)  # Unix: launcher pid
     args = parser.parse_args(argv)
 
     def log(msg):
         print("[direct link] {}".format(msg), flush=True)
 
     try:
-        if not is_windows():
-            raise DirectLinkRefused(
-                "direct-link DHCP is supported only on Windows")
         server_ip, client_ip, prefixlen = _validate_topology(
             args.server_ip, args.client_ip, args.prefix)
-        _startup_adapter_check(args.adapter, args.if_index, server_ip)
-        responder = DhcpResponder(server_ip, client_ip, prefixlen,
-                                  adapter_name=args.adapter, log=log,
-                                  if_index=args.if_index)
-        responder.open_socket()  # waits for the link, then binds the port
-        # Authoritative safety gate: with the link now up, act as a DHCP client
-        # and see whether a real DHCP server answers. On a genuine direct link
-        # nothing does; on a real network this refuses before we answer anyone.
-        log("checking for another DHCP server on this port…")
-        responder.check_for_foreign_dhcp_server(timeout=4.0)
-        responder.serve_forever()
+        if is_windows():
+            return _run_responder_windows(args, server_ip, client_ip, prefixlen, log)
+        if is_linux() or is_macos():
+            return _run_responder_unix(args, server_ip, client_ip, prefixlen, log)
+        raise DirectLinkRefused(
+            "direct-link DHCP is not supported on this operating system")
     except _Rehome as r:
         # Coexist with a device already on the wire: ask the launcher to move
         # this PC's address (one elevated reconfigure) and restart us. The
@@ -1263,6 +1790,57 @@ def run_responder(argv):
     except WindowsSetupError as e:
         log("cannot start: {}".format(e))
         return 2
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, _StopResponder):
         return 0
+
+
+def _run_responder_windows(args, server_ip, client_ip, prefixlen, log):
+    _startup_adapter_check(args.adapter, args.if_index, server_ip)
+    responder = DhcpResponder(server_ip, client_ip, prefixlen,
+                              adapter_name=args.adapter, log=log,
+                              if_index=args.if_index)
+    responder.open_socket()  # waits for the link, then binds the port
+    # Authoritative safety gate: with the link now up, act as a DHCP client and
+    # see whether a real DHCP server answers. On a genuine direct link nothing
+    # does; on a real network this refuses before we answer anyone.
+    log("checking for another DHCP server on this port…")
+    responder.check_for_foreign_dhcp_server(timeout=4.0)
+    responder.serve_forever()
+    return 0
+
+
+def _run_responder_unix(args, server_ip, client_ip, prefixlen, log):
+    """Linux/macOS: EXPERIMENTAL. The responder runs as root (port 67 is
+    privileged there), so it configures the port itself and, in a finally,
+    always removes the address again -- on a clean stop, a crash, a SIGTERM, or
+    the launcher exiting."""
+    if os.geteuid() != 0:
+        raise DirectLinkRefused(
+            "the direct-link helper needs root on this OS (to bind DHCP port 67 "
+            "and set the address); it should be started elevated")
+    adapter_id = args.adapter_id or args.adapter
+    # Configure the adapter that verification actually MATCHED, not the id we
+    # were handed: _verify_unix_adapter can match by stable name when the id is
+    # stale (interface ids are not stable across reboots), and configuring a
+    # different port than the one we vetted could touch a real LAN.
+    verified = _verify_unix_adapter(adapter_id, args.adapter)
+    adapter_id = verified["id"]
+
+    configured = False
+    _install_unix_signal_stop()
+    try:
+        if args.configure_ip:
+            apply_local_ip(adapter_id, server_ip, prefixlen, log)
+            configured = True
+        responder = DhcpResponder(server_ip, client_ip, prefixlen,
+                                  adapter_name=args.adapter, log=log)
+        responder.stop_file = args.stop_file or None
+        responder.watch_pid = args.watch_pid or None
+        responder.open_socket()
+        log("checking for another DHCP server on this port…")
+        responder.check_for_foreign_dhcp_server(timeout=4.0)
+        responder.serve_forever()
+    finally:
+        if configured:
+            restore_local_ip(adapter_id, server_ip, prefixlen, log)
     return 0

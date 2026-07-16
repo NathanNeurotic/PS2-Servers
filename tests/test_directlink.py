@@ -424,6 +424,29 @@ class MissingIpDiagnosisTests(unittest.TestCase):
                 r.open_socket()
         self.assertEqual(caught.exception.server_ip, "192.168.137.2")
 
+    def test_open_socket_stops_when_teardown_requested_while_waiting(self):
+        # While bind() keeps failing (link down / no console), an unticked box
+        # or an exited launcher must still tear the helper down instead of
+        # sleeping forever -- the stop check has to run inside the wait loop,
+        # even after the re-home probe finds nothing.
+        import errno
+        r = responder()
+
+        def fail_bind(*_a, **_k):
+            err = OSError("address not available")
+            err.errno = errno.EADDRNOTAVAIL
+            raise err
+
+        fake = mock.Mock()
+        fake.bind.side_effect = fail_bind
+        with mock.patch.object(directlink.socket, "socket", return_value=fake), \
+                mock.patch.object(directlink.time, "sleep"), \
+                mock.patch.object(r, "_plan_rehome_now", return_value=None), \
+                mock.patch.object(r, "_stop_requested",
+                                  side_effect=[False, True]):
+            with self.assertRaises(directlink._StopResponder):
+                r.open_socket()
+
 
 def make_offer(xid, server_ip, offered_ip="192.168.137.10", msg_type=MSG_OFFER,
                include_server_id=True, siaddr=None):
@@ -550,32 +573,56 @@ class SubnetTests(unittest.TestCase):
     def test_taken_networks_filters(self):
         enumerated = {
             "adapters": [
-                {"if_index": 5, "ipv4": [
+                {"id": 5, "ipv4": [
                     {"ip": "192.168.1.100", "prefix": 24, "origin": "Dhcp"},
                     {"ip": "169.254.9.9", "prefix": 16, "origin": "WellKnown"},
                 ]},
-                {"if_index": 7, "ipv4": [
+                {"id": 7, "ipv4": [
                     {"ip": "192.168.137.1", "prefix": 24, "origin": "Manual"},
                 ]},
             ],
             "routes": [
-                {"prefix": "0.0.0.0/0", "ifIndex": 5},
-                {"prefix": "224.0.0.0/4", "ifIndex": 5},
-                {"prefix": "255.255.255.255/32", "ifIndex": 5},
-                {"prefix": "169.254.0.0/16", "ifIndex": 9},
-                {"prefix": "10.50.0.0/16", "ifIndex": 9},
-                {"prefix": "192.168.137.0/24", "ifIndex": 7},
+                {"prefix": "0.0.0.0/0", "if_id": 5},
+                {"prefix": "224.0.0.0/4", "if_id": 5},
+                {"prefix": "255.255.255.255/32", "if_id": 5},
+                {"prefix": "169.254.0.0/16", "if_id": 9},
+                {"prefix": "10.50.0.0/16", "if_id": 9},
+                {"prefix": "192.168.137.0/24", "if_id": 7},
             ],
         }
         # Excluding adapter 7 (the one being reconfigured) drops both its
         # address and its route, so its old subnet stays reusable.
-        taken = taken_networks(enumerated, exclude_if_index=7)
+        taken = taken_networks(enumerated, exclude_id=7)
         nets = {(net, plen) for net, plen in taken}
         self.assertIn((_ip_to_int("192.168.1.0"), 24), nets)
         self.assertIn((_ip_to_int("10.50.0.0"), 16), nets)
         self.assertNotIn((_ip_to_int("192.168.137.0"), 24), nets)
         self.assertNotIn((_ip_to_int("169.254.0.0"), 16), nets)
         self.assertNotIn((_ip_to_int("224.0.0.0"), 4), nets)
+
+    def test_taken_networks_additive_retains_selected(self):
+        # Unix setup is additive: the selected port KEEPS its address, so with
+        # no exclusion its network and its route must stay in the taken set, or
+        # choose_subnet could pick a subnet that collides with the very port we
+        # are adding to. The Windows replacement flow (exclude_id) drops them.
+        enumerated = {
+            "adapters": [
+                {"id": 7, "ipv4": [
+                    {"ip": "192.168.137.1", "prefix": 24, "origin": "Manual"},
+                ]},
+            ],
+            "routes": [
+                {"prefix": "192.168.137.0/24", "if_id": 7},
+                {"prefix": "10.50.0.0/16", "if_id": 7},
+            ],
+        }
+        keep = {(net, plen) for net, plen in taken_networks(enumerated)}
+        self.assertIn((_ip_to_int("192.168.137.0"), 24), keep)
+        self.assertIn((_ip_to_int("10.50.0.0"), 16), keep)
+        drop = {(net, plen) for net, plen
+                in taken_networks(enumerated, exclude_id=7)}
+        self.assertNotIn((_ip_to_int("192.168.137.0"), 24), drop)
+        self.assertNotIn((_ip_to_int("10.50.0.0"), 16), drop)
 
 
 class ClassifyTests(unittest.TestCase):
