@@ -76,14 +76,29 @@ def install(app, gui):
         original_build(card)
         add_page_actions(card)
 
+    def normalized_port(value):
+        """A port as a number, so 0xF5F6 and 62966 stop looking like a change.
+
+        base=0 reads both the hex the field prefills and the decimal someone may
+        retype. Anything unparseable falls back to its text: a port field holding
+        junk is the user's business, not a reason to raise here.
+        """
+        if not value:
+            return ""
+        try:
+            return int(str(value).strip(), 0)
+        except (TypeError, ValueError):
+            return str(value).strip()
+
     def pending_launch_changes(app_obj, card, key):
         """Field labels whose value differs from what the running server started on.
 
         ServerCard._active_values is the snapshot taken at launch and cleared at
         stop, so it is the only honest answer to "what is this process actually
-        using" -- the widgets have moved on. Compared as strings because a port
-        typed as 0xF5F6 and one restored as 62966 are the same port, and offering
-        to restart over that would be noise.
+        using" -- the widgets have moved on. Ports compare as numbers and flags as
+        bools, so a port retyped 62966 after launching as 0xF5F6 is not a change:
+        prompting to restart over how a number is spelled would teach people to
+        click through the prompt, which is how a confirm stops protecting anything.
         """
         was = getattr(card, "_active_values", None)
         if not was:
@@ -92,8 +107,10 @@ def install(app, gui):
         changed = []
         for field in card.server.fields:
             before, after = was.get(field.key), now.get(field.key)
-            if isinstance(before, bool) or isinstance(after, bool):
+            if field.kind == "bool" or isinstance(before, bool) or isinstance(after, bool):
                 same = bool(before) == bool(after)
+            elif field.kind == "port":
+                same = normalized_port(before) == normalized_port(after)
             else:
                 same = str(before or "") == str(after or "")
             if not same:
