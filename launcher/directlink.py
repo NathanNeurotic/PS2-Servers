@@ -832,14 +832,20 @@ class DhcpResponder:
             # Could not read the adapter (lookup failed, or it is gone) -- do
             # not guess a cause; the bare fact is still useful.
             return generic
-        if (adapter.get("status") or "").lower() == "up":
+        status = (adapter.get("status") or "").lower()
+        if status == "up":
             return (generic + " -- Windows removed it, which means another "
                     "device on this cable is already using {ip}. If your PS2 "
                     "is set to a static IP of {ip}, switch it to DHCP "
                     "(automatic), or to a different address such as {client}."
                     .format(ip=self.server_ip, client=self.client_ip))
-        return (generic + "; the link went down -- the cable was unplugged or "
-                "the console was switched off")
+        # Only an explicitly-recognized down state gets the link-down wording;
+        # a missing or unfamiliar status is "unknown cause", not a guess.
+        if status in ("disconnected", "down", "not present", "disabled",
+                      "not operational", "inactive", "lowerlayerdown"):
+            return (generic + "; the link went down -- the cable was unplugged "
+                    "or the console was switched off")
+        return generic
 
     # -- refusals ---------------------------------------------------------- #
     def _take_token(self):

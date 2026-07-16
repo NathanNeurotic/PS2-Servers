@@ -279,6 +279,18 @@ class MissingIpDiagnosisTests(unittest.TestCase):
             msg = responder()._diagnose_missing_server_ip()
         self.assertIn("no longer configured", msg)
         self.assertNotIn("link went down", msg)
+        self.assertNotIn("another device", msg)
+
+    def test_unknown_status_is_generic(self):
+        # A missing/unfamiliar status must not be guessed as a link-down.
+        for status in ("", None, "weird"):
+            with mock.patch.object(directlink, "adapter_state",
+                                   return_value={"name": "Ethernet 2",
+                                                 "status": status, "ipv4": []}):
+                msg = responder()._diagnose_missing_server_ip()
+            self.assertNotIn("link went down", msg, status)
+            self.assertNotIn("another device", msg, status)
+            self.assertIn("no longer configured", msg, status)
 
     def test_serve_forever_refuses_with_diagnosis_when_ip_vanishes(self):
         # Exercise the real refusal path: the periodic recheck finds the
