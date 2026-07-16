@@ -356,7 +356,13 @@ def test_modulo_mode_is_exclusive(root, files):
         disc_port = _free_udp_port()
         server = _start_server(root, disc_port, single_port=True, modulo_compat=modulo)
         try:
-            c = UdpfsTestClient(('127.0.0.1', disc_port), timeout=4.0)
+            # Short only where a timeout IS the expected answer -- waiting seconds to
+            # be told what we already expect is dead time. The passing branch keeps a
+            # generous one: it has 200KB to move, and this timeout is per recv, so a
+            # contended CI runner would fail a test whose whole job is to stop false
+            # claims about this flag.
+            c = UdpfsTestClient(('127.0.0.1', disc_port),
+                                timeout=0.5 if modulo else 5.0)
             try:
                 c.discover()          # conformant: seq 0, no modulo fixups
                 got = c.read_file(name, len(expected)) == expected
