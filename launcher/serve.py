@@ -39,6 +39,13 @@ def run_serve(key, server_args):
         except (AttributeError, ValueError):
             pass
 
+    # Not a REGISTRY server: the direct-link DHCP helper runs as a child the
+    # same way, so its logs flow through the terminal and stop follows the
+    # process, but it has no card of its own.
+    if key == "directlink":
+        from .directlink import run_responder
+        return run_responder(list(server_args))
+
     server = REGISTRY.get(key)
     if server is None:
         raise SystemExit("unknown server: {}".format(key))

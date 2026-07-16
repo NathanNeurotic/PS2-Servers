@@ -16,9 +16,9 @@ import tkinter as tk
 import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
-from . import config, elevate, netinfo, tray, windows_setup
+from . import config, directlink, elevate, netinfo, tray, windows_setup
 from .process import ServerProcess
-from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen
+from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
 
 DOT_RUNNING = "●"  # filled circle
 # Tab-header state. Filled = up, hollow = down, on the tab you can see without
@@ -93,6 +93,12 @@ Use "Remove PS2 Servers firewall rules" to delete only rules whose display names
 
 Removing those rules returns Windows to having no PS2 Servers-specific firewall rules. It does not add block rules. It does not change Windows SMB1. It does not remove unrelated firewall rules.
 
+Direct PS2-to-PC link
+
+A PS2 cabled straight into the PC has no router on the wire, so nothing hands the console an IP address and every network app fails the same way. Ticking "PS2 is plugged directly into this PC" fixes that: PS2 Servers gives the chosen network port a fixed address (one administrator prompt), allows DHCP through the firewall, and runs a small DHCP helper that answers only on that port, so the console configures itself.
+
+The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if several different devices start asking. Unticking the box stops the helper and returns the port to automatic (DHCP); "Remove PS2 Servers firewall rules" also undoes it. Direct link mode is currently Windows-only.
+
 No terminal required
 
 The buttons in the launcher footer are the normal way to manage PS2 Servers' Windows changes. Use "Allow through firewall" to add or refresh the rules. Use "Remove PS2 Servers firewall rules" to undo them. Use "Stop all" to shut down every running PS2 Servers process from the GUI.
@@ -119,6 +125,7 @@ TAB_TITLES = {
     "udpfs": "UDPFS",
     "udpbd": "UDPBD",
     "setup": "SETUP",
+    "directlink": "DIRECT",
 }
 
 
@@ -351,6 +358,9 @@ class LauncherApp:
         self.logs = {}
         self.saved = config.load()
         self._firewall_ok = set()   # _restore fills it; never read before it exists
+        self._direct_proc = None            # the DHCP helper child, when running
+        self._direct_expected = False       # we started it and expect it alive
+        self._direct_busy = False           # an enable/disable flow is mid-flight
         self._tray = None
         self._tray_option_widgets = []
         self.close_to_tray_var = tk.BooleanVar(
@@ -394,8 +404,16 @@ class LauncherApp:
             self.root.after(350, self._allow_pending)
         elif self.saved.get("pending_cleanup"):
             self.root.after(350, self._cleanup_pending)
+        elif self.saved.get("pending_direct_link"):
+            self.root.after(350, self._direct_link_pending)
+        elif self.saved.get("pending_direct_link_off"):
+            self.root.after(350, self._direct_link_off_pending)
         elif self.saved.get("pending_start"):
             self.root.after(350, self._start_pending)
+        elif (self.saved.get("direct_link") or {}).get("enabled"):
+            # Re-arm the DHCP helper for an already-configured direct link.
+            # Skipped while any pending flow runs: those flows own the state.
+            self.root.after(600, self._direct_link_startup)
 
     def _configure_window(self):
         screen_height = self.root.winfo_screenheight()
@@ -525,6 +543,27 @@ class LauncherApp:
                   style="TopStripHint.TLabel", wraplength=420).grid(
             row=0, column=3, sticky="w", padx=(12, 0))
 
+        # direct PS2-to-PC link: adapter setup + DHCP helper behind one checkbox.
+        # Windows-only for now -- adapter configuration is per-OS plumbing.
+        if windows_setup.is_windows():
+            direct = ttk.Frame(parent, style="TopStrip.TFrame", padding=(12, 8))
+            direct.pack(fill="x", padx=16, pady=(0, 8))
+            direct.columnconfigure(1, weight=1)
+            self.direct_link_var = tk.BooleanVar(value=False)
+            self._direct_check = ttk.Checkbutton(
+                direct, text="PS2 is plugged directly into this PC",
+                variable=self.direct_link_var, style="Card.TCheckbutton",
+                command=self._on_direct_link_toggle)
+            self._direct_check.grid(row=0, column=0, sticky="w")
+            self._direct_status = ttk.Label(
+                direct, text=self._DIRECT_STATUS_OFF,
+                style="TopStripHint.TLabel", wraplength=640)
+            self._direct_status.grid(row=0, column=1, sticky="w", padx=(12, 0))
+        else:
+            self.direct_link_var = None
+            self._direct_check = None
+            self._direct_status = None
+
         # main tabs: one server per tab, plus a shared terminal tab
         self.nb = ttk.Notebook(parent)
         self.nb.pack(fill="x", padx=16, pady=(0, 12))
@@ -556,6 +595,7 @@ class LauncherApp:
         for server in REGISTRY.values():
             self.logs[server.key] = self.terminal
         self.logs["setup"] = self.terminal
+        self.logs["directlink"] = self.terminal
 
         self._build_about_tab()
 
@@ -676,6 +716,427 @@ class LauncherApp:
         self.ip_var.set(netinfo.best_lan_ip())
         for key in self.procs:
             self.cards[key].refresh_status(self.is_running(key))
+
+    # -- direct PS2-to-PC link -------------------------------------------- #
+    _DIRECT_STATUS_OFF = (
+        "Tick this if there is no router between the PS2 and this PC. It sets "
+        "up the network port and gives the console its address automatically.")
+
+    def _set_direct_status(self, text):
+        if self._direct_status is not None:
+            self._direct_status.config(text=text)
+
+    def _set_direct_checkbox(self, ticked, busy=False):
+        """Reflect state without re-entering the toggle handler (ttk fires the
+        command only on clicks, so programmatic var changes are safe)."""
+        self._direct_busy = busy
+        if self.direct_link_var is not None:
+            self.direct_link_var.set(bool(ticked))
+        if self._direct_check is not None:
+            self._direct_check.config(state="disabled" if busy else "normal")
+
+    def _direct_ready_status(self, cfg):
+        return ("Ready on '{adapter}': this PC is {server}, the PS2 gets "
+                "{client} by itself. Use {server} wherever an app asks for "
+                "the server IP.".format(adapter=cfg.get("adapter", "?"),
+                                        server=cfg.get("server_ip", "?"),
+                                        client=cfg.get("client_ip", "?")))
+
+    def _on_direct_link_toggle(self):
+        if self._direct_busy:
+            return
+        if self.direct_link_var.get():
+            self._direct_link_begin_enable()
+        else:
+            self._direct_link_begin_disable()
+
+    def _direct_link_begin_enable(self):
+        self._set_direct_checkbox(True, busy=True)
+        self._set_direct_status(
+            "Looking for the network port the PS2 is plugged into…")
+
+        def worker():
+            try:
+                enumerated = directlink.enumerate_adapters()
+            except Exception as e:
+                self.root.after(0, lambda err=e: self._direct_link_fail(
+                    "Could not inspect this PC's network ports:\n\n{}".format(err)))
+                return
+            self.root.after(0, lambda: self._direct_link_choose(enumerated))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _direct_link_fail(self, message, title="Direct link setup failed"):
+        messagebox.showerror(title, message)
+        self._append_log("directlink", "[launcher] {}\n".format(
+            message.replace("\n", " ").strip()))
+        self._set_direct_checkbox(False)
+        self._set_direct_status(self._DIRECT_STATUS_OFF)
+
+    def _direct_link_choose(self, enumerated):
+        candidates, rejected = directlink.find_candidates(enumerated)
+        if not candidates:
+            lines = ["No network port looks like a direct PS2 link right now.",
+                     ""]
+            for adapter, reason in rejected[:8]:
+                lines.append("• {} — {}".format(adapter["name"], reason))
+            lines += ["",
+                      "Plug the PS2 straight into this PC with an ethernet "
+                      "cable, turn the console on, then tick the box again."]
+            messagebox.showinfo("No direct link found", "\n".join(lines))
+            self._set_direct_checkbox(False)
+            self._set_direct_status(self._DIRECT_STATUS_OFF)
+            return
+
+        adapter = (candidates[0] if len(candidates) == 1
+                   else self._pick_adapter_dialog(candidates))
+        if adapter is None:
+            self._set_direct_checkbox(False)
+            self._set_direct_status(self._DIRECT_STATUS_OFF)
+            return
+
+        taken = directlink.taken_networks(enumerated,
+                                          exclude_if_index=adapter["if_index"])
+        server_ip, client_ip = directlink.choose_subnet(taken)
+        if not server_ip:
+            self._direct_link_fail(
+                "Could not find a private network range that does not "
+                "collide with one this PC already uses.")
+            return
+
+        current = [i["ip"] for i in adapter.get("ipv4", [])
+                   if i["ip"] and not i["ip"].startswith("169.254.")]
+        note = ""
+        if current:
+            note = ("\n\nIts current address ({}) will be replaced; unticking "
+                    "the box returns the port to automatic (DHCP), not to "
+                    "that address.".format(", ".join(current)))
+        if not messagebox.askyesno(
+                "Set up the direct PS2 link?",
+                "Use '{name}' ({desc}) as the direct PS2 link?\n\n"
+                "PS2 Servers will:\n"
+                "• give this PC the fixed address {server} on that port\n"
+                "• allow DHCP (UDP 67) through the firewall\n"
+                "• run a small DHCP helper that answers ONLY on that port, "
+                "handing the PS2 {client}\n\n"
+                "This needs one administrator prompt. The helper refuses to "
+                "run if that port turns out to be a real network (router or "
+                "DHCP server present). Untick the box to undo everything."
+                "{note}".format(name=adapter["name"], desc=adapter["desc"],
+                                server=server_ip, client=client_ip,
+                                note=note)):
+            self._set_direct_checkbox(False)
+            self._set_direct_status(self._DIRECT_STATUS_OFF)
+            return
+
+        self.saved["direct_link"] = {
+            "enabled": False,
+            "adapter": adapter["name"],
+            "if_index": adapter["if_index"],
+            "server_ip": server_ip,
+            "client_ip": client_ip,
+            "prefix": directlink.PREFIX_LENGTH,
+        }
+
+        if not elevate.is_admin():
+            if not elevate.can_elevate():
+                self._direct_link_fail(
+                    "Setting a fixed address on the port needs administrator "
+                    "rights, and this environment cannot request them.")
+                return
+            self._save(pending_direct_link=True)
+            if elevate.relaunch_as_admin():
+                self.stop_all()
+                if self._tray:
+                    self._tray.stop()
+                self.root.destroy()
+            else:
+                self.saved.pop("pending_direct_link", None)
+                self._save()
+                self._direct_link_fail("Could not restart as administrator.")
+            return
+
+        self._direct_link_apply_async()
+
+    def _pick_adapter_dialog(self, candidates):
+        win = tk.Toplevel(self.root)
+        win.title("Which port is the PS2 in?")
+        win.transient(self.root)
+        win.grab_set()
+        win.resizable(False, False)
+        ttk.Label(win, justify="left",
+                  text="More than one network port could be the PS2 link.\n"
+                       "Pick the one the PS2 is plugged into:").pack(
+            padx=14, pady=(12, 6), anchor="w")
+        box = tk.Listbox(win, height=max(2, min(6, len(candidates))), width=64,
+                         exportselection=False)
+        for adapter in candidates:
+            box.insert("end", "{}  —  {}".format(adapter["name"], adapter["desc"]))
+        box.selection_set(0)
+        box.pack(padx=14, pady=4)
+        chosen = {"adapter": None}
+        buttons = ttk.Frame(win)
+        buttons.pack(fill="x", padx=14, pady=(6, 12))
+
+        def use():
+            selection = box.curselection()
+            if selection:
+                chosen["adapter"] = candidates[selection[0]]
+            win.destroy()
+
+        ttk.Button(buttons, text="Use this port", command=use).pack(
+            side="right")
+        ttk.Button(buttons, text="Cancel", command=win.destroy).pack(
+            side="right", padx=(0, 8))
+        box.bind("<Double-Button-1>", lambda _e: use())
+        win.wait_window()
+        return chosen["adapter"]
+
+    def _direct_link_apply_async(self):
+        cfg = self.saved.get("direct_link") or {}
+        if not cfg.get("server_ip"):
+            self._direct_link_fail("Direct link settings were lost; please "
+                                   "tick the box again.")
+            return
+        self._set_direct_checkbox(True, busy=True)
+        self._set_direct_status("Setting up '{}'…".format(cfg.get("adapter")))
+        self.nb.select(self.terminal_tab)
+
+        def worker():
+            try:
+                configured = directlink.apply_adapter_config(
+                    cfg["if_index"], cfg["server_ip"],
+                    cfg.get("prefix", directlink.PREFIX_LENGTH))
+                firewall = windows_setup.apply_setup("directlink", {})
+            except Exception as e:
+                self.root.after(0, lambda err=e: self._direct_link_fail(
+                    "Could not set up the direct link:\n\n{}".format(err)))
+                return
+            output = "\n".join(
+                filter(None, [configured, firewall.get("output") or ""]))
+            self.root.after(0, lambda: self._direct_link_enabled(output))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _direct_link_enabled(self, output):
+        if output:
+            self._append_log("directlink", "[setup] {}\n".format(
+                output.replace("\n", "\n[setup] ")))
+        cfg = self.saved.get("direct_link") or {}
+        cfg["enabled"] = True
+        self.saved["direct_link"] = cfg
+        self._start_direct_responder()
+        # The LAN IP box is what every OPL hint shows; the direct link has
+        # exactly one address the PS2 can reach.
+        self.ip_var.set(cfg["server_ip"])
+        self._save()
+        self._set_direct_checkbox(True)
+        self._set_direct_status(self._direct_ready_status(cfg))
+
+    def _start_direct_responder(self):
+        if self._direct_proc is not None and self._direct_proc.is_running():
+            return
+        cfg = self.saved.get("direct_link") or {}
+        args = ["--server-ip", cfg["server_ip"],
+                "--client-ip", cfg["client_ip"],
+                "--prefix", str(cfg.get("prefix", directlink.PREFIX_LENGTH)),
+                "--adapter", cfg.get("adapter", ""),
+                "--if-index", str(cfg.get("if_index", 0))]
+        command = serve_command("directlink", args)
+        self._append_log("directlink",
+                         "[launcher] starting DHCP helper: {}\n".format(
+                             " ".join(command)))
+        proc = ServerProcess("directlink", command, cwd=REPO_ROOT,
+                             on_output=self._on_output)
+        try:
+            proc.start()
+        except OSError as e:
+            self._direct_link_fail("Could not start the DHCP helper: {}".format(e))
+            return
+        self._direct_proc = proc
+        self._direct_expected = True
+
+    def _stop_direct_responder(self):
+        self._direct_expected = False
+        if self._direct_proc is not None:
+            if self._direct_proc.is_running():
+                self._direct_proc.stop()
+                self._append_log("directlink", "[launcher] DHCP helper stopped\n")
+            self._direct_proc = None
+
+    def _direct_link_begin_disable(self):
+        cfg = self.saved.get("direct_link") or {}
+        if not cfg.get("enabled"):
+            self._stop_direct_responder()
+            self._set_direct_checkbox(False)
+            self._set_direct_status(self._DIRECT_STATUS_OFF)
+            return
+        choice = messagebox.askyesnocancel(
+            "Turn off the direct link?",
+            "Return '{}' to automatic (DHCP)?\n\n"
+            "Yes: undo the network setup (one administrator prompt if "
+            "needed).\nNo: stop the DHCP helper but keep the fixed address "
+            "{}.\nCancel: leave the direct link on.".format(
+                cfg.get("adapter", "?"), cfg.get("server_ip", "?")))
+        if choice is None:
+            self._set_direct_checkbox(True)
+            return
+
+        self._stop_direct_responder()
+        cfg["enabled"] = False
+        self.saved["direct_link"] = cfg
+
+        if choice is False:
+            self._save()
+            self._set_direct_checkbox(False)
+            self._set_direct_status(
+                "Off. '{}' keeps the fixed address {}; tick the box to use "
+                "it again.".format(cfg.get("adapter", "?"),
+                                   cfg.get("server_ip", "?")))
+            return
+
+        if not elevate.is_admin():
+            if not elevate.can_elevate():
+                self._save()
+                self._direct_link_fail(
+                    "Returning the port to automatic (DHCP) needs "
+                    "administrator rights, and this environment cannot "
+                    "request them. The DHCP helper is stopped.")
+                return
+            self._save(pending_direct_link_off=True)
+            if elevate.relaunch_as_admin():
+                self.stop_all()
+                if self._tray:
+                    self._tray.stop()
+                self.root.destroy()
+            else:
+                self.saved.pop("pending_direct_link_off", None)
+                self._save()
+                self._direct_link_fail(
+                    "Could not restart as administrator. The DHCP helper is "
+                    "stopped, but '{}' still has the fixed address {} — untick "
+                    "and tick later, or use Windows network settings, to "
+                    "return it to DHCP.".format(cfg.get("adapter", "?"),
+                                                cfg.get("server_ip", "?")))
+            return
+
+        self._save()
+        self._direct_link_restore_async(cfg)
+
+    def _direct_link_restore_async(self, cfg):
+        self._set_direct_checkbox(False, busy=True)
+        self._set_direct_status(
+            "Returning '{}' to automatic (DHCP)…".format(cfg.get("adapter")))
+
+        def worker():
+            try:
+                output = directlink.restore_adapter_dhcp(
+                    cfg.get("if_index", 0), expect_ip=cfg.get("server_ip"))
+            except Exception as e:
+                self.root.after(0, lambda err=e: self._direct_link_fail(
+                    "Could not return the port to automatic (DHCP):\n\n{}"
+                    .format(err), title="Direct link cleanup failed"))
+                return
+            self.root.after(0, lambda: self._direct_link_restored(output))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _direct_link_restored(self, output):
+        if output:
+            self._append_log("directlink", "[setup] {}\n".format(
+                output.replace("\n", "\n[setup] ")))
+        self._set_direct_checkbox(False)
+        self._set_direct_status(self._DIRECT_STATUS_OFF)
+
+    def _direct_link_pending(self):
+        self.saved.pop("pending_direct_link", None)
+        self._save()
+        cfg = self.saved.get("direct_link") or {}
+        if not cfg.get("server_ip"):
+            return
+        self.nb.select(self.terminal_tab)
+        self._append_log("directlink",
+                         "[launcher] continuing direct link setup after "
+                         "administrator restart\n")
+        if not elevate.is_admin():
+            self._direct_link_fail(
+                "Administrator rights were not granted; the direct link was "
+                "not set up.")
+            return
+        self._direct_link_apply_async()
+
+    def _direct_link_off_pending(self):
+        self.saved.pop("pending_direct_link_off", None)
+        self._save()
+        cfg = self.saved.get("direct_link") or {}
+        self.nb.select(self.terminal_tab)
+        self._append_log("directlink",
+                         "[launcher] continuing direct link cleanup after "
+                         "administrator restart\n")
+        if not elevate.is_admin():
+            self._direct_link_fail(
+                "Administrator rights were not granted. '{}' still has the "
+                "fixed address {}.".format(cfg.get("adapter", "?"),
+                                           cfg.get("server_ip", "?")),
+                title="Direct link cleanup failed")
+            return
+        if not cfg.get("if_index"):
+            return
+        self._direct_link_restore_async(cfg)
+
+    def _direct_link_startup(self):
+        """Re-arm an already-configured direct link on launch.
+
+        The adapter's static address survives reboots; the helper does not.
+        Verify the port still looks like ours, then start the helper (which
+        re-checks the refusals itself before answering anything).
+        """
+        cfg = self.saved.get("direct_link") or {}
+        if not cfg.get("enabled") or self.direct_link_var is None:
+            return
+        self._set_direct_checkbox(True, busy=True)
+        self._set_direct_status("Checking the direct-link port…")
+
+        def worker():
+            problem = None
+            try:
+                adapter = directlink.adapter_state(cfg.get("if_index", 0),
+                                                   cfg.get("adapter") or None)
+                if adapter is None:
+                    problem = "the direct-link port is no longer present"
+                elif not any(i["ip"] == cfg.get("server_ip")
+                             for i in adapter["ipv4"]):
+                    problem = ("'{}' no longer has the address {}".format(
+                        adapter["name"], cfg.get("server_ip")))
+                else:
+                    # An unplugged cable is fine -- the helper waits for it.
+                    # A gateway or lease is not: refuse like the helper would.
+                    ok, reason = directlink.classify_adapter(adapter,
+                                                             allow_down=True)
+                    if not ok:
+                        problem = "'{}' {}".format(adapter["name"], reason)
+            except Exception as e:
+                problem = str(e)
+            self.root.after(0, lambda: self._direct_link_startup_done(problem))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _direct_link_startup_done(self, problem):
+        cfg = self.saved.get("direct_link") or {}
+        if problem:
+            cfg["enabled"] = False
+            self.saved["direct_link"] = cfg
+            self._save()
+            self._append_log("directlink",
+                             "[launcher] direct link not re-armed: {}\n".format(problem))
+            self._set_direct_checkbox(False)
+            self._set_direct_status(
+                "Direct link is off: {}. Tick the box to set it up again."
+                .format(problem))
+            return
+        self._start_direct_responder()
+        self._set_direct_checkbox(True)
+        self._set_direct_status(self._direct_ready_status(cfg))
 
     # -- run/stop --------------------------------------------------------- #
     def is_running(self, key):
@@ -940,6 +1401,8 @@ class LauncherApp:
     def _allow_windows_setup_async(self):
         self._append_log("setup", "[setup] allowing PS2 Servers through Windows Firewall\n")
         values = {key: card.values() for key, card in self.cards.items()}
+        if (self.saved.get("direct_link") or {}).get("enabled"):
+            values["directlink"] = {}
 
         def worker():
             try:
@@ -984,12 +1447,16 @@ class LauncherApp:
             self.stop_all()
 
         if require_confirm:
+            message = ("This removes only Windows Firewall rules whose display names "
+                       "start with:\n\nPS2 Servers -\n\n"
+                       "It does not create block rules. After this, Windows returns to "
+                       "having no PS2 Servers-specific firewall rules.")
+            if (self.saved.get("direct_link") or {}).get("server_ip"):
+                message += ("\n\nThe direct PS2 link is also undone: its DHCP "
+                            "helper stops and the port returns to automatic "
+                            "(DHCP).")
             if not messagebox.askyesno(
-                    "Remove PS2 Servers firewall rules?",
-                    "This removes only Windows Firewall rules whose display names "
-                    "start with:\n\nPS2 Servers -\n\n"
-                    "It does not create block rules. After this, Windows returns to "
-                    "having no PS2 Servers-specific firewall rules. Continue?"):
+                    "Remove PS2 Servers firewall rules?", message + "\n\nContinue?"):
                 return
 
         if not elevate.is_admin():
@@ -1054,7 +1521,32 @@ class LauncherApp:
         # The cache says "these rules exist and match". They are about to not.
         self._forget_firewall_ok()
 
+        # Cleanup is the "give me my Windows back" button, so the direct link
+        # goes too: helper stopped here (main thread owns the process), the
+        # port returned to DHCP in the worker (we are already elevated).
+        direct_cfg = dict(self.saved.get("direct_link") or {})
+        if direct_cfg.get("server_ip"):
+            self._stop_direct_responder()
+            self.saved.pop("direct_link", None)
+            self._save()
+            self._set_direct_checkbox(False)
+            self._set_direct_status(self._DIRECT_STATUS_OFF)
+
         def worker():
+            if direct_cfg.get("server_ip"):
+                try:
+                    output = directlink.restore_adapter_dhcp(
+                        direct_cfg.get("if_index", 0),
+                        expect_ip=direct_cfg.get("server_ip"))
+                    self.root.after(0, lambda out=output: self._append_log(
+                        "directlink", "[setup] {}\n".format(
+                            out.replace("\n", "\n[setup] "))))
+                except Exception as e:
+                    # The firewall removal below still matters; report and go on.
+                    self.root.after(0, lambda err=e: self._append_log(
+                        "directlink",
+                        "[setup] could not return the direct-link port to "
+                        "DHCP: {}\n".format(err)))
             try:
                 result = windows_setup.remove_setup()
             except Exception as e:
@@ -1132,6 +1624,20 @@ class LauncherApp:
                 self.cards[key].toggle_btn.config(state="normal")
                 self._append_log(key, "[launcher] server exited (code {})\n".format(
                     proc.returncode))
+        if (self._direct_expected and self._direct_proc is not None
+                and not self._direct_proc.is_running()):
+            code = self._direct_proc.returncode
+            self._direct_expected = False
+            self._append_log("directlink",
+                             "[launcher] DHCP helper exited (code {})\n".format(code))
+            if code == 3:  # a safety refusal; the helper said why in the log
+                self._set_direct_status(
+                    "The DHCP helper stopped itself for safety — see the "
+                    "TERMINAL tab. Untick and tick the box to retry.")
+            else:
+                self._set_direct_status(
+                    "The DHCP helper stopped (code {}) — see the TERMINAL "
+                    "tab. Untick and tick the box to retry.".format(code))
         self.root.after(600, self._poll_status)
 
     # -- config ----------------------------------------------------------- #
@@ -1162,7 +1668,8 @@ class LauncherApp:
             self._saved_bool("minimize_to_tray", self.minimize_to_tray_var.get()))
 
     def _save(self, pending_start=None, pending_cleanup=False,
-              pending_firewall_allow=False):
+              pending_firewall_allow=False, pending_direct_link=False,
+              pending_direct_link_off=False):
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get(),
                 "firewall_ok": sorted(getattr(self, "_firewall_ok", ())),
@@ -1175,12 +1682,18 @@ class LauncherApp:
                 "ip_custom": self.ip_var.get() not in self._detected_ips(),
                 "close_to_tray": bool(self.close_to_tray_var.get()),
                 "minimize_to_tray": bool(self.minimize_to_tray_var.get())}
+        if self.saved.get("direct_link"):
+            data["direct_link"] = self.saved["direct_link"]
         if pending_start:
             data["pending_start"] = pending_start
         if pending_cleanup:
             data["pending_cleanup"] = True
         if pending_firewall_allow:
             data["pending_firewall_allow"] = True
+        if pending_direct_link:
+            data["pending_direct_link"] = True
+        if pending_direct_link_off:
+            data["pending_direct_link_off"] = True
         try:
             config.save(data)
         except OSError:
@@ -1227,6 +1740,7 @@ class LauncherApp:
         # look like a frozen window
         self.root.withdraw()
         self.stop_all()
+        self._stop_direct_responder()
         if self._tray:
             self._tray.stop()
         self.root.destroy()

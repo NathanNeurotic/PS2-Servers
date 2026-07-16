@@ -141,6 +141,11 @@ def _server_ports(key, values):
         return ports
     if key == "udpbd":
         return [("UDP", UDPBD_PORT, "UDPBD")]
+    if key == "directlink":
+        # The direct-link DHCP helper. Rule created only while enabling the
+        # mode (never speculatively), removed with every other "PS2 Servers -"
+        # rule by remove_setup.
+        return [("UDP", 67, "Direct link DHCP")]
     return []
 
 
@@ -404,6 +409,9 @@ def setup_summary(key, values):
         parts.append("create Windows Firewall allow rules for the built-in PS2 Servers SMB server")
         if values.get("take_445"):
             parts.append("temporarily use TCP 445 by pausing Windows file sharing while the server runs")
+    elif key == "directlink":
+        parts.append("set a fixed address on the chosen network port and allow "
+                     "the direct-link DHCP helper (UDP 67) through the firewall")
     else:
         ports = _server_ports(key, values)
         if ports:
