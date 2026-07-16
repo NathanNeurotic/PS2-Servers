@@ -167,16 +167,29 @@ def _apply_gui_review_fixes(gui):
         style.configure("PageActions.TLabel", background=palette["panel"], foreground=palette["muted"])
         style.configure("Admin.TFrame", background=palette["panel"], relief="solid", borderwidth=1)
         style.configure("Server.TNotebook", background=palette["bg"], borderwidth=0,
-                        tabmargins=(8, 6, 8, 0))
-        style.configure("Server.TNotebook.Tab", padding=(12, 6), font=("", 10, "bold"),
-                        background=palette["panel"], foreground=palette["muted"], borderwidth=1)
+                        tabmargins=(6, 4, 6, 0))
+        # Inactive tabs sit flat and muted; the selected tab is lifted with a
+        # brighter fill, accent2 text, and an accent outline that ties it to the
+        # page below. clam otherwise blends its own lighter fill onto the raised
+        # selected tab (a washed-out, low-contrast box), so light/dark/bordercolor
+        # are pinned per state to keep every tab exactly the colour asked for.
+        style.configure("Server.TNotebook.Tab", padding=(16, 8), font=("", 10, "bold"),
+                        background=palette["panel"], foreground=palette["muted"],
+                        borderwidth=1, bordercolor="#18416f",
+                        lightcolor=palette["panel"], darkcolor=palette["panel"])
         style.map("Server.TNotebook.Tab",
                   background=[("selected", palette["panel3"]),
-                              ("active", palette["panel2"]),
+                              ("active", "!selected", palette["panel2"]),
                               ("!selected", palette["panel"])],
                   foreground=[("selected", palette["accent2"]),
                               ("active", palette["text"]),
-                              ("!selected", palette["muted"])])
+                              ("!selected", palette["muted"])],
+                  bordercolor=[("selected", palette["accent"]),
+                               ("!selected", "#18416f")],
+                  lightcolor=[("selected", palette["panel3"]),
+                              ("!selected", palette["panel"])],
+                  darkcolor=[("selected", palette["panel3"]),
+                             ("!selected", palette["panel"])])
 
     def configure_window(self):
         screen_width = max(640, self.root.winfo_screenwidth())
