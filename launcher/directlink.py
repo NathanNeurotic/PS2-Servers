@@ -24,7 +24,7 @@ LAN). Containment is layered:
     adapter that has a default gateway or holds a DHCP lease -- both mean
     "this is a real network, not a direct link".
   * A tripwire while running: a direct link has exactly one device, so seeing
-    several distinct client MACs means this is not a direct link; the
+    a second distinct client MAC means this is not a direct link; the
     responder stops rather than keep answering.
   * One lease, one address, and rate-limited replies.
 
@@ -33,6 +33,7 @@ sharing along, and is not ours to debug; this is ~150 lines we can fix.
 """
 
 import errno
+import ipaddress
 import json
 import socket
 import struct
@@ -67,8 +68,16 @@ class DirectLinkRefused(RuntimeError):
 
 
 # --------------------------------------------------------------------------- #
-# Small IPv4 math (no ipaddress import: these five lines are the whole need)
+# Small IPv4 helpers
 # --------------------------------------------------------------------------- #
+def _canonical_ipv4(value, label="IPv4 address"):
+    try:
+        return str(ipaddress.IPv4Address(str(value)))
+    except (ipaddress.AddressValueError, ValueError):
+        raise WindowsSetupError(
+            "Invalid {}: {!r}".format(label, value)) from None
+
+
 def _ip_to_int(ip):
     return struct.unpack("!I", socket.inet_aton(ip))[0]
 
@@ -279,6 +288,11 @@ def apply_adapter_config(if_index, server_ip, prefixlen=PREFIX_LENGTH):
     stale answer from the earlier scan (or a cable moved in between) cannot
     configure the wrong port.
     """
+    server_ip = _canonical_ipv4(server_ip, "direct-link server address")
+    prefixlen = int(prefixlen)
+    if not 1 <= prefixlen <= 32:
+        raise WindowsSetupError(
+            "Invalid direct-link prefix length: {}".format(prefixlen))
     script = "\n".join([
         "$ErrorActionPreference = 'Stop'",
         "$idx = {}".format(int(if_index)),
@@ -293,7 +307,10 @@ def apply_adapter_config(if_index, server_ip, prefixlen=PREFIX_LENGTH):
         "  throw 'REFUSED: that adapter holds a DHCP lease from a real network.'",
         "}",
         "$name = (Get-NetAdapter -InterfaceIndex $idx -ErrorAction Stop).Name",
+        "$mutationStarted = $false",
+        "try {",
         "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Disabled",
+        "$mutationStarted = $true",
         "Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
         "-ErrorAction SilentlyContinue | "
         "Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
@@ -302,6 +319,19 @@ def apply_adapter_config(if_index, server_ip, prefixlen=PREFIX_LENGTH):
         "Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses "
         "-ErrorAction SilentlyContinue",
         "Write-Output ('CONFIGURED=' + $name)",
+        "} catch {",
+        "  $originalError = $_",
+        "  if ($mutationStarted) {",
+        "    Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
+        "-ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false "
+        "-ErrorAction SilentlyContinue",
+        "    Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 "
+        "-Dhcp Enabled -ErrorAction SilentlyContinue",
+        "    Set-DnsClientServerAddress -InterfaceIndex $idx "
+        "-ResetServerAddresses -ErrorAction SilentlyContinue",
+        "  }",
+        "  throw $originalError",
+        "}",
     ])
     res = _powershell(script)
     output = ((res.stdout or "") + (res.stderr or "")).strip()
@@ -319,6 +349,8 @@ def restore_adapter_dhcp(if_index, expect_ip=None):
     """
     guard = ""
     if expect_ip:
+        expect_ip = _canonical_ipv4(
+            expect_ip, "expected direct-link server address")
         guard = "\n".join([
             "$cur = @(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
             "-ErrorAction SilentlyContinue | ForEach-Object { [string]$_.IPAddress })",
@@ -430,9 +462,9 @@ def _mac_text(mac):
 class DhcpResponder:
     """Single-lease DHCP for exactly one directly-attached console."""
 
-    # A direct link has one device on it. Several distinct MACs asking for
+    # A direct link has one device on it. A second distinct MAC asking for
     # addresses means this wire is a real network -- stop, do not adapt.
-    MAX_DISTINCT_MACS = 3
+    MAX_DISTINCT_MACS = 1
     REPLY_BURST = 8          # token bucket: at most this many queued replies
     REPLY_RATE = 4.0         # ...refilled at this many per second
     IP_RECHECK_SECONDS = 30  # confirm our address still exists this often
@@ -720,17 +752,19 @@ def run_responder(argv):
     parser.add_argument("--prefix", type=int, default=PREFIX_LENGTH)
     parser.add_argument("--adapter", default="")
     parser.add_argument("--if-index", type=int, default=0)
-    parser.add_argument("--skip-adapter-check", action="store_true",
-                        help="tests only: no PowerShell at startup")
     args = parser.parse_args(argv)
 
     def log(msg):
         print("[direct link] {}".format(msg), flush=True)
 
     try:
-        if is_windows() and not args.skip_adapter_check:
-            _startup_adapter_check(args.adapter, args.if_index, args.server_ip)
-        responder = DhcpResponder(args.server_ip, args.client_ip, args.prefix,
+        if not is_windows():
+            raise DirectLinkRefused(
+                "direct-link DHCP is supported only on Windows")
+        server_ip = _canonical_ipv4(args.server_ip, "direct-link server address")
+        client_ip = _canonical_ipv4(args.client_ip, "direct-link client address")
+        _startup_adapter_check(args.adapter, args.if_index, server_ip)
+        responder = DhcpResponder(server_ip, client_ip, args.prefix,
                                   adapter_name=args.adapter, log=log)
         responder.open_socket()
         responder.serve_forever()

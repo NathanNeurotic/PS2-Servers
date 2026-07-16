@@ -8,14 +8,17 @@ protocol and the refusals can be tested without a wire.
 
 import struct
 import unittest
+from unittest import mock
 
-from launcher import directlink
+from launcher import directlink, windows_setup
 from launcher.directlink import (
     DhcpResponder, DirectLinkRefused, MAGIC_COOKIE,
     MSG_ACK, MSG_DISCOVER, MSG_NAK, MSG_OFFER, MSG_REQUEST,
     build_reply, choose_subnet, classify_adapter, networks_overlap,
     parse_packet, taken_networks, _BOOTP, _ip_to_int,
 )
+from launcher.gui import LauncherApp
+from launcher.windows_setup import WindowsSetupError
 
 SERVER = "192.168.137.1"
 CLIENT = "192.168.137.10"
@@ -323,6 +326,116 @@ class ClassifyTests(unittest.TestCase):
             allow_down=True)
         self.assertFalse(ok)
         self.assertIn("router", reason)
+
+
+class ConfigurationSafetyTests(unittest.TestCase):
+    def test_invalid_server_ip_is_rejected_before_powershell(self):
+        with mock.patch.object(directlink, "_powershell") as powershell:
+            with self.assertRaises(WindowsSetupError):
+                directlink.apply_adapter_config(
+                    3, "192.168.137.1'; Remove-Item C:\\ -Recurse; '")
+        powershell.assert_not_called()
+
+    def test_invalid_restore_guard_is_rejected_before_powershell(self):
+        with mock.patch.object(directlink, "_powershell") as powershell:
+            with self.assertRaises(WindowsSetupError):
+                directlink.restore_adapter_dhcp(
+                    3, expect_ip="192.168.137.1'; Write-Output BAD; '")
+        powershell.assert_not_called()
+
+    def test_configuration_script_contains_failure_rollback(self):
+        result = mock.Mock(returncode=0, stdout="CONFIGURED=Ethernet", stderr="")
+        with mock.patch.object(directlink, "_powershell", return_value=result) as ps:
+            directlink.apply_adapter_config(3, SERVER)
+        script = ps.call_args.args[0]
+        self.assertIn("catch {", script)
+        self.assertIn("-Dhcp Enabled", script)
+        self.assertIn("throw $originalError", script)
+
+    def test_responder_refuses_non_windows(self):
+        args = ["--server-ip", SERVER, "--client-ip", CLIENT,
+                "--adapter", "Ethernet", "--if-index", "3"]
+        with mock.patch.object(directlink, "is_windows", return_value=False):
+            self.assertEqual(directlink.run_responder(args), 3)
+
+
+class FirewallSafetyTests(unittest.TestCase):
+    def test_directlink_rule_is_address_scoped_without_app_wildcard(self):
+        rules = windows_setup._firewall_rules(
+            "directlink", {"server_ip": SERVER})
+        self.assertEqual(len(rules), 1)
+        self.assertIsNone(rules[0]["program"])
+        self.assertEqual(rules[0]["local_address"], SERVER)
+
+    def test_directlink_firewall_script_uses_local_address(self):
+        result = mock.Mock(returncode=0, stdout="SETUP_CHANGED=True", stderr="")
+        with (mock.patch.object(windows_setup, "is_windows", return_value=True),
+              mock.patch.object(windows_setup, "_powershell",
+                                return_value=result) as ps):
+            windows_setup.apply_setup("directlink", {"server_ip": SERVER})
+        self.assertIn("-LocalAddress '{}'".format(SERVER), ps.call_args.args[0])
+
+
+class LauncherLifecycleTests(unittest.TestCase):
+    def app(self):
+        app = object.__new__(LauncherApp)
+        app.saved = {"direct_link": {
+            "enabled": False, "server_ip": SERVER, "client_ip": CLIENT,
+            "adapter": "Ethernet", "if_index": 3, "prefix": 24,
+        }}
+        app._append_log = mock.Mock()
+        app._save = mock.Mock()
+        app._set_direct_checkbox = mock.Mock()
+        app._set_direct_status = mock.Mock()
+        return app
+
+    def test_enable_is_not_saved_when_helper_fails_to_start(self):
+        app = self.app()
+        app._start_direct_responder = mock.Mock(return_value=False)
+        app.ip_var = mock.Mock()
+        LauncherApp._direct_link_enabled(app, "")
+        self.assertFalse(app.saved["direct_link"]["enabled"])
+        app._save.assert_not_called()
+        app.ip_var.set.assert_not_called()
+
+    def test_firewall_failure_restores_configured_adapter(self):
+        app = self.app()
+        app.root = mock.Mock()
+        app.root.after.side_effect = lambda _delay, callback: callback()
+        app.nb = mock.Mock()
+        app.terminal_tab = object()
+        app._direct_link_fail = mock.Mock()
+        with (mock.patch.object(directlink, "apply_adapter_config",
+                               return_value="CONFIGURED=Ethernet"),
+              mock.patch.object(windows_setup, "apply_setup",
+                                side_effect=WindowsSetupError("firewall failed")),
+              mock.patch.object(directlink, "restore_adapter_dhcp",
+                                return_value="RESTORED=automatic (DHCP)") as restore,
+              mock.patch("launcher.gui.threading.Thread") as thread):
+            LauncherApp._direct_link_apply_async(app)
+            thread.call_args.kwargs["target"]()
+        restore.assert_called_once_with(3, expect_ip=SERVER)
+        app._direct_link_fail.assert_called_once()
+        self.assertIn("returned to automatic", app._direct_link_fail.call_args.args[0])
+
+    def test_stop_all_also_stops_direct_responder(self):
+        app = self.app()
+        app.procs = {}
+        app._stop_direct_responder = mock.Mock()
+        LauncherApp.stop_all(app)
+        app._stop_direct_responder.assert_called_once_with()
+
+    def test_failed_cleanup_retains_recovery_state(self):
+        app = self.app()
+        cfg = dict(app.saved["direct_link"])
+        LauncherApp._fail_direct_cleanup(app, RuntimeError("busy"), cfg)
+        self.assertEqual(app.saved["direct_link"], cfg)
+
+    def test_successful_cleanup_clears_recovery_state(self):
+        app = self.app()
+        LauncherApp._finish_direct_cleanup(app, "RESTORED=automatic (DHCP)")
+        self.assertNotIn("direct_link", app.saved)
+        app._save.assert_called_once_with()
 
 
 if __name__ == "__main__":

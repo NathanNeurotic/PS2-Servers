@@ -97,7 +97,7 @@ Direct PS2-to-PC link
 
 A PS2 cabled straight into the PC has no router on the wire, so nothing hands the console an IP address and every network app fails the same way. Ticking "PS2 is plugged directly into this PC" fixes that: PS2 Servers gives the chosen network port a fixed address (one administrator prompt), allows DHCP through the firewall, and runs a small DHCP helper that answers only on that port, so the console configures itself.
 
-The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if several different devices start asking. Unticking the box stops the helper and returns the port to automatic (DHCP); "Remove PS2 Servers firewall rules" also undoes it. Direct link mode is currently Windows-only.
+The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if a second device starts asking. Unticking the box stops the helper and returns the port to automatic (DHCP); "Remove PS2 Servers firewall rules" also undoes it. Direct link mode is currently Windows-only.
 
 No terminal required
 
@@ -903,13 +903,27 @@ class LauncherApp:
         self.nb.select(self.terminal_tab)
 
         def worker():
+            configured = None
             try:
                 configured = directlink.apply_adapter_config(
                     cfg["if_index"], cfg["server_ip"],
                     cfg.get("prefix", directlink.PREFIX_LENGTH))
-                firewall = windows_setup.apply_setup("directlink", {})
+                firewall = windows_setup.apply_setup(
+                    "directlink", {"server_ip": cfg["server_ip"]})
             except Exception as e:
-                self.root.after(0, lambda err=e: self._direct_link_fail(
+                error = e
+                if configured is not None:
+                    try:
+                        rollback = directlink.restore_adapter_dhcp(
+                            cfg["if_index"], expect_ip=cfg["server_ip"])
+                        error = RuntimeError(
+                            "{}\n\nThe adapter was returned to automatic "
+                            "(DHCP).\n{}".format(e, rollback))
+                    except Exception as rollback_error:
+                        error = RuntimeError(
+                            "{}\n\nAutomatic rollback also failed: {}"
+                            .format(e, rollback_error))
+                self.root.after(0, lambda err=error: self._direct_link_fail(
                     "Could not set up the direct link:\n\n{}".format(err)))
                 return
             output = "\n".join(
@@ -923,9 +937,10 @@ class LauncherApp:
             self._append_log("directlink", "[setup] {}\n".format(
                 output.replace("\n", "\n[setup] ")))
         cfg = self.saved.get("direct_link") or {}
+        if not self._start_direct_responder():
+            return
         cfg["enabled"] = True
         self.saved["direct_link"] = cfg
-        self._start_direct_responder()
         # The LAN IP box is what every OPL hint shows; the direct link has
         # exactly one address the PS2 can reach.
         self.ip_var.set(cfg["server_ip"])
@@ -935,7 +950,7 @@ class LauncherApp:
 
     def _start_direct_responder(self):
         if self._direct_proc is not None and self._direct_proc.is_running():
-            return
+            return True
         cfg = self.saved.get("direct_link") or {}
         args = ["--server-ip", cfg["server_ip"],
                 "--client-ip", cfg["client_ip"],
@@ -952,9 +967,10 @@ class LauncherApp:
             proc.start()
         except OSError as e:
             self._direct_link_fail("Could not start the DHCP helper: {}".format(e))
-            return
+            return False
         self._direct_proc = proc
         self._direct_expected = True
+        return True
 
     def _stop_direct_responder(self):
         self._direct_expected = False
@@ -1134,7 +1150,11 @@ class LauncherApp:
                 "Direct link is off: {}. Tick the box to set it up again."
                 .format(problem))
             return
-        self._start_direct_responder()
+        if not self._start_direct_responder():
+            cfg["enabled"] = False
+            self.saved["direct_link"] = cfg
+            self._save()
+            return
         self._set_direct_checkbox(True)
         self._set_direct_status(self._direct_ready_status(cfg))
 
@@ -1401,8 +1421,9 @@ class LauncherApp:
     def _allow_windows_setup_async(self):
         self._append_log("setup", "[setup] allowing PS2 Servers through Windows Firewall\n")
         values = {key: card.values() for key, card in self.cards.items()}
-        if (self.saved.get("direct_link") or {}).get("enabled"):
-            values["directlink"] = {}
+        direct_cfg = self.saved.get("direct_link") or {}
+        if direct_cfg.get("enabled"):
+            values["directlink"] = {"server_ip": direct_cfg.get("server_ip")}
 
         def worker():
             try:
@@ -1527,10 +1548,10 @@ class LauncherApp:
         direct_cfg = dict(self.saved.get("direct_link") or {})
         if direct_cfg.get("server_ip"):
             self._stop_direct_responder()
-            self.saved.pop("direct_link", None)
-            self._save()
-            self._set_direct_checkbox(False)
-            self._set_direct_status(self._DIRECT_STATUS_OFF)
+            self._set_direct_checkbox(bool(direct_cfg.get("enabled")), busy=True)
+            self._set_direct_status(
+                "Returning '{}' to automatic (DHCP)…".format(
+                    direct_cfg.get("adapter", "?")))
 
         def worker():
             if direct_cfg.get("server_ip"):
@@ -1538,15 +1559,13 @@ class LauncherApp:
                     output = directlink.restore_adapter_dhcp(
                         direct_cfg.get("if_index", 0),
                         expect_ip=direct_cfg.get("server_ip"))
-                    self.root.after(0, lambda out=output: self._append_log(
-                        "directlink", "[setup] {}\n".format(
-                            out.replace("\n", "\n[setup] "))))
+                    self.root.after(
+                        0, lambda out=output: self._finish_direct_cleanup(out))
                 except Exception as e:
                     # The firewall removal below still matters; report and go on.
-                    self.root.after(0, lambda err=e: self._append_log(
-                        "directlink",
-                        "[setup] could not return the direct-link port to "
-                        "DHCP: {}\n".format(err)))
+                    self.root.after(
+                        0, lambda err=e: self._fail_direct_cleanup(
+                            err, direct_cfg))
             try:
                 result = windows_setup.remove_setup()
             except Exception as e:
@@ -1555,6 +1574,25 @@ class LauncherApp:
             self.root.after(0, lambda: self._finish_cleanup_success(result))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_direct_cleanup(self, output):
+        self._append_log("directlink", "[setup] {}\n".format(
+            output.replace("\n", "\n[setup] ")))
+        self.saved.pop("direct_link", None)
+        self._save()
+        self._set_direct_checkbox(False)
+        self._set_direct_status(self._DIRECT_STATUS_OFF)
+
+    def _fail_direct_cleanup(self, error, cfg):
+        self._append_log(
+            "directlink",
+            "[setup] could not return the direct-link port to DHCP: {}\n"
+            .format(error))
+        self._set_direct_checkbox(bool(cfg.get("enabled")))
+        self._set_direct_status(
+            "Direct-link cleanup failed; the helper is stopped, but '{}' "
+            "may still use {}. Retry cleanup to restore automatic (DHCP)."
+            .format(cfg.get("adapter", "?"), cfg.get("server_ip", "?")))
 
     def _finish_cleanup_success(self, result):
         output = result.get("output") or "No PS2 Servers firewall rules found."
@@ -1579,6 +1617,7 @@ class LauncherApp:
     def stop_all(self):
         for key in list(self.procs):
             self.stop_server(key)
+        self._stop_direct_responder()
 
     # -- logging (thread-safe) ------------------------------------------- #
     def _on_output(self, key, line):
@@ -1740,7 +1779,6 @@ class LauncherApp:
         # look like a frozen window
         self.root.withdraw()
         self.stop_all()
-        self._stop_direct_responder()
         if self._tray:
             self._tray.stop()
         self.root.destroy()

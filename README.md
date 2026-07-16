@@ -190,7 +190,7 @@ The helper is deliberately paranoid, because a DHCP server answering on a real
 network could hand bad addresses to everything on it. It binds only to the
 direct-link port, refuses to start if that port reaches a router or already got an
 address from a real DHCP server, serves exactly one address to one console, and
-stops itself if several different devices start asking. Windows-only for now.
+stops itself if a second device starts asking. Windows-only for now.
 
 ## Run a server on its own (terminal)
 
