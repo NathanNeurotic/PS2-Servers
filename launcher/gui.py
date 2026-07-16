@@ -146,6 +146,17 @@ def tab_label(key, running, fallback=None):
     return "{} {}".format(dot, title)
 
 
+def tab_text(label):
+    """The padded tab text, matching StyledNotebook.add's own wrapping.
+
+    Both the initial nb.add() (via StyledNotebook) and the later nb.tab()
+    refreshes must produce identical text, or the label shifts on the first
+    status change. Making this the single source of truth removes that coupling
+    -- and keeps them consistent even where StyledNotebook is not in play.
+    """
+    return "  {}  ".format(label.strip())
+
+
 def opl_hint(key, ip, values):
     if key == "smbv1":
         port = "445" if values.get("take_445") else str(values.get("port") or 1111)
@@ -235,11 +246,10 @@ class ServerCard(ttk.LabelFrame):
         try:
             if img is not None:
                 title = TAB_TITLES.get(self.server.key, self.server.label)
-                nb.tab(tab, text="  {}  ".format(title), image=img,
-                       compound="left")
+                nb.tab(tab, text=tab_text(title), image=img, compound="left")
             else:  # image generation unavailable: fall back to the glyph
-                nb.tab(tab, text=tab_label(self.server.key, running,
-                                           fallback=self.server.label))
+                nb.tab(tab, text=tab_text(tab_label(
+                    self.server.key, running, fallback=self.server.label)))
         except tk.TclError:
             pass
 
@@ -597,10 +607,11 @@ class LauncherApp:
             img = self._tab_dot_image(running=False)
             if img is not None:
                 title = TAB_TITLES.get(server.key, server.label)
-                self.nb.add(tab, text=title, image=img, compound="left")
+                self.nb.add(tab, text=tab_text(title), image=img,
+                            compound="left")
             else:
-                self.nb.add(tab, text=tab_label(server.key, running=False,
-                                                fallback=server.label))
+                self.nb.add(tab, text=tab_text(tab_label(
+                    server.key, running=False, fallback=server.label)))
             self.server_tabs[server.key] = tab
             self.cards[server.key] = card
 
