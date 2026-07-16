@@ -6,6 +6,7 @@ Everything here is socket-free: handle_packet() is deliberately pure so the
 protocol and the refusals can be tested without a wire.
 """
 
+import socket
 import struct
 import unittest
 from unittest import mock
@@ -268,6 +269,31 @@ class MissingIpDiagnosisTests(unittest.TestCase):
                                side_effect=RuntimeError("boom")):
             msg = responder()._diagnose_missing_server_ip()
         self.assertIn("no longer configured", msg)  # never raises
+        # A failed lookup must NOT be reported as either specific cause.
+        self.assertNotIn("link went down", msg)
+        self.assertNotIn("another device", msg)
+
+    def test_adapter_absent_is_generic(self):
+        # adapter_state returning None (port gone) is also "unknown cause".
+        with mock.patch.object(directlink, "adapter_state", return_value=None):
+            msg = responder()._diagnose_missing_server_ip()
+        self.assertIn("no longer configured", msg)
+        self.assertNotIn("link went down", msg)
+
+    def test_serve_forever_refuses_with_diagnosis_when_ip_vanishes(self):
+        # Exercise the real refusal path: the periodic recheck finds the
+        # address gone and serve_forever raises with the conflict diagnosis.
+        r = responder()
+        r.sock = ServeTests.FakeSocket(socket.timeout())  # recvfrom never reached
+        with mock.patch.object(r, "_server_ip_still_present", return_value=False), \
+                mock.patch.object(directlink.DhcpResponder,
+                                  "IP_RECHECK_SECONDS", -1), \
+                mock.patch.object(directlink, "adapter_state",
+                                  return_value={"name": "Ethernet 2",
+                                                "status": "Up", "ipv4": []}):
+            with self.assertRaises(DirectLinkRefused) as caught:
+                r.serve_forever()
+        self.assertIn("another device", str(caught.exception))
 
 
 def make_offer(xid, server_ip, offered_ip="192.168.137.10", msg_type=MSG_OFFER,

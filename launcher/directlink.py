@@ -824,12 +824,15 @@ class DhcpResponder:
         from the console simply being switched off (the link would be down).
         """
         generic = "{} is no longer configured on this PC".format(self.server_ip)
-        adapter = None
         try:
             adapter = adapter_state(0, self.adapter_name or None)
         except Exception:
             adapter = None
-        if adapter is not None and (adapter.get("status") or "").lower() == "up":
+        if adapter is None:
+            # Could not read the adapter (lookup failed, or it is gone) -- do
+            # not guess a cause; the bare fact is still useful.
+            return generic
+        if (adapter.get("status") or "").lower() == "up":
             return (generic + " -- Windows removed it, which means another "
                     "device on this cable is already using {ip}. If your PS2 "
                     "is set to a static IP of {ip}, switch it to DHCP "
