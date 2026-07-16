@@ -16,6 +16,7 @@ from launcher.directlink import (
     MSG_ACK, MSG_DISCOVER, MSG_NAK, MSG_OFFER, MSG_REQUEST,
     build_reply, choose_subnet, classify_adapter, networks_overlap,
     parse_packet, taken_networks, _BOOTP, _ip_to_int,
+    _build_discover, _foreign_offer_server_id, _synthetic_probe_mac,
 )
 from launcher.gui import LauncherApp
 from launcher.windows_setup import WindowsSetupError
@@ -129,13 +130,34 @@ class HandleTests(unittest.TestCase):
         reply, _dest = result
         self.assertEqual(parse_options(reply)[53], bytes([MSG_ACK]))
 
-    def test_request_for_other_address_naks(self):
+    def test_request_for_other_address_is_silent(self):
+        # Never a broadcast NAK: on a wire that turned out to be a real network
+        # that would kick its clients off valid leases. Silence -> the client
+        # times out and re-DISCOVERs, and a real PS2 then gets our address.
         r = responder()
         result = r.handle_packet(
             make_request(MSG_REQUEST, options=opt_ip(50, "10.0.0.5")),
             ("0.0.0.0", 68))
-        reply, _dest = result
-        self.assertEqual(parse_options(reply)[53], bytes([MSG_NAK]))
+        self.assertIsNone(result)
+
+    def test_init_reboot_foreign_address_is_silent(self):
+        # INIT-REBOOT/REBINDING carries no server-id (option 54) and a foreign
+        # ciaddr; this is exactly the packet a rebooting real-LAN client sends,
+        # and it must never draw a NAK.
+        r = responder()
+        result = r.handle_packet(
+            make_request(MSG_REQUEST, ciaddr="192.168.1.23"),
+            ("0.0.0.0", 68))
+        self.assertIsNone(result)
+
+    def test_own_probe_mac_ignored(self):
+        # The periodic foreign-server probe is heard back on port 67; it must
+        # never be tracked (would trip the 1-MAC tripwire) or answered.
+        r = responder()
+        result = r.handle_packet(
+            make_request(MSG_DISCOVER, mac=r.probe_mac), ("0.0.0.0", 68))
+        self.assertIsNone(result)
+        self.assertEqual(r.macs_seen, set())
 
     def test_foreign_server_id_is_silence(self):
         # The client accepted a different server's offer: not our business.
@@ -220,6 +242,95 @@ class ServeTests(unittest.TestCase):
         error = OSError("ICMP port unreachable")
         error.winerror = 10054
         self.assert_reset_is_ignored(error)
+
+
+def make_offer(xid, server_ip, offered_ip="192.168.137.10", msg_type=MSG_OFFER,
+               include_server_id=True, siaddr=None):
+    """A server's BOOTREPLY (DHCPOFFER/ACK) as a foreign server would send it."""
+    chaddr = b"\x02\x00\x00\x00\x00\x99" + b"\x00" * 10
+    si = _ip_to_int(siaddr) if siaddr else _ip_to_int(server_ip)
+    header = _BOOTP.pack(2, 1, 6, 0, xid, 0, 0x8000, 0,
+                         _ip_to_int(offered_ip), si, 0, chaddr, b"", b"")
+    opts = bytes([53, 1, msg_type])
+    if include_server_id:
+        opts += bytes([54, 4]) + struct.pack("!I", _ip_to_int(server_ip))
+    opts += b"\xff"
+    reply = header + MAGIC_COOKIE + opts
+    return reply + b"\x00" * max(0, 300 - len(reply))
+
+
+class ProbeTests(unittest.TestCase):
+    def test_probe_mac_is_locally_administered_unicast(self):
+        for _ in range(20):
+            mac = _synthetic_probe_mac()
+            self.assertEqual(len(mac), 6)
+            self.assertTrue(mac[0] & 0x02)        # locally administered
+            self.assertFalse(mac[0] & 0x01)       # unicast
+
+    def test_discover_is_wellformed_and_parseable(self):
+        disc = _build_discover(0xABCD1234, b"\x02\x00\x00\x00\x00\x01")
+        pkt = parse_packet(disc)
+        self.assertIsNotNone(pkt)
+        self.assertEqual(pkt["options"][53], bytes([MSG_DISCOVER]))
+        self.assertEqual(struct.unpack("!I", disc[4:8])[0], 0xABCD1234)
+        self.assertEqual(disc[10:12], b"\x80\x00")  # broadcast flag set
+
+    def test_foreign_offer_detected(self):
+        offer = make_offer(0x1111, "192.168.1.1")
+        self.assertEqual(
+            _foreign_offer_server_id(offer, 0x1111, "192.168.137.1"),
+            "192.168.1.1")
+
+    def test_our_own_offer_is_not_foreign(self):
+        # The periodic re-probe hears our own responder; server-id == our IP.
+        offer = make_offer(0x2222, "192.168.137.1")
+        self.assertIsNone(
+            _foreign_offer_server_id(offer, 0x2222, "192.168.137.1"))
+
+    def test_wrong_xid_ignored(self):
+        offer = make_offer(0x3333, "192.168.1.1")
+        self.assertIsNone(
+            _foreign_offer_server_id(offer, 0x9999, "192.168.137.1"))
+
+    def test_offer_without_server_id_uses_siaddr(self):
+        offer = make_offer(0x4444, "192.168.1.1", include_server_id=False,
+                           siaddr="192.168.1.5")
+        self.assertEqual(
+            _foreign_offer_server_id(offer, 0x4444, "192.168.137.1"),
+            "192.168.1.5")
+
+    def test_bootrequest_is_not_a_foreign_reply(self):
+        # A client's DISCOVER (op=1) must never read as a server answering.
+        disc = _build_discover(0x5555, b"\x02\x00\x00\x00\x00\x01")
+        self.assertIsNone(
+            _foreign_offer_server_id(disc, 0x5555, "192.168.137.1"))
+
+    def test_junk_is_not_a_foreign_reply(self):
+        self.assertIsNone(
+            _foreign_offer_server_id(b"\x00" * 300, 0x1, "192.168.137.1"))
+        self.assertIsNone(
+            _foreign_offer_server_id(b"short", 0x1, "192.168.137.1"))
+
+    def test_check_raises_on_foreign_server(self):
+        r = responder()
+        with mock.patch.object(directlink, "probe_for_foreign_dhcp_server",
+                               return_value="192.168.1.1"):
+            with self.assertRaises(DirectLinkRefused):
+                r.check_for_foreign_dhcp_server()
+
+    def test_check_passes_when_quiet(self):
+        r = responder()
+        with mock.patch.object(directlink, "probe_for_foreign_dhcp_server",
+                               return_value=None):
+            r.check_for_foreign_dhcp_server()  # no raise
+
+    def test_check_fails_open_when_probe_unavailable(self):
+        # Empty string == "could not probe"; the other layers still apply, so
+        # we proceed rather than refuse a legitimate direct link.
+        r = responder()
+        with mock.patch.object(directlink, "probe_for_foreign_dhcp_server",
+                               return_value=""):
+            r.check_for_foreign_dhcp_server()  # no raise
 
 
 class SubnetTests(unittest.TestCase):
