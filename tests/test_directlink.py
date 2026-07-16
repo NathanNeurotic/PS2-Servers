@@ -508,6 +508,14 @@ class LauncherLifecycleTests(unittest.TestCase):
             cfg, clear_saved=True, daemon=False)
         self.assertIn("could not save", app._append_log.call_args.args[1])
 
+    def test_restore_worker_honors_non_daemon_policy(self):
+        app = self.app()
+        with mock.patch("launcher.gui.threading.Thread") as thread:
+            LauncherApp._direct_link_restore_async(
+                app, app.saved["direct_link"], daemon=False)
+        self.assertFalse(thread.call_args.kwargs["daemon"])
+        thread.return_value.start.assert_called_once_with()
+
     def test_pending_recovery_resumes_after_restart(self):
         app = self.app()
         app.saved["pending_direct_link_restore"] = True

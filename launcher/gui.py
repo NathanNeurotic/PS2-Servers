@@ -1075,7 +1075,10 @@ class LauncherApp:
             self.root.after(
                 0, lambda: self._direct_link_restored(output, clear_saved))
 
-        threading.Thread(target=worker, daemon=True).start()
+        # A non-daemon worker is used when the crash-recovery marker could not
+        # be saved.  That keeps process shutdown from abandoning the only DHCP
+        # restore attempt that can prevent a stranded static adapter.
+        threading.Thread(target=worker, daemon=daemon).start()
 
     def _direct_link_restored(self, output, clear_saved=False):
         if output:
@@ -1616,10 +1619,7 @@ class LauncherApp:
                 return
             self.root.after(0, lambda: self._finish_cleanup_success(result))
 
-        # A non-daemon worker is used when the crash-recovery marker could not
-        # be saved.  That keeps process shutdown from abandoning the only DHCP
-        # restore attempt that can prevent a stranded static adapter.
-        threading.Thread(target=worker, daemon=daemon).start()
+        threading.Thread(target=worker, daemon=True).start()
 
     def _finish_direct_cleanup(self, output):
         self._append_log("directlink", "[setup] {}\n".format(
