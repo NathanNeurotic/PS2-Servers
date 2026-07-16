@@ -244,6 +244,32 @@ class ServeTests(unittest.TestCase):
         self.assert_reset_is_ignored(error)
 
 
+class MissingIpDiagnosisTests(unittest.TestCase):
+    def test_up_adapter_means_address_conflict(self):
+        # Link up but our address gone -> another device is using it.
+        with mock.patch.object(directlink, "adapter_state",
+                               return_value={"name": "Ethernet 2", "status": "Up",
+                                             "ipv4": []}):
+            msg = responder()._diagnose_missing_server_ip()
+        self.assertIn("another", msg)
+        self.assertIn("DHCP", msg)
+        self.assertIn(CLIENT, msg)   # suggests the non-colliding address
+
+    def test_down_adapter_means_cable_or_console(self):
+        with mock.patch.object(directlink, "adapter_state",
+                               return_value={"name": "Ethernet 2",
+                                             "status": "Disconnected", "ipv4": []}):
+            msg = responder()._diagnose_missing_server_ip()
+        self.assertIn("link went down", msg)
+        self.assertNotIn("another device", msg)
+
+    def test_adapter_lookup_failure_is_safe(self):
+        with mock.patch.object(directlink, "adapter_state",
+                               side_effect=RuntimeError("boom")):
+            msg = responder()._diagnose_missing_server_ip()
+        self.assertIn("no longer configured", msg)  # never raises
+
+
 def make_offer(xid, server_ip, offered_ip="192.168.137.10", msg_type=MSG_OFFER,
                include_server_id=True, siaddr=None):
     """A server's BOOTREPLY (DHCPOFFER/ACK) as a foreign server would send it."""

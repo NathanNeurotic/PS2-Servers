@@ -667,7 +667,12 @@ class DhcpResponder:
     MAX_DISTINCT_MACS = 1
     REPLY_BURST = 8          # token bucket: at most this many queued replies
     REPLY_RATE = 4.0         # ...refilled at this many per second
-    IP_RECHECK_SECONDS = 30  # confirm our address still exists this often
+    IP_RECHECK_SECONDS = 5   # confirm our address still exists this often
+    # ...short, because the common reason it vanishes is a duplicate-address
+    # conflict (another device on the wire using our address), and Windows
+    # removes ours within seconds of that device ARPing. Catching it fast turns
+    # a confusing flap into one clear message. The check is a cheap socket bind;
+    # only the failure path does the (slower) adapter lookup to diagnose why.
     # Re-run the active foreign-server probe this often while serving, so a
     # cable moved from the PS2 onto a real LAN mid-session is caught without
     # waiting for a relaunch. Long enough that the stray DISCOVER is rare.
@@ -808,6 +813,31 @@ class DhcpResponder:
         finally:
             s.close()
 
+    def _diagnose_missing_server_ip(self):
+        """Why our address vanished, in words a user can act on.
+
+        The case worth naming is a duplicate-address conflict: another device
+        on the wire is already using our address, so Windows' duplicate-address
+        detection strips it from this PC within seconds -- which is exactly the
+        confusing 'it keeps disconnecting' failure a PS2 left on a static IP
+        equal to our server address produces. That reads completely differently
+        from the console simply being switched off (the link would be down).
+        """
+        generic = "{} is no longer configured on this PC".format(self.server_ip)
+        adapter = None
+        try:
+            adapter = adapter_state(0, self.adapter_name or None)
+        except Exception:
+            adapter = None
+        if adapter is not None and (adapter.get("status") or "").lower() == "up":
+            return (generic + " -- Windows removed it, which means another "
+                    "device on this cable is already using {ip}. If your PS2 "
+                    "is set to a static IP of {ip}, switch it to DHCP "
+                    "(automatic), or to a different address such as {client}."
+                    .format(ip=self.server_ip, client=self.client_ip))
+        return (generic + "; the link went down -- the cable was unplugged or "
+                "the console was switched off")
+
     # -- refusals ---------------------------------------------------------- #
     def _take_token(self):
         now = time.monotonic()
@@ -925,9 +955,7 @@ class DhcpResponder:
             if now - last_check > self.IP_RECHECK_SECONDS:
                 last_check = now
                 if not self._server_ip_still_present():
-                    raise DirectLinkRefused(
-                        "{} is no longer configured on this PC; "
-                        "stopping".format(self.server_ip))
+                    raise DirectLinkRefused(self._diagnose_missing_server_ip())
             if now - last_probe > self.REPROBE_SECONDS:
                 last_probe = now
                 # Catches a cable moved from the PS2 onto a real LAN while we
