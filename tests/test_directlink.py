@@ -369,26 +369,26 @@ class SubnetTests(unittest.TestCase):
     def test_taken_networks_filters(self):
         enumerated = {
             "adapters": [
-                {"if_index": 5, "ipv4": [
+                {"id": 5, "ipv4": [
                     {"ip": "192.168.1.100", "prefix": 24, "origin": "Dhcp"},
                     {"ip": "169.254.9.9", "prefix": 16, "origin": "WellKnown"},
                 ]},
-                {"if_index": 7, "ipv4": [
+                {"id": 7, "ipv4": [
                     {"ip": "192.168.137.1", "prefix": 24, "origin": "Manual"},
                 ]},
             ],
             "routes": [
-                {"prefix": "0.0.0.0/0", "ifIndex": 5},
-                {"prefix": "224.0.0.0/4", "ifIndex": 5},
-                {"prefix": "255.255.255.255/32", "ifIndex": 5},
-                {"prefix": "169.254.0.0/16", "ifIndex": 9},
-                {"prefix": "10.50.0.0/16", "ifIndex": 9},
-                {"prefix": "192.168.137.0/24", "ifIndex": 7},
+                {"prefix": "0.0.0.0/0", "if_id": 5},
+                {"prefix": "224.0.0.0/4", "if_id": 5},
+                {"prefix": "255.255.255.255/32", "if_id": 5},
+                {"prefix": "169.254.0.0/16", "if_id": 9},
+                {"prefix": "10.50.0.0/16", "if_id": 9},
+                {"prefix": "192.168.137.0/24", "if_id": 7},
             ],
         }
         # Excluding adapter 7 (the one being reconfigured) drops both its
         # address and its route, so its old subnet stays reusable.
-        taken = taken_networks(enumerated, exclude_if_index=7)
+        taken = taken_networks(enumerated, exclude_id=7)
         nets = {(net, plen) for net, plen in taken}
         self.assertIn((_ip_to_int("192.168.1.0"), 24), nets)
         self.assertIn((_ip_to_int("10.50.0.0"), 16), nets)
