@@ -364,6 +364,7 @@ class LauncherApp:
         self._build()
         self._refresh_scroll_body()
         self._restore()
+        self._ip_trace_ready = True   # edits after this are the user's, not ours
 
         # On Windows, run from the system tray: closing or minimizing hides the
         # window (servers keep running) and the tray menu restores or quits.
@@ -651,6 +652,12 @@ class LauncherApp:
         return self.ip_var.get()
 
     def _on_ip_edited(self, *_args):
+        # The trace is live before _restore() runs, so restoring the saved IP at
+        # startup would schedule a pointless save of what was just loaded. An
+        # explicit flag, not a probe of some unrelated attribute that happens to
+        # be born at the right time.
+        if not getattr(self, "_ip_trace_ready", False):
+            return
         # Debounced: fires per keystroke, and half-typed addresses are not worth
         # saving or showing. 700ms after the last edit is "done typing".
         if getattr(self, "_ip_edit_job", None):
@@ -661,7 +668,7 @@ class LauncherApp:
         self._ip_edit_job = None
         for key, card in self.cards.items():
             if self.is_running(key):
-                card.refresh_status(True)
+                card.refresh_status(running=True)
         self._save()
 
     def _refresh_ips(self):
