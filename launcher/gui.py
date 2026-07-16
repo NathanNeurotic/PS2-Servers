@@ -21,6 +21,12 @@ from .process import ServerProcess
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen
 
 DOT_RUNNING = "●"  # filled circle
+# Tab-header state. Filled = up, hollow = down, on the tab you can see without
+# opening it. Deliberately not a red/green glyph: ttk.Notebook has no per-tab
+# foreground, and a coloured emoji renders as a box wherever the font lacks it --
+# shape survives every platform and every colourblindness.
+TAB_DOT_RUNNING = "●"
+TAB_DOT_STOPPED = "○"
 COLOR_RUNNING = "#2e9e44"
 COLOR_STOPPED = "#b0b0b0"
 COLOR_ERROR = "#d23c3c"
@@ -116,6 +122,17 @@ TAB_TITLES = {
 }
 
 
+def tab_label(key, running, fallback=None):
+    """Tab text carrying the server's state, so it reads from any tab.
+
+    fallback keeps what the tabs did before they carried state: a server with no
+    TAB_TITLES entry showed its own label, not a shouted key.
+    """
+    dot = TAB_DOT_RUNNING if running else TAB_DOT_STOPPED
+    title = TAB_TITLES.get(key, fallback or key.upper())
+    return "{} {}".format(dot, title)
+
+
 def opl_hint(key, ip, values):
     if key == "smbv1":
         port = "445" if values.get("take_445") else str(values.get("port") or 1111)
@@ -189,6 +206,23 @@ class ServerCard(ttk.LabelFrame):
                               wraplength=720)
         self.hint.grid(row=row, column=0, columnspan=3, sticky="w",
                        padx=4, pady=(4, 0))
+
+    def _refresh_tab_dot(self, running):
+        """Mark this server's tab up or down.
+
+        Guarded: cards are built before the notebook finishes wiring itself up, and
+        refresh_status runs during that. A tab that is not there yet has no state
+        worth showing, and a TclError here would take the card down with it.
+        """
+        tab = getattr(self.app, "server_tabs", {}).get(self.server.key)
+        nb = getattr(self.app, "nb", None)
+        if tab is None or nb is None:
+            return
+        try:
+            nb.tab(tab, text=tab_label(self.server.key, running,
+                                       fallback=self.server.label))
+        except tk.TclError:
+            pass
 
     def _add_help(self, parent, text, row, column, indent):
         # Own row, so help never overlaps the entry or Browse button. columnspan
@@ -292,6 +326,7 @@ class ServerCard(ttk.LabelFrame):
     def refresh_status(self, running, error=False):
         if error or not running:
             self._active_values = None
+        self._refresh_tab_dot(running and not error)
         if error:
             self.status.config(text=DOT_RUNNING + " Error", foreground=COLOR_ERROR)
         elif running:
@@ -492,7 +527,8 @@ class LauncherApp:
             tab.columnconfigure(0, weight=1)
             card = ServerCard(tab, self, server)
             card.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-            self.nb.add(tab, text=TAB_TITLES.get(server.key, server.label))
+            self.nb.add(tab, text=tab_label(server.key, running=False,
+                                            fallback=server.label))
             self.server_tabs[server.key] = tab
             self.cards[server.key] = card
 
