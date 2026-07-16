@@ -19,7 +19,14 @@ def install(app, gui):
         if field.kind == "bool":
             return bool(field.default)
         if field.kind == "port":
-            return card.server.port_display()
+            # The FIELD's own default, never server.port_display() -- that returns
+            # ServerDef.default_port, so Revert handed every port field the server's
+            # main port and set Data port to the discovery port, which the server
+            # refuses to start on. A falsy default means "auto" and renders blank.
+            if not field.default:
+                return ""
+            return ("0x%04X" % field.default if card.server.port_is_hex
+                    else str(field.default))
         return "" if field.default is None else str(field.default)
 
     def reset_to_defaults(card):
