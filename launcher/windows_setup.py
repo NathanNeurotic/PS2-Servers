@@ -141,13 +141,16 @@ def _server_ports(key, values):
         return ports
     if key == "udpbd":
         return [("UDP", UDPBD_PORT, "UDPBD")]
+    if key == "directlink":
+        # The direct-link DHCP helper. Rule created only while enabling the
+        # mode (never speculatively), removed with every other "PS2 Servers -"
+        # rule by remove_setup.
+        return [("UDP", 67, "Direct link DHCP")]
     return []
 
 
 def _rule_names(key, values):
-    rules = [
-        "PS2 Servers - App"
-    ]
+    rules = [] if key == "directlink" else ["PS2 Servers - App"]
     for proto, port, purpose in _server_ports(key, values):
         rules.append("PS2 Servers - {} {} {}".format(purpose, proto, port))
     return rules
@@ -166,16 +169,20 @@ def setup_fingerprint(key, values):
     """
     if not is_windows():
         return ""
-    return "|".join([os.path.abspath(_server_program_path())] + _rule_names(key, values))
+    parts = [os.path.abspath(_server_program_path())] + _rule_names(key, values)
+    if key == "directlink":
+        parts.append(str(values.get("server_ip") or ""))
+    return "|".join(parts)
 
 
 def _firewall_rules(key, values):
     program = os.path.abspath(_server_program_path())
-    rules = [{
+    rules = [] if key == "directlink" else [{
         "name": "PS2 Servers - App",
         "protocol": "Any",
         "port": None,
         "program": program,
+        "local_address": None,
     }]
     for proto, port, purpose in _server_ports(key, values):
         rules.append({
@@ -183,6 +190,8 @@ def _firewall_rules(key, values):
             "protocol": proto,
             "port": int(port),
             "program": None,
+            "local_address": (values.get("server_ip")
+                              if key == "directlink" else None),
         })
     return rules
 
@@ -212,7 +221,9 @@ def needs_setup(key, values, log=None):
     if log is None:
         log = lambda msg: None
 
-    port_rule_names = _rule_names(key, values)[1:]
+    all_rule_names = _rule_names(key, values)
+    check_app_rule = key != "directlink"
+    port_rule_names = all_rule_names[1:] if check_app_rule else all_rule_names
     rule_array = "@({})".format(",".join(_ps_quote(n) for n in port_rule_names))
     program = _ps_quote(os.path.abspath(_server_program_path()))
     app_rule = _ps_quote("PS2 Servers - App")
@@ -231,13 +242,14 @@ def needs_setup(key, values, log=None):
         "} else {",
         "$appRuleName = {}".format(app_rule),
         "$appProgram = {}".format(program),
+        "$checkAppRule = {}".format("$true" if check_app_rule else "$false"),
         "$wanted = {}".format(rule_array),
         "$fw = New-Object -ComObject HNetCfg.FwPolicy2",
         "$appFound = $null",
         "try { $appFound = $fw.Rules.Item($appRuleName) } catch {}",
-        "if (-not $appFound) {",
+        "if ($checkAppRule -and -not $appFound) {",
         "  Write-Output ('NEED_RULE=' + $appRuleName)",
-        "} elseif ($appFound.ApplicationName -ne $appProgram) {",
+        "} elseif ($checkAppRule -and $appFound.ApplicationName -ne $appProgram) {",
         "  Write-Output ('NEED_RULE=' + $appRuleName)",
         "}",
         "foreach ($name in $wanted) {",
@@ -317,10 +329,13 @@ def apply_setup(key, values):
                     _ps_quote(rule["program"]))
             )
         else:
+            local_address = rule.get("local_address")
+            local_arg = (" -LocalAddress {}".format(_ps_quote(local_address))
+                         if local_address else "")
             rule_lines.append(
                 "New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow "
-                "-Profile Any -Protocol {} -LocalPort {} -ErrorAction Stop | Out-Null".format(
-                    proto, int(rule["port"]))
+                "-Profile Any -Protocol {} -LocalPort {}{} -ErrorAction Stop | Out-Null".format(
+                    proto, int(rule["port"]), local_arg)
             )
         rule_lines.append("$changed = $true")
 
@@ -404,6 +419,9 @@ def setup_summary(key, values):
         parts.append("create Windows Firewall allow rules for the built-in PS2 Servers SMB server")
         if values.get("take_445"):
             parts.append("temporarily use TCP 445 by pausing Windows file sharing while the server runs")
+    elif key == "directlink":
+        parts.append("set a fixed address on the chosen network port and allow "
+                     "the direct-link DHCP helper (UDP 67) through the firewall")
     else:
         ports = _server_ports(key, values)
         if ports:

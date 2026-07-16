@@ -175,6 +175,23 @@ Packaged builds bundle CHD (libchdr) and ZSO (lz4) support, so CHD/CSO/ZSO image
 `libchdr` native library for CHD; CSO always works (Python standard library). See
 [docs/optional-compression-dependencies.md](docs/optional-compression-dependencies.md).
 
+## Direct PS2-to-PC link (no router)
+
+A PS2 cabled straight into the PC has no router on the wire, so nothing hands the
+console an IP address — every network app then fails the same way (empty lists,
+"check cable and DHCP"). Tick **"PS2 is plugged directly into this PC"** at the top
+of the launcher and that whole problem disappears: PS2 Servers finds the right
+network port, gives the PC a fixed address on it (one administrator prompt), and
+runs a tiny DHCP helper on that port only, so the console — which asks for an
+address by itself — just gets one. The LAN IP box fills in with the address to use
+in OPL. Unticking the box undoes all of it.
+
+The helper is deliberately paranoid, because a DHCP server answering on a real
+network could hand bad addresses to everything on it. It binds only to the
+direct-link port, refuses to start if that port reaches a router or already got an
+address from a real DHCP server, serves exactly one address to one console, and
+stops itself if a second device starts asking. Windows-only for now.
+
 ## Run a server on its own (terminal)
 
 Each server still runs standalone, and the launcher can run them too:
