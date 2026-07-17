@@ -193,8 +193,11 @@ def _udpfs_argv(v):
         args += ["--peer-timeout", str(timeout)]
     if v.get("read_only"):
         args.append("--read-only")
-    if v.get("enable_compression"):
-        args.append("--enable-compression")
+    # The server decompresses by default now, so ticking the box is a no-op and
+    # UNTICKING is the instruction that has to be sent. Passing nothing when it
+    # is unticked would silently leave decompression on.
+    if not v.get("enable_compression"):
+        args.append("--no-compression")
     if v.get("modulo_mode"):
         # Implies --single-port server-side; passing both would be redundant.
         args.append("--modulo-mode")

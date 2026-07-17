@@ -334,18 +334,45 @@ def test_extension_gating_builder():
     print("[builder] library-availability gating")
     saved = (srv.LZ4_AVAILABLE, srv.LIBCHDR_AVAILABLE)
     try:
+        # '.ziso'/'.ciso' are alternate spellings of the SAME containers, so an
+        # alias must appear exactly when its base format does -- gating them
+        # apart would advertise a file the matching codec cannot open.
         srv.LZ4_AVAILABLE, srv.LIBCHDR_AVAILABLE = True, True
-        check(srv._supported_compressed_extensions() == ('.zso', '.cso', '.chd'),
-              "all libraries available -> all three formats")
+        check(srv._supported_compressed_extensions() ==
+              ('.zso', '.ziso', '.cso', '.ciso', '.chd'),
+              "all libraries available -> all three formats, aliases included")
         srv.LZ4_AVAILABLE, srv.LIBCHDR_AVAILABLE = False, True
-        check(srv._supported_compressed_extensions() == ('.cso', '.chd'),
-              "no lz4 -> ZSO dropped")
+        check(srv._supported_compressed_extensions() == ('.cso', '.ciso', '.chd'),
+              "no lz4 -> ZSO dropped, and .ziso with it")
         srv.LZ4_AVAILABLE, srv.LIBCHDR_AVAILABLE = True, False
-        check(srv._supported_compressed_extensions() == ('.zso', '.cso'),
+        check(srv._supported_compressed_extensions() ==
+              ('.zso', '.ziso', '.cso', '.ciso'),
               "no libchdr -> CHD dropped")
         srv.LZ4_AVAILABLE, srv.LIBCHDR_AVAILABLE = False, False
-        check(srv._supported_compressed_extensions() == ('.cso',),
-              "neither library -> only CSO (zlib is stdlib)")
+        check(srv._supported_compressed_extensions() == ('.cso', '.ciso'),
+              "neither library -> only CSO and its alias (zlib is stdlib)")
+    finally:
+        srv.LZ4_AVAILABLE, srv.LIBCHDR_AVAILABLE = saved
+
+
+def test_extension_alias_mapping():
+    """Every advertised extension must map to a codec, and aliases must map to
+    the same one as the spelling they alias -- the listing transform and the
+    .iso sibling probe both key off this table."""
+    print("[builder] extension -> codec mapping")
+    check(srv._format_for_extension('a.cso') == 'cso', ".cso -> cso")
+    check(srv._format_for_extension('a.ciso') == 'cso', ".ciso -> cso (alias)")
+    check(srv._format_for_extension('a.zso') == 'zso', ".zso -> zso")
+    check(srv._format_for_extension('a.ziso') == 'zso', ".ziso -> zso (alias)")
+    check(srv._format_for_extension('a.chd') == 'chd', ".chd -> chd")
+    check(srv._format_for_extension('A.CISO') == 'cso', "matching is case-folded")
+    check(srv._format_for_extension('a.iso') is None, "plain .iso is not compressed")
+    saved = (srv.LZ4_AVAILABLE, srv.LIBCHDR_AVAILABLE)
+    try:
+        srv.LZ4_AVAILABLE, srv.LIBCHDR_AVAILABLE = True, True
+        for ext in srv._supported_compressed_extensions():
+            check(srv._format_for_extension('x' + ext) is not None,
+                  f"advertised {ext} has a codec")
     finally:
         srv.LZ4_AVAILABLE, srv.LIBCHDR_AVAILABLE = saved
 
@@ -382,6 +409,7 @@ def main():
         test_prefers_parseable_sibling(root)
         test_exact_stem_no_case_collision(root)
         test_extension_gating_builder()
+        test_extension_alias_mapping()
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
