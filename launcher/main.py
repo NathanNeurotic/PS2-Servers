@@ -41,6 +41,10 @@ def main(argv=None):
         from . import gui
     except ImportError as e:  # Tkinter not present in this Python build
         print("GUI unavailable ({}). Servers on this machine:".format(e))
+        if platform.system() == "Linux":
+            print("(Tk is bundled in the packaged download. Running from source? "
+                  "Install your distro's Tk package, e.g. "
+                  "'sudo apt install python3-tk' or 'sudo dnf install python3-tkinter'.)")
         _print_list()
         return 1
     _apply_gui_review_fixes(gui)
@@ -60,6 +64,18 @@ Administrator rights are requested only when Windows requires them:
 - using the advanced SMB port 445 mode.
 
 The launcher shows whether it is currently running as administrator. Use "Restart as administrator" only when you intentionally need elevated Windows setup actions. Keeping the default launch non-admin reduces the blast radius of bugs and makes the app easier to trust.
+"""
+
+
+UNIX_ABOUT_TEXT = """
+
+Linux and macOS
+
+PS2 Servers runs the same three servers here as on Windows. A few things differ:
+
+- There is no firewall management. If the PS2 cannot see a server after you start it, open its port in your firewall -- the TERMINAL tab prints the exact command for ufw or firewalld when a server starts. Many desktops allow LAN traffic by default and need nothing.
+- System tray, and the "Take port 445" SMB option, are Windows-only and are not shown here.
+- Direct link mode is experimental on Linux and macOS: it runs a small helper as administrator (via your system's password prompt) to configure the port, and removes that configuration again when it stops.
 """
 
 
@@ -89,8 +105,15 @@ def _apply_gui_review_fixes(gui):
         "disabled": "#5f6f8d",
     }
 
-    if ADMIN_ABOUT_TEXT not in gui.ABOUT_TEXT:
-        gui.ABOUT_TEXT += ADMIN_ABOUT_TEXT
+    # The admin section is about Windows Firewall rules, UAC, and 445 mode --
+    # none of which apply on Linux/macOS. Append it only on Windows; elsewhere
+    # add a short, accurate note so the About tab isn't full of Windows-only
+    # instructions and references to buttons that don't exist off Windows.
+    if gui.windows_setup.is_windows():
+        if ADMIN_ABOUT_TEXT not in gui.ABOUT_TEXT:
+            gui.ABOUT_TEXT += ADMIN_ABOUT_TEXT
+    elif UNIX_ABOUT_TEXT not in gui.ABOUT_TEXT:
+        gui.ABOUT_TEXT += UNIX_ABOUT_TEXT
 
     gui.COLOR_RUNNING = palette["ok"]
     gui.COLOR_STOPPED = palette["muted"]

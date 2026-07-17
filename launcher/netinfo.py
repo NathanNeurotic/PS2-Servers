@@ -7,7 +7,78 @@ the warning the SMBv1 server already prints ("usually 192.168.x.x -- NOT a
 VPN/WSL address").
 """
 
+import shutil
 import socket
+import subprocess
+import sys
+
+
+# Interfaces the PS2 is never reachable on: containers, bridges, VPN tunnels,
+# VM host-only nets. Matched as name prefixes.
+_VIRTUAL_IFACE_PREFIXES = (
+    "lo", "docker", "veth", "virbr", "br-", "tun", "tap", "vmnet", "vboxnet",
+    "zt", "wg", "utun", "llw", "awdl", "bridge", "gif", "stf", "ap",
+)
+
+
+def _iface_is_virtual(name):
+    return name.startswith(_VIRTUAL_IFACE_PREFIXES)
+
+
+def _parse_linux_ip_addr(text):
+    """IPv4s from `ip -o -4 addr show`, skipping virtual interfaces.
+
+    A line looks like: '3: enp3s0    inet 192.168.1.50/24 brd ... scope global'
+    """
+    ips = []
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if len(parts) < 4 or parts[2] != "inet":
+            continue
+        if _iface_is_virtual(parts[1]):
+            continue
+        ips.append(parts[3].split("/")[0])
+    return ips
+
+
+def _parse_macos_ifconfig(text):
+    """IPv4s from `ifconfig`, skipping virtual interfaces.
+
+    Interface headers start in column 0 ('en0: flags=...'); their addresses
+    follow on indented 'inet <ip> netmask ...' lines.
+    """
+    ips = []
+    current = None
+    for line in (text or "").splitlines():
+        if line and not line[0].isspace():
+            current = line.split(":", 1)[0]
+            continue
+        stripped = line.strip()
+        if stripped.startswith("inet ") and current and not _iface_is_virtual(current):
+            ips.append(stripped.split()[1])
+    return ips
+
+
+def _posix_extra_ipv4():
+    """Interface IPv4s that getaddrinfo(hostname) misses on Unix.
+
+    On Debian/Ubuntu the hostname resolves to 127.0.1.1, so getaddrinfo returns
+    only loopback and the machine's real NICs never reach the LAN-IP dropdown --
+    a multi-NIC, NAS, or VPN user is then left to type the address by hand. Read
+    the interfaces directly instead. Best-effort: any failure yields nothing.
+    """
+    try:
+        if sys.platform.startswith("linux") and shutil.which("ip"):
+            out = subprocess.run(["ip", "-o", "-4", "addr", "show"],
+                                 capture_output=True, text=True, timeout=3).stdout
+            return _parse_linux_ip_addr(out)
+        if sys.platform == "darwin" and shutil.which("ifconfig"):
+            out = subprocess.run(["ifconfig"],
+                                 capture_output=True, text=True, timeout=3).stdout
+            return _parse_macos_ifconfig(out)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return []
 
 
 def primary_ip():
@@ -42,6 +113,9 @@ def all_ipv4():
     except OSError:
         pass
     ips.add(primary_ip())
+    # getaddrinfo(hostname) under-reports on Unix (Debian/Ubuntu point the
+    # hostname at 127.0.1.1); read the interfaces directly to fill the dropdown.
+    ips.update(_posix_extra_ipv4())
     return sorted(ip for ip in ips if not ip.startswith(("127.", "169.254.")))
 
 

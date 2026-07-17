@@ -29,7 +29,7 @@ def _direct_link_experimental():
     """Non-Windows: the setup path is real but unverified on hardware."""
     return platform.system() in ("Linux", "Darwin")
 
-from . import config, directlink, elevate, netinfo, tray, windows_setup
+from . import config, directlink, elevate, netinfo, posix_firewall, tray, windows_setup
 from .process import ServerProcess
 from .release_metadata import DISPLAY_VERSION
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
@@ -219,9 +219,14 @@ class ServerCard(ttk.LabelFrame):
             self.toggle_btn.config(state="disabled")
         row += 1
 
-        # primary fields, then advanced fields (hidden behind a toggle)
-        primary = [f for f in self.server.fields if not f.advanced]
-        advanced = [f for f in self.server.fields if f.advanced]
+        # primary fields, then advanced fields (hidden behind a toggle).
+        # windows_only fields (e.g. take-445, which pauses LanmanServer) are
+        # dropped off Windows: their mechanism cannot work there, and showing a
+        # dead control just invites a confusing permission error.
+        shown = [f for f in self.server.fields
+                 if windows_setup.is_windows() or not f.windows_only]
+        primary = [f for f in shown if not f.advanced]
+        advanced = [f for f in shown if f.advanced]
         for f in primary:
             row = self._add_field(self, f, row)
 
@@ -670,15 +675,18 @@ class LauncherApp:
         footer = ttk.Frame(parent, style="Footer.TFrame", padding=(12, 10))
         footer.pack(fill="x", padx=16, pady=(0, 8), before=self.nb)
         footer.columnconfigure(2, weight=1)
-        allow = ttk.Button(footer, text="Allow through firewall",
-                           command=self.allow_windows_setup)
-        allow.grid(row=0, column=0, sticky="w")
-        remove = ttk.Button(footer, text="Remove PS2 Servers firewall rules",
-                            command=self.remove_windows_setup)
-        remove.grid(row=0, column=1, sticky="w", padx=(8, 0))
-        if not windows_setup.is_windows():
-            allow.config(state="disabled")
-            remove.config(state="disabled")
+        # These two manage named WINDOWS Firewall rules. On other OSes there is
+        # nothing for them to do, so rather than show them permanently greyed --
+        # which just makes a Linux user wonder what they're missing -- omit them
+        # entirely (the admin panel is hidden the same way). Linux firewall
+        # guidance is instead printed to the terminal when a server starts.
+        if windows_setup.is_windows():
+            allow = ttk.Button(footer, text="Allow through firewall",
+                               command=self.allow_windows_setup)
+            allow.grid(row=0, column=0, sticky="w")
+            remove = ttk.Button(footer, text="Remove PS2 Servers firewall rules",
+                                command=self.remove_windows_setup)
+            remove.grid(row=0, column=1, sticky="w", padx=(8, 0))
         ttk.Button(footer, text="Stop all", command=self.stop_all).grid(
             row=0, column=3, sticky="e")
         ttk.Button(footer, text="Restart", command=self.restart_app).grid(
@@ -729,19 +737,25 @@ class LauncherApp:
         ttk.Button(links, text="Security notes",
                    command=lambda: self._open_url(SECURITY_URL)).pack(side="left", padx=(6, 0), pady=6)
 
-        behavior = ttk.LabelFrame(about, text=" Window behavior ")
-        behavior.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
-        behavior.columnconfigure(2, weight=1)
-        row += 1
-        close_to_tray = ttk.Checkbutton(
-            behavior, text="Close to tray", variable=self.close_to_tray_var,
-            command=self._save, style="Card.TCheckbutton")
-        close_to_tray.grid(row=0, column=0, sticky="w", padx=(6, 12), pady=6)
-        minimize_to_tray = ttk.Checkbutton(
-            behavior, text="Minimize to tray", variable=self.minimize_to_tray_var,
-            command=self._save, style="Card.TCheckbutton")
-        minimize_to_tray.grid(row=0, column=1, sticky="w", padx=(0, 12), pady=6)
-        self._tray_option_widgets.extend([close_to_tray, minimize_to_tray])
+        # The tray options only mean anything with a tray, which is Windows-only.
+        # Omit the frame entirely elsewhere rather than show two dead checkboxes
+        # (on Linux closing the window quits, with a confirm if servers are up).
+        # Gate on tray.AVAILABLE, not self._tray: the tray instance is created
+        # AFTER _build() runs, so self._tray is still None here on every OS.
+        if tray.AVAILABLE:
+            behavior = ttk.LabelFrame(about, text=" Window behavior ")
+            behavior.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
+            behavior.columnconfigure(2, weight=1)
+            row += 1
+            close_to_tray = ttk.Checkbutton(
+                behavior, text="Close to tray", variable=self.close_to_tray_var,
+                command=self._save, style="Card.TCheckbutton")
+            close_to_tray.grid(row=0, column=0, sticky="w", padx=(6, 12), pady=6)
+            minimize_to_tray = ttk.Checkbutton(
+                behavior, text="Minimize to tray", variable=self.minimize_to_tray_var,
+                command=self._save, style="Card.TCheckbutton")
+            minimize_to_tray.grid(row=0, column=1, sticky="w", padx=(0, 12), pady=6)
+            self._tray_option_widgets.extend([close_to_tray, minimize_to_tray])
 
         text_frame = ttk.Frame(about)
         about.rowconfigure(row, weight=1)
@@ -1602,6 +1616,29 @@ class LauncherApp:
         card.refresh_status(True)
         card.toggle_btn.config(state="normal")
         self.nb.select(self.terminal_tab)
+        if not windows_setup.is_windows():
+            self._log_firewall_hint(key, values)
+
+    def _log_firewall_hint(self, key, values):
+        """Unix: after a server starts, tell the user how to open its ports if a
+        firewall is blocking them. Windows manages allow-rules directly; on Unix
+        we are not root, so guidance is the honest option -- and it turns a
+        silent 'the PS2 sees nothing' into an actionable message. The systemctl
+        active-probe runs OFF the Tk thread; the lines are appended back on it."""
+        ports = windows_setup.server_ports(key, values)
+        if not ports:
+            return
+
+        def worker():
+            lines = posix_firewall.firewall_hint_lines(ports, probe_active=True)
+
+            def emit():
+                for line in lines:
+                    self._append_log(key, "[firewall] {}\n".format(line))
+
+            self.root.after(0, emit)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _allow_pending(self):
         self.saved.pop("pending_firewall_allow", None)
@@ -2185,7 +2222,12 @@ class LauncherApp:
         if self._should_close_to_tray():
             self._hide_to_tray()
             return
-        self.exit_app(confirm=False)
+        # No tray to fall back to (every OS but Windows, or the tray disabled):
+        # closing the window really does quit. Confirm ONLY when servers are
+        # running -- _confirm_app_shutdown returns True instantly otherwise, so
+        # an idle close is still one click. Without this a Linux user clicking X
+        # out of habit silently kills a server mid-load.
+        self.exit_app()
 
     def _should_close_to_tray(self):
         return bool(self._tray and self.close_to_tray_var.get())

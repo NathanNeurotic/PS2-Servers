@@ -121,6 +121,14 @@ def _parse_port(value, default):
         return int(default)
 
 
+def server_ports(key, values):
+    """Public: the fixed inbound ports a server listens on, cross-platform.
+
+    Used both to build Windows firewall rules and to tell a Linux user which
+    ports to open -- one source so the two never disagree."""
+    return _server_ports(key, values)
+
+
 def _server_ports(key, values):
     """Return [(protocol, port, purpose), ...] for fixed inbound ports."""
     if key == "smbv1":
