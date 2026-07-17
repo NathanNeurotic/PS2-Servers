@@ -402,6 +402,9 @@ class LauncherApp:
         self._direct_expected = False       # we started it and expect it alive
         self._direct_busy = False           # an enable/disable flow is mid-flight
         self._direct_rehomes = 0            # times we moved to coexist this run
+        # Set once _shutdown_app starts destroying the root, so the self-
+        # rescheduling loops and worker callbacks stop touching a dead Tk.
+        self._shutting_down = False
         self._tray = None
         self._tray_option_widgets = []
         self.close_to_tray_var = tk.BooleanVar(
@@ -1636,7 +1639,13 @@ class LauncherApp:
                 for line in lines:
                     self._append_log(key, "[firewall] {}\n".format(line))
 
-            self.root.after(0, emit)
+            # The probe can take a few seconds; the window may be gone by now.
+            if self._shutting_down:
+                return
+            try:
+                self.root.after(0, emit)
+            except tk.TclError:
+                pass  # root destroyed between the check and the call
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1928,7 +1937,8 @@ class LauncherApp:
             pass
         for key, lines in updates.items():  # one widget update per server per tick
             self._append_log(key, "".join(lines))
-        self.root.after(150, self._drain_logs)
+        if not self._shutting_down:
+            self.root.after(150, self._drain_logs)
 
     def _append_log(self, key, text):
         widget = self.logs[key]
@@ -1981,7 +1991,8 @@ class LauncherApp:
                     "The DHCP helper stopped (code {}) — see the TERMINAL "
                     "tab. Untick and tick the box to retry.".format(code))
                 self._finish_direct_exit()
-        self.root.after(600, self._poll_status)
+        if not self._shutting_down:
+            self.root.after(600, self._poll_status)
 
     def _finish_direct_exit(self):
         cfg = self.saved.get("direct_link") or {}
@@ -2208,6 +2219,10 @@ class LauncherApp:
                 ", ".join(running)))
 
     def _shutdown_app(self):
+        # Stop the periodic loops (_drain_tray / _drain_logs / _poll_status) and
+        # any pending worker callback from rescheduling onto the root we are
+        # about to destroy -- otherwise the reschedule raises TclError.
+        self._shutting_down = True
         self._save()
         # hide first so the (up to a few seconds of) child termination doesn't
         # look like a frozen window
@@ -2271,9 +2286,12 @@ class LauncherApp:
                     # Exit paths -- an explicit Quit should not silently kill a
                     # transfer either. No-op prompt when nothing is running.
                     self.exit_app()
+                    if self._shutting_down:
+                        return  # root is being destroyed; don't reschedule
         except queue.Empty:
             pass
-        self.root.after(150, self._drain_tray)
+        if not self._shutting_down:
+            self.root.after(150, self._drain_tray)
 
     def _quit_from_tray(self):
         self.exit_app()

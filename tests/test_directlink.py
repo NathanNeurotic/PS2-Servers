@@ -758,6 +758,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         app._save = mock.Mock()
         app._set_direct_checkbox = mock.Mock()
         app._set_direct_status = mock.Mock()
+        app._shutting_down = False  # real __init__ sets this; _poll_status reads it
         return app
 
     def test_enable_is_not_saved_when_helper_fails_to_start(self):
