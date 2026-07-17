@@ -335,15 +335,36 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Ensure the dev build stays a pre-release
+        # softprops sets prerelease: true above, but GitHub has silently dropped
+        # that flag on publish (main-96, during an API hiccup), which let a dev
+        # build steal the "Latest" badge from the newest tagged vX.Y.Z. Re-assert
+        # it -- idempotent when already set -- so a mis-flag cannot reach users.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set +e
+          # A pre-release is never the "Latest" release, so this alone keeps the
+          # badge on the newest tagged vX.Y.Z.
+          gh release edit "$TAG" --prerelease \
+            || echo "note: could not re-assert pre-release flag on ${TAG}"
+          exit 0
+
       - name: Prune old development pre-releases
         # Every push to main publishes one of these, and nothing used to remove
         # them: they reached 49 releases / 83 tags before a manual cleanup. Keep
         # only the newest few so the Releases page stays readable.
         #
-        # Deliberately paranoid about what it deletes: a release must BOTH be
-        # flagged prerelease AND carry a main-<run>-<sha> tag. A tagged vX.Y.Z
-        # release satisfies neither, so it can never be selected here -- and the
-        # loop refuses anything starting with "v" as a last line of defence.
+        # Selection keys on the main-<run>-<sha> TAG pattern alone, NOT on the
+        # prerelease flag. A tagged vX.Y.Z can never match that pattern, and the
+        # loop refuses anything starting with "v" as a last line of defence, so
+        # a real release is never at risk. Matching the tag (not the flag) also
+        # makes this self-healing: GitHub once published main-96 with
+        # prerelease=false (an API hiccup), which both stole the "Latest" badge
+        # from the newest vX.Y.Z AND made that build immune to a flag-based
+        # prune. Keying on the tag prunes such a mis-flagged build too.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEEP: '5'
@@ -356,7 +377,6 @@ jobs:
           # reason about and needs no jq binary (gh has jq built in).
           gh release list --limit 200 --json tagName,isPrerelease,createdAt \
             --jq '[ .[]
-                    | select(.isPrerelease == true)
                     | select(.tagName | test("^main-[0-9]+-"))
                   ]
                   | sort_by(.createdAt) | reverse | .[].tagName' > all_dev.txt || exit 0
@@ -364,7 +384,7 @@ jobs:
           # Skip the newest KEEP lines; everything after them is stale.
           tail -n +"$((KEEP + 1))" all_dev.txt > stale.txt
           count=$(grep -c . stale.txt)
-          echo "Dev pre-releases: ${total}. Keeping newest ${KEEP}, pruning ${count}."
+          echo "Dev builds (main-*): ${total}. Keeping newest ${KEEP}, pruning ${count}."
           while read -r tag; do
             [ -z "$tag" ] && continue
             case "$tag" in
