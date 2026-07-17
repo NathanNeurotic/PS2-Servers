@@ -96,18 +96,15 @@ class BindTests(unittest.TestCase):
 
 
 class DataPortPrecedenceTests(unittest.TestCase):
-    """--data-port beats a port embedded in --bind; the parse must tell an
-    explicit 0 ('pick ephemeral') apart from the flag being absent."""
+    """Exercise the PRODUCTION resolver, not a copy of it, so the test can't
+    pass while main() diverges. --data-port beats a port in --bind, which beats
+    DATA_PORT; an explicit 0 ('pick ephemeral') is distinct from the flag being
+    absent."""
 
     @staticmethod
-    def _resolve(data_port_arg, bind_arg):
-        # Mirror main()'s resolution without standing a server up. args.data_port
-        # is None when --data-port was not passed; 0 is a real, explicit value.
-        data_port = data_port_arg
+    def _resolve(data_port_arg, bind_arg, env_value=None):
         _bind_ip, bind_port = udpfs.split_bind(bind_arg)
-        if data_port is None:
-            data_port = bind_port if bind_port is not None else 0
-        return data_port
+        return udpfs.resolve_data_port(data_port_arg, bind_port, env_value)
 
     def test_explicit_data_port_beats_bind_port(self):
         self.assertEqual(self._resolve(50000, ':41233'), 50000)
@@ -119,8 +116,78 @@ class DataPortPrecedenceTests(unittest.TestCase):
     def test_bind_port_used_when_data_port_absent(self):
         self.assertEqual(self._resolve(None, ':41233'), 41233)
 
-    def test_auto_when_neither_given(self):
+    def test_env_used_when_cli_and_bind_absent(self):
+        self.assertEqual(self._resolve(None, '192.168.1.5', env_value='51000'), 51000)
+
+    def test_cli_beats_env(self):
+        self.assertEqual(self._resolve(50000, '192.168.1.5', env_value='51000'), 50000)
+
+    def test_bind_beats_env(self):
+        self.assertEqual(self._resolve(None, ':41233', env_value='51000'), 41233)
+
+    def test_auto_when_nothing_given(self):
         self.assertEqual(self._resolve(None, '192.168.1.5'), 0)
+
+    def test_out_of_range_env_raises(self):
+        with self.assertRaises(ValueError):
+            self._resolve(None, '192.168.1.5', env_value='99999')
+
+
+class PortRangeTests(unittest.TestCase):
+    def test_data_port_arg_rejects_out_of_range(self):
+        parse = udpfs._port_arg('--data-port')
+        self.assertEqual(parse('41233'), 41233)
+        self.assertEqual(parse('0'), 0)
+        self.assertEqual(parse('0xF5F7'), 0xF5F7)  # hex like the CLI accepts
+        for bad in ('99999', '-1', '70000'):
+            with self.assertRaises(Exception):  # argparse.ArgumentTypeError
+                parse(bad)
+
+
+class TruncatedCompressedHeaderTests(unittest.TestCase):
+    """A truncated compressed file with valid magic must not report metadata --
+    _resolve_compressed_sibling would prefer this unopenable candidate over a
+    good later sibling and OPEN would then fail with EIO."""
+
+    def _write(self, path, data):
+        with open(path, 'wb') as f:
+            f.write(data)
+
+    def test_truncated_cso_with_valid_magic_is_rejected(self):
+        import struct as _struct
+        import tempfile
+        d = tempfile.mkdtemp()
+        try:
+            # Valid CISO magic + a size field, but only 16 bytes -- shorter than
+            # the 24-byte header the wrapper needs.
+            magic = _struct.pack('<I', udpfs.CSO_MAGIC)
+            truncated = magic + b'\x00' * 4 + _struct.pack('<Q', 700 * 1024 * 1024)
+            self.assertEqual(len(truncated), 16)
+            p = os.path.join(d, 'Game.cso')
+            self._write(p, truncated)
+            self.assertIsNone(udpfs.get_compressed_info(p))
+        finally:
+            import shutil as _shutil
+            _shutil.rmtree(d, ignore_errors=True)
+
+    def test_full_length_header_still_parses(self):
+        import struct as _struct
+        import tempfile
+        d = tempfile.mkdtemp()
+        try:
+            magic = _struct.pack('<I', udpfs.CSO_MAGIC)
+            header = (magic + _struct.pack('<I', 24)
+                      + _struct.pack('<Q', 700 * 1024 * 1024)
+                      + _struct.pack('<I', 2048) + b'\x01\x00\x00\x00')
+            self.assertEqual(len(header), 24)
+            p = os.path.join(d, 'Game.cso')
+            self._write(p, header)
+            info = udpfs.get_compressed_info(p)
+            self.assertIsNotNone(info)
+            self.assertEqual(info[1], 'CSO')
+        finally:
+            import shutil as _shutil
+            _shutil.rmtree(d, ignore_errors=True)
 
 
 class ExtensionAliasTests(unittest.TestCase):

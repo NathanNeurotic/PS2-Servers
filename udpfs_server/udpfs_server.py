@@ -290,9 +290,15 @@ def get_compressed_info(file_path: str) -> Optional[Tuple[int, str]]:
                 return (uncompressed_size, 'CHD')
             
             header = f.read(24)
-            if len(header) < 16:
+            # The ZSO/CSO wrappers need the full 24-byte header (magic, header
+            # size, uncompressed size, block size, version, align) before they
+            # can open the file. A shorter read -- a truncated or interrupted
+            # download that happens to carry valid magic -- must NOT report
+            # metadata: _resolve_compressed_sibling would then prefer this
+            # unopenable candidate over a good later sibling and OPEN would fail.
+            if len(header) < 24:
                 return None
-            
+
             magic = header[0:4]
             magic_int = struct.unpack('<I', magic)[0]
             
@@ -2397,6 +2403,44 @@ def _duration_arg(label):
     return parse
 
 
+def _parse_port(value):
+    """A UDP port in range. int(x, 0) so 0x.. hex is accepted, like the CLI."""
+    port = int(value, 0) if isinstance(value, str) else int(value)
+    if not 0 <= port <= 65535:
+        raise ValueError("port {} out of range 0-65535".format(port))
+    return port
+
+
+def _port_arg(label):
+    """argparse type for a port: reject an out-of-range value with a clean usage
+    error instead of letting it reach socket.bind() and raise there."""
+    def parse(value):
+        try:
+            return _parse_port(value)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(
+                "invalid {} {!r}: {}".format(label, value, e))
+    return parse
+
+
+def resolve_data_port(cli_data_port, bind_port, env_value):
+    """The data port, by precedence: explicit --data-port > a port in --bind >
+    DATA_PORT env > auto (0).
+
+    cli_data_port is None when --data-port was absent -- 0 is a real value
+    ("pick an ephemeral port") and must not be treated as unset. env_value is
+    the raw DATA_PORT string (or None). Raises ValueError on an out-of-range
+    env value so the caller can turn it into a clean usage error.
+    """
+    if cli_data_port is not None:
+        return cli_data_port
+    if bind_port is not None:
+        return bind_port
+    if env_value:
+        return _parse_port(env_value)
+    return 0
+
+
 def split_bind(value) -> Tuple[str, Optional[int]]:
     """(ip, port|None) from 'IP', 'IP:PORT' or ':PORT'.
 
@@ -2485,7 +2529,7 @@ def main():
         help='Number of decompressed blocks to cache per file (default: 32; env: COMPRESSION_CACHE_SIZE)'
     )
     parser.add_argument(
-        '--data-port', type=lambda x: int(x, 0), default=None,
+        '--data-port', type=_port_arg('--data-port'), default=None,
         help='Pin the UDP data port instead of using an ephemeral one (default: 0 = '
              'auto). Use when the data endpoint must be predictable for a manual '
              'firewall rule, port forwarding, or NAT. Ignored with --single-port '
@@ -2552,11 +2596,13 @@ def main():
     except ValueError as e:
         parser.error(str(e))
     args.bind = bind_ip
-    if args.data_port is None:
-        if bind_port is not None:
-            args.data_port = bind_port
-        else:
-            args.data_port = _env_int('DATA_PORT', 0)
+    # DATA_PORT (env) skips argparse's type check, so its range is validated
+    # inside resolve_data_port -- DATA_PORT=99999 must fail here, not at bind().
+    try:
+        args.data_port = resolve_data_port(
+            args.data_port, bind_port, os.environ.get('DATA_PORT'))
+    except ValueError as e:
+        parser.error("invalid DATA_PORT: {}".format(e))
 
     if not args.block_device and not args.root_dir:
         parser.error("At least one of --block-device or --root-dir is required")
