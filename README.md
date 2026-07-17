@@ -251,8 +251,7 @@ CSO decompression is built in (it uses the standard library). The *optional*
 compressed formats do have dependencies: ZSO needs the `lz4` package and CHD
 needs a native `libchdr` library — install those if you want ZSO/CHD, and any
 format whose library is missing is simply left untouched (uncompressed images
-are unaffected). This is the box that is already on 24/7 next to the console, so
-running the server there is often ideal.
+are unaffected).
 
 (The **minimum requirements** table above describes the *packaged GUI app*, which
 is x64/Apple-Silicon only. Running a server straight from source, as here, has no
