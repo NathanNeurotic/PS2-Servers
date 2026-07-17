@@ -347,10 +347,23 @@ jobs:
         run: |
           set +e
           # A pre-release is never the "Latest" release, so this alone keeps the
-          # badge on the newest tagged vX.Y.Z.
-          gh release edit "$TAG" --prerelease \
-            || echo "note: could not re-assert pre-release flag on ${TAG}"
-          exit 0
+          # badge on the newest tagged vX.Y.Z. Retry once, then VERIFY -- GitHub
+          # has accepted this call without applying the flag before. If the build
+          # is still mis-flagged it would steal Latest right now, so fail loudly
+          # (the release is already published; a red run flags it for a human,
+          # and the prune keys on the tag so it is still cleaned up next run).
+          for attempt in 1 2; do
+            gh release edit "$TAG" --prerelease && break
+            echo "attempt ${attempt}: could not set --prerelease on ${TAG}"
+            sleep 5
+          done
+          pre=$(gh release view "$TAG" --json isPrerelease --jq .isPrerelease 2>/dev/null)
+          if [ "$pre" = "true" ]; then
+            echo "confirmed ${TAG} is a pre-release"
+            exit 0
+          fi
+          echo "::error::${TAG} is not flagged pre-release; it could steal the Latest badge"
+          exit 1
 
       - name: Prune old development pre-releases
         # Every push to main publishes one of these, and nothing used to remove
@@ -375,9 +388,11 @@ jobs:
           # Newest first. Selection is done here; "how many to keep" is applied
           # with tail below rather than inside jq, so the slice stays trivial to
           # reason about and needs no jq binary (gh has jq built in).
+          # Match the EXACT generated shape main-<run>-<7-hex-sha>, not just the
+          # prefix, so a hand-made tag like main-123-hotfix is never selected.
           gh release list --limit 200 --json tagName,isPrerelease,createdAt \
             --jq '[ .[]
-                    | select(.tagName | test("^main-[0-9]+-"))
+                    | select(.tagName | test("^main-[0-9]+-[0-9a-f]{7}$"))
                   ]
                   | sort_by(.createdAt) | reverse | .[].tagName' > all_dev.txt || exit 0
           total=$(grep -c . all_dev.txt)
