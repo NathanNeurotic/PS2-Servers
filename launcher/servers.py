@@ -73,6 +73,7 @@ class Field:
     default: object = None
     help: str = ""
     advanced: bool = False  # GUI hides advanced fields until expanded
+    windows_only: bool = False  # GUI omits the field entirely on other OSes
 
 
 @dataclass
@@ -240,6 +241,7 @@ SMBV1 = ServerDef(
         Field("read_only", "Read-only", "bool", default=False, advanced=True,
               help="No saves / no VMC writes."),
         Field("take_445", "Take port 445 (admin)", "bool", default=False, advanced=True,
+              windows_only=True,
               help="Bind standard port 445 by pausing Windows file sharing. Needs admin."),
         Field("bind", "Bind address", "text", default="", advanced=True,
               help="Interface to bind (blank = all)."),
