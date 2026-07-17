@@ -95,6 +95,34 @@ class BindTests(unittest.TestCase):
                 udpfs.split_bind(bad)
 
 
+class DataPortPrecedenceTests(unittest.TestCase):
+    """--data-port beats a port embedded in --bind; the parse must tell an
+    explicit 0 ('pick ephemeral') apart from the flag being absent."""
+
+    @staticmethod
+    def _resolve(data_port_arg, bind_arg):
+        # Mirror main()'s resolution without standing a server up. args.data_port
+        # is None when --data-port was not passed; 0 is a real, explicit value.
+        data_port = data_port_arg
+        _bind_ip, bind_port = udpfs.split_bind(bind_arg)
+        if data_port is None:
+            data_port = bind_port if bind_port is not None else 0
+        return data_port
+
+    def test_explicit_data_port_beats_bind_port(self):
+        self.assertEqual(self._resolve(50000, ':41233'), 50000)
+
+    def test_explicit_zero_data_port_wins_over_bind_port(self):
+        # The bug: 0 was treated as "unset" and --bind's 41233 leaked through.
+        self.assertEqual(self._resolve(0, ':41233'), 0)
+
+    def test_bind_port_used_when_data_port_absent(self):
+        self.assertEqual(self._resolve(None, ':41233'), 41233)
+
+    def test_auto_when_neither_given(self):
+        self.assertEqual(self._resolve(None, '192.168.1.5'), 0)
+
+
 class ExtensionAliasTests(unittest.TestCase):
     """'.ciso'/'.ziso' occur in the wild for the same containers."""
 
@@ -122,22 +150,54 @@ class ExtensionAliasTests(unittest.TestCase):
         self.assertIn('.cso', exts)  # zlib is stdlib: always supported
 
 
+class _FakeSock:
+    """Records setsockopt calls; a real socket always reports a positive buffer,
+    which would let a no-op implementation pass."""
+
+    def __init__(self, current, fail=False):
+        self.current = current
+        self.fail = fail
+        self.set_calls = []
+
+    def getsockopt(self, level, opt):
+        if self.fail:
+            raise OSError('nope')
+        return self.current
+
+    def setsockopt(self, level, opt, value):
+        if self.fail:
+            raise OSError('nope')
+        self.set_calls.append(value)
+        self.current = value
+
+
 class RecvBufferTests(unittest.TestCase):
-    def test_widen_is_best_effort_and_never_shrinks(self):
+    def test_widen_sets_the_option_when_current_is_smaller(self):
+        s = _FakeSock(current=8192)
+        udpfs._widen_recv_buffer(s, udpfs.DATA_RECV_BUFFER_BYTES)
+        self.assertEqual(s.set_calls, [udpfs.DATA_RECV_BUFFER_BYTES])
+
+    def test_widen_does_nothing_when_current_is_already_adequate(self):
+        # Never shrink a buffer the OS already gave us (some platforms hand out
+        # a large one, and asking for less would be a downgrade).
+        s = _FakeSock(current=4 << 20)
+        udpfs._widen_recv_buffer(s, udpfs.DATA_RECV_BUFFER_BYTES)
+        self.assertEqual(s.set_calls, [])
+
+    def test_widen_is_best_effort_when_the_option_is_refused(self):
+        s = _FakeSock(current=0, fail=True)
+        udpfs._widen_recv_buffer(s, 1 << 20)  # must not raise
+        self.assertEqual(s.set_calls, [])
+
+    def test_widen_on_a_real_socket(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             udpfs._widen_recv_buffer(s, udpfs.DATA_RECV_BUFFER_BYTES)
-            got = s.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
-            self.assertGreater(got, 0)
-            # Asking for less must not shrink what we already have.
-            before = got
-            udpfs._widen_recv_buffer(s, 1024)
-            self.assertGreaterEqual(
-                s.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF), before)
+            self.assertGreater(s.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF), 0)
         finally:
             s.close()
 
-    def test_widen_tolerates_a_broken_socket(self):
+    def test_widen_tolerates_a_closed_socket(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.close()
         udpfs._widen_recv_buffer(s, 1 << 20)  # must not raise
@@ -153,6 +213,13 @@ class LauncherCompressionArgTests(unittest.TestCase):
 
     def test_ticked_sends_nothing_because_it_is_the_default(self):
         args = servers._udpfs_argv({'root_dir': '/games', 'enable_compression': True})
+        self.assertNotIn('--no-compression', args)
+
+    def test_omitted_key_keeps_decompression_on(self):
+        # A config written before this field existed has no key at all. Treating
+        # that as "unticked" would disable decompression for people who never
+        # asked to -- the exact opposite of the default this PR establishes.
+        args = servers._udpfs_argv({'root_dir': '/games'})
         self.assertNotIn('--no-compression', args)
 
     def test_only_long_flags_are_emitted(self):

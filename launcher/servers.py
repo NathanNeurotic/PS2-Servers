@@ -195,8 +195,11 @@ def _udpfs_argv(v):
         args.append("--read-only")
     # The server decompresses by default now, so ticking the box is a no-op and
     # UNTICKING is the instruction that has to be sent. Passing nothing when it
-    # is unticked would silently leave decompression on.
-    if not v.get("enable_compression"):
+    # is unticked would silently leave decompression on. Default the lookup to
+    # True: a config written before this field existed has no key, and treating
+    # that as "unticked" would disable decompression for exactly the users who
+    # never asked to.
+    if not v.get("enable_compression", True):
         args.append("--no-compression")
     if v.get("modulo_mode"):
         # Implies --single-port server-side; passing both would be redundant.

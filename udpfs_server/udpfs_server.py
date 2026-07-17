@@ -85,13 +85,16 @@ def _supported_compressed_extensions() -> Tuple[str, ...]:
     only serve as raw container bytes. The tuple order is also the probe order
     when several compressed siblings of the same .iso exist.
     """
-    exts = []
-    if LZ4_AVAILABLE:
-        exts.extend(('.zso', '.ziso'))
-    exts.extend(('.cso', '.ciso'))  # zlib is stdlib; CSO is always supported
-    if LIBCHDR_AVAILABLE:
-        exts.append('.chd')
-    return tuple(exts)
+    # Derived from _EXTENSION_FORMATS, never a second hand-written list: an
+    # alias added to the table but forgotten here would map to a codec while
+    # staying unadvertised, so the console would never see the file. Dict order
+    # is insertion order, which keeps the documented probe order.
+    available = {
+        'zso': LZ4_AVAILABLE,
+        'cso': True,  # zlib is stdlib; CSO is always supported
+        'chd': LIBCHDR_AVAILABLE,
+    }
+    return tuple(ext for ext, fmt in _EXTENSION_FORMATS.items() if available[fmt])
 
 
 # The single source of truth for every extension predicate below (listing
@@ -2482,7 +2485,7 @@ def main():
         help='Number of decompressed blocks to cache per file (default: 32; env: COMPRESSION_CACHE_SIZE)'
     )
     parser.add_argument(
-        '--data-port', type=lambda x: int(x, 0), default=_env_int('DATA_PORT', 0),
+        '--data-port', type=lambda x: int(x, 0), default=None,
         help='Pin the UDP data port instead of using an ephemeral one (default: 0 = '
              'auto). Use when the data endpoint must be predictable for a manual '
              'firewall rule, port forwarding, or NAT. Ignored with --single-port '
@@ -2540,15 +2543,20 @@ def main():
         enable_compression = False
     args.enable_compression = enable_compression
 
-    # --bind may carry the data port (udpfsd grammar). An explicit --data-port
-    # wins; otherwise a port here fills it in.
+    # --bind may carry the data port (udpfsd grammar). Precedence: an explicit
+    # --data-port wins, then a port in --bind, then DATA_PORT, then auto (0).
+    # args.data_port is None when the flag was absent -- 0 is a REAL value
+    # ("pick an ephemeral port"), so it must not be mistaken for "unset".
     try:
         bind_ip, bind_port = split_bind(args.bind)
     except ValueError as e:
         parser.error(str(e))
     args.bind = bind_ip
-    if not args.data_port and bind_port:
-        args.data_port = bind_port
+    if args.data_port is None:
+        if bind_port is not None:
+            args.data_port = bind_port
+        else:
+            args.data_port = _env_int('DATA_PORT', 0)
 
     if not args.block_device and not args.root_dir:
         parser.error("At least one of --block-device or --root-dir is required")
