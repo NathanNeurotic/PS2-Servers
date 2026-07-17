@@ -33,6 +33,7 @@ import gzip
 import math
 import os
 import queue
+import re
 import select
 import socket
 import struct
@@ -56,6 +57,25 @@ except ImportError:
     LZ4_AVAILABLE = False
 
 
+# Extension -> format id. The ONLY place an extension is mapped to a codec.
+# '.ciso' and '.zso' both occur in the wild for the same containers -- several
+# conversion tools write CSO as '.ciso' and ZSO as '.ziso', and udpfsd accepts
+# both spellings. An extension we do not recognise is not a cosmetic problem:
+# the file is never renamed to .iso, so the console simply cannot see it.
+_EXTENSION_FORMATS = {
+    '.zso': 'zso',
+    '.ziso': 'zso',
+    '.cso': 'cso',
+    '.ciso': 'cso',
+    '.chd': 'chd',
+}
+
+
+def _format_for_extension(file_path: str) -> Optional[str]:
+    """Codec id ('zso'/'cso'/'chd') for a path's extension, or None."""
+    return _EXTENSION_FORMATS.get(os.path.splitext(file_path)[1].lower())
+
+
 def _supported_compressed_extensions() -> Tuple[str, ...]:
     """Compressed-image extensions this server can actually decompress.
 
@@ -65,13 +85,16 @@ def _supported_compressed_extensions() -> Tuple[str, ...]:
     only serve as raw container bytes. The tuple order is also the probe order
     when several compressed siblings of the same .iso exist.
     """
-    exts = []
-    if LZ4_AVAILABLE:
-        exts.append('.zso')
-    exts.append('.cso')  # zlib is stdlib; CSO is always supported
-    if LIBCHDR_AVAILABLE:
-        exts.append('.chd')
-    return tuple(exts)
+    # Derived from _EXTENSION_FORMATS, never a second hand-written list: an
+    # alias added to the table but forgotten here would map to a codec while
+    # staying unadvertised, so the console would never see the file. Dict order
+    # is insertion order, which keeps the documented probe order.
+    available = {
+        'zso': LZ4_AVAILABLE,
+        'cso': True,  # zlib is stdlib; CSO is always supported
+        'chd': LIBCHDR_AVAILABLE,
+    }
+    return tuple(ext for ext, fmt in _EXTENSION_FORMATS.items() if available[fmt])
 
 
 # The single source of truth for every extension predicate below (listing
@@ -79,6 +102,34 @@ def _supported_compressed_extensions() -> Tuple[str, ...]:
 # '.zso'/'.cso'/'.chd' lists at call sites -- that drift is exactly how CHD
 # files silently vanished from directory listings once before.
 COMPRESSED_EXTENSIONS = _supported_compressed_extensions()
+
+
+# Kernel receive-buffer sizes. The PS2 streams bursts of small datagrams, so
+# any stall in the receive loop lets the socket buffer overflow -- and a dropped
+# datagram costs a NACK plus a retransmit round-trip, which is far more
+# expensive than the memory. udpfsd asks for the same 1 MB on its data socket
+# (internal/udpfsd/data.go) and a small one on discovery, which only ever sees
+# occasional broadcasts. Both are requests, not guarantees: the OS may cap them.
+DATA_RECV_BUFFER_BYTES = 1 << 20
+DISCOVERY_RECV_BUFFER_BYTES = 1 << 16
+
+
+def _widen_recv_buffer(sock, size: int) -> None:
+    """Ask for a larger SO_RCVBUF, never shrinking one the OS already gave us.
+
+    Best-effort by design: a platform that refuses the option, clamps it, or
+    reports nonsense must not stop the server from serving.
+    """
+    try:
+        current = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+    except OSError:
+        current = 0
+    if current >= size:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, size)
+    except OSError:
+        pass  # keep the default; smaller buffer is slower, not broken
 
 
 # UDPRDMA Protocol Constants
@@ -173,17 +224,19 @@ def open_compressed(file_path: str, cache_size: int = None) -> Optional[Compress
     Returns:
         CompressedFileWrapper subclass instance, or None if unsupported format
     """
-    ext = os.path.splitext(file_path)[1].lower()
-    
-    if ext == '.zso':
+    fmt = _format_for_extension(file_path)
+
+    if fmt == 'zso':
         if not LZ4_AVAILABLE:
             return None
         return ZsoFileWrapper(file_path, cache_size)
-    elif ext == '.cso':
+    elif fmt == 'cso':
         return CsoFileWrapper(file_path, cache_size)
-    elif ext == '.chd':
+    elif fmt == 'chd':
+        if not LIBCHDR_AVAILABLE:
+            return None
         return ChdFileWrapper(file_path, cache_size)
-    
+
     return None
 
 
@@ -192,11 +245,11 @@ def get_compressed_info(file_path: str) -> Optional[Tuple[int, str]]:
     Get info about a compressed file without fully opening it.
     Returns (uncompressed_size, format_name) or None if not a supported compressed file.
     """
-    ext = os.path.splitext(file_path)[1].lower()
-    
+    fmt = _format_for_extension(file_path)
+
     try:
         with open(file_path, 'rb') as f:
-            if ext == '.chd':
+            if fmt == 'chd':
                 # CHD has different header structure
                 header = f.read(64)
                 if len(header) < 64:
@@ -243,14 +296,14 @@ def get_compressed_info(file_path: str) -> Optional[Tuple[int, str]]:
             magic = header[0:4]
             magic_int = struct.unpack('<I', magic)[0]
             
-            if ext == '.zso':
+            if fmt == 'zso':
                 if magic == ZSO_MAGIC:
                     uncompressed_size = struct.unpack('<Q', header[8:16])[0]
                     return (uncompressed_size, 'ZSO')
                 elif magic == b'ZISO':
                     uncompressed_size = struct.unpack('<Q', header[8:16])[0]
                     return (uncompressed_size, 'ZISO')
-            elif ext == '.cso':
+            elif fmt == 'cso':
                 if magic_int == CSO_MAGIC:
                     uncompressed_size = struct.unpack('<Q', header[8:16])[0]
                     return (uncompressed_size, 'CSO')
@@ -432,10 +485,14 @@ class UdpfsServer:
                   f"discovery and data on one port.")
             sys.exit(1)
 
-        # Discovery socket, broadcast UDP
+        # Discovery socket, broadcast UDP. In single-port mode this socket also
+        # carries the data stream, so it needs the data-sized receive buffer.
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        _widen_recv_buffer(
+            self.sock,
+            DATA_RECV_BUFFER_BYTES if single_port else DISCOVERY_RECV_BUFFER_BYTES)
         self.sock.bind(('', port))
         self.sock.setblocking(False)
 
@@ -456,6 +513,7 @@ class UdpfsServer:
             # port that changes every launch.
             self.dsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.dsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            _widen_recv_buffer(self.dsock, DATA_RECV_BUFFER_BYTES)
             self.dsock.bind((bind_ip, data_port))
             self.dsock.setblocking(False)
 
@@ -2275,6 +2333,95 @@ def _env_float(name, default):
     return float(v) if v else default
 
 
+_DURATION_UNITS = {
+    'ns': 1e-9, 'us': 1e-6, 'ms': 1e-3, 's': 1.0, 'm': 60.0, 'h': 3600.0,
+}
+# Longest-first so 'ms' is not read as 'm' + junk.
+_DURATION_RE = re.compile(r'(\d+(?:\.\d+)?)(ns|us|ms|h|m|s)')
+
+
+def parse_duration(text) -> Optional[float]:
+    """Seconds from '90', '90s', '1h', '1h30m'. None when unparseable.
+
+    udpfsd takes Go time.Duration strings for --peer-timeout/--metrics-period
+    and its README documents them that way, so a command line or compose file
+    written against udpfsd lands here verbatim. A bare number stays seconds,
+    which is what this server always accepted.
+    """
+    if text is None:
+        return None
+    if isinstance(text, (int, float)):
+        return float(text)
+    s = str(text).strip().lower()
+    if not s:
+        return None
+    try:
+        return float(s)  # plain seconds -- the historical form
+    except ValueError:
+        pass
+    parts = _DURATION_RE.findall(s)
+    # Every character must belong to a component: '1h' parses, '1h junk' does not.
+    if not parts or ''.join(n + u for n, u in parts) != s.replace(' ', ''):
+        return None
+    return sum(float(n) * _DURATION_UNITS[u] for n, u in parts)
+
+
+def _env_duration(name, default, label=None):
+    """Duration env var. NEVER raises: an unusable value warns and falls back.
+
+    udpfsd ignores a duration it cannot parse and carries on with its default;
+    dying with a traceback because someone set PEER_TIMEOUT=1h (a value udpfsd
+    documents) would be a strictly worse answer for the container users who are
+    the only people setting these at all.
+    """
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == '':
+        return default
+    secs = parse_duration(raw)
+    if secs is None:
+        print(f"Warning: ignoring {name}={raw!r} (expected seconds, or a "
+              f"duration like 1h / 30m / 90s); using {default}", file=sys.stderr)
+        return default
+    return secs
+
+
+def _duration_arg(label):
+    """argparse type for a duration option: a clean error, never a traceback."""
+    def parse(value):
+        secs = parse_duration(value)
+        if secs is None:
+            raise argparse.ArgumentTypeError(
+                f"invalid {label} {value!r}: expected seconds, or a duration "
+                f"like 1h / 30m / 90s")
+        return secs
+    return parse
+
+
+def split_bind(value) -> Tuple[str, Optional[int]]:
+    """(ip, port|None) from 'IP', 'IP:PORT' or ':PORT'.
+
+    udpfsd's -bind is documented as "Address and port for data connection"
+    (e.g. 0.0.0.0:62966 or :41233). A bare IP keeps its long-standing meaning
+    here; the host:port form used to reach getaddrinfo intact and die with an
+    unhandled socket.gaierror. Raises ValueError on a malformed port so the
+    caller can turn it into a usage error.
+    """
+    text = (value or '').strip()
+    if ':' not in text:
+        return text, None
+    host, _, port_s = text.rpartition(':')
+    port_s = port_s.strip()
+    if not port_s:
+        return host, None
+    try:
+        port = int(port_s, 0)
+    except ValueError:
+        raise ValueError(f"invalid port in --bind value {value!r}")
+    if not 0 <= port <= 65535:
+        raise ValueError(f"port out of range in --bind value {value!r}")
+    return host, port
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='UDPFS Server - Unified file and block device server over UDPRDMA',
@@ -2297,8 +2444,11 @@ def main():
         help=f'UDP port to listen on (default: 0x{UDPFS_PORT:04X}; env: PORT)'
     )
     parser.add_argument(
-        '--bind', '-i', default=os.environ.get('BIND', ''), metavar='IP',
-        help='IP address to bind/listen on (default: all interfaces; env: BIND)'
+        '--bind', '-i', default=os.environ.get('BIND', ''), metavar='IP[:PORT]',
+        help='IP address to bind/listen on, optionally with the data port '
+             '(e.g. 192.168.1.5, 0.0.0.0:62966, :41233). A port here is the '
+             'same knob as --data-port, which wins if both are given. '
+             '(default: all interfaces; env: BIND)'
     )
     parser.add_argument(
         '--sector-size', '-s', type=int, default=_env_int('SECTOR_SIZE', 512),
@@ -2312,18 +2462,30 @@ def main():
         '--verbose', '-v', action='store_true', default=_env_bool('VERBOSE'),
         help='Verbose output (env: VERBOSE)'
     )
-    parser.add_argument(
-        '--enable-compression', '-c', action='store_true',
-        default=_env_bool('ENABLE_COMPRESSION'),
-        help='Enable transparent decompression of .zso (LZ4), .cso (zlib), and .chd (CHD v5) '
-             'files. Compressed files appear as .iso in directory listings. (env: ENABLE_COMPRESSION)'
+    # Compression is ON by default (as udpfsd is): a folder of .chd/.cso/.zso
+    # otherwise looks EMPTY to the console until the user knows to pass a flag,
+    # which is a silent-wrong-answer, not a preference. Both spellings are kept
+    # so old command lines and configs still mean what they used to.
+    compression = parser.add_mutually_exclusive_group()
+    compression.add_argument(
+        '--enable-compression', '-c', action='store_true', default=False,
+        help='Force transparent decompression on. It is already on by default; '
+             'kept for compatibility with existing command lines. '
+             '(env: ENABLE_COMPRESSION)'
+    )
+    compression.add_argument(
+        '--no-compression', action='store_true', default=False,
+        help='Disable transparent decompression of .zso/.ziso (LZ4), '
+             '.cso/.ciso (zlib) and .chd (CHD v5). With it on (the default) '
+             'those files appear as .iso in directory listings and are '
+             'decompressed on the fly. (env: NO_COMPRESSION)'
     )
     parser.add_argument(
         '--compression-cache-size', type=int, default=_env_int('COMPRESSION_CACHE_SIZE', 32),
         help='Number of decompressed blocks to cache per file (default: 32; env: COMPRESSION_CACHE_SIZE)'
     )
     parser.add_argument(
-        '--data-port', type=lambda x: int(x, 0), default=_env_int('DATA_PORT', 0),
+        '--data-port', type=lambda x: int(x, 0), default=None,
         help='Pin the UDP data port instead of using an ephemeral one (default: 0 = '
              'auto). Use when the data endpoint must be predictable for a manual '
              'firewall rule, port forwarding, or NAT. Ignored with --single-port '
@@ -2347,7 +2509,8 @@ def main():
              'connect while this is on (env: MODULO_MODE)'
     )
     parser.add_argument(
-        '--peer-timeout', type=float, default=_env_float('PEER_TIMEOUT', SESSION_TIMEOUT),
+        '--peer-timeout', type=_duration_arg('--peer-timeout'),
+        default=_env_duration('PEER_TIMEOUT', SESSION_TIMEOUT),
         help=f'Seconds of client inactivity before its session is reaped, closing '
              f'the files it had open. Clamped to '
              f'{int(SESSION_TIMEOUT_MIN)}-{int(SESSION_TIMEOUT_MAX)}; 0 does not '
@@ -2360,11 +2523,40 @@ def main():
         help='Periodically log transfer/op statistics (env: METRICS)'
     )
     parser.add_argument(
-        '--metrics-period', type=float, default=_env_float('METRICS_PERIOD', 60.0),
-        help='Seconds between metrics log lines (default: 60; env: METRICS_PERIOD)'
+        '--metrics-period', type=_duration_arg('--metrics-period'),
+        default=_env_duration('METRICS_PERIOD', 60.0),
+        help='Seconds between metrics log lines. Accepts a duration '
+             '(e.g. 90s, 5m). (default: 60; env: METRICS_PERIOD)'
     )
 
     args = parser.parse_args()
+
+    # Compression: default on; CLI beats env; an explicit disable beats an enable.
+    enable_compression = True
+    if os.environ.get('ENABLE_COMPRESSION') is not None:
+        enable_compression = _env_bool('ENABLE_COMPRESSION', True)
+    if _env_bool('NO_COMPRESSION'):
+        enable_compression = False
+    if args.enable_compression:
+        enable_compression = True
+    if args.no_compression:
+        enable_compression = False
+    args.enable_compression = enable_compression
+
+    # --bind may carry the data port (udpfsd grammar). Precedence: an explicit
+    # --data-port wins, then a port in --bind, then DATA_PORT, then auto (0).
+    # args.data_port is None when the flag was absent -- 0 is a REAL value
+    # ("pick an ephemeral port"), so it must not be mistaken for "unset".
+    try:
+        bind_ip, bind_port = split_bind(args.bind)
+    except ValueError as e:
+        parser.error(str(e))
+    args.bind = bind_ip
+    if args.data_port is None:
+        if bind_port is not None:
+            args.data_port = bind_port
+        else:
+            args.data_port = _env_int('DATA_PORT', 0)
 
     if not args.block_device and not args.root_dir:
         parser.error("At least one of --block-device or --root-dir is required")
