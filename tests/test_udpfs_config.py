@@ -7,9 +7,12 @@ duration/bind cases below was an unhandled traceback before.
 Run:  python -m unittest tests.test_udpfs_config -v
 """
 
+import argparse
 import os
 import socket
+import struct
 import sys
+import tempfile
 import unittest
 
 # udpfs_server/ is not a package; the server module and its compressed_iso
@@ -140,7 +143,7 @@ class PortRangeTests(unittest.TestCase):
         self.assertEqual(parse('0'), 0)
         self.assertEqual(parse('0xF5F7'), 0xF5F7)  # hex like the CLI accepts
         for bad in ('99999', '-1', '70000'):
-            with self.assertRaises(Exception):  # argparse.ArgumentTypeError
+            with self.assertRaises(argparse.ArgumentTypeError):
                 parse(bad)
 
 
@@ -149,45 +152,34 @@ class TruncatedCompressedHeaderTests(unittest.TestCase):
     _resolve_compressed_sibling would prefer this unopenable candidate over a
     good later sibling and OPEN would then fail with EIO."""
 
-    def _write(self, path, data):
+    @staticmethod
+    def _write(directory, name, data):
+        path = os.path.join(directory, name)
         with open(path, 'wb') as f:
             f.write(data)
+        return path
 
     def test_truncated_cso_with_valid_magic_is_rejected(self):
-        import struct as _struct
-        import tempfile
-        d = tempfile.mkdtemp()
-        try:
+        with tempfile.TemporaryDirectory() as d:
             # Valid CISO magic + a size field, but only 16 bytes -- shorter than
             # the 24-byte header the wrapper needs.
-            magic = _struct.pack('<I', udpfs.CSO_MAGIC)
-            truncated = magic + b'\x00' * 4 + _struct.pack('<Q', 700 * 1024 * 1024)
+            magic = struct.pack('<I', udpfs.CSO_MAGIC)
+            truncated = magic + b'\x00' * 4 + struct.pack('<Q', 700 * 1024 * 1024)
             self.assertEqual(len(truncated), 16)
-            p = os.path.join(d, 'Game.cso')
-            self._write(p, truncated)
+            p = self._write(d, 'Game.cso', truncated)
             self.assertIsNone(udpfs.get_compressed_info(p))
-        finally:
-            import shutil as _shutil
-            _shutil.rmtree(d, ignore_errors=True)
 
     def test_full_length_header_still_parses(self):
-        import struct as _struct
-        import tempfile
-        d = tempfile.mkdtemp()
-        try:
-            magic = _struct.pack('<I', udpfs.CSO_MAGIC)
-            header = (magic + _struct.pack('<I', 24)
-                      + _struct.pack('<Q', 700 * 1024 * 1024)
-                      + _struct.pack('<I', 2048) + b'\x01\x00\x00\x00')
+        with tempfile.TemporaryDirectory() as d:
+            magic = struct.pack('<I', udpfs.CSO_MAGIC)
+            header = (magic + struct.pack('<I', 24)
+                      + struct.pack('<Q', 700 * 1024 * 1024)
+                      + struct.pack('<I', 2048) + b'\x01\x00\x00\x00')
             self.assertEqual(len(header), 24)
-            p = os.path.join(d, 'Game.cso')
-            self._write(p, header)
+            p = self._write(d, 'Game.cso', header)
             info = udpfs.get_compressed_info(p)
             self.assertIsNotNone(info)
             self.assertEqual(info[1], 'CSO')
-        finally:
-            import shutil as _shutil
-            _shutil.rmtree(d, ignore_errors=True)
 
 
 class ExtensionAliasTests(unittest.TestCase):
