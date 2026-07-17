@@ -214,6 +214,36 @@ def _apply_gui_review_fixes(gui):
                   darkcolor=[("selected", palette["panel3"]),
                              ("!selected", palette["panel"])])
 
+        # Scrollbars: clam's default is a chunky, arrowed, pale bar that clashes
+        # with the dark theme (nothing styled it before). Drop the arrow buttons
+        # for a clean trough + thumb, colour the thumb to the theme, and brighten
+        # it to the accent on hover/drag. The layout override is wrapped because
+        # element names can differ across ttk builds -- if it fails we still get
+        # the colours, just with the default arrows.
+        for _orient, _trough in (("Vertical", "ns"), ("Horizontal", "ew")):
+            _name = _orient + ".TScrollbar"
+            try:
+                style.layout(_name, [
+                    (_orient + ".Scrollbar.trough", {
+                        "sticky": _trough,
+                        "children": [(_orient + ".Scrollbar.thumb",
+                                      {"expand": "1", "sticky": "nswe"})],
+                    }),
+                ])
+            except gui.tk.TclError:
+                pass
+            style.configure(_name, gripcount=0, borderwidth=0, relief="flat",
+                            troughcolor=palette["panel"],
+                            background=palette["panel3"],
+                            bordercolor=palette["panel"],
+                            lightcolor=palette["panel3"],
+                            darkcolor=palette["panel3"],
+                            arrowcolor=palette["muted"])
+            style.map(_name,
+                      background=[("pressed", palette["accent"]),
+                                  ("active", palette["accent2"]),
+                                  ("!active", palette["panel3"])])
+
     def configure_window(self):
         screen_width = max(640, self.root.winfo_screenwidth())
         screen_height = max(480, self.root.winfo_screenheight())
