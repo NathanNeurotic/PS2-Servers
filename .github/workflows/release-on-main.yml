@@ -334,3 +334,44 @@ jobs:
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prune old development pre-releases
+        # Every push to main publishes one of these, and nothing used to remove
+        # them: they reached 49 releases / 83 tags before a manual cleanup. Keep
+        # only the newest few so the Releases page stays readable.
+        #
+        # Deliberately paranoid about what it deletes: a release must BOTH be
+        # flagged prerelease AND carry a main-<run>-<sha> tag. A tagged vX.Y.Z
+        # release satisfies neither, so it can never be selected here -- and the
+        # loop refuses anything starting with "v" as a last line of defence.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP: '5'
+        shell: bash
+        run: |
+          # Cleanup must never fail a release that already published fine.
+          set +e
+          # Newest first. Selection is done here; "how many to keep" is applied
+          # with tail below rather than inside jq, so the slice stays trivial to
+          # reason about and needs no jq binary (gh has jq built in).
+          gh release list --limit 200 --json tagName,isPrerelease,createdAt \
+            --jq '[ .[]
+                    | select(.isPrerelease == true)
+                    | select(.tagName | test("^main-[0-9]+-"))
+                  ]
+                  | sort_by(.createdAt) | reverse | .[].tagName' > all_dev.txt || exit 0
+          total=$(grep -c . all_dev.txt)
+          # Skip the newest KEEP lines; everything after them is stale.
+          tail -n +"$((KEEP + 1))" all_dev.txt > stale.txt
+          count=$(grep -c . stale.txt)
+          echo "Dev pre-releases: ${total}. Keeping newest ${KEEP}, pruning ${count}."
+          while read -r tag; do
+            [ -z "$tag" ] && continue
+            case "$tag" in
+              v*) echo "REFUSING to touch version release ${tag}"; continue ;;
+            esac
+            echo "  deleting ${tag}"
+            gh release delete "$tag" --cleanup-tag --yes \
+              || echo "  (could not delete ${tag}; leaving it)"
+          done < stale.txt
+          exit 0
