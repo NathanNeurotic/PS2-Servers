@@ -118,6 +118,29 @@ class MacosIfconfigParseTests(unittest.TestCase):
         self.assertEqual(ips, ["192.168.1.20"])
 
 
+class ServerRecommendationTests(unittest.TestCase):
+    """A beginner shouldn't have to guess between three equal-looking servers."""
+
+    def test_udpfs_is_recommended(self):
+        udpfs = servers.REGISTRY["udpfs"]
+        self.assertEqual(udpfs.recommendation_kind, "good")
+        self.assertTrue(udpfs.recommendation)
+
+    def test_udpbd_is_legacy(self):
+        udpbd = servers.REGISTRY["udpbd"]
+        self.assertEqual(udpbd.recommendation_kind, "legacy")
+        self.assertIn("UDPFS", udpbd.recommendation + udpbd.blurb)
+
+    def test_smbv1_is_neutral(self):
+        # The classic; not badged either way so it doesn't read as second-class.
+        self.assertEqual(servers.REGISTRY["smbv1"].recommendation, "")
+
+    def test_bind_help_says_you_need_not_set_it(self):
+        # The tester assumed he had to set 0.0.0.0; discovery is already all-iface.
+        bind = next(f for f in servers.REGISTRY["udpfs"].fields if f.key == "bind")
+        self.assertIn("every network interface", bind.help)
+
+
 class WindowsOnlyFieldTests(unittest.TestCase):
     def test_take_445_is_flagged_windows_only(self):
         smb = servers.REGISTRY["smbv1"]

@@ -86,6 +86,11 @@ class ServerDef:
     _build_argv: Callable
     default_port: Optional[int] = None
     port_is_hex: bool = False  # UDP servers are conventionally written in hex
+    # A short guidance badge shown on the tab/card so a beginner isn't choosing
+    # between three equal-looking servers. kind drives the colour: "good" for
+    # the recommended one, "legacy" for a superseded one, "" for neutral.
+    recommendation: str = ""
+    recommendation_kind: str = ""
     share_hint: str = ""  # what the user types into OPL's "Share" field, if any
     module_file: Optional[str] = None  # python: file to import
     module_dir: Optional[str] = None  # python: dir added to sys.path (sibling imports)
@@ -253,8 +258,11 @@ SMBV1 = ServerDef(
 UDPFS = ServerDef(
     key="udpfs",
     label="UDPFS server",
-    blurb="Serve a folder and/or a disk image over UDP. Newer protocol; can "
-    "transparently decompress CHD/CSO/ZSO.",
+    blurb="Serve a folder and/or a disk image over UDP. The newer protocol and "
+    "the best choice for most setups; can transparently decompress CHD/CSO/ZSO. "
+    "The PS2 finds it automatically — nothing to type in your loader.",
+    recommendation="Recommended for most setups",
+    recommendation_kind="good",
     runtime="python",
     default_port=0xF5F6,
     port_is_hex=True,
@@ -288,7 +296,11 @@ UDPFS = ServerDef(
                    "manual firewall rule, port forwarding, or a strict NAT can't "
                    "follow the auto port, which changes every launch. Setting it "
                    "also adds a matching firewall rule. Ignored in Modulo mode."),
-        Field("bind", "Bind address", "text", default="", advanced=True),
+        Field("bind", "Bind address", "text", default="", advanced=True,
+              help="Leave blank. The server already listens for the PS2 on every "
+                   "network interface — you do NOT need to set 0.0.0.0. This only "
+                   "pins the source address of the data connection, for unusual "
+                   "multi-NIC setups."),
         Field("peer_timeout", "Idle timeout (seconds)", "text", default="3600",
               advanced=True,
               help="Drop a console after this long with no traffic, closing the "
@@ -307,8 +319,11 @@ UDPFS = ServerDef(
 UDPBD = ServerDef(
     key="udpbd",
     label="UDPBD server",
-    blurb="Serve a single disk image as a block device over UDP. The PS2 finds "
-    "the server automatically (broadcast).",
+    blurb="Serve a single disk image as a block device over UDP. Largely "
+    "superseded by UDPFS — use UDPFS unless you specifically need UDPBD. The "
+    "PS2 finds the server automatically (broadcast).",
+    recommendation="Legacy — prefer UDPFS",
+    recommendation_kind="legacy",
     runtime="python",
     default_port=0xBDBD,
     port_is_hex=True,

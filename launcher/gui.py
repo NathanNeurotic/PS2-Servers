@@ -201,6 +201,16 @@ class ServerCard(ttk.LabelFrame):
         self.columnconfigure(1, weight=1)
         row = 0
 
+        # A one-line recommendation badge so a beginner knows which server to
+        # reach for (UDPFS recommended, UDPBD legacy) instead of guessing.
+        if self.server.recommendation:
+            colour = (COLOR_RUNNING if self.server.recommendation_kind == "good"
+                      else COLOR_STOPPED)
+            ttk.Label(self, text=self.server.recommendation,
+                      foreground=colour, style="CardStatus.TLabel").grid(
+                row=row, column=0, columnspan=3, sticky="w", padx=4, pady=(2, 0))
+            row += 1
+
         # header: blurb + status + start/stop
         ttk.Label(self, text=self.server.blurb, wraplength=560,
                   style="CardMuted.TLabel").grid(row=row, column=0, columnspan=3,
