@@ -37,14 +37,22 @@ class FirewallHintTests(unittest.TestCase):
         text = "\n".join(lines)
         self.assertIn("sudo ufw allow 62966/udp", text)
 
-    def test_firewalld_command_when_present(self):
+    def test_firewalld_command_is_copyable_with_note_separate(self):
         def which(name):
             return "/usr/bin/firewall-cmd" if name == "firewall-cmd" else None
         with mock.patch.object(posix_firewall.shutil, "which", side_effect=which):
             lines = posix_firewall.firewall_hint_lines(self.SMB_PORTS, probe_active=False)
-        text = "\n".join(lines)
-        self.assertIn("sudo firewall-cmd --add-port=1111/tcp", text)
-        self.assertIn("--permanent", text)  # persistence reminder
+        stripped = [ln.strip() for ln in lines]
+        # The command line must be exactly the command -- copy-pasteable, no
+        # trailing prose that a shell would choke on.
+        self.assertIn("sudo firewall-cmd --add-port=1111/tcp", stripped)
+        self.assertNotIn("sudo firewall-cmd --add-port=1111/tcp  "
+                         "(add --permanent to keep it after a reboot)", stripped)
+        # The persistence caveat is still present, just on its own line.
+        self.assertTrue(any("--permanent" in ln and "firewall-cmd" in ln
+                            for ln in stripped))
+        self.assertFalse(any(ln.startswith("sudo") and "--permanent" in ln
+                             for ln in stripped))
 
     def test_active_probe_sharpens_the_lead_line(self):
         def which(name):

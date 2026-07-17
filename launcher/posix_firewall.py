@@ -19,11 +19,12 @@ import subprocess
 
 
 _TOOLS = (
-    # (binary, systemd unit, command template). Order = preference.
-    ("ufw", "ufw", "sudo ufw allow {port}/{proto}"),
-    ("firewall-cmd", "firewalld",
-     "sudo firewall-cmd --add-port={port}/{proto}"
-     "  (add --permanent to keep it after a reboot)"),
+    # (binary, systemd unit, command template, note). Order = preference. The
+    # template renders to a bare, copy-pasteable command; any caveat goes in
+    # `note`, printed separately so pasting the command line just works.
+    ("ufw", "ufw", "sudo ufw allow {port}/{proto}", ""),
+    ("firewall-cmd", "firewalld", "sudo firewall-cmd --add-port={port}/{proto}",
+     "firewall-cmd: add --permanent to keep the rule after a reboot."),
 )
 
 
@@ -42,17 +43,17 @@ def _unit_is_active(unit):
 
 
 def detect_firewall_tools(probe_active=True):
-    """[(binary, template, active_bool), ...] for the firewall tools present.
+    """[(binary, template, note, active_bool), ...] for the tools present.
 
     probe_active runs one short `systemctl is-active` per tool; pass False to
     skip the subprocess entirely (e.g. on a UI thread that must not block).
     """
     found = []
-    for binary, unit, template in _TOOLS:
+    for binary, unit, template, note in _TOOLS:
         if not shutil.which(binary):
             continue
         active = _unit_is_active(unit) if probe_active else False
-        found.append((binary, template, active))
+        found.append((binary, template, note, active))
     return found
 
 
@@ -65,7 +66,7 @@ def firewall_hint_lines(ports, probe_active=True):
     if not ports:
         return []
     tools = detect_firewall_tools(probe_active=probe_active)
-    active = [t for t in tools if t[2]]
+    active = [t for t in tools if t[3]]
 
     if active:
         lead = ("Your {} firewall is active -- if the PS2 cannot see this "
@@ -79,9 +80,13 @@ def firewall_hint_lines(ports, probe_active=True):
 
     if tools:
         for proto, port, _purpose in ports:
-            for binary, template, _act in tools:
+            for _binary, template, _note, _act in tools:
                 lines.append("    " + template.format(
                     port=port, proto=proto.lower()))
+        # Tool caveats once, after the copy-pasteable commands.
+        for _binary, _template, note, _act in tools:
+            if note:
+                lines.append("  " + note)
     else:
         lines.append("  (open them in whatever firewall your distro uses; most "
                      "desktop setups already allow LAN traffic)")

@@ -2267,13 +2267,16 @@ class LauncherApp:
                 if action == "open":
                     self._restore_from_tray()
                 elif action == "quit":
-                    self.exit_app(confirm=False)
+                    # Confirm if servers are running, like the window-close and
+                    # Exit paths -- an explicit Quit should not silently kill a
+                    # transfer either. No-op prompt when nothing is running.
+                    self.exit_app()
         except queue.Empty:
             pass
         self.root.after(150, self._drain_tray)
 
     def _quit_from_tray(self):
-        self.exit_app(confirm=False)
+        self.exit_app()
 
 
 def run_gui():
