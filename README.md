@@ -6,11 +6,13 @@
 
 Standard PS2 network servers — **SMBv1 (RiptOPL)**, **UDPFS**, and **UDPBD** — for
 loading PlayStation 2 games, apps, and media over a LAN. These are the protocols
-PS2 homebrew uses to load over a network, so they are not OPL-only: anything that
-speaks SMB, UDPFS, or UDPBD works — [Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)
+PS2 homebrew uses to load over a network, so they are not OPL-only. Loaders
+confirmed working include [Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)
 (OPL) and its forks (RiptOPL, wOPL), plus **NHDDL**, **wLaunchELF-R3Z**, **SMS**,
-**POPStarter / POPSLoader**, and other network-capable homebrew. A small
-**GUI launcher** runs them all without touching a terminal.
+and **POPStarter / POPSLoader**; other network-capable homebrew that speaks these
+protocols should work too. (One known exception: **Modulo** doesn't follow the
+UDPFS protocol and needs the launcher's dedicated Modulo mode — see below.) A
+small **GUI launcher** runs them all without touching a terminal.
 
 ## Quick start — the launcher
 
@@ -161,7 +163,7 @@ Python and no heavy runtime for the packaged app.
 | OS | Windows 10/11 (x64), Linux (x64), or macOS (Apple Silicon or Intel) |
 | Packaged app | No Python required — the download bundles everything |
 | From source | Python 3 with Tkinter (Linux: `sudo apt install python3-tk`); official builds use Python 3.12 |
-| Hardware | Any modern 64-bit PC — the launcher is a small Tkinter GUI, not Electron/Qt |
+| Hardware | Any modern 64-bit PC for the **packaged GUI app** (x64 / Apple Silicon). Running a server from source needs only Python 3 and works on any architecture — see "On a Raspberry Pi, NAS, or other non-x64 box" below. |
 | Network | Wired or Wi‑Fi LAN on the same subnet as the PS2 (wired recommended for large games) |
 | Disk | A few hundred MB for the app, plus room for your game files |
 
@@ -170,7 +172,7 @@ Python and no heavy runtime for the packaged app.
 | | Requirement |
 |---|---|
 | Console | A PS2 that boots homebrew (FreeMcBoot / FreeDVDBoot / modchip / etc.) |
-| Loader | Any network-capable PS2 homebrew — OPL, RiptOPL, wOPL, NHDDL, wLaunchELF-R3Z, SMS, POPStarter / POPSLoader, … |
+| Loader | Network-capable PS2 homebrew — confirmed with OPL, RiptOPL, wOPL, NHDDL, wLaunchELF-R3Z, SMS, POPStarter / POPSLoader (Modulo needs the launcher's Modulo mode) |
 | Network adapter | The PS2 Ethernet adapter — built into slims; SCPH‑10281 on fat units |
 | Emulator (optional) | PCSX2 with a configured network adapter also works for testing |
 
@@ -237,17 +239,23 @@ python -m launcher --list            # show servers available on this machine
 
 The servers are pure Python standard library, so they run on **any machine with
 Python 3** — a Raspberry Pi (any model), an ARM/MIPS NAS, an OpenWrt router —
-even where there is no packaged build for that architecture. No pip installs, no
-GUI needed; point a server at your games folder and it serves over the LAN just
-the same:
+even where there is no packaged build for that architecture. Baseline serving
+needs no pip installs and no GUI; point a server at your games folder and it
+serves over the LAN just the same:
 
 ```sh
 python3 udpfs_server/udpfs_server.py -d /srv/ps2games
 ```
 
-CSO decompression is built in (it uses the standard library); ZSO and CHD light
-up automatically if the optional `lz4` / `libchdr` libraries are present, and any
-format whose library is missing is simply left untouched. This is the box that is
+CSO decompression is built in (it uses the standard library). The *optional*
+compressed formats do have dependencies: ZSO needs the `lz4` package and CHD
+needs a native `libchdr` library — install those if you want ZSO/CHD, and any
+format whose library is missing is simply left untouched (uncompressed images
+are unaffected).
+
+(The **minimum requirements** table above describes the *packaged GUI app*, which
+is x64/Apple-Silicon only. Running a server straight from source, as here, has no
+such limit — any architecture with Python 3 works.) This is the box that is
 already on 24/7 next to the console, so running the server there is often ideal.
 
 ## Build the packaged app

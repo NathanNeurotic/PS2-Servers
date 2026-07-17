@@ -1002,7 +1002,7 @@ class LauncherApp:
                 self.stop_all()
                 if self._tray:
                     self._tray.stop()
-                self.root.destroy()
+                self._destroy_root()
             else:
                 self.saved.pop("pending_direct_link", None)
                 self._save()
@@ -1281,7 +1281,7 @@ class LauncherApp:
                 self.stop_all()
                 if self._tray:
                     self._tray.stop()
-                self.root.destroy()
+                self._destroy_root()
             else:
                 self.saved.pop("pending_direct_link_off", None)
                 self._save()
@@ -1383,7 +1383,7 @@ class LauncherApp:
                 self.stop_all()
                 if self._tray:
                     self._tray.stop()
-                self.root.destroy()
+                self._destroy_root()
             else:
                 self._set_direct_checkbox(False)
                 self._set_direct_status(
@@ -1541,7 +1541,7 @@ class LauncherApp:
                     self.stop_all()  # free ports before the elevated instance starts
                     if self._tray:
                         self._tray.stop()
-                    self.root.destroy()
+                    self._destroy_root()
                 else:
                     messagebox.showerror(
                         "Elevation failed",
@@ -1720,7 +1720,7 @@ class LauncherApp:
                 self.stop_all()
                 if self._tray:
                     self._tray.stop()
-                self.root.destroy()
+                self._destroy_root()
             else:
                 self.saved.pop("pending_firewall_allow", None)
                 self._save()
@@ -1813,7 +1813,7 @@ class LauncherApp:
                 self.stop_all()
                 if self._tray:
                     self._tray.stop()
-                self.root.destroy()
+                self._destroy_root()
             else:
                 self.saved.pop("pending_cleanup", None)
                 self._save()
@@ -2228,10 +2228,18 @@ class LauncherApp:
             "This will stop running servers:\n\n{}\n\nContinue?".format(
                 ", ".join(running)))
 
+    def _destroy_root(self):
+        """The ONLY place the root is destroyed. Sets _shutting_down first so the
+        periodic loops (_drain_tray / _drain_logs / _poll_status) and any pending
+        worker callback stop touching the root -- otherwise a reschedule or a
+        queued after() raises TclError. Every teardown path routes through here,
+        including the relaunch/elevation flows that used to destroy directly."""
+        self._shutting_down = True
+        self.root.destroy()
+
     def _shutdown_app(self):
-        # Stop the periodic loops (_drain_tray / _drain_logs / _poll_status) and
-        # any pending worker callback from rescheduling onto the root we are
-        # about to destroy -- otherwise the reschedule raises TclError.
+        # Stop the loops before the (up to a few seconds of) child termination,
+        # not just at destroy time, so nothing reschedules during stop_all.
         self._shutting_down = True
         self._save()
         # hide first so the (up to a few seconds of) child termination doesn't
@@ -2240,7 +2248,7 @@ class LauncherApp:
         self.stop_all()
         if self._tray:
             self._tray.stop()
-        self.root.destroy()
+        self._destroy_root()
 
     # -- system tray (Windows) -------------------------------------------- #
     def _on_window_close(self):

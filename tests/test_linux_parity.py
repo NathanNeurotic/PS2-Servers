@@ -124,12 +124,14 @@ class ServerRecommendationTests(unittest.TestCase):
     def test_udpfs_is_recommended(self):
         udpfs = servers.REGISTRY["udpfs"]
         self.assertEqual(udpfs.recommendation_kind, "good")
-        self.assertTrue(udpfs.recommendation)
+        self.assertEqual(udpfs.recommendation, "Recommended for most setups")
 
     def test_udpbd_is_legacy(self):
         udpbd = servers.REGISTRY["udpbd"]
         self.assertEqual(udpbd.recommendation_kind, "legacy")
-        self.assertIn("UDPFS", udpbd.recommendation + udpbd.blurb)
+        # Assert the badge text itself, not badge-or-blurb, so a missing badge
+        # can't be masked by the blurb still mentioning UDPFS.
+        self.assertEqual(udpbd.recommendation, "Legacy — prefer UDPFS")
 
     def test_smbv1_is_neutral(self):
         # The classic; not badged either way so it doesn't read as second-class.
@@ -138,7 +140,9 @@ class ServerRecommendationTests(unittest.TestCase):
     def test_bind_help_says_you_need_not_set_it(self):
         # The tester assumed he had to set 0.0.0.0; discovery is already all-iface.
         bind = next(f for f in servers.REGISTRY["udpfs"].fields if f.key == "bind")
+        self.assertIn("Leave blank", bind.help)
         self.assertIn("every network interface", bind.help)
+        self.assertIn("source address", bind.help)
 
 
 class WindowsOnlyFieldTests(unittest.TestCase):

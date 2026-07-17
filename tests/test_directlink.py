@@ -809,6 +809,18 @@ class LauncherLifecycleTests(unittest.TestCase):
             app.saved["direct_link"])
         app.root.after.assert_called_once_with(600, app._poll_status)
 
+    def test_poll_status_does_not_reschedule_during_shutdown(self):
+        # Once _shutdown_app/_destroy_root has flagged shutdown, the loop must
+        # not schedule another tick onto the root about to be destroyed.
+        app = self.app()
+        app.procs = {}
+        app._direct_expected = False
+        app._direct_proc = None
+        app.root = mock.Mock()
+        app._shutting_down = True
+        LauncherApp._poll_status(app)
+        app.root.after.assert_not_called()
+
     def test_rehome_exit_triggers_coexist_not_rollback(self):
         app = self.app()
         app.saved["direct_link"]["enabled"] = True

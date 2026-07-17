@@ -207,9 +207,18 @@ jobs:
             'exec "$HERE/usr/bin/PS2Servers" "$@"' \
             > "$APPDIR/AppRun"
           chmod +x "$APPDIR/AppRun" "$APPDIR/usr/bin/PS2Servers"
+          # Pin appimagetool to a tagged release and verify its digest before we
+          # execute it. 'continuous' is a rolling tag -- pinning + a checksum
+          # gate means a changed or tampered build can't silently run on the
+          # runner and wrap itself around our binary. set -e aborts the step on
+          # a mismatch (and the step is continue-on-error, so a bad hash drops
+          # the AppImage without blocking the real Linux downloads).
+          APPIMAGETOOL_VERSION="1.9.1"
+          APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
           TOOL="$RUNNER_TEMP/appimagetool"
           curl -fsSL -o "$TOOL" \
-            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
+          echo "${APPIMAGETOOL_SHA256}  ${TOOL}" | sha256sum -c -
           chmod +x "$TOOL"
           mkdir -p out
           # --appimage-extract-and-run runs the tool without needing FUSE on the runner.
@@ -256,11 +265,11 @@ jobs:
           | OS | Recommended | Also available |
           | --- | --- | --- |
           | Windows x64 | \`PS2Servers-windows-x64-folder.zip\` (folder, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |
-          | Linux x64 | \`PS2Servers-x86_64.AppImage\` (desktop/menu integration) or \`PS2Servers-linux-x64\` | \`PS2Servers-linux-x64-folder.tar.gz\` (folder; use if /tmp is noexec) |
+          | Linux x64 | \`PS2Servers-linux-x64\` (single file) | \`PS2Servers-x86_64.AppImage\` (desktop/menu integration, newer) or \`PS2Servers-linux-x64-folder.tar.gz\` (folder; use if /tmp is noexec) |
           | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` | |
           | macOS — Intel | \`PS2Servers-macos-x64.zip\` | |
 
-          Run it: **Windows — unzip the folder build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the folder build comes up clean. Linux — the \`.AppImage\` gives you desktop/menu shortcuts (via AppImageLauncher); \`chmod +x\` it and run, or use the plain \`PS2Servers-linux-x64\`. macOS — unzip and right-click → Open (unsigned).
+          Run it: **Windows — unzip the folder build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the folder build comes up clean. Linux — \`chmod +x PS2Servers-linux-x64\` and run it; or try the newer \`.AppImage\` for desktop/menu shortcuts (via AppImageLauncher). macOS — unzip and right-click → Open (unsigned).
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 
@@ -310,6 +319,15 @@ jobs:
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: out/${{ matrix.folder_asset }}
+
+      - name: Attest Linux AppImage provenance
+        # Same non-blocking contract as the AppImage build itself: only on Linux,
+        # and never fail the release if the AppImage wasn't produced.
+        if: runner.os == 'Linux' && matrix.folder_asset != ''
+        continue-on-error: true
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: out/PS2Servers-x86_64.AppImage
 
       - name: Upload build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
