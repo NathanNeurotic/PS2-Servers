@@ -169,6 +169,69 @@ jobs:
           cp ANTIVIRUS-NOTICE.md "$dist/"
           ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/out/${{ matrix.folder_asset }}" "$(basename "$dist")" )
 
+      # An AppImage wraps the same standalone build so Linux users get desktop /
+      # menu shortcuts and AppImageLauncher integration (a tester request).
+      # Fully optional: continue-on-error throughout, and every downstream step
+      # sums/attaches it only if the file is present, so a hiccup here never
+      # affects the primary Linux downloads. Files are written with printf, not
+      # a heredoc, to avoid YAML indentation leaking into .desktop / AppRun.
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux' && matrix.folder_asset != ''
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          dist=$(ls -d dist/*.dist 2>/dev/null | head -1)
+          test -n "$dist"
+          APPDIR="$RUNNER_TEMP/AppDir"
+          rm -rf "$APPDIR"
+          mkdir -p "$APPDIR/usr/bin"
+          cp -a "$dist"/. "$APPDIR/usr/bin/"
+          test -x "$APPDIR/usr/bin/PS2Servers"
+          sudo apt-get install -y imagemagick libfuse2 >/dev/null 2>&1 || true
+          if command -v convert >/dev/null 2>&1; then
+            convert launcher/assets/theme/LOGO.png -resize 256x256 "$APPDIR/ps2servers.png" \
+              || cp launcher/assets/theme/LOGO.png "$APPDIR/ps2servers.png"
+          else
+            cp launcher/assets/theme/LOGO.png "$APPDIR/ps2servers.png"
+          fi
+          printf '%s\n' \
+            '[Desktop Entry]' 'Type=Application' 'Name=PS2 Servers' \
+            'Comment=Load PS2 games, apps and homebrew over your LAN' \
+            'Exec=PS2Servers' 'Icon=ps2servers' \
+            'Categories=Network;Game;Utility;' 'Terminal=false' \
+            > "$APPDIR/ps2servers.desktop"
+          printf '%s\n' \
+            '#!/bin/bash' \
+            'HERE="$(dirname "$(readlink -f "$0")")"' \
+            'exec "$HERE/usr/bin/PS2Servers" "$@"' \
+            > "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun" "$APPDIR/usr/bin/PS2Servers"
+          TOOL="$RUNNER_TEMP/appimagetool"
+          curl -fsSL -o "$TOOL" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$TOOL"
+          mkdir -p out
+          # --appimage-extract-and-run runs the tool without needing FUSE on the runner.
+          ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" \
+            "$GITHUB_WORKSPACE/out/PS2Servers-x86_64.AppImage"
+          chmod +x "out/PS2Servers-x86_64.AppImage"
+          ls -la "out/PS2Servers-x86_64.AppImage"
+
+      - name: Write AppImage checksum
+        if: runner.os == 'Linux' && matrix.folder_asset != ''
+        continue-on-error: true
+        shell: python
+        run: |
+          import hashlib
+          from pathlib import Path
+
+          asset = Path("out") / "PS2Servers-x86_64.AppImage"
+          if asset.exists():
+              digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+              asset.with_name(asset.name + ".sha256.txt").write_text(
+                  f"{digest}  {asset.name}\n", encoding="utf-8")
+
       - name: Write folder asset checksum
         if: matrix.folder_asset != ''
         continue-on-error: true
@@ -193,11 +256,11 @@ jobs:
           | OS | Recommended | Also available |
           | --- | --- | --- |
           | Windows x64 | \`PS2Servers-windows-x64-folder.zip\` (folder, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |
-          | Linux x64 | \`PS2Servers-linux-x64\` | \`PS2Servers-linux-x64-folder.tar.gz\` (folder; use if /tmp is noexec) |
+          | Linux x64 | \`PS2Servers-x86_64.AppImage\` (desktop/menu integration) or \`PS2Servers-linux-x64\` | \`PS2Servers-linux-x64-folder.tar.gz\` (folder; use if /tmp is noexec) |
           | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` | |
           | macOS — Intel | \`PS2Servers-macos-x64.zip\` | |
 
-          Run it: **Windows — unzip the folder build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the folder build comes up clean. Linux — \`chmod +x PS2Servers-linux-x64\`, then run. macOS — unzip and right-click → Open (unsigned).
+          Run it: **Windows — unzip the folder build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the folder build comes up clean. Linux — the \`.AppImage\` gives you desktop/menu shortcuts (via AppImageLauncher); \`chmod +x\` it and run, or use the plain \`PS2Servers-linux-x64\`. macOS — unzip and right-click → Open (unsigned).
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 
@@ -293,3 +356,18 @@ jobs:
           files: |
             out/${{ matrix.folder_asset }}
             out/${{ matrix.folder_asset }}.sha256.txt
+
+      - name: Attach Linux AppImage to release
+        # Only if the build actually produced one -- the glob attaches nothing
+        # when absent, so a failed AppImage build never blocks the release.
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux' && matrix.folder_asset != ''
+        continue-on-error: true
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        with:
+          name: PS2 Servers ${{ github.ref_name }}
+          body_path: out/release-notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
+          files: |
+            out/PS2Servers-x86_64.AppImage
+            out/PS2Servers-x86_64.AppImage.sha256.txt
