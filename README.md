@@ -4,14 +4,20 @@
 
 # PS2-Servers
 
-Network servers for loading PlayStation 2 games and apps over a LAN with
-[Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader) (OPL) and forks —
-plus a small **GUI launcher** so anyone can run them without touching a terminal.
+Standard PS2 network servers — **SMBv1 (RiptOPL)**, **UDPFS**, and **UDPBD** — for
+loading PlayStation 2 games, apps, and media over a LAN. These are the protocols
+PS2 homebrew uses to load over a network, so they are not OPL-only: anything that
+speaks SMB, UDPFS, or UDPBD works — [Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)
+(OPL) and its forks (RiptOPL, wOPL), plus **NHDDL**, **wLaunchELF-R3Z**, **SMS**,
+**POPStarter / POPSLoader**, and other network-capable homebrew. A small
+**GUI launcher** runs them all without touching a terminal.
 
 ## Quick start — the launcher
 
 The launcher lets you pick a server, choose your games folder, and click **Start**.
-It detects your PC's LAN IP and shows the exact settings to enter in OPL.
+It detects your PC's LAN IP and shows the exact settings to enter in your loader
+(OPL, RiptOPL, NHDDL, and the rest) — read them off the launcher window rather
+than from any guide, since your address and port are specific to your machine.
 
 - **Packaged app (no Python needed):** download the release for your OS.
   **On Windows, prefer the folder build** — unzip
@@ -164,7 +170,7 @@ Python and no heavy runtime for the packaged app.
 | | Requirement |
 |---|---|
 | Console | A PS2 that boots homebrew (FreeMcBoot / FreeDVDBoot / modchip / etc.) |
-| Loader | Open PS2 Loader (OPL) or a fork such as RiptOPL |
+| Loader | Any network-capable PS2 homebrew — OPL, RiptOPL, wOPL, NHDDL, wLaunchELF-R3Z, SMS, POPStarter / POPSLoader, … |
 | Network adapter | The PS2 Ethernet adapter — built into slims; SCPH‑10281 on fat units |
 | Emulator (optional) | PCSX2 with a configured network adapter also works for testing |
 
@@ -227,6 +233,23 @@ python -m launcher --serve udpfs -d D:/PS2Games
 python -m launcher --list            # show servers available on this machine
 ```
 
+### On a Raspberry Pi, NAS, or other non-x64 box
+
+The servers are pure Python standard library, so they run on **any machine with
+Python 3** — a Raspberry Pi (any model), an ARM/MIPS NAS, an OpenWrt router —
+even where there is no packaged build for that architecture. No pip installs, no
+GUI needed; point a server at your games folder and it serves over the LAN just
+the same:
+
+```sh
+python3 udpfs_server/udpfs_server.py -d /srv/ps2games
+```
+
+CSO decompression is built in (it uses the standard library); ZSO and CHD light
+up automatically if the optional `lz4` / `libchdr` libraries are present, and any
+format whose library is missing is simply left untouched. This is the box that is
+already on 24/7 next to the console, so running the server there is often ideal.
+
 ## Build the packaged app
 
 [Nuitka](https://nuitka.net) bundles the launcher and all three servers into one
@@ -261,7 +284,8 @@ verification, "build it yourself", and false-positive-reporting guide.
 
 The UDPBD port is validated by `udpbd_server/selftest.py` at the protocol level
 (INFO/READ/WRITE byte-for-byte). As with the SMBv1 server, **final validation is on
-real hardware** — an actual PS2 running OPL, or PCSX2 with a network adapter.
+real hardware** — an actual PS2 running OPL (or another network loader), or PCSX2
+with a network adapter.
 
 ## Legal & responsible use
 
