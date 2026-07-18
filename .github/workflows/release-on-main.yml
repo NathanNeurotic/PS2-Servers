@@ -133,7 +133,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" ${{ matrix.asset_name }}
 
       - name: Generate artifact attestation
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: ${{ matrix.asset_name }}
 
@@ -184,7 +184,7 @@ jobs:
       - name: Generate folder artifact attestation
         if: matrix.folder_asset != ''
         continue-on-error: true
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: ${{ matrix.folder_asset }}
 
@@ -211,7 +211,7 @@ jobs:
           git archive --format=zip --output=PS2Servers-source.zip HEAD
 
       - name: Generate source attestation
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: PS2Servers-source.zip
 
