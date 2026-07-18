@@ -352,7 +352,7 @@ jobs:
       # current stable tag. A plain vX.Y.Z tag is a normal release and does.
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: PS2 Servers ${{ github.ref_name }}
           body_path: out/release-notes.md
@@ -365,7 +365,7 @@ jobs:
       - name: Attach folder build to release
         if: startsWith(github.ref, 'refs/tags/') && matrix.folder_asset != ''
         continue-on-error: true
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: PS2 Servers ${{ github.ref_name }}
           body_path: out/release-notes.md
@@ -380,7 +380,7 @@ jobs:
         # when absent, so a failed AppImage build never blocks the release.
         if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux' && matrix.folder_asset != ''
         continue-on-error: true
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: PS2 Servers ${{ github.ref_name }}
           body_path: out/release-notes.md
