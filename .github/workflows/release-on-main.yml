@@ -305,14 +305,16 @@ jobs:
 
             ## Downloads
 
-            **On Windows, download the folder build** (`PS2Servers-windows-x64-folder.zip`)
-            and run `PS2Servers.exe` from inside the folder — it is the same app
-            without the self-extracting wrapper that trips antivirus heuristics, so
-            it comes up clean. A single-file `PS2Servers-windows-x64.zip` is also
-            published for convenience. **32-bit Windows** builds
-            (`PS2Servers-windows-x86*.zip`) are published for older / low-end PCs.
-            Linux: `PS2Servers-linux-x64` (or the `-folder.tar.gz` build if `/tmp`
-            is `noexec`). macOS ships as a `.app`.
+            **On 64-bit Windows, download the folder build**
+            (`PS2Servers-windows-x64-folder.zip`) and run `PS2Servers.exe` from
+            inside the folder — it is the same app without the self-extracting
+            wrapper that trips antivirus heuristics, so it comes up clean. A
+            single-file `PS2Servers-windows-x64.zip` is also published for
+            convenience. **On 32-bit Windows** (older / low-end PCs), download
+            `PS2Servers-windows-x86-folder.zip` (or the single-file
+            `PS2Servers-windows-x86.zip`) instead — the x64 build will not run
+            there. Linux: `PS2Servers-linux-x64` (or the `-folder.tar.gz` build if
+            `/tmp` is `noexec`). macOS ships as a `.app`.
 
             ## Security transparency
 
