@@ -58,18 +58,26 @@ def _install_tab_icons(app, gui):
 
 def _soften_styles(root, gui):
     style = gui.ttk.Style(root)
+    # Share ONE palette with main.py (launcher/theme.py). This layer runs last
+    # and wins for the styles below, so sourcing the same colours here is what
+    # keeps the two theme layers from drifting into two different-looking skins.
+    from . import theme
+    p = theme.PALETTE
     palette = {
-        "bg": "#040915",
-        "surface": "#081427",
-        "surface2": "#0c1b33",
-        "edge": "#15365f",
-        "text": "#e7f2ff",
-        "muted": "#b4c6df",
-        "accent": "#009cff",
-        "accent2": "#46d9ff",
-        "warn": "#ffd45f",
-        "ok": "#5ff0bc",
-        "danger": "#ff5676",
+        "bg": p["bg"],
+        "surface": p["panel"],
+        "surface2": p["panel2"],
+        "panel3": p["panel3"],
+        "edge": p["edge"],
+        "text": p["text"],
+        "muted": p["muted"],
+        "accent": p["accent"],
+        "accent_hover": p["accent_hover"],
+        "accent2": p["accent2"],
+        "warn": p["warn"],
+        "ok": p["ok"],
+        "danger": p["error"],
+        "disabled": p["disabled"],
     }
 
     root.configure(background=palette["bg"])
@@ -113,23 +121,32 @@ def _soften_styles(root, gui):
     style.configure("PageActions.TFrame", background=palette["surface"], relief="flat")
     style.configure("PageActions.TLabel", background=palette["surface"], foreground=palette["muted"])
 
-    style.configure("TButton", background=palette["surface2"], foreground=palette["text"],
-                    padding=(10, 5), borderwidth=1, focusthickness=1,
-                    focuscolor=palette["accent"])
+    # Secondary buttons: flat surface with a subtle slate edge; hover lifts one
+    # elevation step rather than jumping to a bright fill. The solid accent fill
+    # is reserved for Accent.TButton (the primary action).
+    style.configure("TButton", background=palette["surface"], foreground=palette["text"],
+                    padding=(12, 6), borderwidth=1, focusthickness=1,
+                    focuscolor=palette["accent"], bordercolor=palette["edge"],
+                    lightcolor=palette["edge"], darkcolor=palette["surface"])
+    # State order matters: a pressed widget is ALSO active, and ttk uses the
+    # first matching statespec -- so pressed must come before active or the
+    # click feedback (panel3) never shows.
     style.map("TButton",
-              background=[("active", "#12305a"), ("pressed", palette["accent"])],
-              foreground=[("disabled", "#6f7f98"), ("pressed", "#ffffff")])
+              background=[("pressed", palette["panel3"]), ("active", palette["surface2"])],
+              foreground=[("disabled", palette["disabled"]), ("pressed", "#ffffff")])
     style.configure("Accent.TButton", background=palette["accent"], foreground="#ffffff",
                     padding=(12, 6), borderwidth=0)
+    # Hover/press DARKEN to accent_hover -- white text stays well above WCAG AA on
+    # both. (The light accent2 is a text colour for dark surfaces, not a fill for
+    # white text, so it is deliberately not used here.)
+    style.map("Accent.TButton",
+              background=[("disabled", palette["surface2"]), ("pressed", palette["accent_hover"]),
+                          ("active", palette["accent_hover"])],
+              foreground=[("disabled", palette["disabled"]), ("!disabled", "#ffffff")])
 
-    style.configure("Server.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(14, 8, 14, 0))
-    style.configure("Server.TNotebook.Tab", padding=(14, 8), font=("", 10, "bold"),
-                    background=palette["surface"], foreground=palette["muted"], borderwidth=1)
-    style.map("Server.TNotebook.Tab",
-              background=[("selected", "#102b53"), ("active", palette["surface2"]),
-                          ("!selected", palette["surface"])],
-              foreground=[("selected", palette["accent2"]), ("active", palette["text"]),
-                          ("!selected", palette["muted"])])
+    # NOTE: the notebook tab bar is deliberately NOT restyled here -- main.py's
+    # apply_theme is the single owner of Server.TNotebook / .Tab, so the tabs
+    # have exactly one definition to reason about.
 
 
 def _install_page_controls(app, gui):
