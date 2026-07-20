@@ -74,7 +74,8 @@ Linux and macOS
 PS2 Servers runs the same three servers here as on Windows. A few things differ:
 
 - There is no firewall management. If the PS2 cannot see a server after you start it, open its port in your firewall -- the TERMINAL tab prints the exact command for ufw or firewalld when a server starts. Many desktops allow LAN traffic by default and need nothing.
-- System tray, and the "Take port 445" SMB option, are Windows-only and are not shown here.
+- The "Take port 445" SMB option is Windows-only and is not shown here.
+- System tray on Linux is experimental. When your desktop has a system tray (XFCE, Cinnamon, MATE, KDE, or GNOME with the AppIndicator extension), you can turn on "Close to tray" / "Minimize to tray" below to keep the servers running without a window. It is off by default -- enable it once you see the tray icon appear. Desktops with no tray simply show no icon, and closing the window quits normally.
 - Direct link mode is experimental on Linux and macOS: it runs a small helper as administrator (via your system's password prompt) to configure the port, and removes that configuration again when it stops.
 """
 

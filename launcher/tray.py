@@ -250,3 +250,21 @@ class SystemTray:
         if self._hwnd:
             user32.PostMessageW(self._hwnd, WM_CLOSE, 0, 0)
             self._hwnd = None
+
+
+# -- Linux backend ----------------------------------------------------------- #
+# On Linux the tray is optional (pystray, bundled in the AppImage). When the
+# pieces are present, expose it through the SAME ``AVAILABLE`` flag and
+# ``SystemTray(tooltip, on_open, on_quit)`` / ``start()`` / ``stop()`` contract as
+# Windows, so the GUI wiring in gui.py is identical on both. On macOS -- and on
+# Linux without pystray/Pillow/a session bus -- ``AVAILABLE`` stays False and the
+# launcher keeps its normal close-to-quit behaviour (the Windows ctypes class
+# above is defined but never instantiated there).
+if platform.system() == "Linux":
+    try:
+        from . import tray_linux
+        if tray_linux.available():
+            AVAILABLE = True
+            SystemTray = tray_linux.SystemTray
+    except Exception:
+        pass

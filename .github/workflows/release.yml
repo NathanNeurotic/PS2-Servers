@@ -64,6 +64,15 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3-tk tk-dev
 
+      # Optional Linux system-tray backend, bundled into the Linux build so the
+      # AppImage has a working tray. best-effort: if this fails the build still
+      # succeeds and the launcher just keeps close-to-quit (build.py only bundles
+      # what is actually installed).
+      - name: Install Linux tray backend (pystray)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: python -m pip install pystray Pillow python-xlib
+
       - name: Install Nuitka
         if: matrix.macos_arch != 'x86_64'
         run: python -m pip install --upgrade pip -r requirements-build.txt

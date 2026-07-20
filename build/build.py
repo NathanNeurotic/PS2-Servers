@@ -55,6 +55,23 @@ INCLUDE_PACKAGES = [
     "lz4",
 ]
 
+# Optional Linux system-tray backend. pystray (+ Pillow for the icon, + the
+# pure-Python Xlib xorg fallback) is bundled so the packaged Linux build has a
+# working tray. Each is included only if actually installed in the build
+# environment, so a build without them still succeeds and the launcher simply
+# degrades to close-to-quit. pystray's AppIndicator/GTK backends import `gi` at
+# runtime from the system (Nuitka can't bundle a gobject-introspection stack);
+# where gi is absent, pystray falls back to the bundled xorg backend.
+LINUX_TRAY_PACKAGES = ["pystray", "PIL", "Xlib", "six"]
+
+
+def _installed(module_name):
+    import importlib.util
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
+
 
 def main():
     system = platform.system()
@@ -94,6 +111,15 @@ def main():
 
     for pkg in INCLUDE_PACKAGES:
         cmd.append("--include-package=" + pkg)
+
+    if system == "Linux":
+        for pkg in LINUX_TRAY_PACKAGES:
+            if _installed(pkg):
+                cmd.append("--include-package=" + pkg)
+        # gi (PyGObject) is a system gobject-introspection stack, not a bundle-
+        # able Python package; pystray imports it only at runtime. Tell Nuitka
+        # not to try to follow it so the build never fails on a missing gi.
+        cmd.append("--nofollow-import-to=gi")
 
     build_mode = os.environ.get("PS2_BUILD_MODE", "onefile").strip().lower()
 

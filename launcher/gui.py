@@ -417,10 +417,17 @@ class LauncherApp:
         self._shutting_down = False
         self._tray = None
         self._tray_option_widgets = []
+        # Default close/minimize-to-tray ON only where the tray icon appears
+        # reliably and synchronously (Windows). On Linux the tray is opt-in even
+        # when available: the icon shows on most desktops (XFCE/Cinnamon/MATE/
+        # KDE) but we don't want a first-run user's window-close to silently hide
+        # the window before they've seen the icon work. A saved preference still
+        # wins, so a Linux user who turns it on keeps it.
+        _tray_default = tray.AVAILABLE and windows_setup.is_windows()
         self.close_to_tray_var = tk.BooleanVar(
-            value=self._saved_bool("close_to_tray", tray.AVAILABLE))
+            value=self._saved_bool("close_to_tray", _tray_default))
         self.minimize_to_tray_var = tk.BooleanVar(
-            value=self._saved_bool("minimize_to_tray", tray.AVAILABLE))
+            value=self._saved_bool("minimize_to_tray", _tray_default))
 
         root.title("PS2 Servers " + APP_VERSION_LABEL)
         self._configure_window()
