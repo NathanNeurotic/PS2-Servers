@@ -8,6 +8,7 @@ two different-looking skins.
 
 import re
 import unittest
+from unittest import mock
 
 from launcher import theme
 
@@ -93,12 +94,17 @@ class AssetSkinSharesThePaletteTests(unittest.TestCase):
             def configure(self, **kw):
                 configured.setdefault("__root__", {}).update(kw)
 
-        asset_skin._soften_styles(FakeRoot(), FakeGui)
+        # Patch the palette with SENTINEL colours that appear nowhere in the real
+        # theme, then assert the configured styles use them. Matching the sentinel
+        # proves asset_skin read live from theme.PALETTE -- a hardcoded private
+        # copy (even one with today's exact values) would fail this.
+        sentinels = {"panel": "#010203", "bg": "#040506", "accent": "#070809"}
+        with mock.patch.dict(theme.PALETTE, sentinels, clear=False):
+            asset_skin._soften_styles(FakeRoot(), FakeGui)
 
-        # The card surface must be the shared panel colour, and the root
-        # background the shared bg colour -- proof it read from theme.PALETTE.
-        self.assertEqual(configured["Card.TFrame"]["background"], theme.PALETTE["panel"])
-        self.assertEqual(configured["__root__"]["background"], theme.PALETTE["bg"])
+        self.assertEqual(configured["Card.TFrame"]["background"], "#010203")
+        self.assertEqual(configured["__root__"]["background"], "#040506")
+        self.assertEqual(configured["Accent.TButton"]["background"], "#070809")
 
 
 if __name__ == "__main__":
