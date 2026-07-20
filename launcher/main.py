@@ -149,16 +149,18 @@ def _apply_gui_review_fixes(gui):
         style.configure("AdminNo.TLabel", background=palette["panel"], foreground=palette["warn"])
         style.configure("TButton", background=palette["panel2"], foreground=palette["text"],
                         borderwidth=1, focusthickness=1, focuscolor=palette["accent"])
+        # pressed before active: a pressed widget is also active, and ttk uses
+        # the first matching statespec, so pressed must be listed first.
         style.map("TButton",
-                  background=[("active", palette["panel3"]), ("pressed", palette["accent"])],
+                  background=[("pressed", palette["accent"]), ("active", palette["panel3"])],
                   foreground=[("disabled", palette["disabled"]), ("pressed", "#ffffff")])
         style.configure("Accent.TButton", background=palette["accent"], foreground="#ffffff",
                         borderwidth=1, focusthickness=1, focuscolor=palette["accent2"])
         # Hover/press darken to accent_hover so white text keeps its AA contrast
         # (a lighter hover would drop it below 4.5:1).
         style.map("Accent.TButton",
-                  background=[("active", palette["accent_hover"]),
-                              ("pressed", palette["accent_hover"])],
+                  background=[("pressed", palette["accent_hover"]),
+                              ("active", palette["accent_hover"])],
                   foreground=[("disabled", palette["disabled"]), ("!disabled", "#ffffff")])
         style.configure("TEntry", fieldbackground=palette["entry"], foreground=palette["text"],
                         insertcolor=palette["text"], bordercolor=palette["panel3"])

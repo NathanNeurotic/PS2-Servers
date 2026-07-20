@@ -128,8 +128,11 @@ def _soften_styles(root, gui):
                     padding=(12, 6), borderwidth=1, focusthickness=1,
                     focuscolor=palette["accent"], bordercolor=palette["edge"],
                     lightcolor=palette["edge"], darkcolor=palette["surface"])
+    # State order matters: a pressed widget is ALSO active, and ttk uses the
+    # first matching statespec -- so pressed must come before active or the
+    # click feedback (panel3) never shows.
     style.map("TButton",
-              background=[("active", palette["surface2"]), ("pressed", palette["panel3"])],
+              background=[("pressed", palette["panel3"]), ("active", palette["surface2"])],
               foreground=[("disabled", palette["disabled"]), ("pressed", "#ffffff")])
     style.configure("Accent.TButton", background=palette["accent"], foreground="#ffffff",
                     padding=(12, 6), borderwidth=0)
@@ -137,8 +140,8 @@ def _soften_styles(root, gui):
     # both. (The light accent2 is a text colour for dark surfaces, not a fill for
     # white text, so it is deliberately not used here.)
     style.map("Accent.TButton",
-              background=[("active", palette["accent_hover"]), ("pressed", palette["accent_hover"]),
-                          ("disabled", palette["surface2"])],
+              background=[("disabled", palette["surface2"]), ("pressed", palette["accent_hover"]),
+                          ("active", palette["accent_hover"])],
               foreground=[("disabled", palette["disabled"]), ("!disabled", "#ffffff")])
 
     # NOTE: the notebook tab bar is deliberately NOT restyled here -- main.py's

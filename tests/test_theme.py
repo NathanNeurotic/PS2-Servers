@@ -22,25 +22,47 @@ REQUIRED_KEYS = {
 }
 
 
+def _wcag_contrast(fg, bg):
+    """Proper WCAG 2.x contrast ratio between two #rrggbb colours."""
+    def _lin(hexc):
+        chan = []
+        for i in (1, 3, 5):
+            c = int(hexc[i:i + 2], 16) / 255.0
+            chan.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+        r, g, b = chan
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    l1, l2 = _lin(fg), _lin(bg)
+    hi, lo = max(l1, l2), min(l1, l2)
+    return (hi + 0.05) / (lo + 0.05)
+
+
 class PaletteContractTests(unittest.TestCase):
-    def test_required_keys_present(self):
-        missing = REQUIRED_KEYS - set(theme.PALETTE)
-        self.assertEqual(missing, set(), "PALETTE missing keys: %s" % missing)
+    def test_key_set_is_exactly_required(self):
+        # Exact set, not just a subset: this also catches a stale/extra key being
+        # reintroduced (the SURFACE-alias problem), not only a missing one.
+        self.assertEqual(set(theme.PALETTE), REQUIRED_KEYS)
 
     def test_all_values_are_six_digit_hex(self):
         for key, value in theme.PALETTE.items():
             self.assertRegex(value, HEX, "%s=%r is not a 6-digit hex colour" % (key, value))
 
-    def test_accent_hover_is_darker_than_accent(self):
-        # The hover shade must be at least as dark as the base accent so white
-        # button text keeps its AA contrast on the active state (a lighter hover
-        # was the original accessibility bug).
-        def _luminance(hex_colour):
-            r, g, b = (int(hex_colour[i:i + 2], 16) for i in (1, 3, 5))
-            return 0.2126 * r + 0.7152 * g + 0.0722 * b
-        self.assertLessEqual(
-            _luminance(theme.PALETTE["accent_hover"]),
-            _luminance(theme.PALETTE["accent"]))
+    def test_white_text_on_accents_meets_wcag_aa(self):
+        # White is the Accent.TButton foreground on both the base accent and the
+        # hover/press accent_hover; both must clear WCAG AA (4.5:1) for normal
+        # text. This is the accessibility fix the review flagged.
+        for key in ("accent", "accent_hover"):
+            ratio = _wcag_contrast("#ffffff", theme.PALETTE[key])
+            self.assertGreaterEqual(
+                ratio, 4.5,
+                "white on %s (%s) is %.2f:1, below WCAG AA 4.5:1"
+                % (key, theme.PALETTE[key], ratio))
+
+    def test_accent_hover_is_no_lighter_than_accent(self):
+        # Guards the hover from regressing to a lighter fill (which would drop
+        # white-text contrast, the original bug).
+        self.assertGreaterEqual(
+            _wcag_contrast("#ffffff", theme.PALETTE["accent_hover"]),
+            _wcag_contrast("#ffffff", theme.PALETTE["accent"]))
 
 
 class AssetSkinSharesThePaletteTests(unittest.TestCase):
