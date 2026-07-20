@@ -60,7 +60,14 @@ def configure_and_build():
         # the runner's native x64; a 32-bit release sets WINDOWS_TARGET_ARCH=x86
         # so the DLL matches the 32-bit Python/Nuitka .exe and can actually load.
         win_arch = os.environ.get("WINDOWS_TARGET_ARCH", "").strip().lower()
-        if win_arch in ("x86", "win32", "32"):
+        # The DLL's bitness must match the interpreter's: a 32-bit Python (and the
+        # Nuitka .exe it builds) can only load a 32-bit DLL. CI sets
+        # WINDOWS_TARGET_ARCH explicitly; when it's unset (e.g. a local build)
+        # fall back to the running interpreter's bitness (sys.maxsize is 2**31-1
+        # on 32-bit Python) so a manual 32-bit build doesn't get a 64-bit DLL.
+        want_win32 = win_arch in ("x86", "win32", "32") or (
+            not win_arch and sys.maxsize <= 2 ** 31 - 1)
+        if want_win32:
             cmd.extend(["-A", "Win32"])
         # Prefer a self-contained runtime for the DLL where supported by CMake/MSVC.
         cmd.extend([
