@@ -51,7 +51,8 @@ local network tool."
 ## Two download shapes (folder is recommended on Windows)
 
 **On Windows, the folder build is the recommended download.** Windows and Linux
-each ship a **folder** build (`PS2Servers-windows-x64-folder.zip` /
+each ship a **folder** build (`PS2Servers-windows-x64-folder.zip` — or
+`PS2Servers-windows-x86-folder.zip` on 32-bit Windows — and
 `PS2Servers-linux-x64-folder.tar.gz`): the same application laid out as a plain
 folder of the executable plus its libraries, with **no self-extracting
 bootstrap** — which is the thing that makes the single-file `.exe` trip
