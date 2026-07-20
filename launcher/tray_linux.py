@@ -81,7 +81,12 @@ def _icon_image():
         draw = ImageDraw.Draw(img)
         draw.rounded_rectangle([5, 5, 58, 58], radius=10,
                                outline=(63, 140, 255, 255), width=3)
-        draw.text((15, 24), "PS2", fill=(116, 182, 255, 255))
+        # The default bitmap font can be missing in some Pillow builds; the badge
+        # (rounded rect) is still a usable icon without the "PS2" text.
+        try:
+            draw.text((15, 24), "PS2", fill=(116, 182, 255, 255))
+        except Exception:
+            pass
         return img
     except Exception:
         return None
@@ -112,16 +117,31 @@ class SystemTray:
         if image is None:
             return False
 
+        # pystray backends differ in what they support (checked at runtime):
+        #   AppIndicator (preferred on XFCE/Cinnamon/MATE/KDE): menu YES,
+        #       default/left-click action NO.
+        #   GTK: menu YES, default action YES.
+        #   xorg (fallback): menu NO, default action YES.
+        # If a backend supports NEITHER a menu nor a default action it can offer
+        # neither Open nor Quit -- decline so the launcher keeps close-to-quit
+        # instead of showing a dead icon the user can't act on.
+        has_menu = bool(getattr(pystray.Icon, "HAS_MENU", True))
+        has_default = bool(getattr(pystray.Icon, "HAS_DEFAULT_ACTION", True))
+        if not has_menu and not has_default:
+            return False
+
         def _open(icon=None, item=None):
             self._safe(self.on_open)
 
         def _quit(icon=None, item=None):
             self._safe(self.on_quit)
 
-        # default=True makes a left click (or double click) invoke Open, matching
-        # the Windows tray where left-click restores the window.
+        # Mark Open as the default (left-click) action only where the backend
+        # supports one. The Open/Quit menu shows on backends with a menu
+        # (AppIndicator/GTK); on the menu-less xorg fallback left-click still
+        # invokes Open and Quit is done from the app window.
         menu = pystray.Menu(
-            pystray.MenuItem("Open PS2 Servers", _open, default=True),
+            pystray.MenuItem("Open PS2 Servers", _open, default=has_default),
             pystray.MenuItem("Quit", _quit),
         )
         try:
@@ -149,10 +169,13 @@ class SystemTray:
 
         self._thread = threading.Thread(target=_run, daemon=True)
         self._thread.start()
-        # Give the backend a moment to come up; if it never signals, treat the
-        # tray as failed so the caller falls back to close-to-quit.
-        self._ready.wait(timeout=4.0)
-        return bool(self._ok)
+        # If the backend never comes up (timeout) or reports failure, stop the
+        # icon/thread so we never leave an orphaned tray icon behind, and fall
+        # back to close-to-quit.
+        if not self._ready.wait(timeout=4.0) or not self._ok:
+            self.stop()
+            return False
+        return True
 
     @staticmethod
     def _safe(fn):

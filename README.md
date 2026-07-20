@@ -187,8 +187,9 @@ Packaged builds bundle CHD (libchdr) and ZSO (lz4) support, so CHD/CSO/ZSO image
 
 On Windows the launcher can close/minimize to the system tray so the servers keep
 running without a window. On Linux this is now available too (experimental): the
-packaged **AppImage** bundles it, and from source it turns on if you
-`pip install pystray` (Pillow is also needed for the icon). It shows a tray icon on
+packaged **AppImage** normally bundles it (the tray dependency is best-effort at
+build time, so an occasional build may ship without it), and from source it turns
+on if you `pip install pystray` (Pillow is also needed for the icon). It shows a tray icon on
 desktops with a system tray — XFCE, Cinnamon, MATE, KDE, or GNOME with the
 AppIndicator extension — where you can enable **Close/Minimize to tray** in the
 About tab. It is **off by default** on Linux; enable it once you see the icon

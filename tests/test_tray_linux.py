@@ -36,6 +36,11 @@ def _fake_pystray():
 
     class Icon:
         instances = []
+        # Backend capability flags (like the real pystray.Icon). Tests override
+        # these to simulate AppIndicator (menu, no default), xorg (default, no
+        # menu), and a backend that supports neither.
+        HAS_MENU = True
+        HAS_DEFAULT_ACTION = True
 
         def __init__(self, name, image, title, menu):
             self.name = name
@@ -91,6 +96,7 @@ class AvailableTests(unittest.TestCase):
 
 class SystemTrayContractTests(unittest.TestCase):
     def setUp(self):
+        self._previous_pystray = sys.modules.get("pystray")
         self.fake, self.Icon = _fake_pystray()
         self.Icon.instances = []
         sys.modules["pystray"] = self.fake
@@ -101,7 +107,12 @@ class SystemTrayContractTests(unittest.TestCase):
 
     def tearDown(self):
         self._icon_patch.stop()
-        sys.modules.pop("pystray", None)
+        # Restore any real pystray that was imported before this fixture, rather
+        # than blindly deleting it and breaking later tests.
+        if self._previous_pystray is None:
+            sys.modules.pop("pystray", None)
+        else:
+            sys.modules["pystray"] = self._previous_pystray
 
     def test_start_returns_true_and_marks_icon_visible(self):
         tray = tray_linux.SystemTray("PS2 Servers", lambda: None, lambda: None)
@@ -139,6 +150,38 @@ class SystemTrayContractTests(unittest.TestCase):
         icon = self.Icon.instances[-1]
         tray.stop()
         self.assertTrue(icon.stopped)
+
+    def test_appindicator_backend_marks_open_non_default(self):
+        # AppIndicator: menu yes, default action no. Open must NOT be the default
+        # item (left-click won't fire it), but the menu still starts fine.
+        self.Icon.HAS_MENU = True
+        self.Icon.HAS_DEFAULT_ACTION = False
+        tray = tray_linux.SystemTray("PS2 Servers", lambda: None, lambda: None)
+        self.assertTrue(tray.start())
+        icon = self.Icon.instances[-1]
+        items = {i.text: i for i in icon.menu.items}
+        self.assertFalse(items["Open PS2 Servers"].default)
+        self.assertIn("Quit", items)  # Quit still reachable via the menu
+
+    def test_xorg_backend_starts_with_default_action(self):
+        # xorg: menu no, default action yes. Still usable (left-click Open), so
+        # it must start, with Open as the default item.
+        self.Icon.HAS_MENU = False
+        self.Icon.HAS_DEFAULT_ACTION = True
+        tray = tray_linux.SystemTray("PS2 Servers", lambda: None, lambda: None)
+        self.assertTrue(tray.start())
+        icon = self.Icon.instances[-1]
+        items = {i.text: i for i in icon.menu.items}
+        self.assertTrue(items["Open PS2 Servers"].default)
+
+    def test_declines_backend_with_neither_menu_nor_default(self):
+        # A backend that can offer neither Open nor Quit is a dead icon -- start()
+        # must decline (return False) and never create an icon.
+        self.Icon.HAS_MENU = False
+        self.Icon.HAS_DEFAULT_ACTION = False
+        tray = tray_linux.SystemTray("PS2 Servers", lambda: None, lambda: None)
+        self.assertFalse(tray.start())
+        self.assertEqual(self.Icon.instances, [])
 
 
 if __name__ == "__main__":
