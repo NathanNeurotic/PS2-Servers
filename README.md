@@ -27,8 +27,10 @@ than from any guide, since your address and port are specific to your machine.
   the folder. It is the same app, but without the self-extracting wrapper that
   makes the single-file `.exe` trip antivirus heuristics, so it comes up clean.
   A single-file `PS2Servers-windows-x64.zip` is still provided for convenience
-  if your AV doesn't object. (Linux: `PS2Servers-linux-x64`, or
-  `PS2Servers-linux-x64-folder.tar.gz` if `/tmp` is mounted `noexec`.)
+  if your AV doesn't object. **On 32-bit Windows, use the `PS2Servers-windows-x86`
+  builds** instead (same app, built for older / low-end PCs). (Linux:
+  `PS2Servers-linux-x64`, or `PS2Servers-linux-x64-folder.tar.gz` if `/tmp` is
+  mounted `noexec`.)
 - **From source:** double-click **`Start-Launcher.bat`** (Windows) or run
   `./start-launcher.sh` (Linux/macOS). Requires Python 3.
 
@@ -160,10 +162,10 @@ Python and no heavy runtime for the packaged app.
 
 | | Requirement |
 |---|---|
-| OS | Windows 10/11 (x64), Linux (x64), or macOS (Apple Silicon or Intel) |
+| OS | Windows (x64 **or 32-bit x86**), Linux (x64), or macOS (Apple Silicon or Intel) |
 | Packaged app | No Python required — the download bundles everything |
 | From source | Python 3 with Tkinter (Linux: `sudo apt install python3-tk`); official builds use Python 3.12 |
-| Hardware | Any modern 64-bit PC for the **packaged GUI app** (x64 / Apple Silicon). Running a server from source needs only Python 3 and works on any architecture — see "On a Raspberry Pi, NAS, or other non-x64 box" below. |
+| Hardware | The **packaged GUI app** ships for x64, **32-bit x86 Windows** (for older / low-end PCs), and Apple Silicon. Running a server from source needs only Python 3 and works on any architecture — see "On a Raspberry Pi, NAS, or other non-x64 box" below. |
 | Network | Wired or Wi‑Fi LAN on the same subnet as the PS2 (wired recommended for large games) |
 | Disk | A few hundred MB for the app, plus room for your game files |
 

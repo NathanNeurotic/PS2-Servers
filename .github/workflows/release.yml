@@ -29,6 +29,11 @@ jobs:
           - os: windows-latest
             asset: PS2Servers-windows-x64.zip
             folder_asset: PS2Servers-windows-x64-folder.zip
+          # 32-bit Windows, for older / low-end PCs still used for SMB on OPL.
+          - os: windows-latest
+            asset: PS2Servers-windows-x86.zip
+            folder_asset: PS2Servers-windows-x86-folder.zip
+            win_arch: x86
           - os: ubuntu-latest
             asset: PS2Servers-linux-x64
             folder_asset: PS2Servers-linux-x64-folder.tar.gz
@@ -44,9 +49,19 @@ jobs:
       # universal2 interpreter (with universal Tcl/Tk) and must execute Python as
       # x86_64 so compiled dependencies like lz4 match the Intel artifact.
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        if: matrix.macos_arch != 'x86_64'
+        if: matrix.macos_arch != 'x86_64' && matrix.win_arch != 'x86'
         with:
           python-version: "3.12"
+
+      # The 32-bit Windows build needs a 32-bit interpreter (with 32-bit Tcl/Tk)
+      # so Nuitka emits a 32-bit .exe and pip pulls the win32 wheels (lz4,
+      # zstandard). setup-python provides an official 32-bit CPython.
+      - name: Set up Python (Windows x86)
+        if: matrix.win_arch == 'x86'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          architecture: "x86"
 
       - name: Install universal2 Python (macOS x86_64 cross-build)
         if: matrix.macos_arch == 'x86_64'
@@ -85,6 +100,7 @@ jobs:
         if: matrix.macos_arch != 'x86_64'
         env:
           MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
+          WINDOWS_TARGET_ARCH: ${{ matrix.win_arch }}
         run: python build/build_libchdr.py
 
       - name: Build bundled libchdr (macOS x86_64)
@@ -274,6 +290,7 @@ jobs:
           | OS | Recommended | Also available |
           | --- | --- | --- |
           | Windows x64 | \`PS2Servers-windows-x64-folder.zip\` (folder, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |
+          | Windows x86 (32-bit) | \`PS2Servers-windows-x86-folder.zip\` (folder, AV-clean) | \`PS2Servers-windows-x86.zip\` (single file) |
           | Linux x64 | \`PS2Servers-linux-x64\` (single file) | \`PS2Servers-x86_64.AppImage\` (desktop/menu integration, newer) or \`PS2Servers-linux-x64-folder.tar.gz\` (folder; use if /tmp is noexec) |
           | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` | |
           | macOS — Intel | \`PS2Servers-macos-x64.zip\` | |

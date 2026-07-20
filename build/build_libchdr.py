@@ -56,6 +56,12 @@ def configure_and_build():
 
     system = platform.system()
     if system == "Windows":
+        # Target CPU for the Visual Studio generator. Default (unset) builds for
+        # the runner's native x64; a 32-bit release sets WINDOWS_TARGET_ARCH=x86
+        # so the DLL matches the 32-bit Python/Nuitka .exe and can actually load.
+        win_arch = os.environ.get("WINDOWS_TARGET_ARCH", "").strip().lower()
+        if win_arch in ("x86", "win32", "32"):
+            cmd.extend(["-A", "Win32"])
         # Prefer a self-contained runtime for the DLL where supported by CMake/MSVC.
         cmd.extend([
             "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
