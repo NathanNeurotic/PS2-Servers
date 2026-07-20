@@ -120,7 +120,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $packageDir = "PS2Servers-windows-x64"
+          $packageDir = "PS2Servers-windows-${{ matrix.win_arch || 'x64' }}"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path dist/PS2Servers.exe -Destination "$packageDir/PS2Servers.exe" -Force
           Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
@@ -177,7 +177,7 @@ jobs:
         run: |
           $dist = Get-ChildItem dist -Directory -Filter *.dist | Select-Object -First 1
           if (-not $dist) { throw "standalone .dist folder not found in dist/" }
-          $packageDir = "PS2Servers-windows-x64-folder"
+          $packageDir = "PS2Servers-windows-${{ matrix.win_arch || 'x64' }}-folder"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path "$($dist.FullName)/*" -Destination $packageDir -Recurse -Force
           Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
