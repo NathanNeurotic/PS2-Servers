@@ -12,7 +12,7 @@ for testing:
 import platform
 import sys
 
-from . import app_icon
+from . import app_icon, theme
 
 
 def main(argv=None):
@@ -89,21 +89,9 @@ def _apply_gui_review_fixes(gui):
     original_launcher_init = gui.LauncherApp.__init__
     original_build = gui.LauncherApp._build
 
-    palette = {
-        "bg": "#030713",
-        "panel": "#071226",
-        "panel2": "#0b1a35",
-        "panel3": "#10254b",
-        "text": "#d9ecff",
-        "muted": "#8aa9d6",
-        "accent": "#0094ff",
-        "accent2": "#37d7ff",
-        "ok": "#46f6b1",
-        "warn": "#ffcf5a",
-        "error": "#ff426d",
-        "entry": "#07101f",
-        "disabled": "#5f6f8d",
-    }
+    # One canonical palette, shared with asset_skin._soften_styles via
+    # launcher/theme.py so the two theme layers can never drift apart again.
+    palette = theme.PALETTE
 
     # The admin section is about Windows Firewall rules, UAC, and 445 mode --
     # none of which apply on Linux/macOS. Append it only on Windows; elsewhere
@@ -129,6 +117,14 @@ def _apply_gui_review_fixes(gui):
             style.theme_use("clam")
         except gui.tk.TclError:
             pass
+
+        # The list that drops from a ttk.Combobox is a classic Tk Listbox that
+        # clam does not colour, so the LAN-IP dropdown used to open light-on-dark.
+        # option_add reaches it where ttk styling cannot.
+        root.option_add("*TCombobox*Listbox.background", palette["entry"])
+        root.option_add("*TCombobox*Listbox.foreground", palette["text"])
+        root.option_add("*TCombobox*Listbox.selectBackground", palette["accent"])
+        root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
 
         style.configure(".",
                         background=palette["bg"],
@@ -171,11 +167,13 @@ def _apply_gui_review_fixes(gui):
         style.configure("TCheckbutton", background=palette["bg"], foreground=palette["text"])
         style.map("TCheckbutton", background=[("active", palette["panel"])])
         style.configure("TLabelframe", background=palette["panel"], foreground=palette["text"],
-                        bordercolor=palette["accent"], relief="solid")
+                        bordercolor=palette["edge"], lightcolor=palette["edge"],
+                        darkcolor=palette["panel"], relief="solid")
         style.configure("TLabelframe.Label", background=palette["bg"], foreground=palette["accent2"],
                         font=("", 10, "bold"))
         style.configure("Card.TLabelframe", background=palette["panel"], foreground=palette["text"],
-                        bordercolor="#18416f", relief="solid", borderwidth=1)
+                        bordercolor=palette["edge"], lightcolor=palette["edge"],
+                        darkcolor=palette["panel"], relief="solid", borderwidth=1)
         style.configure("Card.TLabelframe.Label", background=palette["bg"],
                         foreground=palette["accent2"], font=("", 10, "bold"))
         style.configure("Card.TFrame", background=palette["panel"])
@@ -189,16 +187,18 @@ def _apply_gui_review_fixes(gui):
         style.configure("PageActions.TFrame", background=palette["panel"], relief="flat")
         style.configure("PageActions.TLabel", background=palette["panel"], foreground=palette["muted"])
         style.configure("Admin.TFrame", background=palette["panel"], relief="solid", borderwidth=1)
+        # main.py is the single owner of the tab bar (asset_skin no longer
+        # restyles it), so this block alone decides how tabs look.
         style.configure("Server.TNotebook", background=palette["bg"], borderwidth=0,
-                        tabmargins=(6, 4, 6, 0))
+                        tabmargins=(8, 6, 8, 0))
         # Inactive tabs sit flat and muted; the selected tab is lifted with a
         # brighter fill, accent2 text, and an accent outline that ties it to the
         # page below. clam otherwise blends its own lighter fill onto the raised
         # selected tab (a washed-out, low-contrast box), so light/dark/bordercolor
         # are pinned per state to keep every tab exactly the colour asked for.
-        style.configure("Server.TNotebook.Tab", padding=(16, 8), font=("", 10, "bold"),
+        style.configure("Server.TNotebook.Tab", padding=(18, 9), font=("", 10, "bold"),
                         background=palette["panel"], foreground=palette["muted"],
-                        borderwidth=1, bordercolor="#18416f",
+                        borderwidth=1, bordercolor=palette["edge"],
                         lightcolor=palette["panel"], darkcolor=palette["panel"])
         style.map("Server.TNotebook.Tab",
                   background=[("selected", palette["panel3"]),
@@ -208,7 +208,7 @@ def _apply_gui_review_fixes(gui):
                               ("active", palette["text"]),
                               ("!selected", palette["muted"])],
                   bordercolor=[("selected", palette["accent"]),
-                               ("!selected", "#18416f")],
+                               ("!selected", palette["edge"])],
                   lightcolor=[("selected", palette["panel3"]),
                               ("!selected", palette["panel"])],
                   darkcolor=[("selected", palette["panel3"]),

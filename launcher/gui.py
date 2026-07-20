@@ -29,7 +29,7 @@ def _direct_link_experimental():
     """Non-Windows: the setup path is real but unverified on hardware."""
     return platform.system() in ("Linux", "Darwin")
 
-from . import config, directlink, elevate, netinfo, posix_firewall, tray, windows_setup
+from . import config, directlink, elevate, netinfo, posix_firewall, theme, tray, windows_setup
 from .process import ServerProcess
 from .release_metadata import DISPLAY_VERSION
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
@@ -222,7 +222,7 @@ class ServerCard(ttk.LabelFrame):
                                 style="CardStatus.TLabel")
         self.status.grid(row=row, column=0, sticky="w", padx=4, pady=(0, 4))
         self.toggle_btn = ttk.Button(self, text="Start", width=10,
-                                     command=self.on_toggle)
+                                     command=self.on_toggle, style="Accent.TButton")
         self.toggle_btn.grid(row=row, column=2, sticky="e", padx=4, pady=(0, 4))
         if not self.server.is_available():
             self.status.config(text="n/a on this OS", foreground=COLOR_ERROR)
@@ -666,9 +666,12 @@ class LauncherApp:
         self.terminal_tab = ttk.Frame(self.nb)
         self.terminal_tab.rowconfigure(0, weight=1)
         self.terminal_tab.columnconfigure(0, weight=1)
+        _p = theme.PALETTE
         self.terminal = tk.Text(self.terminal_tab, height=16, wrap="none",
-                                state="disabled", background="#101418",
-                                foreground="#d8dee9", insertbackground="#d8dee9")
+                                state="disabled", background=_p["entry"],
+                                foreground=_p["text"], insertbackground=_p["accent"],
+                                selectbackground=_p["panel3"], selectforeground=_p["text"],
+                                borderwidth=0, highlightthickness=0)
         scroll = ttk.Scrollbar(self.terminal_tab, orient="vertical",
                                command=self.terminal.yview)
         self.terminal.configure(yscrollcommand=scroll.set)
@@ -775,7 +778,12 @@ class LauncherApp:
         text_frame.grid(row=row, column=0, sticky="nsew", padx=8, pady=8)
         text_frame.rowconfigure(0, weight=1)
         text_frame.columnconfigure(0, weight=1)
-        text = tk.Text(text_frame, wrap="word", height=18, state="normal")
+        _p = theme.PALETTE
+        text = tk.Text(text_frame, wrap="word", height=18, state="normal",
+                       background=_p["panel"], foreground=_p["text"],
+                       insertbackground=_p["accent"], selectbackground=_p["panel3"],
+                       selectforeground=_p["text"], borderwidth=0,
+                       highlightthickness=0, padx=12, pady=10)
         scroll = ttk.Scrollbar(text_frame, orient="vertical", command=text.yview)
         text.configure(yscrollcommand=scroll.set)
         text.grid(row=0, column=0, sticky="nsew")
