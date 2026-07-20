@@ -27,7 +27,8 @@ than from any guide, since your address and port are specific to your machine.
   the folder. It is the same app, but without the self-extracting wrapper that
   makes the single-file `.exe` trip antivirus heuristics, so it comes up clean.
   A single-file `PS2Servers-windows-x64.zip` is still provided for convenience
-  if your AV doesn't object. **On 32-bit Windows, use the `PS2Servers-windows-x86`
+  if your AV doesn't object. **On 32-bit Windows, use the
+  `PS2Servers-windows-x86.zip` (or `PS2Servers-windows-x86-folder.zip`)
   builds** instead (same app, built for older / low-end PCs). (Linux:
   `PS2Servers-linux-x64`, or `PS2Servers-linux-x64-folder.tar.gz` if `/tmp` is
   mounted `noexec`.)

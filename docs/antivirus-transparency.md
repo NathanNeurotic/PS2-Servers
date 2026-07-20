@@ -15,6 +15,8 @@ information is published at [falsepositives.html](falsepositives.html).
 - Windows executable: PS2Servers.exe
 - Windows release package: PS2Servers-windows-x64.zip
 - Windows folder package (alternative): PS2Servers-windows-x64-folder.zip
+- 32-bit Windows release package: PS2Servers-windows-x86.zip
+- 32-bit Windows folder package (alternative): PS2Servers-windows-x86-folder.zip
 - Repository: https://github.com/NathanNeurotic/PS2-Servers
 
 Packaged Windows builds include version metadata: company name, product name,

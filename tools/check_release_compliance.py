@@ -96,6 +96,7 @@ def main():
     errors += require(
         ".github/workflows/release-on-main.yml",
         "PS2Servers-windows-x64.zip",
+        "PS2Servers-windows-x86.zip",
         "SHA256SUMS.txt",
         "GitHub artifact attestations",
         "does not enable Windows SMB1",
@@ -109,6 +110,7 @@ def main():
     errors += require(
         ".github/workflows/release.yml",
         "PS2Servers-windows-x64.zip",
+        "PS2Servers-windows-x86.zip",
         ".sha256.txt",
         "does not enable Windows SMB1",
         "does not enable or disable Windows optional features",
@@ -121,6 +123,7 @@ def main():
     errors += require(
         "README.md",
         "PS2Servers-windows-x64.zip",
+        "PS2Servers-windows-x86.zip",
         "Windows' built-in SMB1 optional",
         "Windows Firewall changes are limited to rules named `PS2 Servers - ...`",
         "docs/antivirus-transparency.md",
@@ -142,6 +145,7 @@ def main():
         "Vendor / company name: NathanNeurotic",
         "Windows executable: PS2Servers.exe",
         "Windows release package: PS2Servers-windows-x64.zip",
+        "32-bit Windows release package: PS2Servers-windows-x86.zip",
         "SMBv1/RiptOPL",
         "TCP port 1111",
         "UDP port 0xF5F6",
