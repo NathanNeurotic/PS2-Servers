@@ -67,14 +67,17 @@ def _soften_styles(root, gui):
         "bg": p["bg"],
         "surface": p["panel"],
         "surface2": p["panel2"],
+        "panel3": p["panel3"],
         "edge": p["edge"],
         "text": p["text"],
         "muted": p["muted"],
         "accent": p["accent"],
+        "accent_hover": p["accent_hover"],
         "accent2": p["accent2"],
         "warn": p["warn"],
         "ok": p["ok"],
         "danger": p["error"],
+        "disabled": p["disabled"],
     }
 
     root.configure(background=palette["bg"])
@@ -126,14 +129,17 @@ def _soften_styles(root, gui):
                     focuscolor=palette["accent"], bordercolor=palette["edge"],
                     lightcolor=palette["edge"], darkcolor=palette["surface"])
     style.map("TButton",
-              background=[("active", palette["surface2"]), ("pressed", p["panel3"])],
-              foreground=[("disabled", p["disabled"]), ("pressed", "#ffffff")])
+              background=[("active", palette["surface2"]), ("pressed", palette["panel3"])],
+              foreground=[("disabled", palette["disabled"]), ("pressed", "#ffffff")])
     style.configure("Accent.TButton", background=palette["accent"], foreground="#ffffff",
                     padding=(12, 6), borderwidth=0)
+    # Hover/press DARKEN to accent_hover -- white text stays well above WCAG AA on
+    # both. (The light accent2 is a text colour for dark surfaces, not a fill for
+    # white text, so it is deliberately not used here.)
     style.map("Accent.TButton",
-              background=[("active", palette["accent2"]), ("pressed", palette["accent"]),
+              background=[("active", palette["accent_hover"]), ("pressed", palette["accent_hover"]),
                           ("disabled", palette["surface2"])],
-              foreground=[("disabled", p["disabled"]), ("!disabled", "#ffffff")])
+              foreground=[("disabled", palette["disabled"]), ("!disabled", "#ffffff")])
 
     # NOTE: the notebook tab bar is deliberately NOT restyled here -- main.py's
     # apply_theme is the single owner of Server.TNotebook / .Tab, so the tabs

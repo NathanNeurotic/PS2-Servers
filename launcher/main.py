@@ -154,8 +154,11 @@ def _apply_gui_review_fixes(gui):
                   foreground=[("disabled", palette["disabled"]), ("pressed", "#ffffff")])
         style.configure("Accent.TButton", background=palette["accent"], foreground="#ffffff",
                         borderwidth=1, focusthickness=1, focuscolor=palette["accent2"])
+        # Hover/press darken to accent_hover so white text keeps its AA contrast
+        # (a lighter hover would drop it below 4.5:1).
         style.map("Accent.TButton",
-                  background=[("active", "#12b8ff"), ("pressed", "#006fd0")],
+                  background=[("active", palette["accent_hover"]),
+                              ("pressed", palette["accent_hover"])],
                   foreground=[("disabled", palette["disabled"]), ("!disabled", "#ffffff")])
         style.configure("TEntry", fieldbackground=palette["entry"], foreground=palette["text"],
                         insertcolor=palette["text"], bordercolor=palette["panel3"])

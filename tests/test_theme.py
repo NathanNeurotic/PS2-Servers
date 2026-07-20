@@ -18,7 +18,7 @@ HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 # here too, so a missing key fails loudly in tests instead of at paint time.
 REQUIRED_KEYS = {
     "bg", "panel", "panel2", "panel3", "edge", "text", "muted",
-    "accent", "accent2", "ok", "warn", "error", "entry", "disabled",
+    "accent", "accent_hover", "accent2", "ok", "warn", "error", "entry", "disabled",
 }
 
 
@@ -31,10 +31,16 @@ class PaletteContractTests(unittest.TestCase):
         for key, value in theme.PALETTE.items():
             self.assertRegex(value, HEX, "%s=%r is not a 6-digit hex colour" % (key, value))
 
-    def test_surface_aliases_track_the_palette(self):
-        # asset_skin maps surface/surface2 onto these; keep them honest.
-        self.assertEqual(theme.SURFACE, theme.PALETTE["panel"])
-        self.assertEqual(theme.SURFACE2, theme.PALETTE["panel2"])
+    def test_accent_hover_is_darker_than_accent(self):
+        # The hover shade must be at least as dark as the base accent so white
+        # button text keeps its AA contrast on the active state (a lighter hover
+        # was the original accessibility bug).
+        def _luminance(hex_colour):
+            r, g, b = (int(hex_colour[i:i + 2], 16) for i in (1, 3, 5))
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+        self.assertLessEqual(
+            _luminance(theme.PALETTE["accent_hover"]),
+            _luminance(theme.PALETTE["accent"]))
 
 
 class AssetSkinSharesThePaletteTests(unittest.TestCase):

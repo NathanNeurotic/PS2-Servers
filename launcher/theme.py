@@ -25,16 +25,16 @@ PALETTE = {
     "edge":     "#31415d",   # subtle hairline border (was a neon blue)
     "text":     "#e9eef7",   # primary text
     "muted":    "#93a3bd",   # secondary / helper text
-    "accent":   "#3f8cff",   # primary blue -- buttons, selected accents
-    "accent2":  "#74b6ff",   # lighter blue -- hints, selected-tab text
+    "accent":   "#2563eb",   # primary blue -- button fill; dark enough that
+                             # white text clears WCAG AA (~4.5:1) on it
+    "accent_hover": "#1b57d1",  # darker primary for button hover/press (keeps
+                                # white text well above AA on the active state)
+    "accent2":  "#74b6ff",   # lighter blue -- used as TEXT on dark surfaces
+                             # (hints, selected-tab label), never as a fill under
+                             # white text, so it stays bright
     "ok":       "#43d597",   # running / recommended (green)
     "warn":     "#e7b750",   # warning (amber)
     "error":    "#f16d7f",   # error / stopped-in-error (red)
     "entry":    "#0f1826",   # input fields + terminal background
     "disabled": "#5c6c88",   # disabled text
 }
-
-# Elevation aliases used by the asset-skin layer, so its local names
-# (surface/surface2/danger) map onto the canonical palette above.
-SURFACE = PALETTE["panel"]
-SURFACE2 = PALETTE["panel2"]
