@@ -26,6 +26,11 @@ jobs:
           - os: windows-latest
             asset_name: PS2Servers-windows-x64.zip
             folder_asset: PS2Servers-windows-x64-folder.zip
+          # 32-bit Windows, for older / low-end PCs still used for SMB on OPL.
+          - os: windows-latest
+            asset_name: PS2Servers-windows-x86.zip
+            folder_asset: PS2Servers-windows-x86-folder.zip
+            win_arch: x86
           - os: ubuntu-latest
             asset_name: PS2Servers-linux-x64
             folder_asset: PS2Servers-linux-x64-folder.tar.gz
@@ -40,10 +45,19 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Python
-        if: matrix.macos_arch != 'x86_64'
+        if: matrix.macos_arch != 'x86_64' && matrix.win_arch != 'x86'
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
+
+      # 32-bit Windows needs a 32-bit interpreter so Nuitka emits a 32-bit .exe
+      # and pip pulls the win32 wheels (lz4, zstandard).
+      - name: Set up Python (Windows x86)
+        if: matrix.win_arch == 'x86'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+          architecture: 'x86'
 
       - name: Install universal2 Python (macOS x64)
         if: matrix.macos_arch == 'x86_64'
@@ -80,6 +94,7 @@ jobs:
         if: matrix.macos_arch != 'x86_64'
         env:
           MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
+          WINDOWS_TARGET_ARCH: ${{ matrix.win_arch }}
         run: python build/build_libchdr.py
 
       - name: Build bundled libchdr (macOS x64)
@@ -105,7 +120,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $packageDir = "PS2Servers-windows-x64"
+          $packageDir = "PS2Servers-windows-${{ matrix.win_arch || 'x64' }}"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path dist/PS2Servers.exe -Destination "$packageDir/PS2Servers.exe" -Force
           Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
@@ -162,7 +177,7 @@ jobs:
         run: |
           $dist = Get-ChildItem dist -Directory -Filter *.dist | Select-Object -First 1
           if (-not $dist) { throw "standalone .dist folder not found in dist/" }
-          $packageDir = "PS2Servers-windows-x64-folder"
+          $packageDir = "PS2Servers-windows-${{ matrix.win_arch || 'x64' }}-folder"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path "$($dist.FullName)/*" -Destination $packageDir -Recurse -Force
           Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
@@ -254,6 +269,8 @@ jobs:
             PS2Servers-source.zip
             PS2Servers-windows-x64.zip
             PS2Servers-windows-x64-folder.zip
+            PS2Servers-windows-x86.zip
+            PS2Servers-windows-x86-folder.zip
           )
           present=()
           for a in "${assets[@]}"; do
@@ -288,12 +305,16 @@ jobs:
 
             ## Downloads
 
-            **On Windows, download the folder build** (`PS2Servers-windows-x64-folder.zip`)
-            and run `PS2Servers.exe` from inside the folder — it is the same app
-            without the self-extracting wrapper that trips antivirus heuristics, so
-            it comes up clean. A single-file `PS2Servers-windows-x64.zip` is also
-            published for convenience. Linux: `PS2Servers-linux-x64` (or the
-            `-folder.tar.gz` build if `/tmp` is `noexec`). macOS ships as a `.app`.
+            **On 64-bit Windows, download the folder build**
+            (`PS2Servers-windows-x64-folder.zip`) and run `PS2Servers.exe` from
+            inside the folder — it is the same app without the self-extracting
+            wrapper that trips antivirus heuristics, so it comes up clean. A
+            single-file `PS2Servers-windows-x64.zip` is also published for
+            convenience. **On 32-bit Windows** (older / low-end PCs), download
+            `PS2Servers-windows-x86-folder.zip` (or the single-file
+            `PS2Servers-windows-x86.zip`) instead — the x64 build will not run
+            there. Linux: `PS2Servers-linux-x64` (or the `-folder.tar.gz` build if
+            `/tmp` is `noexec`). macOS ships as a `.app`.
 
             ## Security transparency
 
@@ -331,6 +352,8 @@ jobs:
             release-assets/PS2Servers-source.zip
             release-assets/PS2Servers-windows-x64.zip
             release-assets/PS2Servers-windows-x64-folder.zip
+            release-assets/PS2Servers-windows-x86.zip
+            release-assets/PS2Servers-windows-x86-folder.zip
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

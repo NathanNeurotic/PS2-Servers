@@ -56,6 +56,27 @@ def configure_and_build():
 
     system = platform.system()
     if system == "Windows":
+        # The libchdr DLL's bitness MUST match the interpreter's: a 32-bit Python
+        # (and the Nuitka .exe it builds) can only load a 32-bit DLL, and vice
+        # versa. CI sets WINDOWS_TARGET_ARCH explicitly (x86 for the 32-bit build,
+        # unset for x64); when it is unset (e.g. a local build) fall back to the
+        # running interpreter's bitness (sys.maxsize is 2**31-1 on 32-bit Python).
+        # An explicit value that disagrees with the interpreter -- or an unknown
+        # value -- would silently produce an unloadable DLL, so reject it loudly
+        # before invoking CMake rather than shipping a broken build.
+        win_arch = os.environ.get("WINDOWS_TARGET_ARCH", "").strip().lower()
+        is_32bit_python = sys.maxsize <= 2 ** 31 - 1
+        win32_arches = {"x86", "win32", "32"}
+        x64_arches = {"x64", "win64", "amd64", "64"}
+        if win_arch and win_arch not in win32_arches | x64_arches:
+            raise ValueError("Unsupported WINDOWS_TARGET_ARCH: {}".format(win_arch))
+        if win_arch in win32_arches and not is_32bit_python:
+            raise RuntimeError("WINDOWS_TARGET_ARCH=x86 needs a 32-bit Python interpreter")
+        if win_arch in x64_arches and is_32bit_python:
+            raise RuntimeError("WINDOWS_TARGET_ARCH=x64 needs a 64-bit Python interpreter")
+        want_win32 = win_arch in win32_arches or (not win_arch and is_32bit_python)
+        if want_win32:
+            cmd.extend(["-A", "Win32"])
         # Prefer a self-contained runtime for the DLL where supported by CMake/MSVC.
         cmd.extend([
             "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
