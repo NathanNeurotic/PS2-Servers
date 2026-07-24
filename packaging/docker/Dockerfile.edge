@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.22-alpine AS build
+# Pinned by digest for reproducible builds (PR #119 review); bump deliberately.
+FROM golang:1.22-alpine@sha256:1699c10032ca2582ec89a24a1312d986a3f094aed3d5c1147b19880afe40e052 AS build
 ARG VERSION=container
 WORKDIR /src
 COPY native/ps2servers-edge/ ./
@@ -19,5 +20,8 @@ ENV FSROOT=/games \
     LOG_FORMAT=text
 VOLUME ["/games"]
 EXPOSE 62966/udp 62967/udp
+# NOTE: the runtime image is scratch (no shell, no tools), so a protocol-level
+# probe is not possible in-container. This is an executable sanity check only
+# (proves the binary starts), not a service health check (PR #119 review).
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD ["/usr/local/bin/ps2servers-edge", "--version"]
 ENTRYPOINT ["/usr/local/bin/ps2servers-edge", "udpfs", "--read-only"]

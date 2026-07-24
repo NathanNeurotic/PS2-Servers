@@ -91,6 +91,8 @@ class AutoUdpfsServer(UdpfsServer):
             sess.response_socket = SOCKET_DATA
             sess.handshake_generation = 0
             sess.fallback_sent = False
+            sess.fallback_generation = 0
+            sess.fallback_rearm = None
             sess.first_data_seen = False
             sess.compat_lock = threading.RLock()
             sess.ingress_by_packet = {}
@@ -167,25 +169,55 @@ class AutoUdpfsServer(UdpfsServer):
         sess.fallback_sent = True
 
     def _schedule_fallback(self, sess, generation: int):
-        def send_later():
-            time.sleep(self.fallback_interval)
-            with self.sessions_lock:
-                current = self.sessions.get(sess.addr)
-            if current is not sess:
-                return
-            with sess.compat_lock:
-                if (sess.handshake_generation != generation
-                        or sess.protocol_profile != PROFILE_PENDING
-                        or sess.first_data_seen
-                        or sess.rx_streaming):
-                    return
-                self._compatibility_inform(sess)
+        # One reusable timer thread per session (PR #119 review: a thread per
+        # DISCOVERY packet let a discovery flood exhaust the process thread
+        # limit, and the RuntimeError from a failed spawn escaped the receive
+        # loop and killed the whole server). A newer DISCOVERY re-arms the SAME
+        # thread; the generation check still decides whether the INFORM sends.
+        # The caller holds ``sess.compat_lock`` (an RLock).
+        sess.fallback_generation = generation
+        event = sess.fallback_rearm
+        if event is not None:
+            event.set()
+            return
+        event = threading.Event()
+        sess.fallback_rearm = event
 
-        threading.Thread(
-            target=send_later,
-            name=f"udpfs-fallback-{sess.addr[0]}:{sess.addr[1]}",
-            daemon=True,
-        ).start()
+        def send_later():
+            while True:
+                if event.wait(self.fallback_interval):
+                    event.clear()  # re-armed by a newer DISCOVERY: fresh interval
+                    continue
+                with self.sessions_lock:
+                    current = self.sessions.get(sess.addr)
+                if current is not sess:
+                    return
+                with sess.compat_lock:
+                    if event.is_set():  # re-armed while we were waking up
+                        event.clear()
+                        continue
+                    sess.fallback_rearm = None
+                    if (sess.handshake_generation != sess.fallback_generation
+                            or sess.protocol_profile != PROFILE_PENDING
+                            or sess.first_data_seen
+                            or sess.rx_streaming):
+                        return
+                    self._compatibility_inform(sess)
+                    return
+
+        try:
+            threading.Thread(
+                target=send_later,
+                name=f"udpfs-fallback-{sess.addr[0]}:{sess.addr[1]}",
+                daemon=True,
+            ).start()
+        except RuntimeError:
+            # Thread limit reached: drop this timer instead of taking the
+            # receive loop (and every session) down with it. The peer's next
+            # DISCOVERY schedules a fresh one.
+            with sess.compat_lock:
+                if sess.fallback_rearm is event:
+                    sess.fallback_rearm = None
 
     def _handle_discovery(self, data: bytes, addr):
         if len(data) < 6:

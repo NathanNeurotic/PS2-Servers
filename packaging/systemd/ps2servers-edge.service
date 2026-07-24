@@ -3,7 +3,10 @@ Description=PS2 Servers Edge UDPFS service
 Documentation=https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE.md
 After=network-online.target local-fs.target
 Wants=network-online.target
-ConditionPathIsDirectory=/srv/ps2
+# No ConditionPathIsDirectory here: the served root is configurable via
+# PS2EDGE_ROOT in /etc/default/ps2servers-edge, and Edge validates --root at
+# startup itself (PR #119 review: a fixed /srv/ps2 condition blocked valid
+# configured mounts).
 
 [Service]
 Type=simple
@@ -29,7 +32,6 @@ LockPersonality=true
 MemoryDenyWriteExecute=true
 RestrictAddressFamilies=AF_INET AF_UNIX
 SystemCallArchitectures=native
-ReadOnlyPaths=/srv/ps2
 
 [Install]
 WantedBy=multi-user.target
