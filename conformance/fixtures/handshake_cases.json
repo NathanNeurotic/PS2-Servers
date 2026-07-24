@@ -1,0 +1,7 @@
+[
+  {"name":"standard-zero","discovery":0,"first_data":0,"profile":"standard"},
+  {"name":"modulo-fresh","discovery":0,"first_data":1,"profile":"modulo"},
+  {"name":"modulo-resumed","discovery":7,"first_data":8,"profile":"modulo"},
+  {"name":"modulo-wraparound","discovery":4095,"first_data":0,"profile":"modulo"},
+  {"name":"nonmatching-fallback","discovery":7,"first_data":0,"profile":"standard"}
+]
