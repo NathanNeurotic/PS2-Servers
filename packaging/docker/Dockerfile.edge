@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+FROM golang:1.22-alpine AS build
+ARG VERSION=container
+WORKDIR /src
+COPY native/ps2servers-edge/ ./
+RUN CGO_ENABLED=0 go test ./... && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/ps2servers-edge ./cmd/ps2servers-edge
+
+FROM scratch
+COPY --from=build /out/ps2servers-edge /usr/local/bin/ps2servers-edge
+USER 65532:65532
+ENV FSROOT=/games \
+    BIND=0.0.0.0 \
+    PORT=62966 \
+    DATA_PORT=62967 \
+    PROTOCOL_MODE=auto \
+    PEER_TIMEOUT=1h \
+    LOG_FORMAT=text
+VOLUME ["/games"]
+EXPOSE 62966/udp 62967/udp
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD ["/usr/local/bin/ps2servers-edge", "--version"]
+ENTRYPOINT ["/usr/local/bin/ps2servers-edge", "udpfs", "--read-only"]

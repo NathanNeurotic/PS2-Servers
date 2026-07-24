@@ -1,13 +1,4 @@
-"""Registry of the PS2 servers the launcher can run.
-
-Each server is described declaratively: the input fields the GUI should show,
-how those values map to command-line arguments, how the server is launched
-(an in-bundle Python module via re-exec, or a native binary), and on which
-operating systems it is available.
-
-Adding a server, or switching one between Python and native, is a local change
-here -- nothing else in the engine needs to know the difference.
-"""
+"""Declarative registry for the server processes launched by PS2 Servers."""
 
 import os
 import platform
@@ -23,22 +14,11 @@ def _repo(*parts):
     return os.path.join(REPO_ROOT, *parts)
 
 
-# --------------------------------------------------------------------------- #
-# Re-exec dispatch
-# --------------------------------------------------------------------------- #
 def is_frozen():
-    """True when running inside a Nuitka/PyInstaller single-file build."""
     return bool(getattr(sys, "frozen", False)) or ("__compiled__" in globals())
 
 
 def frozen_self_exe():
-    """Path of the executable to re-launch when frozen.
-
-    In a Nuitka *onefile* build, sys.executable is the temporary EXTRACTED inner
-    binary, which cannot be relaunched -- re-running the app means launching the
-    ORIGINAL onefile exe the user started. Nuitka exposes it via the
-    NUITKA_ONEFILE_BINARY env var; sys.argv[0] is the next-best source.
-    """
     argv = getattr(sys, "argv", None)
     argv0 = argv[0] if argv else None
     for candidate in (os.environ.get("NUITKA_ONEFILE_BINARY"), argv0):
@@ -50,30 +30,21 @@ def frozen_self_exe():
 
 
 def serve_command(key, args):
-    """Command that runs the Python server `key` in its own process.
-
-    When bundled, we re-exec the original onefile exe with a hidden --serve flag,
-    so the embedded Python runs the server with no system Python installed. From
-    source, we re-run the package the same way.
-    """
     if is_frozen():
         return [frozen_self_exe(), "--serve", key, *args]
     return [sys.executable, "-m", "launcher", "--serve", key, *args]
 
 
-# --------------------------------------------------------------------------- #
-# Declarative descriptions
-# --------------------------------------------------------------------------- #
 @dataclass
 class Field:
     key: str
     label: str
-    kind: str  # folder | file | bool | port | text
+    kind: str
     required: bool = False
     default: object = None
     help: str = ""
-    advanced: bool = False  # GUI hides advanced fields until expanded
-    windows_only: bool = False  # GUI omits the field entirely on other OSes
+    advanced: bool = False
+    windows_only: bool = False
 
 
 @dataclass
@@ -81,20 +52,17 @@ class ServerDef:
     key: str
     label: str
     blurb: str
-    runtime: str  # 'python' | 'native'
+    runtime: str
     fields: list
     _build_argv: Callable
     default_port: Optional[int] = None
-    port_is_hex: bool = False  # UDP servers are conventionally written in hex
-    # A short guidance badge shown on the tab/card so a beginner isn't choosing
-    # between three equal-looking servers. kind drives the colour: "good" for
-    # the recommended one, "legacy" for a superseded one, "" for neutral.
+    port_is_hex: bool = False
     recommendation: str = ""
     recommendation_kind: str = ""
-    share_hint: str = ""  # what the user types into OPL's "Share" field, if any
-    module_file: Optional[str] = None  # python: file to import
-    module_dir: Optional[str] = None  # python: dir added to sys.path (sibling imports)
-    binary_rel: dict = field(default_factory=dict)  # native: {system: 'rel/path'}
+    share_hint: str = ""
+    module_file: Optional[str] = None
+    module_dir: Optional[str] = None
+    binary_rel: dict = field(default_factory=dict)
     available_os: tuple = ("Windows", "Linux", "Darwin")
 
     def build_argv(self, values):
@@ -120,11 +88,10 @@ class ServerDef:
         if self.runtime == "native":
             return self.resolve_binary(system) is not None
         if is_frozen():
-            return True  # python servers are bundled into the executable
+            return True
         return bool(self.module_file) and os.path.exists(self.module_file)
 
     def launch_command(self, values):
-        """Full command (argv list) to start this server with the given values."""
         if self.runtime == "python":
             return serve_command(self.key, self.build_argv(values))
         binary = self.resolve_binary()
@@ -133,15 +100,7 @@ class ServerDef:
         return [binary, *self.build_argv(values)]
 
 
-# --------------------------------------------------------------------------- #
-# Argument builders (values dict -> server CLI args)
-# --------------------------------------------------------------------------- #
 def _parse_seconds(raw):
-    """A whole-second count from a text field, or None to leave it to the server.
-
-    The server clamps the range and owns the default; this only rejects what is
-    not a number at all, so a typo can't become an argv the server must guess at.
-    """
     if raw is None:
         return None
     text = str(raw).strip()
@@ -149,12 +108,7 @@ def _parse_seconds(raw):
         return None
     try:
         value = int(float(text))
-    except ValueError:
-        return None
-    except OverflowError:
-        # float() takes "inf"/"infinity"/"1e400" happily and int() then refuses
-        # them. Someone reaching for a way to switch the timeout off will type
-        # exactly that, so it must not throw out of build_argv.
+    except (ValueError, OverflowError):
         return None
     return value if value > 0 else None
 
@@ -178,10 +132,6 @@ def _udpfs_argv(v):
     if not v.get("root_dir") and not v.get("block_device"):
         raise ValueError("UDPFS needs a Games folder and/or a Disk image.")
     args = []
-    # Long flags only: the packaged app re-executes ITSELF to run a server,
-    # and Nuitka's self-execution guard aborts (exit 2) when a compiled binary
-    # is invoked with a bare '-c' (or '-m') followed by another argument --
-    # exactly what '-c -v' produced once compression became the default.
     if v.get("root_dir"):
         args += ["--root-dir", v["root_dir"]]
     if v.get("block_device"):
@@ -192,24 +142,21 @@ def _udpfs_argv(v):
         args += ["--data-port", str(v["data_port"])]
     if v.get("bind"):
         args += ["--bind", str(v["bind"])]
-    # Blank/garbage means "leave it alone" -- the server owns the default and the
-    # clamp, so don't pass a flag we'd only have to second-guess here.
     timeout = _parse_seconds(v.get("peer_timeout"))
     if timeout is not None:
         args += ["--peer-timeout", str(timeout)]
     if v.get("read_only"):
         args.append("--read-only")
-    # The server decompresses by default now, so ticking the box is a no-op and
-    # UNTICKING is the instruction that has to be sent. Passing nothing when it
-    # is unticked would silently leave decompression on. Default the lookup to
-    # True: a config written before this field existed has no key, and treating
-    # that as "unticked" would disable decompression for exactly the users who
-    # never asked to.
     if not v.get("enable_compression", True):
         args.append("--no-compression")
+    # Existing saved launcher state may still contain modulo_mode. Preserve it as
+    # a strict diagnostic selection, but new GUI sessions use automatic mode and
+    # no longer expose the misleading global checkbox.
+    protocol_mode = v.get("protocol_mode")
     if v.get("modulo_mode"):
-        # Implies --single-port server-side; passing both would be redundant.
-        args.append("--modulo-mode")
+        protocol_mode = "modulo"
+    if protocol_mode in ("standard", "modulo"):
+        args += ["--protocol-mode", protocol_mode]
     if v.get("verbose"):
         args.append("--verbose")
     return args
@@ -224,14 +171,10 @@ def _udpbd_argv(v):
     return args
 
 
-# --------------------------------------------------------------------------- #
-# The registry
-# --------------------------------------------------------------------------- #
 SMBV1 = ServerDef(
     key="smbv1",
     label="SMBv1 server (RiptOPL)",
-    blurb="Share a games folder over SMB. Works even on Windows 11 where the OS "
-    "removed SMB1.",
+    blurb="Share a games folder over SMB. Works even on Windows 11 where the OS removed SMB1.",
     runtime="python",
     default_port=1111,
     share_hint="games",
@@ -241,12 +184,11 @@ SMBV1 = ServerDef(
         Field("games_folder", "Games folder", "folder", required=True,
               help="Folder of PS2 games/apps to share."),
         Field("port", "Port", "port", default=1111, advanced=True,
-              help="TCP port (default 1111). Avoid ports below 1033 -- Windows can "
-              "reserve or block low ports."),
+              help="TCP port (default 1111). Avoid ports below 1033."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True,
               help="No saves / no VMC writes."),
-        Field("take_445", "Take port 445 (admin)", "bool", default=False, advanced=True,
-              windows_only=True,
+        Field("take_445", "Take port 445 (admin)", "bool", default=False,
+              advanced=True, windows_only=True,
               help="Bind standard port 445 by pausing Windows file sharing. Needs admin."),
         Field("bind", "Bind address", "text", default="", advanced=True,
               help="Interface to bind (blank = all)."),
@@ -258,15 +200,13 @@ SMBV1 = ServerDef(
 UDPFS = ServerDef(
     key="udpfs",
     label="UDPFS server",
-    blurb="Serve a folder and/or a disk image over UDP. The newer protocol and "
-    "the best choice for most setups; can transparently decompress CHD/CSO/ZSO. "
-    "The PS2 finds it automatically — nothing to type in your loader.",
+    blurb="Serve a folder and/or disk image over UDP. Automatic compatibility supports standards-compliant and Modulo clients at the same time; no compatibility checkbox is required.",
     recommendation="Recommended for most setups",
     recommendation_kind="good",
     runtime="python",
     default_port=0xF5F6,
     port_is_hex=True,
-    module_file=_repo("udpfs_server", "udpfs_server.py"),
+    module_file=_repo("udpfs_server", "ps2servers_core.py"),
     module_dir=_repo("udpfs_server"),
     fields=[
         Field("root_dir", "Games folder", "folder", required=False,
@@ -274,54 +214,26 @@ UDPFS = ServerDef(
         Field("block_device", "Disk image", "file", required=False,
               help="A single disk image to serve as a block device."),
         Field("enable_compression", "Decompress CHD/CSO/ZSO", "bool", default=True,
-              help="On by default so CHD/CSO/ZSO images appear as playable .iso "
-              "(needs lz4 for ZSO, libchdr for CHD; formats without their library "
-              "are simply left as-is). Untick to serve files without decompression."),
-        # Deliberately NOT advanced: the users who need this are the least likely
-        # to go looking under a disclosure triangle for it.
-        Field("modulo_mode", "Check this if you are using Modulo", "bool",
-              default=False,
-              help="Tick this ONLY while you are using Modulo — it is either/or. "
-                   "Modulo uses improper UDPFS protocol and only ever worked against "
-                   "the patched server in its own repo, so this answers the way that "
-                   "server does, which a correct client cannot follow: NHDDL, "
-                   "RiptOPL, POPSTARTER, POPSLOADER and wLaunchELF-R3Z will not "
-                   "connect while this is on. Untick it and they are back."),
+              help="On by default. Formats without their optional library remain unadvertised."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("port", "Port", "port", default=0xF5F6, advanced=True,
-              help="UDP port (default 0xF5F6). In Modulo UDPFS mode this single "
-                   "port carries everything."),
+              help="UDP discovery port (default 0xF5F6)."),
         Field("data_port", "Data port", "port", default=0, advanced=True,
-              help="Leave 0 (auto) unless the data port must be predictable — a "
-                   "manual firewall rule, port forwarding, or a strict NAT can't "
-                   "follow the auto port, which changes every launch. Setting it "
-                   "also adds a matching firewall rule. Ignored in Modulo mode."),
+              help="Leave 0 (auto) unless a firewall/NAT requires a predictable data port."),
         Field("bind", "Bind address", "text", default="", advanced=True,
-              help="Leave blank. The server already listens for the PS2 on every "
-                   "network interface — you do NOT need to set 0.0.0.0. This only "
-                   "pins the source address of the data connection, for unusual "
-                   "multi-NIC setups."),
+              help="Leave blank. Discovery already listens on every interface; this only pins the data source address."),
         Field("peer_timeout", "Idle timeout (seconds)", "text", default="3600",
               advanced=True,
-              help="Drop a console after this long with no traffic, closing the "
-                   "files it had open (60-86400, default 3600 = 1 hour). UDPFS has "
-                   "no disconnect, so a paused game and an unplugged PS2 look "
-                   "identical — set it too low and a long pause loses its game. "
-                   "Lower it only to clear stale consoles faster."),
+              help="Drop an inactive console and close its handles after 60-86400 seconds."),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
     ],
     _build_argv=_udpfs_argv,
 )
 
-# Pure-Python port (udpbd_server/udpbd_server.py). Cross-platform; this is the
-# only UDPBD implementation the launcher uses. A legacy Windows udpbd-server.exe
-# was never wired in and is no longer vendored -- see udpbd_server/SOURCE.md.
 UDPBD = ServerDef(
     key="udpbd",
     label="UDPBD server",
-    blurb="Serve a single disk image as a block device over UDP. Largely "
-    "superseded by UDPFS — use UDPFS unless you specifically need UDPBD. The "
-    "PS2 finds the server automatically (broadcast).",
+    blurb="Serve a single disk image as a block device over UDP. Largely superseded by UDPFS.",
     recommendation="Legacy — prefer UDPFS",
     recommendation_kind="legacy",
     runtime="python",
@@ -330,12 +242,9 @@ UDPBD = ServerDef(
     module_file=_repo("udpbd_server", "udpbd_server.py"),
     module_dir=_repo("udpbd_server"),
     fields=[
-        Field("image_file", "Disk image", "file", required=True,
-              help="A single disk image to serve as a block device."),
-        Field("read_only", "Read-only", "bool", default=False, advanced=True,
-              help="No saves / no VMC writes."),
-        Field("verbose", "Verbose logging", "bool", default=False, advanced=True,
-              help="Log every read/write command."),
+        Field("image_file", "Disk image", "file", required=True),
+        Field("read_only", "Read-only", "bool", default=False, advanced=True),
+        Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
     ],
     _build_argv=_udpbd_argv,
 )
