@@ -66,6 +66,16 @@ func Open(path string) (*Image, error) {
 		f.Close()
 		return nil, fmt.Errorf("image index too large")
 	}
+	// Reject impossible indexes before allocating from them (PR #119 review):
+	// the header alone could otherwise drive a ~1 GiB index allocation out of
+	// a tiny crafted file. The on-disk image must actually hold the index.
+	if st, statErr := f.Stat(); statErr != nil {
+		f.Close()
+		return nil, statErr
+	} else if need := int64(headerSize) + (blocks+1)*4; st.Size() < need {
+		f.Close()
+		return nil, fmt.Errorf("%s index truncated: need %d bytes, have %d", format, need, st.Size())
+	}
 	index := make([]uint32, blocks+1)
 	if _, err = f.Seek(int64(headerSize), io.SeekStart); err != nil {
 		f.Close()

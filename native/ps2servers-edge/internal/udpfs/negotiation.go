@@ -32,6 +32,10 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 		return
 	}
 	w := s.getWorker(in.peer)
+	if w == nil {
+		s.cfg.Log.Warn("peer limit reached, dropping discovery", map[string]any{"peer": in.peer})
+		return
+	}
 	st := w.state
 	st.Mu.Lock()
 	defer st.Mu.Unlock()

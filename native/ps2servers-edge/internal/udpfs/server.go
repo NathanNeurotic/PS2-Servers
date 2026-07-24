@@ -22,6 +22,11 @@ const (
 	maxDatagram         = 64 * 1024
 	maxPathBytes        = 1024
 	maxHandles          = 64
+	// maxPeers bounds concurrent peer sessions (PR #119 review): without a cap,
+	// a spoofed UDP flood could grow s.sessions -- a goroutine plus buffered
+	// channels per peer -- without bound. 64 is far above any real PS2 client
+	// count, and the reaper frees expired sessions so legit peers regain slots.
+	maxPeers = 64
 )
 
 type Config struct {
@@ -239,6 +244,9 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	if w := s.sessions[key]; w != nil {
 		return w
 	}
+	if len(s.sessions) >= maxPeers {
+		return nil
+	}
 	forced := s.cfg.ProtocolMode
 	if forced == session.Pending {
 		forced = ""
@@ -271,6 +279,10 @@ func (s *Server) dispatch(in inbound) {
 		s.handleDiscovery(in, h)
 	case protocol.Data:
 		w := s.getWorker(in.peer)
+		if w == nil {
+			s.cfg.Log.Warn("peer limit reached, dropping datagram", map[string]any{"peer": in.peer})
+			return
+		}
 		_, dh, payload, parseErr := protocol.ParseDataPacket(in.packet)
 		if parseErr == nil && len(payload) == 0 {
 			s.handleControl(w.state, dh)

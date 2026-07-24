@@ -18,11 +18,14 @@ config udpfs 'main'
     option data_port '0'
     option protocol 'auto'
     option single_port '0'
-    option read_only '1'
     option peer_timeout '1h'
     option log_format 'text'
     option verbose '0'
 ```
+
+Note: there is no `read_only` UCI option — Edge is unconditionally read-only
+(the init script always passes `--read-only`), so a `read_only '0'` line would
+silently do nothing.
 
 The `procd` service runs as the dedicated `ps2edge` user, restarts on failure,
 and passes the UCI values to the first-party Edge CLI. If the game mount is not
