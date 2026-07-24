@@ -1,0 +1,35 @@
+[Unit]
+Description=PS2 Servers Edge UDPFS service
+Documentation=https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE.md
+After=network-online.target local-fs.target
+Wants=network-online.target
+ConditionPathIsDirectory=/srv/ps2
+
+[Service]
+Type=simple
+User=ps2edge
+Group=ps2edge
+EnvironmentFile=-/etc/default/ps2servers-edge
+ExecStart=/usr/local/bin/ps2servers-edge udpfs --root ${PS2EDGE_ROOT} --bind ${PS2EDGE_BIND} --port ${PS2EDGE_PORT} --data-port ${PS2EDGE_DATA_PORT} --protocol-mode ${PS2EDGE_PROTOCOL} --peer-timeout ${PS2EDGE_PEER_TIMEOUT} --read-only --log-format ${PS2EDGE_LOG_FORMAT}
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+SystemCallArchitectures=native
+ReadOnlyPaths=/srv/ps2
+
+[Install]
+WantedBy=multi-user.target
