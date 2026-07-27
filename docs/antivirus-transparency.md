@@ -48,7 +48,7 @@ Characteristics that can trip heuristics:
 None of these is malicious behavior; each is inherent to "an unsigned, bundled,
 local network tool."
 
-## Two download shapes (folder is recommended on Windows)
+## Two download shapes (portable is recommended on Windows)
 
 **On Windows, the portable build is the recommended download.** Windows and Linux
 each ship a **portable** build (`PS2Servers-windows-x64-portable.zip` — or
