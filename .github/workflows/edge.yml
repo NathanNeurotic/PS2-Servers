@@ -62,6 +62,53 @@ jobs:
           python udpfs_server/pathguard_selftest.py
           python udpfs_server/compression_selftest.py
 
+      # Drives the shared conformance probe against a real Edge process over
+      # real UDP sockets: standards client plus three Modulo-shaped ones,
+      # concurrently, covering the 4095 -> 0 sequence wrap and comparing
+      # returned bytes against the source file. Go unit tests exercise Edge's
+      # own helpers; this checks the bytes it actually puts on the wire, which
+      # is the part that has to match a console.
+      #
+      # This earns the "integration tested" label in conformance/README.md.
+      # It is NOT a hardware claim -- see docs/EDGE.md validation status.
+      - name: UDPFS conformance probe against Edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          port=62966
+          root="$(mktemp -d)"
+          # Deterministic fixture so a failure is reproducible. Keep it inside
+          # one UDPRDMA payload (MaxPayload is 1408): the probe compares the
+          # bytes from a single READ reply and does not reassemble a fragmented
+          # transfer, so a larger fixture reports a false "READ mismatch"
+          # against a perfectly healthy server -- verified by reproducing that
+          # against the Python core as well as Edge.
+          python - "$root/probe.iso" <<'PYFIX'
+          import sys
+          with open(sys.argv[1], "wb") as f:
+              f.write(bytes([(i * 7) & 0xFF for i in range(1024)]))
+          PYFIX
+
+          go build -o "$RUNNER_TEMP/ps2servers-edge" ./cmd/ps2servers-edge
+          "$RUNNER_TEMP/ps2servers-edge" udpfs --root "$root" --bind 127.0.0.1 --port "$port" &
+          edge_pid=$!
+          trap 'kill "$edge_pid" 2>/dev/null || true' EXIT
+
+          # Wait for the discovery socket to be bound. A UDP connect() always
+          # succeeds, so poll the listening table instead of probing blindly.
+          for _ in $(seq 1 50); do
+            if ss -lun 2>/dev/null | grep -q ":${port}\b"; then break; fi
+            sleep 0.2
+          done
+          if ! kill -0 "$edge_pid" 2>/dev/null; then
+            echo "::error::Edge exited before the probe could run"
+            exit 1
+          fi
+
+          python "$GITHUB_WORKSPACE/conformance/integration/udpfs_probe.py" \
+            --host 127.0.0.1 --port "$port" --root "$root" --path probe.iso
+        working-directory: native/ps2servers-edge
+
   build:
     name: Build Edge
     needs: test
