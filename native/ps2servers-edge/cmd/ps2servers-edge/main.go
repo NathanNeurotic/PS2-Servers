@@ -55,11 +55,16 @@ func main() {
 	singlePort := fs.Bool("single-port", envBool("SINGLE_PORT", false), "use discovery port for all traffic")
 	timeoutText := fs.String("peer-timeout", env("PEER_TIMEOUT", "1h"), "idle session timeout")
 	txDelayMs := fs.Float64("tx-delay-ms", envFloat("TX_DELAY_MS", 0.0), "inter-packet transmit delay in milliseconds")
-	// Defaults to read-only, unlike the Desktop server and udpfsd which
-	// default to writable. Edge runs unauthenticated on routers and NAS boxes
-	// where the game share is often the whole disk, and it shipped read-only,
-	// so writes are opt-in rather than a silent posture change on upgrade.
-	readOnly := fs.Bool("read-only", envBool("RO", true), "serve files read-only; pass --read-only=false to allow writes")
+	// Writable by default, matching the Desktop/Core server and udpfsd. UDPFS
+	// is a two-way protocol in practice -- a console that loads a game off the
+	// share usually wants to write its saves back to it -- so a read-only
+	// default makes Edge quietly less capable than its siblings for the normal
+	// case. Pass --read-only (or RO=1) to serve read-only.
+	//
+	// The OpenWrt package still starts read-only unless the operator opts in,
+	// because a router share is often an entire attached disk. See
+	// packaging/openwrt/files/ps2servers-edge.config.
+	readOnly := fs.Bool("read-only", envBool("RO", false), "serve files read-only; omit to allow the console to write saves")
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
 	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
 	quiet := fs.Bool("quiet", false, "suppress informational logs")

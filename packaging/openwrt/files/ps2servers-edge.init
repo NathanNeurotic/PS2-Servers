@@ -33,8 +33,14 @@ start_service() {
                 --data-port "$data_port" \
                 --protocol-mode "$protocol" \
                 --peer-timeout "$peer_timeout" \
-                --log-format "$log_format" \
-                --read-only
+                --log-format "$log_format"
+        # --read-only used to be hardcoded here, which made the read_only UCI
+        # option decorative: setting it to 0 changed nothing. It is honoured
+        # now, and still defaults to 1 -- a router share is frequently an
+        # entire attached disk, so writes stay opt-in on this platform even
+        # though the binary itself defaults to writable.
+        config_get_bool read_only main read_only 1
+        [ "$read_only" -eq 1 ] && procd_append_param command --read-only
         append_bool_flag main single_port --single-port
         append_bool_flag main verbose --verbose
         procd_set_param user ps2edge

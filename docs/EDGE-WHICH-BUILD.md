@@ -150,11 +150,11 @@ System Settings → Privacy & Security.
 
 ## Letting the console write (saves)
 
-Every build is **read-only by default**. To let the PS2 write — memory-card
-saves, for instance — add `--read-only=false`:
+Every build **allows writes by default**, so memory-card saves work with no
+extra flags. To serve read-only instead, add `--read-only`:
 
 ```sh
-./ps2servers-edge udpfs --root /path/to/games --read-only=false
+./ps2servers-edge udpfs --root /path/to/games --read-only
 ```
 
 Only one console may hold a given file open for writing at a time; a second one
