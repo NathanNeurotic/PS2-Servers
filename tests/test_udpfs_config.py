@@ -314,5 +314,70 @@ class LauncherCompressionArgTests(unittest.TestCase):
                 self.fail(f"short flag {a!r} would trip the Nuitka self-exec guard")
 
 
+class LauncherTxDelayArgTests(unittest.TestCase):
+    """tx_delay_ms ships with default='0', so every GUI launch walks this branch.
+
+    It was previously untested, which let a NameError ('math' was used without
+    being imported) reach users as "can't launch" on each attempt while CI
+    stayed green -- no test in this file passed tx_delay_ms at all.
+    """
+
+    @staticmethod
+    def _argv(tx_delay):
+        return servers._udpfs_argv({'root_dir': '/games', 'tx_delay_ms': tx_delay})
+
+    def test_field_default_builds_without_raising(self):
+        # The regression guard: build the way the GUI actually does, from the
+        # declared field defaults, so a default change keeps this honest.
+        values = {f.key: f.default for f in servers.UDPFS.fields}
+        values['root_dir'] = '/games'
+        self.assertIsNotNone(values['tx_delay_ms'])  # else this proves nothing
+        args = servers.UDPFS.build_argv(values)
+        self.assertIn('--tx-delay-ms', args)
+
+    def test_ordinary_value_is_forwarded(self):
+        args = self._argv('2.5')
+        self.assertIn('--tx-delay-ms', args)
+        self.assertEqual(args[args.index('--tx-delay-ms') + 1], '2.5')
+
+    def test_negative_is_dropped(self):
+        self.assertNotIn('--tx-delay-ms', self._argv('-1'))
+
+    def test_non_finite_is_dropped(self):
+        # float('inf')/float('nan') parse fine, so only an explicit finite check
+        # keeps them off the child process command line.
+        for bad in ('inf', '-inf', 'nan', float('inf'), float('nan')):
+            self.assertNotIn('--tx-delay-ms', self._argv(bad), repr(bad))
+
+    def test_garbage_is_ignored_not_raised(self):
+        for bad in ('abc', '', '  ', object()):
+            self.assertNotIn('--tx-delay-ms', self._argv(bad), repr(bad))
+
+    def test_absent_key_emits_nothing(self):
+        self.assertNotIn('--tx-delay-ms', servers._udpfs_argv({'root_dir': '/games'}))
+
+
+class LauncherModeLaunchTests(unittest.TestCase):
+    """Every registered mode must build an argv from its own field defaults.
+
+    A NameError in any one builder presents to the user as that mode simply
+    refusing to start, so cover the whole registry rather than UDPFS alone.
+    """
+
+    def test_every_mode_builds_argv_from_defaults(self):
+        for key, server in servers.REGISTRY.items():
+            values = {f.key: f.default for f in server.fields}
+            for f in server.fields:
+                if f.required and not values.get(f.key):
+                    values[f.key] = '/dummy.iso' if f.kind == 'file' else '/games'
+            # Folder-backed modes need a source even though it is not 'required'.
+            if key == 'udpfs':
+                values['root_dir'] = '/games'
+            if key == 'smbv1':
+                values['games_folder'] = '/games'
+            with self.subTest(mode=key):
+                self.assertIsInstance(server.build_argv(values), list)
+
+
 if __name__ == '__main__':
     unittest.main()
