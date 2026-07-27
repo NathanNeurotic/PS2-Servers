@@ -12,8 +12,10 @@ func (s *Server) handleControl(st *session.State, dh protocol.DataHeader) {
 	defer st.Mu.Unlock()
 	st.Touch()
 	if dh.Flags&protocol.FlagACK != 0 {
-		st.TransmitAcked = dh.AckSequence
-		s.pruneAcked(st, dh.AckSequence)
+		if protocol.Between(st.TransmitAcked, dh.AckSequence, st.TransmitSequence) {
+			st.TransmitAcked = dh.AckSequence
+			s.pruneAcked(st, dh.AckSequence)
+		}
 	} else {
 		s.retransmit(st, dh.AckSequence)
 	}
@@ -32,6 +34,9 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 		return
 	}
 	w := s.getWorker(in.peer)
+	if w == nil {
+		return
+	}
 	st := w.state
 	st.Mu.Lock()
 	defer st.Mu.Unlock()
@@ -45,59 +50,65 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 		return
 	}
 
-	profile := session.Pending
-	if s.cfg.ProtocolMode == session.Standard || s.cfg.ProtocolMode == session.Modulo {
-		profile = s.cfg.ProtocolMode
-	}
-	st.Reset(profile)
+	st.ResetState()
 	st.DiscoverySequence = h.Sequence
-	st.FallbackGeneration++
-	generation := st.FallbackGeneration
-	st.Touch()
+	st.ResponseSocket = in.socket
 
-	if s.cfg.ProtocolMode == session.Standard {
-		st.ExpectedReceive = 0
+	switch s.cfg.ProtocolMode {
+	case session.Standard:
+		st.Profile = session.Standard
 		s.sendStandardInform(st)
-		return
-	}
-	if s.cfg.ProtocolMode == session.Modulo {
-		st.ExpectedReceive = protocol.Next(h.Sequence)
-		st.ResponseSocket = session.DiscoverySocket
+	case session.Modulo:
+		st.Profile = session.Modulo
 		s.sendModuloInform(st)
-		return
+	case session.Pending:
+		if h.Sequence == 0 {
+			st.Profile = session.Standard
+			s.sendStandardInform(st)
+		} else {
+			st.Profile = session.Pending
+			s.sendStandardInform(st)
+			s.scheduleFallback(st)
+		}
 	}
+}
 
-	// Automatic mode always offers the canonical two-port handshake first.
-	st.ResponseSocket = session.DataSocket
-	s.sendStandardInform(st)
-	go func(key string, gen uint64) {
-		timer := time.NewTimer(s.cfg.FallbackDelay)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-		case <-s.closed:
-			return
-		case <-w.done:
-			return
-		}
+func (s *Server) scheduleFallback(st *session.State) {
+	generation := st.FallbackGeneration
+	delay := s.cfg.FallbackDelay
+	if delay == 0 {
+		delay = defaultFallback
+	}
+	go func(peerStr string, gen uint64) {
+		time.Sleep(delay)
 		s.sessionsMu.Lock()
-		current := s.sessions[key]
+		w := s.sessions[peerStr]
 		s.sessionsMu.Unlock()
-		if current == nil || current != w {
+		if w == nil {
 			return
 		}
-		state := current.state
+		state := w.state
 		state.Mu.Lock()
 		defer state.Mu.Unlock()
 		if state.FallbackGeneration != gen || state.Profile != session.Pending || state.Streaming {
 			return
 		}
 		s.sendModuloInform(state)
-	}(in.peer.String(), generation)
+	}(inboundPeerString(st.Peer), generation)
+}
+
+func inboundPeerString(p *net.UDPAddr) string {
+	if p == nil {
+		return ""
+	}
+	return p.String()
 }
 
 func (s *Server) sendStandardInform(st *session.State) {
 	_, data := s.Addr()
+	if data == nil {
+		return
+	}
 	packet := append(protocol.Header{Type: protocol.Inform, Sequence: 1}.Marshal(), protocol.DiscoveryHeader{ServiceID: protocol.ServiceUDPFS, Port: uint16(data.Port)}.Marshal()...)
 	s.sendOn(session.DataSocket, packet, st.Peer)
 }
@@ -129,6 +140,9 @@ func (s *Server) sendOn(which session.Socket, p []byte, peer *net.UDPAddr) {
 	if conn == nil {
 		return
 	}
+	if s.cfg.TxDelay > 0 {
+		time.Sleep(s.cfg.TxDelay)
+	}
 	if _, err := conn.WriteToUDP(p, peer); err != nil {
 		s.cfg.Log.Debug("UDP send failed", map[string]any{"peer": peer, "socket": which, "error": err})
 	}
@@ -137,12 +151,6 @@ func (s *Server) sendOn(which session.Socket, p []byte, peer *net.UDPAddr) {
 func classify(discovery, first uint16) session.Profile {
 	next := protocol.Next(discovery)
 	if first == next && (first != 0 || discovery != 0) {
-		return session.Modulo
-	}
-	if discovery == 0 && first == 0 {
-		return session.Standard
-	}
-	if first == next {
 		return session.Modulo
 	}
 	return session.Standard

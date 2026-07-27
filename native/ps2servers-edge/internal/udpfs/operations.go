@@ -34,11 +34,11 @@ func (s *Server) handleMessage(st *session.State, p []byte) {
 	}
 }
 func cString(b []byte) (string, error) {
+	if idx := bytes.IndexByte(b, 0); idx >= 0 {
+		b = b[:idx]
+	}
 	if len(b) > maxPathBytes {
 		return "", fmt.Errorf("path too long")
-	}
-	if i := strings.IndexByte(string(b), 0); i >= 0 {
-		b = b[:i]
 	}
 	return string(b), nil
 }
@@ -140,7 +140,7 @@ func (s *Server) handleRead(st *session.State, p []byte) {
 	}
 	id := int32(binary.LittleEndian.Uint32(p[4:8]))
 	size := binary.LittleEndian.Uint32(p[8:12])
-	if size > 64<<20 {
+	if size > 64<<10 {
 		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
 		return
 	}
@@ -150,7 +150,10 @@ func (s *Server) handleRead(st *session.State, p []byte) {
 		return
 	}
 	buf := make([]byte, size)
-	n, err := h.Reader.Read(buf)
+	n, err := io.ReadFull(h.Reader, buf)
+	if err == io.ErrUnexpectedEOF {
+		err = nil
+	}
 	if err != nil && err != io.EOF {
 		s.sendTransfer(st, result8(protocol.ResultReply, errno(err)), nil)
 		return

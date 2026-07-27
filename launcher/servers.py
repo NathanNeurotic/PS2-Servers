@@ -143,7 +143,11 @@ def _udpfs_argv(v):
     if v.get("bind"):
         args += ["--bind", str(v["bind"])]
     if v.get("tx_delay_ms") is not None:
-        args += ["--tx-delay-ms", str(v["tx_delay_ms"])]
+        try:
+            delay = max(0.0, float(v["tx_delay_ms"]))
+            args += ["--tx-delay-ms", str(delay)]
+        except (TypeError, ValueError):
+            pass
     timeout = _parse_seconds(v.get("peer_timeout"))
     if timeout is not None:
         args += ["--peer-timeout", str(timeout)]

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.22-alpine AS build
+FROM golang:1.23-alpine AS build
 ARG VERSION=container
 WORKDIR /src
 COPY native/ps2servers-edge/ ./

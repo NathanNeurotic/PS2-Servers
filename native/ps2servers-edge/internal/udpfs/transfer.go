@@ -63,6 +63,9 @@ func (s *Server) confirmWindow(st *session.State, target uint16) bool {
 		if s.waitForAck(st, target) {
 			return true
 		}
+		if attempt == maxWindowRetries {
+			break
+		}
 		st.Mu.Lock()
 		if len(st.TxBuffer) == 0 {
 			st.Mu.Unlock()
@@ -96,15 +99,15 @@ func (s *Server) sendTransfer(st *session.State, header, data []byte) {
 		}
 		capacity := protocol.MaxPayload - len(hdrBytes)
 		if capacity < 0 {
+			s.cfg.Log.Error("response header exceeds max payload", map[string]any{"peer": st.Peer, "header_bytes": len(hdrBytes)})
 			return
 		}
 		n := len(data)
 		if n > capacity {
 			n = capacity
 		}
-		chunk := append(append([]byte(nil), hdrBytes...), data[:n]...)
+		paddedData := pad4(append([]byte(nil), data[:n]...))
 		data = data[n:]
-		paddedData := pad4(append([]byte(nil), chunk[len(hdrBytes):]...))
 		payload := append(append([]byte(nil), hdrBytes...), paddedData...)
 		flags := protocol.FlagACK
 		if len(data) == 0 {
@@ -147,13 +150,7 @@ func errno(err error) int32 {
 	}
 	return -int32(syscall.EIO)
 }
-func statPayload(mode uint32, size uint64) []byte {
-	b := make([]byte, 4+4+4+8+8)
-	binary.LittleEndian.PutUint32(b, mode)
-	binary.LittleEndian.PutUint32(b[4:], uint32(size))
-	binary.LittleEndian.PutUint32(b[8:], uint32(size>>32))
-	return b
-}
+
 func result8(t protocol.MessageType, result int32) []byte {
 	b := make([]byte, 8)
 	b[0] = byte(t)
