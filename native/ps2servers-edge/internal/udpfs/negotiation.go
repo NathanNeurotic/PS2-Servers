@@ -57,7 +57,6 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 	st.Reset(profile)
 	st.DiscoverySequence = h.Sequence
 	st.FallbackGeneration++
-	generation := st.FallbackGeneration
 	st.Touch()
 
 	switch s.cfg.ProtocolMode {
