@@ -14,12 +14,12 @@ ps2servers-edge udpfs \
   --protocol-mode auto \
   --data-port 0 \
   --peer-timeout 1h \
-  --read-only \
   --log-format text
 ```
 
 Important options:
 
+- `--read-only` — serve read-only; writes are allowed by default
 - `--protocol-mode auto|standard|modulo`
 - `--modulo-mode` — deprecated alias for strict Modulo mode
 - `--single-port`
@@ -110,14 +110,18 @@ Desktop/Core UDPBD is unchanged.
 
 ## Writes
 
-Edge supports file writes, so a console can save. They are **off by default**;
-pass `--read-only=false` (or `RO=false`) to enable them.
+Edge supports file writes, so a console can save. They are **on by default**,
+matching the Desktop/Core server and udpfsd. UDPFS is a two-way protocol in
+practice — a console that loads a game off the share usually wants to write its
+saves back to the same place — so a read-only default would make Edge quietly
+less capable than its siblings for the ordinary case.
 
-The default differs from the Desktop server and from udpfsd, both of which
-default to writable. Edge normally runs unauthenticated on a router or NAS
-where the share may be an entire disk, and it shipped read-only, so enabling
-writes is a deliberate act rather than something an upgrade does silently. The
-OpenWrt package ships `option read_only '1'` regardless.
+Pass `--read-only` (or `RO=1`) to serve read-only instead.
+
+**The OpenWrt package still starts read-only** unless the operator opts in, via
+`option read_only '1'` in `/etc/config/ps2servers-edge`. A router share is
+frequently an entire attached disk, and the service is unauthenticated on the
+LAN, so writes are opt-in on that platform regardless of the binary default.
 
 With writes enabled:
 
@@ -137,7 +141,7 @@ Block-device writes (`BWRITE`) are not implemented; file writes only.
 Edge enforces a configured filesystem root. It rejects `..`, absolute and
 drive-qualified paths, unsafe symbolic links, oversized paths, oversized reads
 and writes, malformed packet lengths, unknown packet types, and excessive open
-handles. It is read-only unless explicitly started with `--read-only=false`.
+handles. It serves writes unless started with `--read-only`.
 Idle sessions are removed, their files are closed, and any write reservation
 they held is released. Normal logs do not print full requested host paths.
 
@@ -157,7 +161,7 @@ they held is released. Normal logs do not print full requested host paths.
 - **file writes: not verified on hardware or an emulator.** The write path is
   implemented against the Python server's wire behaviour and covered by unit
   and loopback tests only. No console has been observed writing through Edge.
-  Writes are off by default for this reason.
+  Treat the write path as the least-proven part of Edge.
 
 Hardware validation must be recorded separately before making a hardware-success
 claim.

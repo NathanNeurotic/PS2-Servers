@@ -8,8 +8,8 @@ single binary for people who want no Python runtime.
 go build ./cmd/ps2servers-edge
 ./ps2servers-edge udpfs --root /mnt/games --protocol-mode auto
 
-# Allow the console to write (memory-card saves). Off by default.
-./ps2servers-edge udpfs --root /mnt/games --read-only=false
+# Serve read-only. Writes are allowed by default, so saves work without this.
+./ps2servers-edge udpfs --root /mnt/games --read-only
 ```
 
 Edge is one edition of PS2 Servers; it does not replace the desktop launcher.
@@ -26,18 +26,21 @@ both can transfer concurrently.
   O_TRUNC and O_APPEND, one writer per file at a time
 - retransmission, NACK handling, send windows, sequence wraparound
 - multiple clients and idle cleanup
-- safe rooted filesystem, read-only unless `--read-only=false`
+- safe rooted filesystem; writes allowed unless `--read-only` is passed
 - ISO, CSO/CISO, ZSO/ZISO
 - text and JSON logs
 - graceful SIGINT/SIGTERM shutdown
 
 ## Writes
 
-Off by default: Edge normally runs unauthenticated on a LAN, and it shipped
-read-only, so enabling writes is a deliberate choice rather than something an
-upgrade does silently. Pass `--read-only=false` (or `RO=false`) to allow them.
+On by default, matching the Desktop/Core server and udpfsd. UDPFS is a two-way
+protocol in practice: a console loading a game off the share usually wants to
+write its saves back to it. Pass `--read-only` (or `RO=1`) to serve read-only.
 
-When enabled:
+The OpenWrt package still starts read-only unless the operator sets
+`option read_only '0'` — a router share is often an entire attached disk.
+
+Guarantees:
 
 - a second peer opening the same file for writing gets `EBUSY`, since two
   consoles interleaving into one file would corrupt it
