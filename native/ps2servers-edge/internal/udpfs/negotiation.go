@@ -67,14 +67,24 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 		st.Profile = session.Modulo
 		s.sendModuloInform(st)
 	case session.Pending:
-		if h.Sequence == 0 {
-			st.Profile = session.Standard
-			s.sendStandardInform(st)
-		} else {
-			st.Profile = session.Pending
-			s.sendStandardInform(st)
-			s.scheduleFallback(st)
-		}
+		// A sequence-zero discovery used to commit straight to Standard and
+		// skip the fallback. That silently broke the shared conformance case
+		// "modulo-fresh" (discovery 0, first data 1): a fresh Modulo client
+		// waits for the compatibility INFORM before sending anything, so it
+		// never got one, and because Profile was already Standard rather than
+		// Pending the classify() path in handleData never ran either -- the
+		// session stayed misclassified for its whole life. classify() itself
+		// was correct, which is why the unit tests passed while a real client
+		// timed out.
+		//
+		// Staying Pending is safe for standard clients: scheduleFallback bails
+		// when the generation moved on, when Streaming, or when the first DATA
+		// has already resolved Profile away from Pending -- which is exactly
+		// what a standard client does. Re-broadcast during a live transfer is
+		// handled by the Streaming guard above, before this switch.
+		st.Profile = session.Pending
+		s.sendStandardInform(st)
+		s.scheduleFallback(st)
 	}
 }
 

@@ -145,11 +145,26 @@ they held is released. Normal logs do not print full requested host paths.
 
 - unit tested: yes
 - loopback integration tested: yes
+- shared conformance probe (`conformance/integration/udpfs_probe.py`): yes, run
+  against a live Edge process in CI — standard plus three Modulo-shaped clients
+  concurrently, covering the 4095 → 0 sequence wrap
 - parser fuzz seeds: yes
 - `go vet`: passed in the implementation environment
-- eight Linux target builds: compiled and inspected
+- sixteen target builds (eleven Linux, three Windows, two macOS): compiled and
+  inspected
 - emulator tested: no
 - physical PS2 hardware tested: no
+- **file writes: not verified on hardware or an emulator.** The write path is
+  implemented against the Python server's wire behaviour and covered by unit
+  and loopback tests only. No console has been observed writing through Edge.
+  Writes are off by default for this reason.
 
 Hardware validation must be recorded separately before making a hardware-success
 claim.
+
+The conformance probe is worth its place: it caught a real defect the Go unit
+tests could not see. `classify()` returned `Modulo` correctly for the
+`modulo-fresh` case (discovery 0, first data 1), but `handleDiscovery` committed
+a sequence-zero discovery straight to `Standard` and never scheduled the
+compatibility INFORM, so a fresh Modulo client waited forever. The classifier
+was right; the path that reaches it was not.
