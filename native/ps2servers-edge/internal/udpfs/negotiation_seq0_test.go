@@ -1,6 +1,7 @@
 package udpfs
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -112,7 +113,13 @@ func TestStandardClientDoesNotReceiveModuloFallback(t *testing.T) {
 	for {
 		n, from, err := client.ReadFromUDP(buf)
 		if err != nil {
-			return // timed out with no stray INFORM, which is the pass condition
+			// Only the deadline elapsing proves nothing arrived. Treating any
+			// error as success would let a broken socket pass this silently.
+			var nerr net.Error
+			if errors.As(err, &nerr) && nerr.Timeout() {
+				return
+			}
+			t.Fatalf("unexpected socket error while watching for a stray INFORM: %v", err)
 		}
 		fh, perr := protocol.ParseHeader(buf[:n])
 		if perr == nil && fh.Type == protocol.Inform && from.Port == disc.Port {
