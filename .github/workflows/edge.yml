@@ -16,6 +16,11 @@ on:
       - "docs/THIRD-PARTY.md"
       - "THIRD_PARTY_NOTICES.md"
       - ".github/workflows/edge.yml"
+      # The reusable workflow holds the entire build matrix and the packaging
+      # script, so a change there affects every target. Without this path a PR
+      # editing only edge-build.yml runs no Edge builds at all -- which is
+      # exactly what happened on the PR that added this line.
+      - ".github/workflows/edge-build.yml"
   push:
     branches: [main]
     tags: ["v*"]
