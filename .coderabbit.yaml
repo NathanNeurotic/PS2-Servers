@@ -1,0 +1,193 @@
+# CodeRabbit configuration for PS2-Servers.
+#
+# Docs:   https://docs.coderabbit.ai/guides/configure-coderabbit
+# Schema: https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+#
+# Goal: keep the findings that are worth acting on (real bugs, undefined names,
+# resource leaks, protocol and portability mistakes) and cut the style nitpicks
+# for tooling and conventions this repository has never adopted.
+#
+# Background: PR #125 fixed a NameError that broke every UDPFS launch. It was
+# introduced by applying an unverified CodeRabbit suggestion (a `math.isfinite`
+# guard added without the matching import). The same review then spent its one
+# actionable comment on a missing return type annotation, for a Ruff rule this
+# repo does not use. This file is aimed squarely at that imbalance.
+
+language: en-US
+
+# Hard limit: 250 characters. The detailed guidance lives in path_instructions
+# below, which allows 20000 per entry.
+tone_instructions: >-
+  Be direct and concise. Prioritise correctness, security and portability over
+  style. Verify each finding against this repo's real code before raising it,
+  and say so when you cannot. Never recommend tooling the repo does not use.
+
+reviews:
+  # 'assertive' (the current org-level setting) produces a high volume of
+  # low-value nitpicks. 'chill' keeps substantive findings and drops most
+  # style-only ones. Use 'quiet' if even this proves too noisy.
+  profile: chill
+
+  # CI is the merge gate, not CodeRabbit's opinion. Never let a review block a
+  # merge or mark a commit failed on its own.
+  request_changes_workflow: false
+  fail_commit_status: false
+
+  high_level_summary: true
+  changed_files_summary: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+
+  # Cosmetic thread noise.
+  poem: false
+  in_progress_fortune: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+  # Unsolicited "here's a PR of docstrings / generated tests" offers. Tests in
+  # this repo are written to document a specific past failure; generated ones
+  # dilute that.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+
+  tools:
+    # KEEP RUFF ENABLED. Its default `F` ruleset includes F821 (undefined name)
+    # -- precisely the check that would have caught the missing `import math`
+    # in c495f92 before it shipped. Disabling Ruff to silence style rules would
+    # throw away the one tool that catches that class of bug. The instructions
+    # below are what suppress the style-only output.
+    ruff:
+      enabled: true
+
+    # Useful on this repo: Go linting, workflow linting, shell in CI steps,
+    # and secret scanning.
+    golangci-lint:
+      enabled: true
+    actionlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    gitleaks:
+      enabled: true
+
+    # Prose linting on docs generates a steady stream of subjective rewrites.
+    languagetool:
+      enabled: false
+    markdownlint:
+      enabled: false
+
+  path_instructions:
+    - path: "**"
+      instructions: >-
+        Cross-cutting rules for this repository. Verify every finding against
+        the actual code here before raising it, rather than applying general
+        best practice; if a claim cannot be verified from the code, say so
+        plainly instead of asserting it. When suggesting a change to executable
+        code, state how you checked it -- a suggestion that alters a code path
+        but has never been executed is how the c495f92 NameError shipped and
+        broke every server launch. Do not recommend adopting tooling,
+        frameworks or conventions this repository does not already use. Prefer
+        one well-verified finding over several speculative ones, and rank by
+        real user impact: this project is run by non-developers to serve games
+        to PlayStation 2 consoles, so a crash on launch matters enormously and
+        a style inconsistency does not.
+
+    - path: "**/*.py"
+      instructions: >-
+        This repository has NOT adopted Ruff, flake8, pylint, mypy, or any type
+        annotation standard. No linter or type checker runs in CI (see
+        .github/workflows/), and there is no pyproject.toml, ruff.toml,
+        setup.cfg, tox.ini or mypy.ini. Do not raise findings that exist only
+        because a linter default flagged them -- in particular missing type
+        annotations (ANN*), docstring rules (D*), import ordering (I*), or
+        naming conventions. Report a linter finding only when it indicates a
+        real defect: undefined or shadowed names (F821, F811), unused
+        assignments that reveal a bug, unreachable code, mutable default
+        arguments, bare or over-broad exception handlers that would swallow a
+        real error, or resource leaks. Correctness, portability and security
+        findings are always welcome regardless of tooling.
+
+    - path: "tests/**"
+      instructions: >-
+        Test helpers here intentionally follow the surrounding unannotated
+        style; the file-local convention wins over general best practice. Do
+        not suggest adding type annotations to individual helpers. Note that
+        `list[str]`-style annotations require Python 3.9+, and the README
+        documents run-from-source as only "Python 3 with Tkinter" with no
+        pinned floor. Each test documents a specific past failure -- when
+        reviewing, check that a test would actually FAIL against the bug it
+        claims to guard, and say so if it would not. That is far more valuable
+        here than style feedback.
+
+    - path: "launcher/**"
+      instructions: >-
+        This is the Tkinter launcher GUI. The `_*_argv` builders in servers.py
+        construct the command line for a child server process, and the packaged
+        app re-executes itself, so ONLY long flags (`--flag`) are safe -- a bare
+        `-c`/`-m` trips Nuitka's self-exec guard. Field defaults in the
+        ServerDef registry decide which argv branches actually execute at
+        runtime, so when reviewing a conditional check the declared default
+        before assuming a branch is rarely taken. Any change to these builders
+        must be executed, not just reasoned about; a suggestion that has not
+        been run is how the c495f92 NameError shipped.
+
+    - path: "udpfs_server/**"
+      instructions: >-
+        This implements a wire protocol served to real PlayStation 2 consoles
+        and to third-party clients (OPL, Modulo). Behaviour here is validated
+        against real hardware. Do not propose changes to packet layout, field
+        values, reserved fields, timing or negotiation based on what looks
+        cleaner or more standard -- a "correct" change can break real consoles.
+        Flag genuine defects (buffer bounds, integer overflow, unchecked
+        lengths, path traversal, resource leaks, races) and leave protocol
+        semantics alone unless the code is provably inconsistent with itself.
+
+    - path: "udpbd_server/**"
+      instructions: >-
+        Same as udpfs_server: a wire protocol served to real PS2 hardware,
+        validated against physical consoles. Report genuine defects; do not
+        propose protocol or timing changes on style or standards grounds.
+
+    - path: "smbv1_server/**"
+      instructions: >-
+        Deliberately speaks the OPL-compatible SMB1/CIFS subset, because that
+        is the only dialect the PS2 and OPL understand. Critically, it
+        implements that subset itself in userspace and does NOT enable the
+        Windows built-in SMB1 optional feature (README lines 51-52), so it
+        works on Windows 11 where the OS removed SMB1. Do not recommend
+        removing SMBv1, upgrading to SMB2/3, or flagging "SMB1 is enabled" as a
+        vulnerability -- none of those apply here and all three have been
+        considered and documented. Genuine implementation defects (path
+        traversal, bounds checks, auth handling) are still very much in scope.
+
+    - path: "native/ps2servers-edge/**"
+      instructions: >-
+        Go service that must cross-compile to eight targets, including
+        linux/mips and linux/mipsle with GOMIPS=softfloat and linux/riscv64,
+        and is built with CGO_ENABLED=0 for a static binary. Reject anything
+        that would introduce cgo, a non-portable syscall, unaligned 64-bit
+        atomics (which fault on 32-bit mips/arm), or an assumption of 64-bit
+        int. Concurrency findings on the session and transfer paths are
+        valuable; `go test -race` runs in CI.
+
+    - path: ".github/workflows/**"
+      instructions: >-
+        Third-party actions are pinned to full commit SHAs on purpose, for
+        supply-chain safety. Do not suggest replacing a pinned SHA with a
+        floating tag such as @v4. Flagging a genuinely outdated pinned action,
+        or an over-broad `permissions:` block, is welcome.
+
+  pre_merge_checks:
+    title:
+      mode: warning
+    description:
+      mode: warning
+
+knowledge_base:
+  learnings:
+    scope: local
