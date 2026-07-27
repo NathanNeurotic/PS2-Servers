@@ -219,6 +219,12 @@ jobs:
               reports x86_64.
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # This job holds contents/id-token/attestations write. Leaving the
+          # default credential helper configured would keep that token
+          # available to everything that follows, including `go build`
+          # fetching modules. edge.yml's test job already does this.
+          persist-credentials: false
       - uses: actions/setup-go@v6.4.0
         with:
           go-version-file: native/ps2servers-edge/go.mod
@@ -245,11 +251,15 @@ jobs:
           GOMIPS: ${{ matrix.gomips }}
           GOMIPS64: ${{ matrix.gomips64 }}
           SOURCE_DATE_EPOCH: ${{ steps.version.outputs.source_date_epoch }}
+          # Through env, not inline ${{ }}: on a tag push this is GITHUB_REF_NAME
+          # verbatim, and git permits characters in a tag name that would be
+          # interpreted by the shell if pasted into the script body.
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p "$GITHUB_WORKSPACE/out/stage"
           go build -trimpath -buildvcs=true \
-            -ldflags="-s -w -buildid= -X main.version=${{ steps.version.outputs.version }}" \
+            -ldflags="-s -w -buildid= -X main.version=${VERSION}" \
             -o "$GITHUB_WORKSPACE/out/stage/ps2servers-edge${{ matrix.ext }}" ./cmd/ps2servers-edge
       - name: Inspect and package artifact
         shell: bash
@@ -265,6 +275,7 @@ jobs:
           GOMIPS_V: ${{ matrix.gomips }}
           GOMIPS64_V: ${{ matrix.gomips64 }}
           VERSION: ${{ steps.version.outputs.version }}
+          EPOCH: ${{ steps.version.outputs.source_date_epoch }}
           EXT: ${{ matrix.ext }}
           ARCHIVE: ${{ matrix.archive }}
           GOOS_V: ${{ matrix.goos }}
@@ -302,7 +313,7 @@ jobs:
             printf 'error". Nothing is damaged; just try another one.\n\n'
             printf -- '-------------------------------------\n\n'
             printf 'WHAT THIS BUILD IS\n\n'
-            printf '  Go target      : GOOS=linux GOARCH=%s' "${GOARCH_V}"
+            printf '  Go target      : GOOS=%s GOARCH=%s' "${GOOS_V}" "${GOARCH_V}"
             [ -n "${GOARM_V}" ]     && printf ' GOARM=%s' "${GOARM_V}"
             [ -n "${GOMIPS_V}" ]    && printf ' GOMIPS=%s' "${GOMIPS_V}"
             [ -n "${GOMIPS64_V}" ]  && printf ' GOMIPS64=%s' "${GOMIPS64_V}"
@@ -340,7 +351,7 @@ jobs:
             # SOURCE_DATE_EPOCH. zip(1) stores real mtimes, which would make
             # two builds of the same commit differ and undermine the
             # attestation the next step produces.
-            SOURCE_DATE_EPOCH="${{ steps.version.outputs.source_date_epoch }}" \
+            SOURCE_DATE_EPOCH="${EPOCH}" \
             PKG="${package}" python3 - <<'PYZIP'
           import os, time, zipfile
           pkg = os.environ["PKG"]
@@ -368,7 +379,7 @@ jobs:
             sha256sum "out/${package}.zip" > "out/${package}.zip.sha256"
           else
             tar --sort=name --owner=0 --group=0 --numeric-owner \
-              --mtime="@${{ steps.version.outputs.source_date_epoch }}" \
+              --mtime="@${EPOCH}" \
               -czf "out/${package}.tar.gz" -C out "${package}"
             sha256sum "out/${package}.tar.gz" > "out/${package}.tar.gz.sha256"
           fi
