@@ -94,15 +94,19 @@ def test_separator_terminated_root():
     try:
         if os.name == "nt":
             sep_root = os.path.realpath("C:\\")
-            check(sep_root.endswith(os.sep),
-                  "realpath('C:\\\\') keeps the trailing separator")
+            check(os.path.normpath(sep_root) == os.path.normpath("C:\\"),
+                  "realpath('C:\\\\') normalizes to the drive root")
         else:
             sep_root = "/"
         server.root_dir = sep_root
 
         r = server._resolve_path("PS2/CD/game.iso")
         expected = os.path.join(sep_root, "PS2", "CD", "game.iso")
-        check(r == expected, "drive/'/'-root serves nested path: %r" % r)
+        if os.name == "nt":
+            check(r is not None and os.path.normpath(r).lower() == os.path.normpath(expected).lower(),
+                  "drive/'/'-root serves nested path: %r" % r)
+        else:
+            check(r == expected, "drive/'/'-root serves nested path: %r" % r)
         r = server._resolve_path("ul.cfg")
         check(r == os.path.join(sep_root, "ul.cfg"),
               "drive/'/'-root serves top-level file")

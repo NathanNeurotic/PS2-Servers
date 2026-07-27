@@ -23,6 +23,7 @@ if _UDPFS_DIR not in sys.path:
     sys.path.insert(0, _UDPFS_DIR)
 
 import udpfs_server as udpfs  # noqa: E402
+import ps2servers_core as udpfs_core  # noqa: E402
 
 from launcher import servers  # noqa: E402
 
@@ -145,6 +146,26 @@ class PortRangeTests(unittest.TestCase):
         for bad in ('99999', '-1', '70000'):
             with self.assertRaises(argparse.ArgumentTypeError):
                 parse(bad)
+
+
+class TxDelayTests(unittest.TestCase):
+    def test_env_default_is_parsed(self):
+        os.environ['TX_DELAY_MS'] = '1.5'
+        try:
+            parser = udpfs_core.build_parser()
+            args = parser.parse_args(['--root-dir', '.'])
+            self.assertEqual(args.tx_delay_ms, 1.5)
+        finally:
+            os.environ.pop('TX_DELAY_MS', None)
+
+    def test_cli_overrides_env(self):
+        os.environ['TX_DELAY_MS'] = '1.5'
+        try:
+            parser = udpfs_core.build_parser()
+            args = parser.parse_args(['--root-dir', '.', '--tx-delay-ms', '2.25'])
+            self.assertEqual(args.tx_delay_ms, 2.25)
+        finally:
+            os.environ.pop('TX_DELAY_MS', None)
 
 
 class TruncatedCompressedHeaderTests(unittest.TestCase):

@@ -128,3 +128,9 @@ func ParseDataPacket(packet []byte) (Header, DataHeader, []byte, error) {
 
 func Next(seq uint16) uint16     { return (seq + 1) & SequenceMask }
 func Previous(seq uint16) uint16 { return (seq - 1) & SequenceMask }
+func Between(start, seq, end uint16) bool {
+	if start <= end {
+		return seq >= start && seq <= end
+	}
+	return seq >= start || seq <= end
+}

@@ -112,6 +112,8 @@ COMPRESSED_EXTENSIONS = _supported_compressed_extensions()
 # occasional broadcasts. Both are requests, not guarantees: the OS may cap them.
 DATA_RECV_BUFFER_BYTES = 1 << 20
 DISCOVERY_RECV_BUFFER_BYTES = 1 << 16
+DATA_SEND_BUFFER_BYTES = 1 << 20
+MAX_SEND_RETRIES = 10
 
 
 def _widen_recv_buffer(sock, size: int) -> None:
@@ -130,6 +132,40 @@ def _widen_recv_buffer(sock, size: int) -> None:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, size)
     except OSError:
         pass  # keep the default; smaller buffer is slower, not broken
+
+
+def _widen_send_buffer(sock, size: int) -> None:
+    """Best-effort ask for a larger SO_SNDBUF."""
+    try:
+        current = sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
+    except OSError:
+        current = 0
+    if current >= size:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, size)
+    except OSError:
+        pass
+
+
+def _is_transient_send_error(exc: OSError) -> bool:
+    return getattr(exc, "errno", None) in {errno.ENOBUFS, errno.EAGAIN, errno.EWOULDBLOCK} or \
+        getattr(exc, "winerror", None) in {10035, 10055}
+
+
+def _send_with_retry(sock, packet: bytes, addr, send_lock, tx_delay_s: float = 0.0):
+    delay = max(0.0, float(tx_delay_s or 0.0))
+    for attempt in range(MAX_SEND_RETRIES):
+        if delay:
+            time.sleep(delay)
+        try:
+            with send_lock:
+                sock.sendto(packet, addr)
+            return
+        except OSError as exc:
+            if not _is_transient_send_error(exc) or attempt + 1 >= MAX_SEND_RETRIES:
+                raise
+            time.sleep(min(0.001 * (attempt + 1), 0.010))
 
 
 # UDPRDMA Protocol Constants
@@ -443,7 +479,8 @@ class UdpfsServer:
                  metrics_period: float = 60.0,
                  single_port: bool = False,
                  modulo_compat: bool = False,
-                 data_port: int = 0):
+                 data_port: int = 0,
+                 tx_delay_ms: float = 0.0):
         # Modulo's client only ever talked to Modulo's own bundled server, which is
         # single-socket, so the two always travel together.
         if modulo_compat:
@@ -466,6 +503,7 @@ class UdpfsServer:
         self.metrics = metrics
         self.metrics_period = metrics_period
         self.single_port = single_port
+        self.tx_delay_s = max(0.0, float(tx_delay_ms or 0.0)) / 1000.0
         # Only ever sent in modulo_compat: its server advertises a friendly name in
         # the INFORM so its loader can label the source. Shares stay empty, matching
         # its CLI server (only its GUI wrapper ever fills them in). gethostname can
@@ -499,6 +537,7 @@ class UdpfsServer:
         _widen_recv_buffer(
             self.sock,
             DATA_RECV_BUFFER_BYTES if single_port else DISCOVERY_RECV_BUFFER_BYTES)
+        _widen_send_buffer(self.sock, DATA_SEND_BUFFER_BYTES)
         self.sock.bind(('', port))
         self.sock.setblocking(False)
 
@@ -520,6 +559,7 @@ class UdpfsServer:
             self.dsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.dsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             _widen_recv_buffer(self.dsock, DATA_RECV_BUFFER_BYTES)
+            _widen_send_buffer(self.dsock, DATA_SEND_BUFFER_BYTES)
             self.dsock.bind((bind_ip, data_port))
             self.dsock.setblocking(False)
 
@@ -623,8 +663,7 @@ class UdpfsServer:
     def _sendto(self, packet: bytes, addr):
         """Send on the shared data socket under a lock (many worker threads)."""
         sock = self.dsock
-        with self.send_lock:
-            sock.sendto(packet, addr)
+        _send_with_retry(sock, packet, addr, self.send_lock, self.tx_delay_s)
 
     def bd_read(self, offset: int, n: int) -> bytes:
         """Thread-safe positional read of the shared block device."""

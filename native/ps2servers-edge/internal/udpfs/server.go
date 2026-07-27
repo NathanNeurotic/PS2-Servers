@@ -32,6 +32,7 @@ type Config struct {
 	SinglePort    bool
 	ProtocolMode  session.Profile
 	PeerTimeout   time.Duration
+	TxDelay       time.Duration
 	ReadOnly      bool
 	Log           *edgelog.Logger
 	ServerName    string
@@ -117,6 +118,7 @@ func (s *Server) Listen() error {
 		data, err := net.ListenUDP("udp4", &net.UDPAddr{IP: ip, Port: s.cfg.DataPort})
 		if err != nil {
 			disc.Close()
+			s.discovery = nil
 			return err
 		}
 		s.data = data
@@ -140,7 +142,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 	}
 	disc, data := s.Addr()
-	s.cfg.Log.Info("UDPFS listening", map[string]any{"root": s.root.Path(), "discovery": disc.String(), "data": data.String(), "protocol": s.cfg.ProtocolMode, "read_only": true})
+	s.cfg.Log.Info("UDPFS listening", map[string]any{"root": s.root.Path(), "discovery": disc.String(), "data": data.String(), "protocol": s.cfg.ProtocolMode, "read_only": s.cfg.ReadOnly})
 	s.wg.Add(1)
 	go s.readLoop(s.discovery, session.DiscoverySocket)
 	if s.data != s.discovery {
@@ -215,19 +217,31 @@ func (s *Server) reaper() {
 		case <-s.closed:
 			return
 		case now := <-tick.C:
+			type expiredSession struct {
+				key string
+				w   *peerWorker
+				id  time.Duration
+			}
+			var expired []expiredSession
 			s.sessionsMu.Lock()
 			for key, w := range s.sessions {
 				w.state.Mu.Lock()
 				idle := now.Sub(w.state.LastActivity)
-				if idle > s.cfg.PeerTimeout {
-					w.state.Close()
-					delete(s.sessions, key)
-					w.stop()
-					s.cfg.Log.Info("session expired", map[string]any{"peer": key, "idle": idle.String()})
-				}
 				w.state.Mu.Unlock()
+				if idle > s.cfg.PeerTimeout {
+					expired = append(expired, expiredSession{key: key, w: w, id: idle})
+					delete(s.sessions, key)
+				}
 			}
 			s.sessionsMu.Unlock()
+
+			for _, item := range expired {
+				item.w.state.Mu.Lock()
+				item.w.state.Close()
+				item.w.state.Mu.Unlock()
+				item.w.stop()
+				s.cfg.Log.Info("session expired", map[string]any{"peer": item.key, "idle": item.id.String()})
+			}
 		}
 	}
 }
@@ -238,6 +252,10 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	defer s.sessionsMu.Unlock()
 	if w := s.sessions[key]; w != nil {
 		return w
+	}
+	if len(s.sessions) >= 256 {
+		s.cfg.Log.Warn("max session limit reached", map[string]any{"peer": key})
+		return nil
 	}
 	forced := s.cfg.ProtocolMode
 	if forced == session.Pending {
@@ -271,6 +289,9 @@ func (s *Server) dispatch(in inbound) {
 		s.handleDiscovery(in, h)
 	case protocol.Data:
 		w := s.getWorker(in.peer)
+		if w == nil {
+			return
+		}
 		_, dh, payload, parseErr := protocol.ParseDataPacket(in.packet)
 		if parseErr == nil && len(payload) == 0 {
 			s.handleControl(w.state, dh)

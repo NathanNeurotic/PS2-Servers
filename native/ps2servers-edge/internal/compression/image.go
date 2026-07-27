@@ -18,6 +18,7 @@ type Image struct {
 	f         *os.File
 	format    string
 	size      int64
+	fileSize  int64
 	blockSize int64
 	align     uint8
 	index     []uint32
@@ -29,14 +30,15 @@ func Open(path string) (*Image, error) {
 	if err != nil {
 		return nil, err
 	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	rawFileSize := st.Size()
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext != ".cso" && ext != ".ciso" && ext != ".zso" && ext != ".ziso" {
-		st, err := f.Stat()
-		if err != nil {
-			f.Close()
-			return nil, err
-		}
-		return &Image{f: f, format: "plain", size: st.Size()}, nil
+		return &Image{f: f, format: "plain", size: rawFileSize, fileSize: rawFileSize}, nil
 	}
 	hdr := make([]byte, 24)
 	if _, err = io.ReadFull(f, hdr); err != nil {
@@ -62,9 +64,9 @@ func Open(path string) (*Image, error) {
 		return nil, fmt.Errorf("invalid %s header", format)
 	}
 	blocks := (size + block - 1) / block
-	if blocks > 1<<28 {
+	if blocks > 1<<28 || uint64(headerSize)+uint64(blocks+1)*4 > uint64(rawFileSize) {
 		f.Close()
-		return nil, fmt.Errorf("image index too large")
+		return nil, fmt.Errorf("image index too large or extends past file size")
 	}
 	index := make([]uint32, blocks+1)
 	if _, err = f.Seek(int64(headerSize), io.SeekStart); err != nil {
@@ -75,7 +77,7 @@ func Open(path string) (*Image, error) {
 		f.Close()
 		return nil, err
 	}
-	return &Image{f: f, format: format, size: size, blockSize: block, align: align, index: index}, nil
+	return &Image{f: f, format: format, size: size, fileSize: rawFileSize, blockSize: block, align: align, index: index}, nil
 }
 func (i *Image) Close() error { return i.f.Close() }
 func (i *Image) Size() int64  { return i.size }
@@ -146,11 +148,7 @@ func (i *Image) readBlock(n int64) ([]byte, error) {
 	if start < 0 || end < start || end-start > 32<<20 {
 		return nil, fmt.Errorf("invalid block range")
 	}
-	st, err := i.f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if end > st.Size() {
+	if end > i.fileSize {
 		return nil, io.ErrUnexpectedEOF
 	}
 	raw := make([]byte, end-start)

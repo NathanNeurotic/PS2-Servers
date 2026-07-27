@@ -28,7 +28,11 @@ func (l *Logger) emit(level, message string, fields map[string]any) {
 	if l.JSON {
 		row := map[string]any{"time": time.Now().UTC().Format(time.RFC3339Nano), "level": level, "message": message}
 		for k, v := range fields {
-			row[k] = v
+			if err, ok := v.(error); ok {
+				row[k] = err.Error()
+			} else {
+				row[k] = v
+			}
 		}
 		b, _ := json.Marshal(row)
 		fmt.Fprintln(l.out, string(b))
