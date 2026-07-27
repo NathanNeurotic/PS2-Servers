@@ -43,12 +43,12 @@ jobs:
             asset: PS2Servers-macos-x64.zip
             macos_arch: x86_64
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Most jobs use setup-python. The macOS x86_64 cross-build instead needs a
       # universal2 interpreter (with universal Tcl/Tk) and must execute Python as
       # x86_64 so compiled dependencies like lz4 match the Intel artifact.
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: matrix.macos_arch != 'x86_64' && matrix.win_arch != 'x86'
         with:
           python-version: "3.12"
@@ -58,7 +58,7 @@ jobs:
       # zstandard). setup-python provides an official 32-bit CPython.
       - name: Set up Python (Windows x86)
         if: matrix.win_arch == 'x86'
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           architecture: "x86"
@@ -298,6 +298,14 @@ jobs:
           Run it: **Windows — unzip the portable build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the portable build comes up clean. Linux — \`chmod +x PS2Servers-linux-x64\` and run it; or try the newer \`.AppImage\` for desktop/menu shortcuts (via AppImageLauncher). macOS — unzip and right-click → Open (unsigned).
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
+
+          ### PS2 Servers Edge — routers, NAS, Raspberry Pi
+
+          **If you are on a normal computer, stop here — the table above is what you want.** Everything named \`PS2ServersEdge-*\` is a different program: a small headless server with no GUI and no Python, for devices where the launcher does not fit.
+
+          Each Edge file is named for the device family it serves, for example \`armv5-pogoplug-sheevaplug-dockstar\`, \`edgerouter-octeon-mips64\`, or \`router-mips-little-endian-mt7621\`. Run \`uname -m\` on the device and match it in [EDGE-WHICH-BUILD.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE-WHICH-BUILD.md); every archive also contains a \`WHICH-DEVICE.txt\` confirming what it is for. Picking the wrong one is harmless — it simply will not start.
+
+          Edge serves CSO/ZSO but **not CHD**, and allows the console to write saves by default (\`--read-only\` to prevent that). For OpenWrt, build the source package for your exact target instead — see [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
 
           One launcher for all three OPL servers (SMBv1, UDPFS, UDPBD): pick a folder, hit Start. On Windows it runs from the system tray (close/minimize → tray; right-click → Open/Quit).
 
