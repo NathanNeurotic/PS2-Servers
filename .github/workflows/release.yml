@@ -299,6 +299,14 @@ jobs:
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 
+          ### PS2 Servers Edge — routers, NAS, Raspberry Pi
+
+          **If you are on a normal computer, stop here — the table above is what you want.** Everything named \`PS2ServersEdge-*\` is a different program: a small headless server with no GUI and no Python, for devices where the launcher does not fit.
+
+          Each Edge file is named for the device family it serves, for example \`armv5-pogoplug-sheevaplug-dockstar\`, \`edgerouter-octeon-mips64\`, or \`router-mips-little-endian-mt7621\`. Run \`uname -m\` on the device and match it in [EDGE-WHICH-BUILD.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE-WHICH-BUILD.md); every archive also contains a \`WHICH-DEVICE.txt\` confirming what it is for. Picking the wrong one is harmless — it simply will not start.
+
+          Edge serves CSO/ZSO but **not CHD**, and allows the console to write saves by default (\`--read-only\` to prevent that). For OpenWrt, build the source package for your exact target instead — see [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
+
           One launcher for all three OPL servers (SMBv1, UDPFS, UDPBD): pick a folder, hit Start. On Windows it runs from the system tray (close/minimize → tray; right-click → Open/Quit).
 
           ## Security transparency

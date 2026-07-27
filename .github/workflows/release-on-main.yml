@@ -334,16 +334,39 @@ jobs:
 
             ## Downloads
 
-            **On 64-bit Windows, download the portable build**
-            (`PS2Servers-windows-x64-portable.zip`) and run `PS2Servers.exe` from
-            inside the folder — it is the same app without the self-extracting
-            wrapper that trips antivirus heuristics, so it comes up clean. A
-            single-file `PS2Servers-windows-x64.zip` is also published for
-            convenience. **On 32-bit Windows** (older / low-end PCs), download
-            `PS2Servers-windows-x86-portable.zip` (or the single-file
-            `PS2Servers-windows-x86.zip`) instead — the x64 build will not run
-            there. Linux: `PS2Servers-linux-x64` (or the `-portable.tar.gz` build if
-            `/tmp` is `noexec`). macOS ships as a `.app`.
+            There are a lot of files below. **You need exactly one.** Find your
+            computer in this table and ignore everything else:
+
+            | Your computer | Download this |
+            |---|---|
+            | Windows, normal (64-bit) | **`PS2Servers-windows-x64-portable.zip`** |
+            | Windows, older 32-bit PC | **`PS2Servers-windows-x86-portable.zip`** |
+            | Linux | **`PS2Servers-linux-x64`** |
+            | Mac, Apple Silicon (M1–M4) | **`PS2Servers-macos-arm64.zip`** |
+            | Mac, Intel | **`PS2Servers-macos-x64.zip`** |
+
+            On Windows: unzip it, open the folder, run `PS2Servers.exe`. That's it.
+
+            <details>
+            <summary>Why "portable", and what are the other files?</summary>
+
+            The **portable** build is the same app laid out as a plain folder,
+            with no self-extracting wrapper. The wrapper is what makes some
+            antivirus flag the single-file build, so the portable one usually
+            comes up clean — that is why it is the recommendation rather than the
+            single-file `PS2Servers-windows-x64.zip`, which is published for
+            convenience.
+
+            On Linux, `PS2Servers-linux-x64` is a single executable; take
+            `PS2Servers-linux-x64-portable.tar.gz` instead if `/tmp` is mounted
+            `noexec`. macOS ships as a `.app` inside the zip.
+
+            `PS2Servers-source.zip` is the source, for running from Python
+            directly or for inspection.
+
+            Everything beginning **`PS2ServersEdge-`** is a different program —
+            see the section below. You do not need it on a normal computer.
+            </details>
 
             ### PS2 Servers Edge (routers, NAS, Raspberry Pi)
 
