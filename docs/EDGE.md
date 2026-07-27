@@ -33,31 +33,45 @@ permission on the game root and open the selected UDP ports in the firewall.
 
 ## Generic Linux
 
-1. Download the artifact matching the CPU.
+1. Download the artifact matching the device. Run `uname -m` on the device and
+   match it in **[EDGE-WHICH-BUILD.md](EDGE-WHICH-BUILD.md)** — that page is the
+   full picker, including how to tell big-endian from little-endian MIPS.
 2. Verify the archive against its adjacent `.sha256` file.
 3. Install it as `/usr/local/bin/ps2servers-edge`.
 4. Run it as an unprivileged account with the game directory mounted read-only.
 
-Target names:
+Downloads are named for the device family rather than the Go architecture, so
+the release page can be read without knowing what "armv6" means. Each archive
+also contains a `WHICH-DEVICE.txt` stating exactly what it is for.
 
-| Artifact | Go target | Notes |
+| Artifact ends in | Go target | For |
 |---|---|---|
-| `linux-386` | `GOARCH=386` | old 32-bit x86 |
-| `linux-amd64` | `GOARCH=amd64` | x86-64 |
-| `linux-armv6` | `GOARCH=arm GOARM=6` | older Raspberry Pi |
-| `linux-armv7` | `GOARCH=arm GOARM=7` | 32-bit ARM |
-| `linux-arm64` | `GOARCH=arm64` | 64-bit ARM |
-| `linux-mips` | `GOARCH=mips GOMIPS=softfloat` | big-endian MIPS32 |
-| `linux-mipsle` | `GOARCH=mipsle GOMIPS=softfloat` | little-endian MIPS32 |
-| `linux-riscv64` | `GOARCH=riscv64` | 64-bit RISC-V |
+| `pc-64bit-amd64` | `GOARCH=amd64` | 64-bit PC, home server, x86 NAS, VMs |
+| `pc-32bit-i386` | `GOARCH=386` | old 32-bit-only x86 |
+| `arm64-pi3-pi4-pi5-nas` | `GOARCH=arm64` | Pi 3/4/5 on 64-bit OS, modern ARM NAS and routers |
+| `armv7-pi2-32bit-routers` | `GOARCH=arm GOARM=7` | Pi 2, Pi 3/4/5 on a 32-bit OS, 32-bit ARM routers |
+| `armv6-pi1-pi-zero` | `GOARCH=arm GOARM=6` | Pi 1, Pi Zero / Zero W |
+| `armv5-pogoplug-sheevaplug-dockstar` | `GOARCH=arm GOARM=5` | Kirkwood plugs, early ARM NAS |
+| `router-mips-little-endian-mt7621` | `GOARCH=mipsle GOMIPS=softfloat` | little-endian MIPS routers (ramips/mt7621, incl. EdgeRouter X) |
+| `router-mips-big-endian-ath79` | `GOARCH=mips GOMIPS=softfloat` | big-endian MIPS routers (ath79/lantiq) |
+| `edgerouter-octeon-mips64` | `GOARCH=mips64 GOMIPS64=softfloat` | Cavium Octeon — EdgeRouter Lite/PoE/4/6P |
+| `mips64-little-endian` | `GOARCH=mips64le GOMIPS64=softfloat` | little-endian 64-bit MIPS (uncommon) |
+| `riscv64-sbc` | `GOARCH=riscv64` | 64-bit RISC-V SBCs |
 
-These are generic Linux executables, not OpenWrt `.ipk` packages.
+These are generic Linux executables, not OpenWrt `.ipk` packages. For OpenWrt,
+build the source package for your exact target — see [OPENWRT.md](OPENWRT.md).
+
+32-bit big-endian PowerPC (WD MyBook Live, OpenWrt `apm821xx`) has no Edge
+build and never will: Go does not support that architecture. Use the
+Desktop/Python UDPFS server there instead.
 
 ## Raspberry Pi and NAS
 
-Use `linux-armv6`, `linux-armv7`, or `linux-arm64` according to the installed OS,
-not merely the board model. For a NAS, select the architecture reported by the
-NAS shell and keep the game share mounted before the service starts.
+Select by `uname -m`, not by the board model. A Raspberry Pi 4 running a 32-bit
+OS reports `armv7l` and needs the armv7 build even though the hardware is
+64-bit capable — this is the most common mistake. For a NAS, use the
+architecture reported by the NAS shell and keep the game share mounted before
+the service starts.
 
 ## Compression matrix
 

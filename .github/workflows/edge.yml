@@ -68,35 +68,135 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # 'label' becomes the download filename, so it leads with the device
+        # family rather than the Go architecture -- a user should be able to
+        # pick the right file without knowing what "armv6" means. 'devices'
+        # is written into WHICH-DEVICE.txt inside the archive.
+        #
+        # Device claims are keyed to OpenWrt target names where possible,
+        # because those are authoritative and a user can verify them with
+        # opkg print-architecture. Model names are representative examples,
+        # never an exhaustive list -- see docs/EDGE-WHICH-BUILD.md.
         include:
-          - target: linux-386
-            goos: linux
-            goarch: "386"
           - target: linux-amd64
+            label: pc-64bit-amd64
             goos: linux
             goarch: amd64
-          - target: linux-armv6
+            devices: >-
+              64-bit PC, mini PC, home server, or x86 NAS (Synology/QNAP/TrueNAS
+              on Intel or AMD), and any 64-bit x86 virtual machine or container.
+              OpenWrt target x86/64. This is the right choice for almost any
+              ordinary computer made after ~2008. uname -m reports x86_64.
+
+          - target: linux-386
+            label: pc-32bit-i386
             goos: linux
-            goarch: arm
-            goarm: "6"
+            goarch: "386"
+            devices: >-
+              Older 32-bit-only PC or thin client, early Intel Atom systems, and
+              32-bit x86 virtual machines. OpenWrt target x86/generic. Use this
+              only if the 64-bit build refuses to run. uname -m reports i386,
+              i586 or i686.
+
+          - target: linux-arm64
+            label: arm64-pi3-pi4-pi5-nas
+            goos: linux
+            goarch: arm64
+            devices: >-
+              Raspberry Pi 3, 4, 5 and Pi Zero 2 W running a 64-bit OS; most
+              modern ARM NAS units; newer 64-bit routers (OpenWrt targets
+              mediatek, rockchip, bcm4908/bcmbca, mvebu 64-bit, ipq807x);
+              Odroid, Orange Pi, Rock Pi and similar 64-bit SBCs; Apple Silicon
+              Linux VMs. uname -m reports aarch64 or arm64.
+
           - target: linux-armv7
+            label: armv7-pi2-32bit-routers
             goos: linux
             goarch: arm
             goarm: "7"
-          - target: linux-arm64
+            devices: >-
+              Raspberry Pi 2, and Pi 3/4/5 running a 32-bit OS (very common --
+              check with uname -m, not the box); 32-bit ARM routers (OpenWrt
+              targets ipq40xx, ipq806x, mvebu 32-bit, bcm53xx); many ARM NAS
+              units from the 2013-2018 era. uname -m reports armv7l.
+
+          - target: linux-armv6
+            label: armv6-pi1-pi-zero
             goos: linux
-            goarch: arm64
-          - target: linux-mips
+            goarch: arm
+            goarm: "6"
+            devices: >-
+              Raspberry Pi 1 (all models) and Pi Zero / Zero W. These cannot run
+              the armv7 build. uname -m reports armv6l.
+
+          - target: linux-armv5
+            label: armv5-pogoplug-sheevaplug-dockstar
             goos: linux
-            goarch: mips
-            gomips: softfloat
+            goarch: arm
+            goarm: "5"
+            devices: >-
+              Marvell Kirkwood plug computers and early ARM NAS boxes: SheevaPlug,
+              DreamPlug, GuruPlug, Pogoplug, Seagate FreeAgent DockStar, ZyXEL
+              NSA320, and similar. OpenWrt targets kirkwood and oxnas. These are
+              ARMv5TE and CANNOT run the armv6 or armv7 builds. uname -m
+              reports armv5tel.
+
           - target: linux-mipsle
+            label: router-mips-little-endian-mt7621
             goos: linux
             goarch: mipsle
             gomips: softfloat
+            devices: >-
+              Little-endian MIPS routers -- the most common modern budget router
+              class. OpenWrt targets ramips (mt7620, mt7621, mt76x8) and
+              ath79 little-endian variants. Examples: many GL.iNet travel
+              routers, Xiaomi/Redmi routers, Netgear R6220, Ubiquiti EdgeRouter
+              X (ER-X, which is MT7621 -- NOT the octeon build). opkg
+              print-architecture shows mipsel_*; uname -m reports mips.
+
+          - target: linux-mips
+            label: router-mips-big-endian-ath79
+            goos: linux
+            goarch: mips
+            gomips: softfloat
+            devices: >-
+              Big-endian MIPS routers, typically Atheros or Lantiq based.
+              OpenWrt targets ath79, ar71xx (legacy) and lantiq. Examples: many
+              TP-Link Archer C7 / WDR3600 / WDR4300 units, older Netgear and
+              AVM Fritz!Box models. opkg print-architecture shows mips_*
+              (no "el"); uname -m reports mips.
+
+          - target: linux-mips64
+            label: edgerouter-octeon-mips64
+            goos: linux
+            goarch: mips64
+            gomips64: softfloat
+            devices: >-
+              Cavium Octeon 64-bit MIPS devices, big-endian. OpenWrt target
+              octeon. Examples: Ubiquiti EdgeRouter Lite (ERLite-3), EdgeRouter
+              PoE, EdgeRouter 4/6P/12. NOTE: the EdgeRouter X (ER-X) is NOT in
+              this family -- it is MT7621, so use the little-endian MIPS build.
+              uname -m reports mips64.
+
+          - target: linux-mips64le
+            label: mips64-little-endian
+            goos: linux
+            goarch: mips64le
+            gomips64: softfloat
+            devices: >-
+              Little-endian 64-bit MIPS systems, including some Loongson-based
+              boards and little-endian octeon userlands. Uncommon -- if you are
+              not certain you need this, you almost certainly want one of the
+              32-bit MIPS router builds instead. uname -m reports mips64.
+
           - target: linux-riscv64
+            label: riscv64-sbc
             goos: linux
             goarch: riscv64
+            devices: >-
+              64-bit RISC-V single-board computers, such as StarFive VisionFive
+              2, Milk-V, and LicheeRV. OpenWrt target sifiveu. uname -m
+              reports riscv64.
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@v6.4.0
@@ -123,6 +223,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
           GOMIPS: ${{ matrix.gomips }}
+          GOMIPS64: ${{ matrix.gomips64 }}
           SOURCE_DATE_EPOCH: ${{ steps.version.outputs.source_date_epoch }}
         run: |
           set -euo pipefail
@@ -132,17 +233,70 @@ jobs:
             -o "$GITHUB_WORKSPACE/out/stage/ps2servers-edge" ./cmd/ps2servers-edge
       - name: Inspect and package artifact
         shell: bash
+        # Matrix values come through env rather than direct ${{ }} interpolation:
+        # the device prose contains backticks, quotes and slashes that would
+        # otherwise be pasted straight into the script body.
+        env:
+          TARGET: ${{ matrix.target }}
+          LABEL: ${{ matrix.label }}
+          DEVICES: ${{ matrix.devices }}
+          GOARCH_V: ${{ matrix.goarch }}
+          GOARM_V: ${{ matrix.goarm }}
+          GOMIPS_V: ${{ matrix.gomips }}
+          GOMIPS64_V: ${{ matrix.gomips64 }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          target="${{ matrix.target }}"
-          version="${{ steps.version.outputs.version }}"
-          package="PS2ServersEdge-${target}-static-no-chd-${version}"
+          # Filename leads with the device family so the release page is
+          # readable without knowing Go architecture names. The Go target is
+          # still recorded in WHICH-DEVICE.txt and BUILD-METADATA.txt.
+          package="PS2ServersEdge-${VERSION}-${LABEL}"
           mkdir -p "out/${package}/licenses"
           mv out/stage/ps2servers-edge "out/${package}/ps2servers-edge"
           chmod +x "out/${package}/ps2servers-edge"
           cp native/ps2servers-edge/README.md "out/${package}/README.md"
-          cp docs/EDGE.md docs/PROTOCOL-COMPATIBILITY.md docs/EDITIONS.md "out/${package}/"
+          cp docs/EDGE.md docs/EDGE-WHICH-BUILD.md docs/PROTOCOL-COMPATIBILITY.md \
+             docs/EDITIONS.md "out/${package}/"
           cp THIRD_PARTY_NOTICES.md "out/${package}/licenses/THIRD_PARTY_NOTICES.md"
+
+          # Plain-language "is this the right download?" note, first thing a
+          # user sees after extracting.
+          {
+            printf 'PS2 Servers Edge %s\n' "${VERSION}"
+            printf '=====================================\n\n'
+            printf 'IS THIS THE RIGHT DOWNLOAD?\n\n'
+            printf 'This build is for:\n\n'
+            printf '%s\n\n' "${DEVICES}" | fold -s -w 76
+            printf -- '-------------------------------------\n\n'
+            printf 'NOT SURE? Run this on the device:\n\n'
+            printf '    uname -m\n\n'
+            printf 'and on OpenWrt also:\n\n'
+            printf '    opkg print-architecture\n\n'
+            printf 'then match it against docs/EDGE-WHICH-BUILD.md in this archive.\n'
+            printf 'Downloading the wrong build is harmless -- it simply will not\n'
+            printf 'run, usually with "cannot execute binary file" or "Exec format\n'
+            printf 'error". Nothing is damaged; just try another one.\n\n'
+            printf -- '-------------------------------------\n\n'
+            printf 'WHAT THIS BUILD IS\n\n'
+            printf '  Go target      : GOOS=linux GOARCH=%s' "${GOARCH_V}"
+            [ -n "${GOARM_V}" ]     && printf ' GOARM=%s' "${GOARM_V}"
+            [ -n "${GOMIPS_V}" ]    && printf ' GOMIPS=%s' "${GOMIPS_V}"
+            [ -n "${GOMIPS64_V}" ]  && printf ' GOMIPS64=%s' "${GOMIPS64_V}"
+            printf '\n'
+            printf '  Internal name  : %s\n' "${TARGET}"
+            printf '  Linking        : static, CGO disabled (no shared libraries\n'
+            printf '                   needed, runs on musl and glibc systems)\n'
+            printf '  Compression    : CSO / ZSO supported. CHD is NOT supported\n'
+            printf '                   in Edge builds -- CHD needs a native\n'
+            printf '                   library that would break static linking.\n'
+            printf '                   Use the Desktop (Python) server for CHD.\n'
+            printf '  Access         : read-only UDPFS\n\n'
+            printf 'QUICK START\n\n'
+            printf '    ./ps2servers-edge udpfs --root /path/to/games\n\n'
+            printf 'See README.md and EDGE.md in this archive for full options,\n'
+            printf 'and EDGE-WHICH-BUILD.md for the complete device table.\n'
+          } > "out/${package}/WHICH-DEVICE.txt"
+
           go version -m "out/${package}/ps2servers-edge" > "out/${package}/BUILD-METADATA.txt"
           file "out/${package}/ps2servers-edge" | tee "out/${package}/FILE-INSPECTION.txt"
           tar --sort=name --owner=0 --group=0 --numeric-owner \
