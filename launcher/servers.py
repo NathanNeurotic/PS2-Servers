@@ -142,6 +142,8 @@ def _udpfs_argv(v):
         args += ["--data-port", str(v["data_port"])]
     if v.get("bind"):
         args += ["--bind", str(v["bind"])]
+    if v.get("tx_delay_ms") is not None:
+        args += ["--tx-delay-ms", str(v["tx_delay_ms"])]
     timeout = _parse_seconds(v.get("peer_timeout"))
     if timeout is not None:
         args += ["--peer-timeout", str(timeout)]
@@ -221,7 +223,10 @@ UDPFS = ServerDef(
         Field("data_port", "Data port", "port", default=0, advanced=True,
               help="Leave 0 (auto) unless a firewall/NAT requires a predictable data port."),
         Field("bind", "Bind address", "text", default="", advanced=True,
-              help="Leave blank. Discovery already listens on every interface; this only pins the data source address."),
+              help="Leave blank. Discovery already listens on every network interface; this only pins the data source address."),
+        Field("tx_delay_ms", "TX delay (ms)", "text", default="0",
+              advanced=True,
+              help="Optional pacing delay between UDP transmissions in milliseconds."),
         Field("peer_timeout", "Idle timeout (seconds)", "text", default="3600",
               advanced=True,
               help="Drop an inactive console and close its handles after 60-86400 seconds."),

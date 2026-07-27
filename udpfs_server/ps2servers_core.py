@@ -19,6 +19,7 @@ from udpfs_server import (
     BLOCK_DEVICE_HANDLE,
     LIBCHDR_AVAILABLE,
     LZ4_AVAILABLE,
+    MAX_SEND_RETRIES,
     SESSION_TIMEOUT,
     SESSION_TIMEOUT_MAX,
     SESSION_TIMEOUT_MIN,
@@ -31,10 +32,13 @@ from udpfs_server import (
     UdpfsServer,
     _duration_arg,
     _env_bool,
+    _env_float,
     _env_duration,
     _env_int,
     _parse_port,
     _port_arg,
+    _send_with_retry,
+    _widen_send_buffer,
     resolve_data_port,
     split_bind,
 )
@@ -134,8 +138,7 @@ class AutoUdpfsServer(UdpfsServer):
         return self._init_compat(super()._get_or_create_session(addr))
 
     def _send_specific(self, sock, packet: bytes, addr):
-        with self.send_lock:
-            sock.sendto(packet, addr)
+        _send_with_retry(sock, packet, addr, self.send_lock, self.tx_delay_s)
 
     def _sendto(self, packet: bytes, addr):
         """Send replies through the socket negotiated for this session."""
@@ -372,6 +375,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--metrics", action="store_true", default=_env_bool("METRICS"))
     parser.add_argument("--metrics-period", type=_duration_arg("--metrics-period"),
                         default=_env_duration("METRICS_PERIOD", 60.0))
+    parser.add_argument("--tx-delay-ms", type=float,
+                        default=_env_float("TX_DELAY_MS", 0.0),
+                        help="Optional delay between UDP transmissions in milliseconds "
+                             "(env: TX_DELAY_MS)")
     return parser
 
 
@@ -438,6 +445,7 @@ def main():
         metrics_period=args.metrics_period,
         single_port=args.single_port,
         data_port=data_port,
+        tx_delay_ms=args.tx_delay_ms,
         protocol_mode=args.protocol_mode,
         fallback_interval=args.compat_fallback,
     )
