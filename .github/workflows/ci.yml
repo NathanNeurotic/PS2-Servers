@@ -26,6 +26,14 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q launcher smbv1_server udpbd_server udpfs_server ps2servers.py
 
+      - name: Check the packaged build ships every server source
+        # The launcher loads each server by file path, so Nuitka cannot see
+        # those imports and build.py has to list them as data. When that list
+        # drifted from the registry a release shipped whose UDPFS mode died
+        # with FileNotFoundError on ps2servers_core.py -- invisible from
+        # source, since the file is simply on disk there.
+        run: python -m unittest tests.test_packaging_data_files -v
+
       - name: Check release compliance posture
         run: python tools/check_release_compliance.py
 
