@@ -28,15 +28,15 @@ jobs:
         include:
           - os: windows-latest
             asset: PS2Servers-windows-x64.zip
-            folder_asset: PS2Servers-windows-x64-folder.zip
+            portable_asset: PS2Servers-windows-x64-portable.zip
           # 32-bit Windows, for older / low-end PCs still used for SMB on OPL.
           - os: windows-latest
             asset: PS2Servers-windows-x86.zip
-            folder_asset: PS2Servers-windows-x86-folder.zip
+            portable_asset: PS2Servers-windows-x86-portable.zip
             win_arch: x86
           - os: ubuntu-latest
             asset: PS2Servers-linux-x64
-            folder_asset: PS2Servers-linux-x64-folder.tar.gz
+            portable_asset: PS2Servers-linux-x64-portable.tar.gz
           - os: macos-latest
             asset: PS2Servers-macos-arm64.zip
           - os: macos-latest
@@ -159,40 +159,40 @@ jobs:
           checksum.write_text(f"{digest}  {asset.name}\n", encoding="utf-8")
 
       # Additional download for users whose antivirus flags the self-extracting
-      # onefile: a plain standalone folder (no extraction bootstrap). Built only
+      # onefile: a plain standalone directory (no extraction bootstrap). Built only
       # for Windows/Linux (macOS already ships a standalone .app).
-      - name: Build standalone folder
-        if: matrix.folder_asset != ''
+      - name: Build standalone portable build
+        if: matrix.portable_asset != ''
         continue-on-error: true
         env:
           PS2_BUILD_MODE: standalone
         run: python build/build.py
 
-      - name: Stage Windows folder artifact
-        if: runner.os == 'Windows' && matrix.folder_asset != ''
+      - name: Stage Windows portable artifact
+        if: runner.os == 'Windows' && matrix.portable_asset != ''
         continue-on-error: true
         shell: pwsh
         run: |
           $dist = Get-ChildItem dist -Directory -Filter *.dist | Select-Object -First 1
           if (-not $dist) { throw "standalone .dist folder not found in dist/" }
-          $packageDir = "out/PS2Servers-windows-${{ matrix.win_arch || 'x64' }}-folder"
+          $packageDir = "out/PS2Servers-windows-${{ matrix.win_arch || 'x64' }}-portable"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path "$($dist.FullName)/*" -Destination $packageDir -Recurse -Force
           Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
           if (Test-Path build/native) {
             Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
           }
-          Compress-Archive -Path $packageDir -DestinationPath "out/${{ matrix.folder_asset }}" -Force
+          Compress-Archive -Path $packageDir -DestinationPath "out/${{ matrix.portable_asset }}" -Force
 
-      - name: Stage Linux folder artifact
-        if: runner.os == 'Linux' && matrix.folder_asset != ''
+      - name: Stage Linux portable artifact
+        if: runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
         shell: bash
         run: |
           dist=$(ls -d dist/*.dist 2>/dev/null | head -1)
           test -n "$dist"
           cp ANTIVIRUS-NOTICE.md "$dist/"
-          ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/out/${{ matrix.folder_asset }}" "$(basename "$dist")" )
+          ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/out/${{ matrix.portable_asset }}" "$(basename "$dist")" )
 
       # An AppImage wraps the same standalone build so Linux users get desktop /
       # menu shortcuts and AppImageLauncher integration (a tester request).
@@ -201,7 +201,7 @@ jobs:
       # affects the primary Linux downloads. Files are written with printf, not
       # a heredoc, to avoid YAML indentation leaking into .desktop / AppRun.
       - name: Build Linux AppImage
-        if: runner.os == 'Linux' && matrix.folder_asset != ''
+        if: runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
         shell: bash
         run: |
@@ -253,7 +253,7 @@ jobs:
           ls -la "out/PS2Servers-x86_64.AppImage"
 
       - name: Write AppImage checksum
-        if: runner.os == 'Linux' && matrix.folder_asset != ''
+        if: runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
         shell: python
         run: |
@@ -266,15 +266,15 @@ jobs:
               asset.with_name(asset.name + ".sha256.txt").write_text(
                   f"{digest}  {asset.name}\n", encoding="utf-8")
 
-      - name: Write folder asset checksum
-        if: matrix.folder_asset != ''
+      - name: Write portable asset checksum
+        if: matrix.portable_asset != ''
         continue-on-error: true
         shell: python
         run: |
           import hashlib
           from pathlib import Path
 
-          asset = Path("out") / "${{ matrix.folder_asset }}"
+          asset = Path("out") / "${{ matrix.portable_asset }}"
           digest = hashlib.sha256(asset.read_bytes()).hexdigest()
           checksum = asset.with_name(asset.name + ".sha256.txt")
           checksum.write_text(f"{digest}  {asset.name}\n", encoding="utf-8")
@@ -289,13 +289,13 @@ jobs:
 
           | OS | Recommended | Also available |
           | --- | --- | --- |
-          | Windows x64 | \`PS2Servers-windows-x64-folder.zip\` (folder, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |
-          | Windows x86 (32-bit) | \`PS2Servers-windows-x86-folder.zip\` (folder, AV-clean) | \`PS2Servers-windows-x86.zip\` (single file) |
-          | Linux x64 | \`PS2Servers-linux-x64\` (single file) | \`PS2Servers-x86_64.AppImage\` (desktop/menu integration, newer) or \`PS2Servers-linux-x64-folder.tar.gz\` (folder; use if /tmp is noexec) |
+          | Windows x64 | \`PS2Servers-windows-x64-portable.zip\` (portable, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |
+          | Windows x86 (32-bit) | \`PS2Servers-windows-x86-portable.zip\` (portable, AV-clean) | \`PS2Servers-windows-x86.zip\` (single file) |
+          | Linux x64 | \`PS2Servers-linux-x64\` (single file) | \`PS2Servers-x86_64.AppImage\` (desktop/menu integration, newer) or \`PS2Servers-linux-x64-portable.tar.gz\` (portable; use if /tmp is noexec) |
           | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` | |
           | macOS — Intel | \`PS2Servers-macos-x64.zip\` | |
 
-          Run it: **Windows — unzip the folder build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the folder build comes up clean. Linux — \`chmod +x PS2Servers-linux-x64\` and run it; or try the newer \`.AppImage\` for desktop/menu shortcuts (via AppImageLauncher). macOS — unzip and right-click → Open (unsigned).
+          Run it: **Windows — unzip the portable build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the portable build comes up clean. Linux — \`chmod +x PS2Servers-linux-x64\` and run it; or try the newer \`.AppImage\` for desktop/menu shortcuts (via AppImageLauncher). macOS — unzip and right-click → Open (unsigned).
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 
@@ -339,17 +339,17 @@ jobs:
         with:
           subject-path: out/${{ matrix.asset }}
 
-      - name: Attest folder build provenance
-        if: matrix.folder_asset != ''
+      - name: Attest portable build provenance
+        if: matrix.portable_asset != ''
         continue-on-error: true
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
-          subject-path: out/${{ matrix.folder_asset }}
+          subject-path: out/${{ matrix.portable_asset }}
 
       - name: Attest Linux AppImage provenance
         # Same non-blocking contract as the AppImage build itself: only on Linux,
         # and never fail the release if the AppImage wasn't produced.
-        if: runner.os == 'Linux' && matrix.folder_asset != ''
+        if: runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
@@ -363,15 +363,15 @@ jobs:
             out/${{ matrix.asset }}
             out/${{ matrix.asset }}.sha256.txt
 
-      - name: Upload folder build artifact
-        if: matrix.folder_asset != ''
+      - name: Upload portable build artifact
+        if: matrix.portable_asset != ''
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.folder_asset }}
+          name: ${{ matrix.portable_asset }}
           path: |
-            out/${{ matrix.folder_asset }}
-            out/${{ matrix.folder_asset }}.sha256.txt
+            out/${{ matrix.portable_asset }}
+            out/${{ matrix.portable_asset }}.sha256.txt
 
       # A tag with a '-' qualifier (v0.4.5-rc1, v0.5.0-beta2) is a pre-release:
       # publish it as such and never let it take the "Latest" badge from the
@@ -388,8 +388,8 @@ jobs:
             out/${{ matrix.asset }}
             out/${{ matrix.asset }}.sha256.txt
 
-      - name: Attach folder build to release
-        if: startsWith(github.ref, 'refs/tags/') && matrix.folder_asset != ''
+      - name: Attach portable build to release
+        if: startsWith(github.ref, 'refs/tags/') && matrix.portable_asset != ''
         continue-on-error: true
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
@@ -398,13 +398,13 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
           files: |
-            out/${{ matrix.folder_asset }}
-            out/${{ matrix.folder_asset }}.sha256.txt
+            out/${{ matrix.portable_asset }}
+            out/${{ matrix.portable_asset }}.sha256.txt
 
       - name: Attach Linux AppImage to release
         # Only if the build actually produced one -- the glob attaches nothing
         # when absent, so a failed AppImage build never blocks the release.
-        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux' && matrix.folder_asset != ''
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:

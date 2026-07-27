@@ -14,9 +14,9 @@ information is published at [falsepositives.html](falsepositives.html).
 - Product name: PS2 Servers
 - Windows executable: PS2Servers.exe
 - Windows release package: PS2Servers-windows-x64.zip
-- Windows folder package (alternative): PS2Servers-windows-x64-folder.zip
+- Windows portable package (alternative): PS2Servers-windows-x64-portable.zip
 - 32-bit Windows release package: PS2Servers-windows-x86.zip
-- 32-bit Windows folder package (alternative): PS2Servers-windows-x86-folder.zip
+- 32-bit Windows portable package (alternative): PS2Servers-windows-x86-portable.zip
 - Repository: https://github.com/NathanNeurotic/PS2-Servers
 
 Packaged Windows builds include version metadata: company name, product name,
@@ -48,15 +48,15 @@ Characteristics that can trip heuristics:
 None of these is malicious behavior; each is inherent to "an unsigned, bundled,
 local network tool."
 
-## Two download shapes (folder is recommended on Windows)
+## Two download shapes (portable is recommended on Windows)
 
-**On Windows, the folder build is the recommended download.** Windows and Linux
-each ship a **folder** build (`PS2Servers-windows-x64-folder.zip` — or
-`PS2Servers-windows-x86-folder.zip` on 32-bit Windows — and
-`PS2Servers-linux-x64-folder.tar.gz`): the same application laid out as a plain
+**On Windows, the portable build is the recommended download.** Windows and Linux
+each ship a **portable** build (`PS2Servers-windows-x64-portable.zip` — or
+`PS2Servers-windows-x86-portable.zip` on 32-bit Windows — and
+`PS2Servers-linux-x64-portable.tar.gz`): the same application laid out as a plain
 folder of the executable plus its libraries, with **no self-extracting
 bootstrap** — which is the thing that makes the single-file `.exe` trip
-antivirus/SmartScreen heuristics. The folder build comes up clean where the
+antivirus/SmartScreen heuristics. The portable build comes up clean where the
 single file does not. Unzip it and run `PS2Servers.exe` (Windows) or
 `PS2Servers` (Linux) from inside the folder. A single-file build is also
 published per platform for convenience. macOS already ships as a standalone
@@ -189,7 +189,7 @@ read, and the packaged build is reproducible from source:
 ```sh
 python -m pip install -r requirements-build.txt
 python build/build.py                       # single file -> dist/PS2Servers(.exe)
-PS2_BUILD_MODE=standalone python build/build.py   # folder build -> dist/ps2servers.dist/
+PS2_BUILD_MODE=standalone python build/build.py   # portable build -> dist/ps2servers.dist/
 ```
 
 The official builds use Python 3.12 and the Nuitka version pinned in
