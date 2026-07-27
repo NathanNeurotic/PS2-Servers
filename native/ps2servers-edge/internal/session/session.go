@@ -27,6 +27,13 @@ type Handle struct {
 	Closer    io.Closer
 	Directory []DirEntry
 	Index     int
+	// Writer is non-nil only for a handle opened with write access. For a
+	// writable regular file it is the same *os.File as Reader, so read and
+	// seek keep working on it unchanged.
+	Writer io.Writer
+	// RealPath is the resolved on-disk path, retained so closing the handle
+	// can release this file's single-writer reservation.
+	RealPath string
 }
 
 type DirEntry struct {
@@ -59,6 +66,33 @@ type State struct {
 	NextHandle         int32
 	TxBuffer           []BufferedPacket
 	AckEvents          chan AckEvent
+
+	// In-flight write assembly. A WriteRequest opens the sequence and the
+	// chunks that follow accumulate here until ReceivedChunks reaches
+	// TotalChunks, at which point the buffer is written in one call. Held
+	// per-peer rather than per-server so two consoles writing at once cannot
+	// interleave into each other's buffer.
+	WriteActive        bool
+	WriteHandle        int32
+	WriteBuffer        []byte
+	WriteTotalChunks   uint16
+	WriteReceivedChunk uint16
+
+	// ReleaseWriter, when set by the server, is called with a handle's
+	// RealPath as that handle is closed if it held write access, so the
+	// server's single-writer reservation for that file is dropped.
+	ReleaseWriter func(realPath string)
+}
+
+// ResetWrite abandons any partially assembled write. Called when a write
+// sequence completes, errors, or the session is reset, so a stale buffer can
+// never be flushed into a later unrelated write.
+func (s *State) ResetWrite() {
+	s.WriteActive = false
+	s.WriteHandle = 0
+	s.WriteBuffer = nil
+	s.WriteTotalChunks = 0
+	s.WriteReceivedChunk = 0
 }
 
 type BufferedPacket struct {
@@ -94,6 +128,7 @@ func (s *State) Reset(profile Profile) {
 	s.Streaming = false
 	s.TxBuffer = nil
 	s.NextHandle = 1
+	s.ResetWrite()
 	for {
 		select {
 		case <-s.AckEvents:
@@ -106,9 +141,39 @@ func (s *State) Reset(profile Profile) {
 // Close closes every file owned by this peer. The caller must serialize access.
 func (s *State) Close() {
 	for id, h := range s.Handles {
+		s.releaseWrite(h)
 		if h.Closer != nil {
 			_ = h.Closer.Close()
 		}
 		delete(s.Handles, id)
 	}
+	s.ResetWrite()
+}
+
+// releaseWrite drops a writable handle's single-writer reservation. Routing
+// every teardown path through here -- explicit close, session reset, idle
+// reap, and server shutdown -- means a peer that vanishes mid-write cannot
+// leave a file reserved forever.
+func (s *State) releaseWrite(h *Handle) {
+	if h == nil || h.Writer == nil || h.RealPath == "" || s.ReleaseWriter == nil {
+		return
+	}
+	s.ReleaseWriter(h.RealPath)
+}
+
+// CloseHandle closes one handle and releases anything it held.
+func (s *State) CloseHandle(id int32) bool {
+	h := s.Handles[id]
+	if h == nil {
+		return false
+	}
+	s.releaseWrite(h)
+	if h.Closer != nil {
+		_ = h.Closer.Close()
+	}
+	delete(s.Handles, id)
+	if s.WriteActive && s.WriteHandle == id {
+		s.ResetWrite()
+	}
+	return true
 }

@@ -38,14 +38,42 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from launcher import app_icon, release_metadata
+from launcher.servers import REGISTRY
+
+# Support modules that a server entry point imports by name rather than being
+# an entry point itself, so they cannot be discovered from the registry.
+# udpfs_server/ps2servers_core.py does `from udpfs_server import (...)`.
+SUPPORT_FILES = [
+    "udpfs_server/udpfs_server.py",
+]
+
+
+def _server_entry_points():
+    """Every Python server module the launcher loads by file path at runtime.
+
+    Derived from REGISTRY rather than hand-listed: this list previously drifted
+    when the UDPFS entry point moved to ps2servers_core.py and build.py was not
+    updated, which shipped a packaged build whose UDPFS mode died with
+    FileNotFoundError on that exact file. Reading the registry means adding or
+    moving a server can no longer silently break the packaged app.
+    """
+    paths = set()
+    for server in REGISTRY.values():
+        if server.runtime != "python" or not server.module_file:
+            continue
+        rel = os.path.relpath(server.module_file, ROOT).replace(os.sep, "/")
+        paths.add(rel)
+    return paths
+
 
 # Server sources shipped as data at their original relative paths -- the launcher
 # loads these by file path at runtime (Nuitka can't see those dynamic imports).
-DATA_FILES = [
-    "smbv1_server/smbserver_opl.py",
-    "udpfs_server/udpfs_server.py",
-    "udpbd_server/udpbd_server.py",
-]
+DATA_FILES = sorted(_server_entry_points() | set(SUPPORT_FILES))
+
+_missing = [rel for rel in DATA_FILES if not os.path.isfile(os.path.join(ROOT, rel))]
+if _missing:
+    raise SystemExit(
+        "build.py: server sources missing from the tree: " + ", ".join(_missing))
 # udpfs_server.py does `from compressed_iso import ...` on load. --include-data-dir
 # skips .py files, so compile it in as a real package instead (importable anywhere).
 # lz4 is optional in source mode, but bundled in packaged releases so normal users

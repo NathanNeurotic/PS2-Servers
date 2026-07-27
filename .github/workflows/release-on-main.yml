@@ -107,7 +107,12 @@ jobs:
         if: matrix.macos_arch != 'x86_64'
         run: python build/build.py
         env:
-          MACOS_TARGET_ARCH: ${{ matrix.macos_target_arch }}
+          # Was matrix.macos_target_arch, which the matrix never defines --
+          # actionlint flags it as undefined. Behaviour is unchanged: every
+          # entry that satisfies the `if` above leaves macos_arch unset, so
+          # both spellings expand to the empty string. Corrected so the
+          # reference is real rather than a trap for the next editor.
+          MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
 
       - name: Build app (macOS x64)
         if: matrix.macos_arch == 'x86_64'
@@ -159,18 +164,18 @@ jobs:
           path: ${{ matrix.asset_name }}
           if-no-files-found: error
 
-      # Additional "folder" download for users whose antivirus flags the
+      # Additional "portable" download for users whose antivirus flags the
       # self-extracting onefile (and for Linux hosts with a noexec /tmp). Same
       # app, no extraction bootstrap. Windows/Linux only; macOS already ships a
       # standalone .app.
-      - name: Build standalone folder
+      - name: Build standalone portable build
         if: matrix.portable_asset != ''
         continue-on-error: true
         env:
           PS2_BUILD_MODE: standalone
         run: python build/build.py
 
-      - name: Package Windows folder build
+      - name: Package Windows portable build
         if: runner.os == 'Windows' && matrix.portable_asset != ''
         continue-on-error: true
         shell: pwsh
@@ -186,7 +191,7 @@ jobs:
           }
           Compress-Archive -Path $packageDir -DestinationPath ${{ matrix.portable_asset }} -Force
 
-      - name: Package Linux folder build
+      - name: Package Linux portable build
         if: runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
         shell: bash
@@ -196,14 +201,14 @@ jobs:
           cp ANTIVIRUS-NOTICE.md "$dist/"
           ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/${{ matrix.portable_asset }}" "$(basename "$dist")" )
 
-      - name: Generate folder artifact attestation
+      - name: Generate portable artifact attestation
         if: matrix.portable_asset != ''
         continue-on-error: true
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: ${{ matrix.portable_asset }}
 
-      - name: Upload folder release asset artifact
+      - name: Upload portable release asset artifact
         if: matrix.portable_asset != ''
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -237,11 +242,26 @@ jobs:
           path: PS2Servers-source.zip
           if-no-files-found: error
 
+  # Edge builds here rather than in edge.yml so its binaries land in the same
+  # run that publishes the rolling release. The tag is main-<run>-<sha> using
+  # THIS workflow's run number, which edge.yml cannot know, and Edge finishes
+  # minutes before the Nuitka launcher builds -- so attaching from the other
+  # workflow would mean either guessing the tag or idling for the release to
+  # appear. Router users previously had to dig through workflow artifacts.
+  edge:
+    name: Build Edge binaries
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/edge-build.yml
+
   release:
     name: Publish release
     needs:
       - build
       - source
+      - edge
     runs-on: ubuntu-latest
 
     steps:
@@ -258,8 +278,8 @@ jobs:
         shell: bash
         run: |
           cd release-assets
-          # Required onefile/source assets plus the optional standalone-folder
-          # builds. Sum only the ones present so a missing optional folder asset
+          # Required onefile/source assets plus the optional standalone-portable
+          # builds. Sum only the ones present so a missing optional portable asset
           # never blocks the release of the primary downloads.
           assets=(
             PS2Servers-linux-x64
@@ -275,6 +295,15 @@ jobs:
           present=()
           for a in "${assets[@]}"; do
             [ -f "$a" ] && present+=("$a")
+          done
+          # Edge tarballs (PS2ServersEdge-<version>-<device-label>.tar.gz) are
+          # discovered by glob rather than listed, so adding a device target to
+          # the Edge matrix never requires editing this list. Their own
+          # per-file .sha256 companions stay out of the release to keep the
+          # asset list readable -- these lines cover them.
+          # Linux Edge targets are .tar.gz, Windows and macOS are .zip.
+          for f in PS2ServersEdge-*.tar.gz PS2ServersEdge-*.zip; do
+            [ -f "$f" ] && present+=("$f")
           done
           sha256sum "${present[@]}" > SHA256SUMS.txt
           cat SHA256SUMS.txt
@@ -305,7 +334,7 @@ jobs:
 
             ## Downloads
 
-            **On 64-bit Windows, download the folder build**
+            **On 64-bit Windows, download the portable build**
             (`PS2Servers-windows-x64-portable.zip`) and run `PS2Servers.exe` from
             inside the folder — it is the same app without the self-extracting
             wrapper that trips antivirus heuristics, so it comes up clean. A
@@ -315,6 +344,26 @@ jobs:
             `PS2Servers-windows-x86.zip`) instead — the x64 build will not run
             there. Linux: `PS2Servers-linux-x64` (or the `-portable.tar.gz` build if
             `/tmp` is `noexec`). macOS ships as a `.app`.
+
+            ### PS2 Servers Edge (routers, NAS, Raspberry Pi)
+
+            The `PS2ServersEdge-*` files are the headless native server for
+            devices where the desktop GUI and Python runtime do not fit —
+            routers, NAS units, Raspberry Pi and other embedded Linux. **You do
+            not need these for a normal PC**; use the launcher downloads above.
+
+            Each Edge file is named for the device family it serves, for example
+            `armv5-pogoplug-sheevaplug-dockstar`, `edgerouter-octeon-mips64`, or
+            `router-mips-little-endian-mt7621`. Run `uname -m` on the device and
+            match it using
+            [EDGE-WHICH-BUILD.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE-WHICH-BUILD.md).
+            Every archive also contains a `WHICH-DEVICE.txt` confirming what it
+            is for. Downloading the wrong one is harmless — it simply will not
+            run.
+
+            Edge is read-only and supports CSO/ZSO but **not CHD**. For OpenWrt,
+            build the source package for your exact target instead — see
+            [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
 
             ## Security transparency
 
@@ -354,6 +403,8 @@ jobs:
             release-assets/PS2Servers-windows-x64-portable.zip
             release-assets/PS2Servers-windows-x86.zip
             release-assets/PS2Servers-windows-x86-portable.zip
+            release-assets/PS2ServersEdge-*.tar.gz
+            release-assets/PS2ServersEdge-*.zip
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

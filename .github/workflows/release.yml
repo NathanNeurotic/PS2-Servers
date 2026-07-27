@@ -159,16 +159,16 @@ jobs:
           checksum.write_text(f"{digest}  {asset.name}\n", encoding="utf-8")
 
       # Additional download for users whose antivirus flags the self-extracting
-      # onefile: a plain standalone folder (no extraction bootstrap). Built only
+      # onefile: a plain standalone directory (no extraction bootstrap). Built only
       # for Windows/Linux (macOS already ships a standalone .app).
-      - name: Build standalone folder
+      - name: Build standalone portable build
         if: matrix.portable_asset != ''
         continue-on-error: true
         env:
           PS2_BUILD_MODE: standalone
         run: python build/build.py
 
-      - name: Stage Windows folder artifact
+      - name: Stage Windows portable artifact
         if: runner.os == 'Windows' && matrix.portable_asset != ''
         continue-on-error: true
         shell: pwsh
@@ -184,7 +184,7 @@ jobs:
           }
           Compress-Archive -Path $packageDir -DestinationPath "out/${{ matrix.portable_asset }}" -Force
 
-      - name: Stage Linux folder artifact
+      - name: Stage Linux portable artifact
         if: runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
         shell: bash
@@ -266,7 +266,7 @@ jobs:
               asset.with_name(asset.name + ".sha256.txt").write_text(
                   f"{digest}  {asset.name}\n", encoding="utf-8")
 
-      - name: Write folder asset checksum
+      - name: Write portable asset checksum
         if: matrix.portable_asset != ''
         continue-on-error: true
         shell: python
@@ -289,13 +289,13 @@ jobs:
 
           | OS | Recommended | Also available |
           | --- | --- | --- |
-          | Windows x64 | \`PS2Servers-windows-x64-portable.zip\` (folder, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |
-          | Windows x86 (32-bit) | \`PS2Servers-windows-x86-portable.zip\` (folder, AV-clean) | \`PS2Servers-windows-x86.zip\` (single file) |
-          | Linux x64 | \`PS2Servers-linux-x64\` (single file) | \`PS2Servers-x86_64.AppImage\` (desktop/menu integration, newer) or \`PS2Servers-linux-x64-portable.tar.gz\` (folder; use if /tmp is noexec) |
+          | Windows x64 | \`PS2Servers-windows-x64-portable.zip\` (portable, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |
+          | Windows x86 (32-bit) | \`PS2Servers-windows-x86-portable.zip\` (portable, AV-clean) | \`PS2Servers-windows-x86.zip\` (single file) |
+          | Linux x64 | \`PS2Servers-linux-x64\` (single file) | \`PS2Servers-x86_64.AppImage\` (desktop/menu integration, newer) or \`PS2Servers-linux-x64-portable.tar.gz\` (portable; use if /tmp is noexec) |
           | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` | |
           | macOS — Intel | \`PS2Servers-macos-x64.zip\` | |
 
-          Run it: **Windows — unzip the folder build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the folder build comes up clean. Linux — \`chmod +x PS2Servers-linux-x64\` and run it; or try the newer \`.AppImage\` for desktop/menu shortcuts (via AppImageLauncher). macOS — unzip and right-click → Open (unsigned).
+          Run it: **Windows — unzip the portable build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the portable build comes up clean. Linux — \`chmod +x PS2Servers-linux-x64\` and run it; or try the newer \`.AppImage\` for desktop/menu shortcuts (via AppImageLauncher). macOS — unzip and right-click → Open (unsigned).
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 
@@ -339,7 +339,7 @@ jobs:
         with:
           subject-path: out/${{ matrix.asset }}
 
-      - name: Attest folder build provenance
+      - name: Attest portable build provenance
         if: matrix.portable_asset != ''
         continue-on-error: true
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
@@ -363,7 +363,7 @@ jobs:
             out/${{ matrix.asset }}
             out/${{ matrix.asset }}.sha256.txt
 
-      - name: Upload folder build artifact
+      - name: Upload portable build artifact
         if: matrix.portable_asset != ''
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -388,7 +388,7 @@ jobs:
             out/${{ matrix.asset }}
             out/${{ matrix.asset }}.sha256.txt
 
-      - name: Attach folder build to release
+      - name: Attach portable build to release
         if: startsWith(github.ref, 'refs/tags/') && matrix.portable_asset != ''
         continue-on-error: true
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2

@@ -1,0 +1,405 @@
+name: Build Edge binaries (reusable)
+
+# Single source of truth for the PS2 Servers Edge build matrix and packaging.
+# Called by:
+#   - edge.yml            (PR / push validation, and tagged-release attach)
+#   - release-on-main.yml (so rolling main-* pre-releases carry Edge binaries
+#                          too -- they previously shipped launcher builds only,
+#                          leaving router users to dig through workflow
+#                          artifacts)
+#
+# Kept as one reusable workflow rather than copied into both callers so the
+# 11-target matrix and its device descriptions cannot drift apart.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Edge ${{ matrix.target }}
+    # No 'needs:' here -- gating is the caller's job. edge.yml runs its test
+    # job first; release-on-main.yml gates on its own build/source jobs.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # 'label' becomes the download filename, so it leads with the device
+        # family rather than the Go architecture -- a user should be able to
+        # pick the right file without knowing what "armv6" means. 'devices'
+        # is written into WHICH-DEVICE.txt inside the archive.
+        #
+        # Device claims are keyed to OpenWrt target names where possible,
+        # because those are authoritative and a user can verify them with
+        # opkg print-architecture. Model names are representative examples,
+        # never an exhaustive list -- see docs/EDGE-WHICH-BUILD.md.
+        include:
+          - target: linux-amd64
+            label: pc-64bit-amd64
+            goos: linux
+            goarch: amd64
+            devices: >-
+              64-bit PC, mini PC, home server, or x86 NAS (Synology/QNAP/TrueNAS
+              on Intel or AMD), and any 64-bit x86 virtual machine or container.
+              OpenWrt target x86/64. This is the right choice for almost any
+              ordinary computer made after ~2008. uname -m reports x86_64.
+
+          - target: linux-386
+            label: pc-32bit-i386
+            goos: linux
+            goarch: "386"
+            devices: >-
+              Older 32-bit-only PC or thin client, early Intel Atom systems, and
+              32-bit x86 virtual machines. OpenWrt target x86/generic. Use this
+              only if the 64-bit build refuses to run. uname -m reports i386,
+              i586 or i686.
+
+          - target: linux-arm64
+            label: arm64-pi3-pi4-pi5-nas
+            goos: linux
+            goarch: arm64
+            devices: >-
+              Raspberry Pi 3, 4, 5 and Pi Zero 2 W running a 64-bit OS; most
+              modern ARM NAS units; newer 64-bit routers (OpenWrt targets
+              mediatek, rockchip, bcm4908/bcmbca, mvebu 64-bit, ipq807x);
+              Odroid, Orange Pi, Rock Pi and similar 64-bit SBCs; Apple Silicon
+              Linux VMs. uname -m reports aarch64 or arm64.
+
+          - target: linux-armv7
+            label: armv7-pi2-32bit-routers
+            goos: linux
+            goarch: arm
+            goarm: "7"
+            devices: >-
+              Raspberry Pi 2, and Pi 3/4/5 running a 32-bit OS (very common --
+              check with uname -m, not the box); 32-bit ARM routers (OpenWrt
+              targets ipq40xx, ipq806x, mvebu 32-bit, bcm53xx); many ARM NAS
+              units from the 2013-2018 era. uname -m reports armv7l.
+
+          - target: linux-armv6
+            label: armv6-pi1-pi-zero
+            goos: linux
+            goarch: arm
+            goarm: "6"
+            devices: >-
+              Raspberry Pi 1 (all models) and Pi Zero / Zero W. These cannot run
+              the armv7 build. uname -m reports armv6l.
+
+          - target: linux-armv5
+            label: armv5-pogoplug-sheevaplug-dockstar
+            goos: linux
+            goarch: arm
+            goarm: "5"
+            devices: >-
+              Marvell Kirkwood plug computers and early ARM NAS boxes: SheevaPlug,
+              DreamPlug, GuruPlug, Pogoplug, Seagate FreeAgent DockStar, ZyXEL
+              NSA320, and similar. OpenWrt targets kirkwood and oxnas. These are
+              ARMv5TE and CANNOT run the armv6 or armv7 builds. uname -m
+              reports armv5tel.
+
+          - target: linux-mipsle
+            label: router-mips-little-endian-mt7621
+            goos: linux
+            goarch: mipsle
+            gomips: softfloat
+            devices: >-
+              Little-endian MIPS routers -- the most common modern budget router
+              class. OpenWrt targets ramips (mt7620, mt7621, mt76x8) and
+              ath79 little-endian variants. Examples: many GL.iNet travel
+              routers, Xiaomi/Redmi routers, Netgear R6220, Ubiquiti EdgeRouter
+              X (ER-X, which is MT7621 -- NOT the octeon build). opkg
+              print-architecture shows mipsel_*; uname -m reports mips.
+
+          - target: linux-mips
+            label: router-mips-big-endian-ath79
+            goos: linux
+            goarch: mips
+            gomips: softfloat
+            devices: >-
+              Big-endian MIPS routers, typically Atheros or Lantiq based.
+              OpenWrt targets ath79, ar71xx (legacy) and lantiq. Examples: many
+              TP-Link Archer C7 / WDR3600 / WDR4300 units, older Netgear and
+              AVM Fritz!Box models. opkg print-architecture shows mips_*
+              (no "el"); uname -m reports mips.
+
+          - target: linux-mips64
+            label: edgerouter-octeon-mips64
+            goos: linux
+            goarch: mips64
+            gomips64: softfloat
+            devices: >-
+              Cavium Octeon 64-bit MIPS devices, big-endian. OpenWrt target
+              octeon. Examples: Ubiquiti EdgeRouter Lite (ERLite-3), EdgeRouter
+              PoE, EdgeRouter 4/6P/12. NOTE: the EdgeRouter X (ER-X) is NOT in
+              this family -- it is MT7621, so use the little-endian MIPS build.
+              uname -m reports mips64.
+
+          - target: linux-mips64le
+            label: mips64-little-endian
+            goos: linux
+            goarch: mips64le
+            gomips64: softfloat
+            devices: >-
+              Little-endian 64-bit MIPS systems, including some Loongson-based
+              boards and little-endian octeon userlands. Uncommon -- if you are
+              not certain you need this, you almost certainly want one of the
+              32-bit MIPS router builds instead. uname -m reports mips64.
+
+          - target: linux-riscv64
+            label: riscv64-sbc
+            goos: linux
+            goarch: riscv64
+            devices: >-
+              64-bit RISC-V single-board computers, such as StarFive VisionFive
+              2, Milk-V, and LicheeRV. OpenWrt target sifiveu. uname -m
+              reports riscv64.
+
+          # Desktop builds. These exist mainly for people who want a single
+          # small binary with no Python runtime -- notably Windows users whose
+          # antivirus flags the packaged Python launcher. Shipped as .zip
+          # because Windows Explorer opens that natively and .tar.gz needs a
+          # command line.
+          - target: windows-amd64
+            label: windows-64bit
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            archive: zip
+            devices: >-
+              64-bit Windows 10 or 11 on a normal Intel or AMD PC. This is the
+              headless command-line server; if you want the graphical launcher,
+              download PS2Servers-windows-x64-folder.zip instead. Useful when
+              antivirus heuristics flag the packaged Python build, since this
+              is a single small native executable.
+
+          - target: windows-386
+            label: windows-32bit
+            goos: windows
+            goarch: "386"
+            ext: .exe
+            archive: zip
+            devices: >-
+              32-bit Windows, for older or low-end PCs where the 64-bit build
+              will not run. Headless command-line server.
+
+          - target: windows-arm64
+            label: windows-arm64
+            goos: windows
+            goarch: arm64
+            ext: .exe
+            archive: zip
+            devices: >-
+              Windows on ARM (Snapdragon-based laptops, Windows 11 ARM virtual
+              machines). Headless command-line server.
+
+          - target: darwin-arm64
+            label: macos-apple-silicon
+            goos: darwin
+            goarch: arm64
+            archive: zip
+            devices: >-
+              macOS on Apple Silicon (M1, M2, M3, M4 and later). Headless
+              command-line server; the graphical launcher ships separately as
+              PS2Servers-macos-arm64.zip. uname -m reports arm64.
+
+          - target: darwin-amd64
+            label: macos-intel
+            goos: darwin
+            goarch: amd64
+            archive: zip
+            devices: >-
+              macOS on Intel Macs. Headless command-line server; the graphical
+              launcher ships separately as PS2Servers-macos-x64.zip. uname -m
+              reports x86_64.
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@v6.4.0
+        with:
+          go-version-file: native/ps2servers-edge/go.mod
+          cache: false
+      - name: Resolve reproducible version metadata
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.5.0-edge.${GITHUB_SHA::7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "source_date_epoch=$(git show -s --format=%ct HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Build static binary
+        working-directory: native/ps2servers-edge
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          GOMIPS: ${{ matrix.gomips }}
+          GOMIPS64: ${{ matrix.gomips64 }}
+          SOURCE_DATE_EPOCH: ${{ steps.version.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/out/stage"
+          go build -trimpath -buildvcs=true \
+            -ldflags="-s -w -buildid= -X main.version=${{ steps.version.outputs.version }}" \
+            -o "$GITHUB_WORKSPACE/out/stage/ps2servers-edge${{ matrix.ext }}" ./cmd/ps2servers-edge
+      - name: Inspect and package artifact
+        shell: bash
+        # Matrix values come through env rather than direct ${{ }} interpolation:
+        # the device prose contains backticks, quotes and slashes that would
+        # otherwise be pasted straight into the script body.
+        env:
+          TARGET: ${{ matrix.target }}
+          LABEL: ${{ matrix.label }}
+          DEVICES: ${{ matrix.devices }}
+          GOARCH_V: ${{ matrix.goarch }}
+          GOARM_V: ${{ matrix.goarm }}
+          GOMIPS_V: ${{ matrix.gomips }}
+          GOMIPS64_V: ${{ matrix.gomips64 }}
+          VERSION: ${{ steps.version.outputs.version }}
+          EXT: ${{ matrix.ext }}
+          ARCHIVE: ${{ matrix.archive }}
+          GOOS_V: ${{ matrix.goos }}
+        run: |
+          set -euo pipefail
+          # Filename leads with the device family so the release page is
+          # readable without knowing Go architecture names. The Go target is
+          # still recorded in WHICH-DEVICE.txt and BUILD-METADATA.txt.
+          package="PS2ServersEdge-${VERSION}-${LABEL}"
+          binary="ps2servers-edge${EXT}"
+          mkdir -p "out/${package}/licenses"
+          mv "out/stage/${binary}" "out/${package}/${binary}"
+          chmod +x "out/${package}/${binary}"
+          cp native/ps2servers-edge/README.md "out/${package}/README.md"
+          cp docs/EDGE.md docs/EDGE-WHICH-BUILD.md docs/PROTOCOL-COMPATIBILITY.md \
+             docs/EDITIONS.md "out/${package}/"
+          cp THIRD_PARTY_NOTICES.md "out/${package}/licenses/THIRD_PARTY_NOTICES.md"
+
+          # Plain-language "is this the right download?" note, first thing a
+          # user sees after extracting.
+          {
+            printf 'PS2 Servers Edge %s\n' "${VERSION}"
+            printf '=====================================\n\n'
+            printf 'IS THIS THE RIGHT DOWNLOAD?\n\n'
+            printf 'This build is for:\n\n'
+            printf '%s\n\n' "${DEVICES}" | fold -s -w 76
+            printf -- '-------------------------------------\n\n'
+            printf 'NOT SURE? Run this on the device:\n\n'
+            printf '    uname -m\n\n'
+            printf 'and on OpenWrt also:\n\n'
+            printf '    opkg print-architecture\n\n'
+            printf 'then match it against docs/EDGE-WHICH-BUILD.md in this archive.\n'
+            printf 'Downloading the wrong build is harmless -- it simply will not\n'
+            printf 'run, usually with "cannot execute binary file" or "Exec format\n'
+            printf 'error". Nothing is damaged; just try another one.\n\n'
+            printf -- '-------------------------------------\n\n'
+            printf 'WHAT THIS BUILD IS\n\n'
+            printf '  Go target      : GOOS=linux GOARCH=%s' "${GOARCH_V}"
+            [ -n "${GOARM_V}" ]     && printf ' GOARM=%s' "${GOARM_V}"
+            [ -n "${GOMIPS_V}" ]    && printf ' GOMIPS=%s' "${GOMIPS_V}"
+            [ -n "${GOMIPS64_V}" ]  && printf ' GOMIPS64=%s' "${GOMIPS64_V}"
+            printf '\n'
+            printf '  Internal name  : %s\n' "${TARGET}"
+            printf '  Linking        : static, CGO disabled (no shared libraries\n'
+            printf '                   needed, runs on musl and glibc systems)\n'
+            printf '  Compression    : CSO / ZSO supported. CHD is NOT supported\n'
+            printf '                   in Edge builds -- CHD needs a native\n'
+            printf '                   library that would break static linking.\n'
+            printf '                   Use the Desktop (Python) server for CHD.\n'
+            printf '  Access         : read-only by default. Pass\n'
+            printf '                   --read-only=false to allow the console to\n'
+            printf '                   write (saves). Only one client may hold a\n'
+            printf '                   given file open for writing at a time.\n\n'
+            printf 'QUICK START\n\n'
+            if [ "${GOOS_V}" = "windows" ]; then
+              printf '    %s udpfs --root D:\\PS2Games\n\n' "${binary}"
+            else
+              printf '    ./%s udpfs --root /path/to/games\n\n' "${binary}"
+            fi
+            printf 'See README.md and EDGE.md in this archive for full options,\n'
+            printf 'and EDGE-WHICH-BUILD.md for the complete device table.\n'
+          } > "out/${package}/WHICH-DEVICE.txt"
+
+          go version -m "out/${package}/${binary}" > "out/${package}/BUILD-METADATA.txt"
+          file "out/${package}/${binary}" | tee "out/${package}/FILE-INSPECTION.txt"
+          # Windows and macOS ship .zip: Explorer and Finder both open it with
+          # a double-click, while .tar.gz needs a command line on Windows.
+          # Everything else stays .tar.gz, which preserves the exec bit that
+          # routers and NAS boxes need.
+          if [ "${ARCHIVE}" = "zip" ]; then
+            # Built with python3 rather than zip(1) so the archive is
+            # reproducible: entries are sorted and every timestamp is pinned to
+            # SOURCE_DATE_EPOCH. zip(1) stores real mtimes, which would make
+            # two builds of the same commit differ and undermine the
+            # attestation the next step produces.
+            SOURCE_DATE_EPOCH="${{ steps.version.outputs.source_date_epoch }}" \
+            PKG="${package}" python3 - <<'PYZIP'
+          import os, time, zipfile
+          pkg = os.environ["PKG"]
+          stamp = time.gmtime(int(os.environ["SOURCE_DATE_EPOCH"]))[:6]
+          root = os.path.join("out", pkg)
+          names = []
+          for dirpath, dirnames, filenames in os.walk(root):
+              dirnames.sort()
+              for fn in sorted(filenames):
+                  names.append(os.path.join(dirpath, fn))
+          names.sort()
+          with zipfile.ZipFile(os.path.join("out", pkg + ".zip"), "w",
+                               zipfile.ZIP_DEFLATED) as z:
+              for path in names:
+                  arc = os.path.relpath(path, "out").replace(os.sep, "/")
+                  info = zipfile.ZipInfo(arc, date_time=stamp)
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  # Preserve the executable bit for the server binary so macOS
+                  # users are not left chmod-ing it after unzipping.
+                  mode = 0o755 if os.access(path, os.X_OK) else 0o644
+                  info.external_attr = (mode & 0xFFFF) << 16
+                  with open(path, "rb") as f:
+                      z.writestr(info, f.read())
+          PYZIP
+            sha256sum "out/${package}.zip" > "out/${package}.zip.sha256"
+          else
+            tar --sort=name --owner=0 --group=0 --numeric-owner \
+              --mtime="@${{ steps.version.outputs.source_date_epoch }}" \
+              -czf "out/${package}.tar.gz" -C out "${package}"
+            sha256sum "out/${package}.tar.gz" > "out/${package}.tar.gz.sha256"
+          fi
+          printf '%s\n' "${package}" > out/artifact-name.txt
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: |
+            out/*.tar.gz
+            out/*.zip
+      - name: Upload Edge artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PS2ServersEdge-${{ matrix.target }}
+          # Linux targets produce .tar.gz, Windows and macOS produce .zip.
+          # Both are listed because a target only ever emits one of them, and
+          # if-no-files-found: error still catches a target emitting neither.
+          path: |
+            out/*.tar.gz
+            out/*.tar.gz.sha256
+            out/*.zip
+            out/*.zip.sha256
+          if-no-files-found: error
+      - name: Attach Edge artifact to tagged release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: |
+            out/*.tar.gz
+            out/*.tar.gz.sha256
+            out/*.zip
+            out/*.zip.sha256
+
