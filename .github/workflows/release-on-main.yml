@@ -301,7 +301,8 @@ jobs:
           # the Edge matrix never requires editing this list. Their own
           # per-file .sha256 companions stay out of the release to keep the
           # asset list readable -- these lines cover them.
-          for f in PS2ServersEdge-*.tar.gz; do
+          # Linux Edge targets are .tar.gz, Windows and macOS are .zip.
+          for f in PS2ServersEdge-*.tar.gz PS2ServersEdge-*.zip; do
             [ -f "$f" ] && present+=("$f")
           done
           sha256sum "${present[@]}" > SHA256SUMS.txt
@@ -403,6 +404,7 @@ jobs:
             release-assets/PS2Servers-windows-x86.zip
             release-assets/PS2Servers-windows-x86-folder.zip
             release-assets/PS2ServersEdge-*.tar.gz
+            release-assets/PS2ServersEdge-*.zip
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

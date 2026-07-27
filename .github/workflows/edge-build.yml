@@ -377,14 +377,21 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
-          subject-path: out/*.tar.gz
+          subject-path: |
+            out/*.tar.gz
+            out/*.zip
       - name: Upload Edge artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: PS2ServersEdge-${{ matrix.target }}
+          # Linux targets produce .tar.gz, Windows and macOS produce .zip.
+          # Both are listed because a target only ever emits one of them, and
+          # if-no-files-found: error still catches a target emitting neither.
           path: |
             out/*.tar.gz
             out/*.tar.gz.sha256
+            out/*.zip
+            out/*.zip.sha256
           if-no-files-found: error
       - name: Attach Edge artifact to tagged release
         if: startsWith(github.ref, 'refs/tags/')
@@ -393,4 +400,6 @@ jobs:
           files: |
             out/*.tar.gz
             out/*.tar.gz.sha256
+            out/*.zip
+            out/*.zip.sha256
 
