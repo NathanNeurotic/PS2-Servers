@@ -101,12 +101,39 @@ should use an explicit build tag, supported host/target combinations, separate
 artifact names, dependency documentation, and CHD integration fixtures. The
 CGO-free router binaries remain independent of that path.
 
-## UDPBD status
+## UDPBD
 
-Native UDPBD is not advertised in this version. The CLI architecture reserves a
-peer subcommand boundary, but verified native UDPBD requires protocol fixtures
-and integration tests that demonstrate real sector reads and correct responses.
-Desktop/Core UDPBD is unchanged.
+Edge serves a disk image as a network block device as well as serving folders
+over UDPFS, so picking Edge does not cost you a server the Desktop build has:
+
+```sh
+ps2servers-edge udpbd --image /mnt/ps2.img          # read/write
+ps2servers-edge udpbd --image /mnt/ps2.img --read-only
+```
+
+It is a separate protocol on its own fixed port (`0xBDBD`), so it is a separate
+subcommand: one invocation serves either a folder of files or one image as a raw
+drive, never both. In OPL, choose UDPBD — there is no IP or port to enter, the
+console finds the server by broadcast.
+
+**UDPFS versus UDPBD.** UDPFS is a network file share: the console asks for a
+named file and a byte range, and the server understands files. UDPBD is a
+network hard drive: the console asks for numbered 512-byte sectors, and the
+server has no idea what is in them, because the filesystem lives inside the
+image and only the PS2 interprets it.
+
+Implemented: `INFO`, `READ` with RDMA streaming and the upstream block-size
+optimizer, and `WRITE` with its RDMA handshake. Requests that run past the end
+of the image are refused rather than answered with unbounded zero padding.
+Truncated and unsolicited RDMA packets are dropped rather than written at an
+arbitrary offset. A read-only image reports `-1` rather than faking a successful
+save.
+
+The wire format was ported from this repository's hardware-validated Python
+UDPBD server, and `conformance/integration/udpbd_probe.py` runs against **both**
+implementations in CI, finishing by asserting that the two produce byte-identical
+images from identical writes. A divergence surfaces as a CI failure rather than
+as a console that will not boot.
 
 ## Writes
 
@@ -149,7 +176,10 @@ they held is released. Normal logs do not print full requested host paths.
 
 - unit tested: yes
 - loopback integration tested: yes
-- shared conformance probe (`conformance/integration/udpfs_probe.py`): yes, run
+- shared UDPBD conformance probe (`conformance/integration/udpbd_probe.py`): yes,
+  run against Edge AND the Python server in CI, asserting both produce
+  byte-identical images from identical writes
+- shared UDPFS conformance probe (`conformance/integration/udpfs_probe.py`): yes, run
   against a live Edge process in CI — standard plus three Modulo-shaped clients
   concurrently, covering the 4095 → 0 sequence wrap
 - parser fuzz seeds: yes

@@ -53,12 +53,31 @@ Guarantees:
   silently concatenating it into the wrong place
 - completed writes are flushed with `fsync` before `WRITE_DONE` is sent
 
+## UDPBD
+
+Edge also serves a single disk image as a network block device, so choosing
+Edge no longer means giving up a server the Desktop build has:
+
+```sh
+./ps2servers-edge udpbd --image /mnt/ps2.img          # read/write
+./ps2servers-edge udpbd --image /mnt/ps2.img --read-only
+```
+
+UDPBD is a different level of abstraction from UDPFS. UDPFS is a network file
+share: the console asks for a named file and a byte range. UDPBD is a network
+hard drive: the console asks for numbered 512-byte sectors, and the filesystem
+lives inside the image where only the PS2 interprets it. In OPL, pick UDPBD; no
+IP or port is entered, the console finds the server by broadcast.
+
+Implemented: INFO, READ with RDMA streaming and the upstream block-size
+optimizer, and WRITE with the RDMA handshake. Out-of-range, truncated and
+unsolicited RDMA packets are refused rather than written. A read-only image
+reports failure rather than faking a successful save.
+
 ## Not claimed
 
 - CHD in generic static builds
-- native UDPBD
-- block-device writes (`BWRITE`); file writes only
-- emulator or physical-console verification of the write path
+- emulator or physical-console verification of the write paths
 
 See `docs/EDGE.md`, `docs/PROTOCOL-COMPATIBILITY.md`, and
 `docs/EDGE-ARCHITECTURE.md` for installation, compatibility, security, and

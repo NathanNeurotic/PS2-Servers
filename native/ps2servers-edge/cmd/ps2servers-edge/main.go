@@ -14,13 +14,19 @@ import (
 
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpbd"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpfs"
 )
 
 var version = "dev"
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "PS2 Servers Edge %s\n\nUsage:\n  ps2servers-edge udpfs --root /games [options]\n  ps2servers-edge --version\n\n", version)
+	fmt.Fprintf(os.Stderr, "PS2 Servers Edge %s\n\nUsage:\n"+
+		"  ps2servers-edge udpfs --root /games [options]\n"+
+		"  ps2servers-edge udpbd --image /path/ps2.img [options]\n"+
+		"  ps2servers-edge --version\n\n"+
+		"  udpfs serves a folder as a network file share.\n"+
+		"  udpbd serves one disk image as a network hard drive.\n\n", version)
 }
 func duration(v string) (time.Duration, error) {
 	if v == "" {
@@ -38,6 +44,10 @@ func duration(v string) (time.Duration, error) {
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "version") {
 		fmt.Printf("ps2servers-edge %s\n", version)
+		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "udpbd" {
+		runUDPBD()
 		return
 	}
 	if len(os.Args) < 2 || os.Args[1] != "udpfs" {
@@ -161,4 +171,52 @@ func envFloat(name string, def float64) float64 {
 		return def
 	}
 	return n
+}
+
+// runUDPBD serves one disk image as a network block device.
+//
+// UDPBD is a separate protocol from UDPFS on its own fixed port, so it gets its
+// own subcommand rather than a flag: a server serves either a folder of files
+// or one image as a raw drive, never both from the same invocation.
+func runUDPBD() {
+	fs := flag.NewFlagSet("udpbd", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	image := fs.String("image", env("BDPATH", ""), "disk image to serve as a block device")
+	bind := fs.String("bind", env("BIND", "0.0.0.0"), "IPv4 bind address")
+	port := fs.Int("port", envInt("UDPBD_PORT", udpbd.Port), "UDP port (default 0xBDBD)")
+	readOnly := fs.Bool("read-only", envBool("RO", false), "serve the image read-only")
+	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
+	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
+	quiet := fs.Bool("quiet", false, "suppress informational logs")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(2)
+	}
+	// Accept a bare positional image too, matching how the Python UDPBD server
+	// is invoked (`udpbd_server.py <image>`).
+	if *image == "" && fs.NArg() > 0 {
+		*image = fs.Arg(0)
+	}
+	if *image == "" {
+		fmt.Fprintln(os.Stderr, "error: --image is required")
+		os.Exit(2)
+	}
+	if *logFormat != "text" && *logFormat != "json" {
+		fmt.Fprintln(os.Stderr, "error: --log-format must be text or json")
+		os.Exit(2)
+	}
+	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
+	server, err := udpbd.New(udpbd.Config{
+		Image: *image, Bind: *bind, Port: *port, ReadOnly: *readOnly, Log: logger,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	defer server.Close()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err = server.Serve(ctx); err != nil {
+		logger.Error("server stopped", map[string]any{"error": err})
+		os.Exit(1)
+	}
 }
