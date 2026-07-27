@@ -4,8 +4,7 @@
 homebrew tool that runs small local-network servers. Some antivirus engines flag
 the single-file build with *generic, machine-learning* warnings. This is a
 **false positive** caused by how the file is packaged — not by anything the
-program does. If you'd rather not see the warning at all, use the **folder
-build** (see below); it is the same app and comes up clean.
+program does. If you'd rather not see the warning at all, use the **portable build** (see below); it is the same app and comes up clean.
 
 ## What you might see
 
@@ -47,15 +46,15 @@ All three are normal for this kind of utility. None of them is malware.
   persistence/autostart, adware, browser modification, crypto-mining, or remote
   control. The only network activity is the LAN server(s) *you* choose to start.
 
-## If you'd rather be cautious — use the folder build
+## If you'd rather be cautious — use the portable build
 
-The release also includes a **folder build** named
-`PS2Servers-windows-x64-folder.zip`. It is the **same application**, just laid out
+The release also includes a **portable build** named
+`PS2Servers-windows-x64-portable.zip`. It is the **same application**, just laid out
 as an ordinary folder of files instead of one self-extracting `.exe`. Because it
 has no self-extraction step, it does **not** trip the heuristics above and comes
 up **clean** on antivirus.
 
-1. Download `PS2Servers-windows-x64-folder.zip` from the release page.
+1. Download `PS2Servers-windows-x64-portable.zip` from the release page.
 2. Unzip it and run `PS2Servers.exe` from inside the folder.
 
 (You can also skip the prebuilt binaries entirely and run from the Python source.)
@@ -74,7 +73,7 @@ The one thing that reliably stops these heuristic flags on the single-file `.exe
 is an **Authenticode code-signing certificate** from a certificate authority
 (OV or EV). That is a recurring paid cost — and EV also needs a hardware token —
 which is out of scope for a free hobby project. A standard certificate still has
-to *earn* SmartScreen reputation over time. Until then, the **folder build**
+to *earn* SmartScreen reputation over time. Until then, the **portable build**
 avoids the problem today, and reporting the false positive to your vendor helps
 clear it for everyone.
 

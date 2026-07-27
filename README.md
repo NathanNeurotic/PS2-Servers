@@ -22,15 +22,15 @@ It detects your PC's LAN IP and shows the exact settings to enter in your loader
 than from any guide, since your address and port are specific to your machine.
 
 - **Packaged app (no Python needed):** download the release for your OS.
-  **On Windows, prefer the folder build** — unzip
-  `PS2Servers-windows-x64-folder.zip` and run **`PS2Servers.exe`** from inside
+  **On Windows, prefer the portable build** — unzip
+  `PS2Servers-windows-x64-portable.zip` and run **`PS2Servers.exe`** from inside
   the folder. It is the same app, but without the self-extracting wrapper that
   makes the single-file `.exe` trip antivirus heuristics, so it comes up clean.
   A single-file `PS2Servers-windows-x64.zip` is still provided for convenience
   if your AV doesn't object. **On 32-bit Windows, use the
-  `PS2Servers-windows-x86.zip` (or `PS2Servers-windows-x86-folder.zip`)
+  `PS2Servers-windows-x86.zip` (or `PS2Servers-windows-x86-portable.zip`)
   builds** instead (same app, built for older / low-end PCs). (Linux:
-  `PS2Servers-linux-x64`, or `PS2Servers-linux-x64-folder.tar.gz` if `/tmp` is
+  `PS2Servers-linux-x64`, or `PS2Servers-linux-x64-portable.tar.gz` if `/tmp` is
   mounted `noexec`.)
 - **From source:** double-click **`Start-Launcher.bat`** (Windows) or run
   `./start-launcher.sh` (Linux/macOS). Requires Python 3.
@@ -73,7 +73,7 @@ If a download is flagged, the antivirus statement
 version at [docs/falsepositives.html](docs/falsepositives.html)) explains exactly
 why heuristics fire, what the app does and does not do, how to verify a download,
 and how to report a false positive to each vendor. A non-self-extracting
-**folder** build is offered as an alternative download for AV-wary users.
+**portable** build is offered as an alternative download for AV-wary users.
 
 See [SECURITY.md](SECURITY.md) for verification, cleanup, and reporting details.
 See [docs/antivirus-transparency.md](docs/antivirus-transparency.md) for the
@@ -299,7 +299,7 @@ gh attestation verify PS2Servers-windows-x64.zip -R NathanNeurotic/PS2-Servers
 Checksums prove the file was downloaded intact. Attestations prove build
 provenance. Neither is a magic safety certificate. Because the app is plain
 Python and `build/build.py` rebuilds the release from source (single-file or
-`PS2_BUILD_MODE=standalone` folder build), the lowest-trust path is to inspect
+`PS2_BUILD_MODE=standalone` portable build), the lowest-trust path is to inspect
 the source and build/run it yourself — see
 [docs/antivirus-transparency.md](docs/antivirus-transparency.md) for the full
 verification, "build it yourself", and false-positive-reporting guide.

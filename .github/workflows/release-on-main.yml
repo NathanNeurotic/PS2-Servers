@@ -25,15 +25,15 @@ jobs:
         include:
           - os: windows-latest
             asset_name: PS2Servers-windows-x64.zip
-            folder_asset: PS2Servers-windows-x64-folder.zip
+            portable_asset: PS2Servers-windows-x64-portable.zip
           # 32-bit Windows, for older / low-end PCs still used for SMB on OPL.
           - os: windows-latest
             asset_name: PS2Servers-windows-x86.zip
-            folder_asset: PS2Servers-windows-x86-folder.zip
+            portable_asset: PS2Servers-windows-x86-portable.zip
             win_arch: x86
           - os: ubuntu-latest
             asset_name: PS2Servers-linux-x64
-            folder_asset: PS2Servers-linux-x64-folder.tar.gz
+            portable_asset: PS2Servers-linux-x64-portable.tar.gz
           - os: macos-latest
             asset_name: PS2Servers-macos-arm64.zip
           - os: macos-latest
@@ -164,52 +164,52 @@ jobs:
       # app, no extraction bootstrap. Windows/Linux only; macOS already ships a
       # standalone .app.
       - name: Build standalone folder
-        if: matrix.folder_asset != ''
+        if: matrix.portable_asset != ''
         continue-on-error: true
         env:
           PS2_BUILD_MODE: standalone
         run: python build/build.py
 
       - name: Package Windows folder build
-        if: runner.os == 'Windows' && matrix.folder_asset != ''
+        if: runner.os == 'Windows' && matrix.portable_asset != ''
         continue-on-error: true
         shell: pwsh
         run: |
           $dist = Get-ChildItem dist -Directory -Filter *.dist | Select-Object -First 1
           if (-not $dist) { throw "standalone .dist folder not found in dist/" }
-          $packageDir = "PS2Servers-windows-${{ matrix.win_arch || 'x64' }}-folder"
+          $packageDir = "PS2Servers-windows-${{ matrix.win_arch || 'x64' }}-portable"
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path "$($dist.FullName)/*" -Destination $packageDir -Recurse -Force
           Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
           if (Test-Path build/native) {
             Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
           }
-          Compress-Archive -Path $packageDir -DestinationPath ${{ matrix.folder_asset }} -Force
+          Compress-Archive -Path $packageDir -DestinationPath ${{ matrix.portable_asset }} -Force
 
       - name: Package Linux folder build
-        if: runner.os == 'Linux' && matrix.folder_asset != ''
+        if: runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
         shell: bash
         run: |
           dist=$(ls -d dist/*.dist 2>/dev/null | head -1)
           test -n "$dist"
           cp ANTIVIRUS-NOTICE.md "$dist/"
-          ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/${{ matrix.folder_asset }}" "$(basename "$dist")" )
+          ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/${{ matrix.portable_asset }}" "$(basename "$dist")" )
 
       - name: Generate folder artifact attestation
-        if: matrix.folder_asset != ''
+        if: matrix.portable_asset != ''
         continue-on-error: true
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
-          subject-path: ${{ matrix.folder_asset }}
+          subject-path: ${{ matrix.portable_asset }}
 
       - name: Upload folder release asset artifact
-        if: matrix.folder_asset != ''
+        if: matrix.portable_asset != ''
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.folder_asset }}
-          path: ${{ matrix.folder_asset }}
+          name: ${{ matrix.portable_asset }}
+          path: ${{ matrix.portable_asset }}
           if-no-files-found: error
 
   source:
@@ -263,14 +263,14 @@ jobs:
           # never blocks the release of the primary downloads.
           assets=(
             PS2Servers-linux-x64
-            PS2Servers-linux-x64-folder.tar.gz
+            PS2Servers-linux-x64-portable.tar.gz
             PS2Servers-macos-arm64.zip
             PS2Servers-macos-x64.zip
             PS2Servers-source.zip
             PS2Servers-windows-x64.zip
-            PS2Servers-windows-x64-folder.zip
+            PS2Servers-windows-x64-portable.zip
             PS2Servers-windows-x86.zip
-            PS2Servers-windows-x86-folder.zip
+            PS2Servers-windows-x86-portable.zip
           )
           present=()
           for a in "${assets[@]}"; do
@@ -306,14 +306,14 @@ jobs:
             ## Downloads
 
             **On 64-bit Windows, download the folder build**
-            (`PS2Servers-windows-x64-folder.zip`) and run `PS2Servers.exe` from
+            (`PS2Servers-windows-x64-portable.zip`) and run `PS2Servers.exe` from
             inside the folder — it is the same app without the self-extracting
             wrapper that trips antivirus heuristics, so it comes up clean. A
             single-file `PS2Servers-windows-x64.zip` is also published for
             convenience. **On 32-bit Windows** (older / low-end PCs), download
-            `PS2Servers-windows-x86-folder.zip` (or the single-file
+            `PS2Servers-windows-x86-portable.zip` (or the single-file
             `PS2Servers-windows-x86.zip`) instead — the x64 build will not run
-            there. Linux: `PS2Servers-linux-x64` (or the `-folder.tar.gz` build if
+            there. Linux: `PS2Servers-linux-x64` (or the `-portable.tar.gz` build if
             `/tmp` is `noexec`). macOS ships as a `.app`.
 
             ## Security transparency
@@ -346,14 +346,14 @@ jobs:
             https://github.com/NathanNeurotic/PS2-Servers
           files: |
             release-assets/PS2Servers-linux-x64
-            release-assets/PS2Servers-linux-x64-folder.tar.gz
+            release-assets/PS2Servers-linux-x64-portable.tar.gz
             release-assets/PS2Servers-macos-arm64.zip
             release-assets/PS2Servers-macos-x64.zip
             release-assets/PS2Servers-source.zip
             release-assets/PS2Servers-windows-x64.zip
-            release-assets/PS2Servers-windows-x64-folder.zip
+            release-assets/PS2Servers-windows-x64-portable.zip
             release-assets/PS2Servers-windows-x86.zip
-            release-assets/PS2Servers-windows-x86-folder.zip
+            release-assets/PS2Servers-windows-x86-portable.zip
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
