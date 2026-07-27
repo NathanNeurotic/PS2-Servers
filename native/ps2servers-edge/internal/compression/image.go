@@ -64,9 +64,9 @@ func Open(path string) (*Image, error) {
 		return nil, fmt.Errorf("invalid %s header", format)
 	}
 	blocks := (size + block - 1) / block
-	if blocks > 1<<28 {
+	if blocks > 1<<28 || uint64(headerSize)+uint64(blocks+1)*4 > uint64(rawFileSize) {
 		f.Close()
-		return nil, fmt.Errorf("image index too large")
+		return nil, fmt.Errorf("image index too large or extends past file size")
 	}
 	index := make([]uint32, blocks+1)
 	if _, err = f.Seek(int64(headerSize), io.SeekStart); err != nil {

@@ -12,7 +12,7 @@ func (s *Server) handleControl(st *session.State, dh protocol.DataHeader) {
 	defer st.Mu.Unlock()
 	st.Touch()
 	if dh.Flags&protocol.FlagACK != 0 {
-		if protocol.Between(st.TransmitAcked, dh.AckSequence, st.TransmitSequence) {
+		if protocol.Between(st.TransmitAcked, dh.AckSequence, protocol.Previous(st.TransmitSequence)) {
 			st.TransmitAcked = dh.AckSequence
 			s.pruneAcked(st, dh.AckSequence)
 		}
@@ -201,8 +201,10 @@ func (s *Server) handleData(st *session.State, in inbound) {
 	}
 
 	if dh.Flags&protocol.FlagACK != 0 {
-		st.TransmitAcked = dh.AckSequence
-		s.pruneAcked(st, dh.AckSequence)
+		if protocol.Between(st.TransmitAcked, dh.AckSequence, protocol.Previous(st.TransmitSequence)) {
+			st.TransmitAcked = dh.AckSequence
+			s.pruneAcked(st, dh.AckSequence)
+		}
 	}
 	if len(payload) == 0 {
 		if dh.Flags&protocol.FlagACK == 0 {
