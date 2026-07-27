@@ -1,6 +1,7 @@
 package udpfs
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"

@@ -48,11 +48,15 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 	if st.Streaming && h.Sequence == 0 && quiet < sessionReplaceQuiet {
 		s.sendStandardInform(st)
 		return
+	profile := session.Pending
+	if s.cfg.ProtocolMode == session.Standard || s.cfg.ProtocolMode == session.Modulo {
+		profile = s.cfg.ProtocolMode
 	}
-
-	st.ResetState()
+	st.Reset(profile)
 	st.DiscoverySequence = h.Sequence
-	st.ResponseSocket = in.socket
+	st.FallbackGeneration++
+	generation := st.FallbackGeneration
+	st.Touch()
 
 	switch s.cfg.ProtocolMode {
 	case session.Standard:
