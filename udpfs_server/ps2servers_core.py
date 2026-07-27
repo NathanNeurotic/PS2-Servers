@@ -207,7 +207,27 @@ class AutoUdpfsServer(UdpfsServer):
             quiet = (time.monotonic() - existing.last_activity
                      if existing is not None else float("inf"))
         self.stats["discovery"] += 1
+
+        # First contact from a console is the most useful line this server can
+        # print. It proves packets are arriving and names the address they came
+        # from, which is what separates "the PS2 never reached us" -- wrong
+        # subnet, firewall, wrong interface -- from "it reached us but the reply
+        # went astray". Without it a misconfigured setup is silent on both ends
+        # and there is nothing to debug from. Asked for by a tester who could not
+        # tell those two cases apart.
+        #
+        # Only first contact is announced: both client families keep
+        # broadcasting discovery for the life of a transfer, so logging every one
+        # would bury the transfer log. --verbose shows them all.
+        first_contact = existing is None
+
         sess = self._get_or_create_session(addr)
+
+        if first_contact:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] DISCOVERY received -- console found this server")
+        elif self.verbose:
+            self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY seq={hdr.seq_nr}")
         with sess.compat_lock:
             # Active clients can keep sequence-zero discovery traffic running in
             # parallel with reads. Reply to it, but never reset that live stream.
