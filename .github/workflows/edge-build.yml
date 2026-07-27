@@ -159,6 +159,64 @@ jobs:
               64-bit RISC-V single-board computers, such as StarFive VisionFive
               2, Milk-V, and LicheeRV. OpenWrt target sifiveu. uname -m
               reports riscv64.
+
+          # Desktop builds. These exist mainly for people who want a single
+          # small binary with no Python runtime -- notably Windows users whose
+          # antivirus flags the packaged Python launcher. Shipped as .zip
+          # because Windows Explorer opens that natively and .tar.gz needs a
+          # command line.
+          - target: windows-amd64
+            label: windows-64bit
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            archive: zip
+            devices: >-
+              64-bit Windows 10 or 11 on a normal Intel or AMD PC. This is the
+              headless command-line server; if you want the graphical launcher,
+              download PS2Servers-windows-x64-folder.zip instead. Useful when
+              antivirus heuristics flag the packaged Python build, since this
+              is a single small native executable.
+
+          - target: windows-386
+            label: windows-32bit
+            goos: windows
+            goarch: "386"
+            ext: .exe
+            archive: zip
+            devices: >-
+              32-bit Windows, for older or low-end PCs where the 64-bit build
+              will not run. Headless command-line server.
+
+          - target: windows-arm64
+            label: windows-arm64
+            goos: windows
+            goarch: arm64
+            ext: .exe
+            archive: zip
+            devices: >-
+              Windows on ARM (Snapdragon-based laptops, Windows 11 ARM virtual
+              machines). Headless command-line server.
+
+          - target: darwin-arm64
+            label: macos-apple-silicon
+            goos: darwin
+            goarch: arm64
+            archive: zip
+            devices: >-
+              macOS on Apple Silicon (M1, M2, M3, M4 and later). Headless
+              command-line server; the graphical launcher ships separately as
+              PS2Servers-macos-arm64.zip. uname -m reports arm64.
+
+          - target: darwin-amd64
+            label: macos-intel
+            goos: darwin
+            goarch: amd64
+            archive: zip
+            devices: >-
+              macOS on Intel Macs. Headless command-line server; the graphical
+              launcher ships separately as PS2Servers-macos-x64.zip. uname -m
+              reports x86_64.
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@v6.4.0
@@ -192,7 +250,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/out/stage"
           go build -trimpath -buildvcs=true \
             -ldflags="-s -w -buildid= -X main.version=${{ steps.version.outputs.version }}" \
-            -o "$GITHUB_WORKSPACE/out/stage/ps2servers-edge" ./cmd/ps2servers-edge
+            -o "$GITHUB_WORKSPACE/out/stage/ps2servers-edge${{ matrix.ext }}" ./cmd/ps2servers-edge
       - name: Inspect and package artifact
         shell: bash
         # Matrix values come through env rather than direct ${{ }} interpolation:
@@ -207,15 +265,19 @@ jobs:
           GOMIPS_V: ${{ matrix.gomips }}
           GOMIPS64_V: ${{ matrix.gomips64 }}
           VERSION: ${{ steps.version.outputs.version }}
+          EXT: ${{ matrix.ext }}
+          ARCHIVE: ${{ matrix.archive }}
+          GOOS_V: ${{ matrix.goos }}
         run: |
           set -euo pipefail
           # Filename leads with the device family so the release page is
           # readable without knowing Go architecture names. The Go target is
           # still recorded in WHICH-DEVICE.txt and BUILD-METADATA.txt.
           package="PS2ServersEdge-${VERSION}-${LABEL}"
+          binary="ps2servers-edge${EXT}"
           mkdir -p "out/${package}/licenses"
-          mv out/stage/ps2servers-edge "out/${package}/ps2servers-edge"
-          chmod +x "out/${package}/ps2servers-edge"
+          mv "out/stage/${binary}" "out/${package}/${binary}"
+          chmod +x "out/${package}/${binary}"
           cp native/ps2servers-edge/README.md "out/${package}/README.md"
           cp docs/EDGE.md docs/EDGE-WHICH-BUILD.md docs/PROTOCOL-COMPATIBILITY.md \
              docs/EDITIONS.md "out/${package}/"
@@ -252,19 +314,64 @@ jobs:
             printf '                   in Edge builds -- CHD needs a native\n'
             printf '                   library that would break static linking.\n'
             printf '                   Use the Desktop (Python) server for CHD.\n'
-            printf '  Access         : read-only UDPFS\n\n'
+            printf '  Access         : read-only by default. Pass\n'
+            printf '                   --read-only=false to allow the console to\n'
+            printf '                   write (saves). Only one client may hold a\n'
+            printf '                   given file open for writing at a time.\n\n'
             printf 'QUICK START\n\n'
-            printf '    ./ps2servers-edge udpfs --root /path/to/games\n\n'
+            if [ "${GOOS_V}" = "windows" ]; then
+              printf '    %s udpfs --root D:\\PS2Games\n\n' "${binary}"
+            else
+              printf '    ./%s udpfs --root /path/to/games\n\n' "${binary}"
+            fi
             printf 'See README.md and EDGE.md in this archive for full options,\n'
             printf 'and EDGE-WHICH-BUILD.md for the complete device table.\n'
           } > "out/${package}/WHICH-DEVICE.txt"
 
-          go version -m "out/${package}/ps2servers-edge" > "out/${package}/BUILD-METADATA.txt"
-          file "out/${package}/ps2servers-edge" | tee "out/${package}/FILE-INSPECTION.txt"
-          tar --sort=name --owner=0 --group=0 --numeric-owner \
-            --mtime="@${{ steps.version.outputs.source_date_epoch }}" \
-            -czf "out/${package}.tar.gz" -C out "${package}"
-          sha256sum "out/${package}.tar.gz" > "out/${package}.tar.gz.sha256"
+          go version -m "out/${package}/${binary}" > "out/${package}/BUILD-METADATA.txt"
+          file "out/${package}/${binary}" | tee "out/${package}/FILE-INSPECTION.txt"
+          # Windows and macOS ship .zip: Explorer and Finder both open it with
+          # a double-click, while .tar.gz needs a command line on Windows.
+          # Everything else stays .tar.gz, which preserves the exec bit that
+          # routers and NAS boxes need.
+          if [ "${ARCHIVE}" = "zip" ]; then
+            # Built with python3 rather than zip(1) so the archive is
+            # reproducible: entries are sorted and every timestamp is pinned to
+            # SOURCE_DATE_EPOCH. zip(1) stores real mtimes, which would make
+            # two builds of the same commit differ and undermine the
+            # attestation the next step produces.
+            SOURCE_DATE_EPOCH="${{ steps.version.outputs.source_date_epoch }}" \
+            PKG="${package}" python3 - <<'PYZIP'
+          import os, time, zipfile
+          pkg = os.environ["PKG"]
+          stamp = time.gmtime(int(os.environ["SOURCE_DATE_EPOCH"]))[:6]
+          root = os.path.join("out", pkg)
+          names = []
+          for dirpath, dirnames, filenames in os.walk(root):
+              dirnames.sort()
+              for fn in sorted(filenames):
+                  names.append(os.path.join(dirpath, fn))
+          names.sort()
+          with zipfile.ZipFile(os.path.join("out", pkg + ".zip"), "w",
+                               zipfile.ZIP_DEFLATED) as z:
+              for path in names:
+                  arc = os.path.relpath(path, "out").replace(os.sep, "/")
+                  info = zipfile.ZipInfo(arc, date_time=stamp)
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  # Preserve the executable bit for the server binary so macOS
+                  # users are not left chmod-ing it after unzipping.
+                  mode = 0o755 if os.access(path, os.X_OK) else 0o644
+                  info.external_attr = (mode & 0xFFFF) << 16
+                  with open(path, "rb") as f:
+                      z.writestr(info, f.read())
+          PYZIP
+            sha256sum "out/${package}.zip" > "out/${package}.zip.sha256"
+          else
+            tar --sort=name --owner=0 --group=0 --numeric-owner \
+              --mtime="@${{ steps.version.outputs.source_date_epoch }}" \
+              -czf "out/${package}.tar.gz" -C out "${package}"
+            sha256sum "out/${package}.tar.gz" > "out/${package}.tar.gz.sha256"
+          fi
           printf '%s\n' "${package}" > out/artifact-name.txt
       - name: Attest build provenance
         if: github.event_name != 'pull_request'

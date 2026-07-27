@@ -2,7 +2,15 @@
 
 Edge ships one file per device family. This page tells you which one to take.
 
-**If you are on an ordinary 64-bit PC, mini PC, or x86 NAS — take
+> **On Windows or macOS, you probably do not want Edge at all.** Edge is the
+> headless command-line server for routers, NAS boxes and Raspberry Pi. On a
+> desktop you almost certainly want the graphical launcher — the
+> `PS2Servers-windows-…` or `PS2Servers-macos-…` download. Take the Edge
+> desktop build only if you specifically want one small native binary with no
+> Python runtime, for example because antivirus flags the packaged Python
+> build. See [Windows and macOS](#windows-and-macos) below.
+
+**If you are running Linux on an ordinary 64-bit PC, mini PC, or x86 NAS — take
 `pc-64bit-amd64` and stop reading.** That covers most people.
 
 ---
@@ -101,6 +109,11 @@ Rough guide to which is which:
 | `edgerouter-octeon-mips64` | `GOARCH=mips64 GOMIPS64=softfloat` | Cavium Octeon (EdgeRouter Lite/PoE/4/6P) |
 | `mips64-little-endian` | `GOARCH=mips64le GOMIPS64=softfloat` | Little-endian 64-bit MIPS — uncommon |
 | `riscv64-sbc` | `GOARCH=riscv64` | 64-bit RISC-V SBCs |
+| `windows-64bit` | `GOOS=windows GOARCH=amd64` | 64-bit Windows |
+| `windows-32bit` | `GOOS=windows GOARCH=386` | 32-bit Windows |
+| `windows-arm64` | `GOOS=windows GOARCH=arm64` | Windows on ARM |
+| `macos-apple-silicon` | `GOOS=darwin GOARCH=arm64` | macOS, M-series |
+| `macos-intel` | `GOOS=darwin GOARCH=amd64` | macOS, Intel |
 
 Device names are **representative examples, not an exhaustive list**. Hardware
 revisions of the same model sometimes change chips entirely. `uname -m` and
@@ -110,6 +123,44 @@ Every build is statically linked with CGO disabled, so it needs no shared
 libraries and runs on both musl and glibc systems.
 
 ---
+
+## Windows and macOS
+
+These builds ship as `.zip` (double-click to open) rather than `.tar.gz`.
+
+| Your machine | Take |
+| --- | --- |
+| Windows 10/11, normal Intel or AMD PC | `windows-64bit` |
+| Older 32-bit-only Windows | `windows-32bit` |
+| Windows on ARM (Snapdragon laptop, ARM VM) | `windows-arm64` |
+| Mac with M1/M2/M3/M4 | `macos-apple-silicon` |
+| Intel Mac | `macos-intel` |
+
+Remember these are the **headless server**: you run them from a terminal, there
+is no window. Start one with:
+
+```sh
+ps2servers-edge.exe udpfs --root D:\PS2Games      # Windows
+./ps2servers-edge udpfs --root /Users/you/PS2     # macOS
+```
+
+macOS will quarantine a downloaded binary; clear it with
+`xattr -d com.apple.quarantine ps2servers-edge` or approve it once in
+System Settings → Privacy & Security.
+
+## Letting the console write (saves)
+
+Every build is **read-only by default**. To let the PS2 write — memory-card
+saves, for instance — add `--read-only=false`:
+
+```sh
+./ps2servers-edge udpfs --root /path/to/games --read-only=false
+```
+
+Only one console may hold a given file open for writing at a time; a second one
+gets "device or resource busy". Writes to compressed images (CSO/ZSO/CHD) are
+refused, because writing into a compressed container at a decompressed offset
+would destroy the image — keep anything you want written as a plain file.
 
 ## What if none of these fit?
 

@@ -33,12 +33,19 @@ const (
 type MessageType uint8
 
 const (
-	OpenRequest    MessageType = 0x10
-	OpenReply      MessageType = 0x11
-	CloseRequest   MessageType = 0x12
-	CloseReply     MessageType = 0x13
-	ReadRequest    MessageType = 0x14
-	SeekRequest    MessageType = 0x1A
+	OpenRequest  MessageType = 0x10
+	OpenReply    MessageType = 0x11
+	CloseRequest MessageType = 0x12
+	CloseReply   MessageType = 0x13
+	ReadRequest  MessageType = 0x14
+	// A write is WriteRequest (handle + total byte count), then one or more
+	// WriteData chunks, then a single WriteDone carrying the byte count or a
+	// negative errno. The first chunk may be appended inline to the
+	// WriteRequest datagram rather than sent separately.
+	WriteRequest MessageType = 0x16
+	WriteData    MessageType = 0x17
+	WriteDone    MessageType = 0x18
+	SeekRequest  MessageType = 0x1A
 	SeekReply      MessageType = 0x1B
 	DReadRequest   MessageType = 0x1C
 	DReadReply     MessageType = 0x1D

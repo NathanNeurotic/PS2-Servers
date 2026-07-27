@@ -24,6 +24,10 @@ func (s *Server) handleMessage(st *session.State, p []byte) {
 		s.handleClose(st, p)
 	case protocol.ReadRequest:
 		s.handleRead(st, p)
+	case protocol.WriteRequest:
+		s.handleWriteRequest(st, p)
+	case protocol.WriteData:
+		s.handleWriteData(st, p)
 	case protocol.SeekRequest:
 		s.handleSeek(st, p)
 	case protocol.DReadRequest:
@@ -75,7 +79,9 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 		s.sendOpen(st, -int32(syscall.ENAMETOOLONG), 0, 0)
 		return
 	}
-	if flags&0x02 != 0 {
+	// PS2 FIO access bits: 0x01 read, 0x02 write, 0x03 read+write.
+	wantWrite := flags&0x02 != 0
+	if wantWrite && s.cfg.ReadOnly {
 		s.sendOpen(st, -int32(syscall.EACCES), 0, 0)
 		return
 	}
@@ -95,6 +101,10 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 		s.sendOpen(st, id, 0x1000, 0)
 		return
 	}
+	if wantWrite {
+		s.openForWrite(st, id, path, flags)
+		return
+	}
 	real, err := s.resolveImagePath(path)
 	if err != nil {
 		s.sendOpen(st, errno(err), 0, 0)
@@ -107,6 +117,82 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 	}
 	st.Handles[id] = &session.Handle{Reader: img, Closer: img}
 	s.sendOpen(st, id, 0x2000, uint64(img.Size()))
+}
+
+// openForWrite handles an OPEN carrying the write access bit.
+//
+// Writes deliberately never go through the compression layer: the CSO/ZSO
+// readers present a decompressed view, so a client writing at a decompressed
+// offset would land bytes at the wrong place in the container and destroy the
+// image. A write to a compressed file is refused outright, and a compressed
+// sibling is never substituted for a missing .iso the way the read path does.
+func (s *Server) openForWrite(st *session.State, id int32, path string, flags uint16) {
+	create := flags&0x0200 != 0
+	truncate := flags&0x0400 != 0
+	appendMode := flags&0x0100 != 0
+
+	if isCompressedName(path) {
+		s.cfg.Log.Warn("refusing write to compressed image", map[string]any{"peer": st.Peer, "path": path})
+		s.sendOpen(st, -int32(syscall.EACCES), 0, 0)
+		return
+	}
+	real, err := s.root.Resolve(path, create)
+	if err != nil {
+		s.sendOpen(st, errno(err), 0, 0)
+		return
+	}
+	// Resolve(allowMissing) permits a path that does not exist yet; without
+	// O_CREAT that is still ENOENT rather than an implicit create.
+	if _, statErr := os.Stat(real); statErr != nil {
+		if !os.IsNotExist(statErr) {
+			s.sendOpen(st, errno(statErr), 0, 0)
+			return
+		}
+		if !create {
+			s.sendOpen(st, -int32(syscall.ENOENT), 0, 0)
+			return
+		}
+	}
+	mode := os.O_RDWR
+	if create {
+		mode |= os.O_CREATE
+	}
+	if truncate {
+		mode |= os.O_TRUNC
+	}
+	if appendMode {
+		mode |= os.O_APPEND
+	}
+	if !s.reserveWriter(real) {
+		s.cfg.Log.Warn("file already open for writing by another peer", map[string]any{"peer": st.Peer, "path": path})
+		s.sendOpen(st, -int32(syscall.EBUSY), 0, 0)
+		return
+	}
+	f, err := os.OpenFile(real, mode, 0o644)
+	if err != nil {
+		s.releaseWriter(real)
+		s.sendOpen(st, errno(err), 0, 0)
+		return
+	}
+	size := int64(0)
+	if info, err := f.Stat(); err == nil {
+		size = info.Size()
+	}
+	// *os.File is both ReadSeeker and Writer, so read and seek on this handle
+	// keep working through the existing paths.
+	st.Handles[id] = &session.Handle{Reader: f, Writer: f, Closer: f, RealPath: real}
+	s.cfg.Log.Debug("OPEN for write", map[string]any{"peer": st.Peer, "path": path, "handle": id})
+	s.sendOpen(st, id, 0x2000, uint64(size))
+}
+
+func isCompressedName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, ext := range []string{".cso", ".ciso", ".zso", ".ziso", ".chd"} {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
 }
 func (s *Server) sendOpen(st *session.State, result int32, mode uint32, size uint64) {
 	b := make([]byte, 36)
@@ -123,15 +209,12 @@ func (s *Server) handleClose(st *session.State, p []byte) {
 		return
 	}
 	id := int32(binary.LittleEndian.Uint32(p[4:8]))
-	h := st.Handles[id]
-	if h == nil {
+	// CloseHandle also drops any single-writer reservation and discards a
+	// partially assembled write aimed at this handle.
+	if !st.CloseHandle(id) {
 		s.sendSimple(st, result8(protocol.CloseReply, -int32(syscall.EBADF)))
 		return
 	}
-	if h.Closer != nil {
-		_ = h.Closer.Close()
-	}
-	delete(st.Handles, id)
 	s.sendSimple(st, result8(protocol.CloseReply, 0))
 }
 func (s *Server) handleRead(st *session.State, p []byte) {
@@ -161,6 +244,135 @@ func (s *Server) handleRead(st *session.State, p []byte) {
 	}
 	s.sendTransfer(st, result8(protocol.ResultReply, int32(n)), buf[:n])
 }
+// maxWriteBytes caps one assembled write. The WRITE_REQ size field is 32-bit,
+// so without a ceiling a peer could announce 4 GiB and make the server buffer
+// it before a single byte is validated. 8 MiB is far above any real PS2 write
+// (saves are kilobytes) while keeping the worst case per peer bounded.
+const maxWriteBytes = 8 << 20
+
+// handleWriteRequest begins a write: handle plus total byte count, optionally
+// with the first WRITE_DATA chunk appended inline to the same datagram.
+func (s *Server) handleWriteRequest(st *session.State, p []byte) {
+	if len(p) < 12 {
+		s.sendWriteDone(st, -int32(syscall.EINVAL))
+		return
+	}
+	id := int32(binary.LittleEndian.Uint32(p[4:8]))
+	size := binary.LittleEndian.Uint32(p[8:12])
+	if s.cfg.ReadOnly {
+		s.cfg.Log.Debug("WRITE refused, server is read-only", map[string]any{"peer": st.Peer, "handle": id})
+		s.sendWriteDone(st, -int32(syscall.EACCES))
+		return
+	}
+	if size > maxWriteBytes {
+		s.cfg.Log.Warn("WRITE refused, size over cap", map[string]any{"peer": st.Peer, "size": size, "cap": maxWriteBytes})
+		s.sendWriteDone(st, -int32(syscall.EFBIG))
+		return
+	}
+	h := st.Handles[id]
+	if h == nil || h.Directory != nil {
+		s.sendWriteDone(st, -int32(syscall.EBADF))
+		return
+	}
+	// A handle opened read-only must not become writable just because the
+	// client asked; the access check belongs at OPEN and is enforced again here.
+	if h.Writer == nil {
+		s.sendWriteDone(st, -int32(syscall.EACCES))
+		return
+	}
+	st.WriteActive = true
+	st.WriteHandle = id
+	st.WriteBuffer = make([]byte, 0, size)
+	st.WriteTotalChunks = 0
+	st.WriteReceivedChunk = 0
+	if len(p) > 12 {
+		s.handleWriteData(st, p[12:])
+		return
+	}
+	s.sendACK(st, true)
+}
+
+// handleWriteData accumulates one chunk. msg starts at the WRITE_DATA type
+// byte, matching how the reference server parses both the standalone and the
+// inline form.
+func (s *Server) handleWriteData(st *session.State, msg []byte) {
+	if len(msg) < 8 {
+		s.sendACK(st, true)
+		return
+	}
+	chunkNr := binary.LittleEndian.Uint16(msg[2:4])
+	chunkSize := binary.LittleEndian.Uint16(msg[4:6])
+	totalChunks := binary.LittleEndian.Uint16(msg[6:8])
+	if !st.WriteActive {
+		// Chunk with no WRITE_REQ in front of it: ignore rather than write
+		// somewhere arbitrary.
+		s.sendACK(st, true)
+		return
+	}
+	body := msg[8:]
+	if int(chunkSize) > len(body) {
+		chunkSize = uint16(len(body))
+	}
+	if chunkNr != st.WriteReceivedChunk {
+		// Out-of-order chunk. Concatenating it would silently corrupt the
+		// file, so drop the whole sequence and let the client retry.
+		s.cfg.Log.Warn("WRITE chunk out of order", map[string]any{
+			"peer": st.Peer, "expected": st.WriteReceivedChunk, "got": chunkNr})
+		st.ResetWrite()
+		s.sendWriteDone(st, -int32(syscall.EIO))
+		return
+	}
+	if len(st.WriteBuffer)+int(chunkSize) > maxWriteBytes {
+		st.ResetWrite()
+		s.sendWriteDone(st, -int32(syscall.EFBIG))
+		return
+	}
+	st.WriteBuffer = append(st.WriteBuffer, body[:chunkSize]...)
+	st.WriteTotalChunks = totalChunks
+	st.WriteReceivedChunk++
+	if totalChunks == 0 || st.WriteReceivedChunk < totalChunks {
+		s.sendACK(st, true)
+		return
+	}
+	s.completeWrite(st)
+}
+
+// completeWrite flushes the assembled buffer to the handle in one call.
+func (s *Server) completeWrite(st *session.State) {
+	id := st.WriteHandle
+	buf := st.WriteBuffer
+	st.ResetWrite()
+	h := st.Handles[id]
+	if h == nil || h.Writer == nil {
+		s.sendWriteDone(st, -int32(syscall.EBADF))
+		return
+	}
+	n, err := h.Writer.Write(buf)
+	if err != nil {
+		s.cfg.Log.Warn("WRITE failed", map[string]any{"peer": st.Peer, "handle": id, "error": err.Error()})
+		s.sendWriteDone(st, errno(err))
+		return
+	}
+	// Push to the OS now. A console yanked mid-session is the normal way this
+	// server loses a peer, and an unflushed save is a lost save.
+	if f, ok := h.Writer.(*os.File); ok {
+		if err := f.Sync(); err != nil {
+			s.cfg.Log.Warn("WRITE sync failed", map[string]any{"peer": st.Peer, "handle": id, "error": err.Error()})
+			s.sendWriteDone(st, errno(err))
+			return
+		}
+	}
+	s.cfg.Log.Debug("WRITE ok", map[string]any{"peer": st.Peer, "handle": id, "bytes": n})
+	s.sendWriteDone(st, int32(n))
+}
+
+func (s *Server) sendWriteDone(st *session.State, result int32) {
+	b := make([]byte, 8)
+	b[0] = byte(protocol.WriteDone)
+	binary.LittleEndian.PutUint32(b[4:], uint32(result))
+	s.sendSimple(st, b)
+}
+
 func (s *Server) handleSeek(st *session.State, p []byte) {
 	if len(p) < 16 {
 		s.sendSeek(st, -int64(syscall.EINVAL))

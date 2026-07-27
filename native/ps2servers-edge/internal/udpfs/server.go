@@ -67,6 +67,42 @@ type Server struct {
 	closed     chan struct{}
 	closeOnce  sync.Once
 	wg         sync.WaitGroup
+
+	// writers reserves each file that some peer currently holds open for
+	// writing, mapping resolved path to a reference count. Two consoles
+	// writing the same file concurrently would interleave into corruption,
+	// so the second OPEN is refused with EBUSY.
+	writersMu sync.Mutex
+	writers   map[string]int
+}
+
+// reserveWriter claims exclusive write access to a resolved path. It reports
+// false when another handle already holds it.
+func (s *Server) reserveWriter(realPath string) bool {
+	s.writersMu.Lock()
+	defer s.writersMu.Unlock()
+	if s.writers == nil {
+		s.writers = make(map[string]int)
+	}
+	if s.writers[realPath] > 0 {
+		return false
+	}
+	s.writers[realPath] = 1
+	return true
+}
+
+// releaseWriter drops a reservation taken by reserveWriter.
+func (s *Server) releaseWriter(realPath string) {
+	s.writersMu.Lock()
+	defer s.writersMu.Unlock()
+	if s.writers == nil {
+		return
+	}
+	if n := s.writers[realPath]; n <= 1 {
+		delete(s.writers, realPath)
+	} else {
+		s.writers[realPath] = n - 1
+	}
 }
 
 func New(cfg Config) (*Server, error) {
@@ -261,7 +297,12 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	if forced == session.Pending {
 		forced = ""
 	}
-	w := &peerWorker{state: session.New(peer, forced), queue: make(chan inbound, 256), done: make(chan struct{})}
+	st := session.New(peer, forced)
+	// Every path that closes a handle -- explicit CLOSE, session reset, idle
+	// reap, server shutdown -- runs through State, so hooking release here
+	// means a peer that disappears mid-write cannot strand a reservation.
+	st.ReleaseWriter = s.releaseWriter
+	w := &peerWorker{state: st, queue: make(chan inbound, 256), done: make(chan struct{})}
 	s.sessions[key] = w
 	s.wg.Add(1)
 	go s.worker(w)
