@@ -58,118 +58,15 @@ jobs:
           python udpfs_server/compression_selftest.py
 
   build:
-    name: Build Edge ${{ matrix.target }}
+    name: Build Edge
     needs: test
-    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
       attestations: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-386
-            goos: linux
-            goarch: "386"
-          - target: linux-amd64
-            goos: linux
-            goarch: amd64
-          - target: linux-armv6
-            goos: linux
-            goarch: arm
-            goarm: "6"
-          - target: linux-armv7
-            goos: linux
-            goarch: arm
-            goarm: "7"
-          - target: linux-arm64
-            goos: linux
-            goarch: arm64
-          - target: linux-mips
-            goos: linux
-            goarch: mips
-            gomips: softfloat
-          - target: linux-mipsle
-            goos: linux
-            goarch: mipsle
-            gomips: softfloat
-          - target: linux-riscv64
-            goos: linux
-            goarch: riscv64
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@v6.4.0
-        with:
-          go-version-file: native/ps2servers-edge/go.mod
-          cache: false
-      - name: Resolve reproducible version metadata
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            VERSION="0.5.0-edge.${GITHUB_SHA::7}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "source_date_epoch=$(git show -s --format=%ct HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Build static binary
-        working-directory: native/ps2servers-edge
-        env:
-          CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          GOARM: ${{ matrix.goarm }}
-          GOMIPS: ${{ matrix.gomips }}
-          SOURCE_DATE_EPOCH: ${{ steps.version.outputs.source_date_epoch }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/out/stage"
-          go build -trimpath -buildvcs=true \
-            -ldflags="-s -w -buildid= -X main.version=${{ steps.version.outputs.version }}" \
-            -o "$GITHUB_WORKSPACE/out/stage/ps2servers-edge" ./cmd/ps2servers-edge
-      - name: Inspect and package artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          target="${{ matrix.target }}"
-          version="${{ steps.version.outputs.version }}"
-          package="PS2ServersEdge-${target}-static-no-chd-${version}"
-          mkdir -p "out/${package}/licenses"
-          mv out/stage/ps2servers-edge "out/${package}/ps2servers-edge"
-          chmod +x "out/${package}/ps2servers-edge"
-          cp native/ps2servers-edge/README.md "out/${package}/README.md"
-          cp docs/EDGE.md docs/PROTOCOL-COMPATIBILITY.md docs/EDITIONS.md "out/${package}/"
-          cp THIRD_PARTY_NOTICES.md "out/${package}/licenses/THIRD_PARTY_NOTICES.md"
-          go version -m "out/${package}/ps2servers-edge" > "out/${package}/BUILD-METADATA.txt"
-          file "out/${package}/ps2servers-edge" | tee "out/${package}/FILE-INSPECTION.txt"
-          tar --sort=name --owner=0 --group=0 --numeric-owner \
-            --mtime="@${{ steps.version.outputs.source_date_epoch }}" \
-            -czf "out/${package}.tar.gz" -C out "${package}"
-          sha256sum "out/${package}.tar.gz" > "out/${package}.tar.gz.sha256"
-          printf '%s\n' "${package}" > out/artifact-name.txt
-      - name: Attest build provenance
-        if: github.event_name != 'pull_request'
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
-        with:
-          subject-path: out/*.tar.gz
-      - name: Upload Edge artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: PS2ServersEdge-${{ matrix.target }}
-          path: |
-            out/*.tar.gz
-            out/*.tar.gz.sha256
-          if-no-files-found: error
-      - name: Attach Edge artifact to tagged release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          files: |
-            out/*.tar.gz
-            out/*.tar.gz.sha256
+    # Matrix and packaging live in edge-build.yml so this workflow and
+    # release-on-main.yml cannot drift apart.
+    uses: ./.github/workflows/edge-build.yml
 
   openwrt-source-check:
     name: Check OpenWrt package source

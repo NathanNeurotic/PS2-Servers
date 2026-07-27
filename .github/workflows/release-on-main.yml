@@ -107,7 +107,12 @@ jobs:
         if: matrix.macos_arch != 'x86_64'
         run: python build/build.py
         env:
-          MACOS_TARGET_ARCH: ${{ matrix.macos_target_arch }}
+          # Was matrix.macos_target_arch, which the matrix never defines --
+          # actionlint flags it as undefined. Behaviour is unchanged: every
+          # entry that satisfies the `if` above leaves macos_arch unset, so
+          # both spellings expand to the empty string. Corrected so the
+          # reference is real rather than a trap for the next editor.
+          MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
 
       - name: Build app (macOS x64)
         if: matrix.macos_arch == 'x86_64'
@@ -237,11 +242,26 @@ jobs:
           path: PS2Servers-source.zip
           if-no-files-found: error
 
+  # Edge builds here rather than in edge.yml so its binaries land in the same
+  # run that publishes the rolling release. The tag is main-<run>-<sha> using
+  # THIS workflow's run number, which edge.yml cannot know, and Edge finishes
+  # minutes before the Nuitka launcher builds -- so attaching from the other
+  # workflow would mean either guessing the tag or idling for the release to
+  # appear. Router users previously had to dig through workflow artifacts.
+  edge:
+    name: Build Edge binaries
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/edge-build.yml
+
   release:
     name: Publish release
     needs:
       - build
       - source
+      - edge
     runs-on: ubuntu-latest
 
     steps:
@@ -275,6 +295,15 @@ jobs:
           present=()
           for a in "${assets[@]}"; do
             [ -f "$a" ] && present+=("$a")
+          done
+          # Edge tarballs (PS2ServersEdge-<version>-<device-label>.tar.gz) are
+          # discovered by glob rather than listed, so adding a device target to
+          # the Edge matrix never requires editing this list. Their own
+          # per-file .sha256 companions stay out of the release to keep the
+          # asset list readable -- these lines cover them.
+          # Linux Edge targets are .tar.gz, Windows and macOS are .zip.
+          for f in PS2ServersEdge-*.tar.gz PS2ServersEdge-*.zip; do
+            [ -f "$f" ] && present+=("$f")
           done
           sha256sum "${present[@]}" > SHA256SUMS.txt
           cat SHA256SUMS.txt
@@ -316,6 +345,26 @@ jobs:
             there. Linux: `PS2Servers-linux-x64` (or the `-folder.tar.gz` build if
             `/tmp` is `noexec`). macOS ships as a `.app`.
 
+            ### PS2 Servers Edge (routers, NAS, Raspberry Pi)
+
+            The `PS2ServersEdge-*` files are the headless native server for
+            devices where the desktop GUI and Python runtime do not fit —
+            routers, NAS units, Raspberry Pi and other embedded Linux. **You do
+            not need these for a normal PC**; use the launcher downloads above.
+
+            Each Edge file is named for the device family it serves, for example
+            `armv5-pogoplug-sheevaplug-dockstar`, `edgerouter-octeon-mips64`, or
+            `router-mips-little-endian-mt7621`. Run `uname -m` on the device and
+            match it using
+            [EDGE-WHICH-BUILD.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE-WHICH-BUILD.md).
+            Every archive also contains a `WHICH-DEVICE.txt` confirming what it
+            is for. Downloading the wrong one is harmless — it simply will not
+            run.
+
+            Edge is read-only and supports CSO/ZSO but **not CHD**. For OpenWrt,
+            build the source package for your exact target instead — see
+            [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
+
             ## Security transparency
 
             PS2 Servers is an open-source PS2 homebrew utility for user-controlled local server setup. It runs local LAN servers for Open PS2 Loader:
@@ -354,6 +403,8 @@ jobs:
             release-assets/PS2Servers-windows-x64-folder.zip
             release-assets/PS2Servers-windows-x86.zip
             release-assets/PS2Servers-windows-x86-folder.zip
+            release-assets/PS2ServersEdge-*.tar.gz
+            release-assets/PS2ServersEdge-*.zip
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

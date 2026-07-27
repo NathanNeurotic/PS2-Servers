@@ -55,7 +55,11 @@ func main() {
 	singlePort := fs.Bool("single-port", envBool("SINGLE_PORT", false), "use discovery port for all traffic")
 	timeoutText := fs.String("peer-timeout", env("PEER_TIMEOUT", "1h"), "idle session timeout")
 	txDelayMs := fs.Float64("tx-delay-ms", envFloat("TX_DELAY_MS", 0.0), "inter-packet transmit delay in milliseconds")
-	readOnly := fs.Bool("read-only", true, "serve files read-only (currently mandatory)")
+	// Defaults to read-only, unlike the Desktop server and udpfsd which
+	// default to writable. Edge runs unauthenticated on routers and NAS boxes
+	// where the game share is often the whole disk, and it shipped read-only,
+	// so writes are opt-in rather than a silent posture change on upgrade.
+	readOnly := fs.Bool("read-only", envBool("RO", true), "serve files read-only; pass --read-only=false to allow writes")
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
 	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
 	quiet := fs.Bool("quiet", false, "suppress informational logs")
@@ -69,10 +73,6 @@ func main() {
 	}
 	if *root == "" {
 		fmt.Fprintln(os.Stderr, "error: --root is required")
-		os.Exit(2)
-	}
-	if !*readOnly {
-		fmt.Fprintln(os.Stderr, "error: PS2 Servers Edge currently supports read-only UDPFS only")
 		os.Exit(2)
 	}
 	if *logFormat != "text" && *logFormat != "json" {
@@ -110,7 +110,7 @@ func main() {
 		txDelay = time.Duration(*txDelayMs * float64(time.Millisecond))
 	}
 	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
-	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: true, Log: logger, ServerName: "PS2 Servers Edge"})
+	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, Log: logger, ServerName: "PS2 Servers Edge"})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
