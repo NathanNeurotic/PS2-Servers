@@ -38,27 +38,38 @@ them deliberate:
 - Only new clients ever send the query, so the reply format is unconstrained by
   history.
 
-## Service ID
+## Service ID and magic
 
     UDPRDMA_SVC_STATUS = 0xF5F7
+    STATUS_MAGIC       = "PS2S"
 
-Claimed by this project, adjacent to `UDPRDMA_SVC_UDPFS = 0xF5F5` and the
-default port `0xF5F6`. That is upstream's numbering range, so a client **must**
-validate the reply (service ID echo plus version byte, below) rather than
-assuming any reply to this query is a status reply. If upstream ever assigns
-0xF5F7, that validation is what keeps the collision harmless, and this document
-is what gets changed.
+The service ID is adjacent to `UDPRDMA_SVC_UDPFS = 0xF5F5` and the default port
+`0xF5F6`. That is upstream's numbering range, allocated consecutively, so
+`0xF5F7` is the next value upstream itself would reach for.
+
+**The number alone is therefore not the identifier — the number plus the magic
+is.** Validating a reply protects a client from a collision, but it does
+nothing about the other direction: a server keyed on the number alone would
+answer *any* discovery packet carrying `0xF5F7`, including a future udpfsd
+client asking about something else entirely. Requiring the magic means a server
+implementing this spec can only ever answer a question it actually understands.
+
+Both sides are required to check it. A server MUST ignore a query without it; a
+client MUST discard a reply without it.
 
 ## Query — client to server
 
-Six bytes. Structurally identical to a DISCOVERY, which is what makes older
-servers discard it on the path they already have.
+Ten bytes. The first six are structurally identical to a DISCOVERY, which is
+what makes older servers discard it on the path they already have — a longer
+packet with an unrecognised service ID hits the same guard and is dropped just
+the same.
 
 | offset | size | field | value |
 |---|---|---|---|
 | 0 | 2 | header | `type = 0` (DISCOVERY), `sequence = 0` |
 | 2 | 2 | service ID | `0xF5F7` |
 | 4 | 2 | port | `0` — unused; the reply goes to the query's UDP source |
+| 6 | 4 | magic | `PS2S` |
 
 The header packs as the existing UDPRDMA header: `type & 0xF | (sequence & 0xFFF) << 4`,
 little-endian, as does every multi-byte field below.
@@ -74,22 +85,25 @@ never resets a live transfer.
 |---|---|---|
 | 0 | 2 | header: `type = 1` (INFORM), `sequence = 0` |
 | 2 | 2 | service ID, echoed: `0xF5F7` |
-| 4 | 1 | payload version — `1` |
-| 5 | 1 | state |
-| 6 | 2 | service flags |
-| 8 | 2 | active sessions |
-| 10 | 4 | uptime, seconds |
-| 14 | 1 | name length, bytes |
-| 15 | … | name, UTF-8, not NUL-terminated |
+| 4 | 4 | magic, echoed: `PS2S` |
+| 8 | 1 | payload version — `1` |
+| 9 | 1 | state |
+| 10 | 2 | service flags |
+| 12 | 2 | active sessions |
+| 14 | 4 | uptime, seconds |
+| 18 | 1 | name length, bytes |
+| 19 | … | name, UTF-8, not NUL-terminated |
 
-Fixed part is 15 bytes. A reply shorter than that, or whose service ID is not
-`0xF5F7`, must be discarded.
+Fixed part is 19 bytes. A reply shorter than that, or whose service ID or magic
+does not match, must be discarded.
 
 **Version.** A client that does not recognise the version must treat the server
-as `unknown` rather than guess. Everything after offset 5 may change in a
-future version; offsets 0–4 may not.
+as `unknown` rather than guess. Everything after offset 8 may change in a future
+version; **offsets 0–8 may not** — header, service ID, magic and version are
+exactly what a client needs in order to decide whether the rest is addressed to
+it and whether it understands the layout.
 
-### State — offset 5
+### State — offset 9
 
 | value | name | meaning |
 |---|---|---|
@@ -102,7 +116,7 @@ future version; offsets 0–4 may not.
 Unknown values must be treated as `degraded`, not as `ready`: a client that has
 not been taught a new state should be cautious rather than confident.
 
-### Service flags — offset 6, bitfield
+### Service flags — offset 10, bitfield
 
 | bit | meaning |
 |---|---|
@@ -115,18 +129,18 @@ not been taught a new state should be cautious rather than confident.
 Unassigned bits are zero and must be ignored, so bits can be added without a
 version bump.
 
-### Active sessions — offset 8
+### Active sessions — offset 12
 
 Peers with live state. `busy` is the authoritative "in flight" signal; this is
 for display.
 
-### Uptime — offset 10
+### Uptime — offset 14
 
 Seconds since the server began serving. Lets a launcher distinguish "it just
 came up" from "it has been up for an hour and is simply idle", which is the
 difference between waiting and investigating.
 
-### Name — offset 14
+### Name — offset 18
 
 The server's name and version, for display — e.g. `PS2 Servers Edge 0.4.9`.
 Capped at 255 bytes by the length field; a client should not assume any
@@ -136,7 +150,7 @@ particular content.
 
 Poll rather than listen. A server does not broadcast state changes, because
 broadcast is filtered on enough networks to make it an unreliable primary
-signal. Once per second while a user is waiting is ample and costs six bytes.
+signal. Once per second while a user is waiting is ample and costs ten bytes.
 
 Timeout is `unknown`, never `down` — the server may simply be older than this
 spec. Distinguish the two by whether ordinary UDPFS DISCOVERY gets an INFORM: a

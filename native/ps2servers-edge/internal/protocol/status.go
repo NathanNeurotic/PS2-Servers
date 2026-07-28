@@ -24,12 +24,32 @@ import (
 // query is a status reply.
 const ServiceStatus uint16 = 0xF5F7
 
-// StatusVersion is the payload version. Offsets 0-4 of a reply are frozen
-// across versions; everything after may change.
+// StatusMagic identifies this protocol independently of the service ID.
+//
+// The number alone is not enough. 0xF5F5 is UDPFS and 0xF5F6 is the default
+// port, so upstream is allocating consecutively and 0xF5F7 is the next one it
+// would reach for. Validating a reply protects our client from that, but it
+// does nothing about the other direction: without this tag a server here would
+// answer ANY discovery packet carrying 0xF5F7, including a future udpfsd
+// client asking about something else entirely. Requiring the magic means this
+// server can only ever answer a question it actually understands.
+//
+// Safe to append because a longer packet with a service ID a server does not
+// recognise is still dropped on the guard it already has -- verified against
+// both implementations before this was added.
+var StatusMagic = [4]byte{'P', 'S', '2', 'S'}
+
+// StatusVersion is the payload version. A reply's first ten bytes -- header,
+// service ID, magic, version -- are frozen across versions, because they are
+// what a client needs in order to decide whether the rest is addressed to it
+// and whether it understands the layout. Everything after may change.
 const StatusVersion uint8 = 1
 
+// StatusQueryLen is the exact length of a query.
+const StatusQueryLen = 10
+
 // StatusFixedLen is the reply length before the variable-length name.
-const StatusFixedLen = 15
+const StatusFixedLen = 19
 
 type ServerState uint8
 
@@ -90,7 +110,7 @@ type StatusReply struct {
 // deliberately strict about length: a six-byte packet whose service ID is
 // 0xF5F7 is the only thing that qualifies.
 func IsStatusQuery(packet []byte) bool {
-	if len(packet) < 6 {
+	if len(packet) < StatusQueryLen {
 		return false
 	}
 	h, err := ParseHeader(packet)
@@ -98,13 +118,18 @@ func IsStatusQuery(packet []byte) bool {
 		return false
 	}
 	dh, err := ParseDiscoveryHeader(packet[2:])
-	return err == nil && dh.ServiceID == ServiceStatus
+	if err != nil || dh.ServiceID != ServiceStatus {
+		return false
+	}
+	// The magic, not just the number. See StatusMagic.
+	return [4]byte(packet[6:10]) == StatusMagic
 }
 
-// MarshalStatusQuery builds the six-byte query.
+// MarshalStatusQuery builds the query.
 func MarshalStatusQuery() []byte {
-	return append(Header{Type: Discovery, Sequence: 0}.Marshal(),
+	q := append(Header{Type: Discovery, Sequence: 0}.Marshal(),
 		DiscoveryHeader{ServiceID: ServiceStatus, Port: 0}.Marshal()...)
+	return append(q, StatusMagic[:]...)
 }
 
 // Marshal encodes a status reply.
@@ -123,12 +148,13 @@ func (r StatusReply) Marshal() []byte {
 	b := make([]byte, StatusFixedLen, StatusFixedLen+len(name))
 	copy(b, Header{Type: Inform, Sequence: 0}.Marshal())
 	binary.LittleEndian.PutUint16(b[2:], ServiceStatus)
-	b[4] = StatusVersion
-	b[5] = uint8(r.State)
-	binary.LittleEndian.PutUint16(b[6:], r.Flags)
-	binary.LittleEndian.PutUint16(b[8:], r.Sessions)
-	binary.LittleEndian.PutUint32(b[10:], r.Uptime)
-	b[14] = uint8(len(name))
+	copy(b[4:8], StatusMagic[:])
+	b[8] = StatusVersion
+	b[9] = uint8(r.State)
+	binary.LittleEndian.PutUint16(b[10:], r.Flags)
+	binary.LittleEndian.PutUint16(b[12:], r.Sessions)
+	binary.LittleEndian.PutUint32(b[14:], r.Uptime)
+	b[18] = uint8(len(name))
 	return append(b, name...)
 }
 
@@ -154,22 +180,25 @@ func ParseStatusReply(b []byte) (StatusReply, error) {
 	if binary.LittleEndian.Uint16(b[2:]) != ServiceStatus {
 		return StatusReply{}, ErrNotStatusReply
 	}
-	if b[4] != StatusVersion {
+	if [4]byte(b[4:8]) != StatusMagic {
+		return StatusReply{}, ErrNotStatusReply
+	}
+	if b[8] != StatusVersion {
 		return StatusReply{}, ErrStatusVersion
 	}
 	r := StatusReply{
-		Version:  b[4],
-		State:    ServerState(b[5]),
-		Flags:    binary.LittleEndian.Uint16(b[6:]),
-		Sessions: binary.LittleEndian.Uint16(b[8:]),
-		Uptime:   binary.LittleEndian.Uint32(b[10:]),
+		Version:  b[8],
+		State:    ServerState(b[9]),
+		Flags:    binary.LittleEndian.Uint16(b[10:]),
+		Sessions: binary.LittleEndian.Uint16(b[12:]),
+		Uptime:   binary.LittleEndian.Uint32(b[14:]),
 	}
 	// An unrecognised state degrades rather than passing through. A client
 	// taught only these five must not read a future "6" as something benign.
 	if r.State > StateStopping {
 		r.State = StateDegraded
 	}
-	nameLen := int(b[14])
+	nameLen := int(b[18])
 	if nameLen > 0 {
 		if len(b) < StatusFixedLen+nameLen {
 			return StatusReply{}, ErrStatusTruncated

@@ -36,17 +36,29 @@ import router_status  # noqa: E402
 
 
 class WireFormat(unittest.TestCase):
-    def test_query_is_six_bytes_and_discovery_shaped(self):
+    def test_query_is_discovery_shaped_and_carries_the_magic(self):
         # The shape is what makes an older server discard it on the guard it
         # already has. A query that did not look like a DISCOVERY would fall
         # through to some other path and might get an answer.
         q = router_status.build_status_query()
-        self.assertEqual(len(q), 6)
+        self.assertEqual(len(q), router_status.QUERY_LEN)
         (header,) = struct.unpack_from("<H", q, 0)
         self.assertEqual(header & 0xF, 0, "packet type must be DISCOVERY")
         self.assertEqual(header >> 4, 0, "sequence must be 0")
         (service,) = struct.unpack_from("<H", q, 2)
         self.assertEqual(service, 0xF5F7)
+        self.assertEqual(q[6:10], router_status.MAGIC)
+
+    def test_query_without_the_magic_is_not_ours(self):
+        # The whole point of the tag: 0xF5F7 sits in upstream's numbering
+        # range, so the number alone must not be enough to make this server
+        # answer. A future udpfsd client using that ID for something else must
+        # get silence from us.
+        bare = struct.pack("<HHH", 0, 0xF5F7, 0)
+        self.assertFalse(router_status.is_status_query(bare))
+        wrong = bare + b"XXXX"
+        self.assertFalse(router_status.is_status_query(wrong))
+        self.assertTrue(router_status.is_status_query(router_status.build_status_query()))
 
     def test_reply_round_trips(self):
         packet = router_status.build_status_reply(
@@ -63,17 +75,25 @@ class WireFormat(unittest.TestCase):
         self.assertTrue(got["flags"] & router_status.FLAG_READ_ONLY)
 
     def test_fixed_offsets_are_where_the_spec_says(self):
-        # Offsets 0-4 are frozen across payload versions; a client keys its
-        # version check on them. If this test has to change, the spec changes.
+        # The first ten bytes are frozen across payload versions; a client keys
+        # its "is this mine, do I understand it" check on them. If this test
+        # has to change, the spec changes and every implementation with it.
         packet = router_status.build_status_reply(router_status.STATE_READY, 0, 0, 0, "")
         self.assertEqual(struct.unpack_from("<H", packet, 2)[0], 0xF5F7)
-        self.assertEqual(packet[4], router_status.VERSION)
+        self.assertEqual(packet[4:8], router_status.MAGIC)
+        self.assertEqual(packet[8], router_status.VERSION)
         self.assertEqual(len(packet), router_status.FIXED_LEN)
+
+    def test_reply_without_the_magic_is_rejected(self):
+        packet = bytearray(router_status.build_status_reply(
+            router_status.STATE_READY, 0, 0, 0, "x"))
+        packet[4:8] = b"NOPE"
+        self.assertIsNone(router_status.parse_status_reply(bytes(packet)))
 
     def test_unknown_version_is_rejected_not_guessed(self):
         packet = bytearray(router_status.build_status_reply(
             router_status.STATE_READY, 0, 0, 0, "x"))
-        packet[4] = 99
+        packet[8] = 99
         self.assertIsNone(router_status.parse_status_reply(bytes(packet)))
 
     def test_unknown_state_degrades(self):
@@ -81,7 +101,7 @@ class WireFormat(unittest.TestCase):
         # something benign.
         packet = bytearray(router_status.build_status_reply(
             router_status.STATE_READY, 0, 0, 0, ""))
-        packet[5] = 200
+        packet[9] = 200
         got = router_status.parse_status_reply(bytes(packet))
         self.assertEqual(got["state"], router_status.STATE_DEGRADED)
 
@@ -97,7 +117,7 @@ class WireFormat(unittest.TestCase):
                               f"accepted a reply truncated to {cut} bytes")
         # A name length that runs past the packet.
         lying = bytearray(good)
-        lying[14] = 200
+        lying[18] = 200
         self.assertIsNone(router_status.parse_status_reply(bytes(lying)))
 
     def test_long_name_is_truncated_not_rejected(self):

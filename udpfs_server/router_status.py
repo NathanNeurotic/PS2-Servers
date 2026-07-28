@@ -22,12 +22,31 @@ import struct
 # rather than trusting that any reply to this query is a status reply.
 SVC_STATUS = 0xF5F7
 
-# Payload version. Offsets 0-4 of a reply are frozen across versions;
-# everything after may change.
+# Identifies this protocol independently of the service ID.
+#
+# The number alone is not enough. 0xF5F5 is UDPFS and 0xF5F6 is the default
+# port, so upstream allocates consecutively and 0xF5F7 is the next one it would
+# reach for. Validating a reply protects our client from that; it does nothing
+# about the other direction. Without this tag a server here would answer ANY
+# discovery packet carrying 0xF5F7 -- including a future udpfsd client asking
+# about something else. Requiring the magic means this server can only answer a
+# question it actually understands.
+#
+# Safe to append: a longer packet whose service ID a server does not recognise
+# is still dropped on the guard it already has, verified against both
+# implementations before this was added.
+MAGIC = b"PS2S"
+
+# Payload version. A reply's first ten bytes -- header, service ID, magic,
+# version -- are frozen across versions, being what a client needs to decide
+# whether the rest is addressed to it and whether it understands the layout.
 VERSION = 1
 
+# Exact length of a query.
+QUERY_LEN = 10
+
 # Length of a reply before the variable-length name.
-FIXED_LEN = 15
+FIXED_LEN = 19
 
 # Packet types, repeated here rather than imported so this module stays
 # free of the server it describes.
@@ -74,19 +93,22 @@ def is_status_query(data):
     that creates a session: a launcher polling once a second has to be
     invisible to the console being served.
     """
-    if len(data) < 6:
+    if len(data) < QUERY_LEN:
         return False
     try:
         packet_type, _ = _unpack_header(data)
         (service_id,) = struct.unpack_from("<H", data, 2)
     except struct.error:
         return False
-    return packet_type == _PKT_DISCOVERY and service_id == SVC_STATUS
+    # The magic, not just the number. See MAGIC.
+    return (packet_type == _PKT_DISCOVERY
+            and service_id == SVC_STATUS
+            and data[6:10] == MAGIC)
 
 
 def build_status_query():
-    """The six-byte query, for a client or a test."""
-    return _pack_header(_PKT_DISCOVERY, 0) + struct.pack("<HH", SVC_STATUS, 0)
+    """The query, for a client or a test."""
+    return _pack_header(_PKT_DISCOVERY, 0) + struct.pack("<HH", SVC_STATUS, 0) + MAGIC
 
 
 def build_status_reply(state, flags, sessions, uptime_seconds, name=""):
@@ -98,9 +120,10 @@ def build_status_reply(state, flags, sessions, uptime_seconds, name=""):
     encoded = name.encode("utf-8", "replace")[:255]
     return (
         _pack_header(_PKT_INFORM, 0)
+        + struct.pack("<H", SVC_STATUS)
+        + MAGIC
         + struct.pack(
-            "<HBBHHIB",
-            SVC_STATUS,
+            "<BBHHIB",
             VERSION,
             state & 0xFF,
             flags & 0xFFFF,
@@ -123,11 +146,14 @@ def parse_status_reply(data):
         return None
     try:
         packet_type, _ = _unpack_header(data)
-        service_id, version, state, flags, sessions, uptime, name_len = struct.unpack_from(
-            "<HBBHHIB", data, 2)
+        (service_id,) = struct.unpack_from("<H", data, 2)
+        version, state, flags, sessions, uptime, name_len = struct.unpack_from(
+            "<BBHHIB", data, 8)
     except struct.error:
         return None
     if packet_type != _PKT_INFORM or service_id != SVC_STATUS:
+        return None
+    if data[4:8] != MAGIC:
         return None
     if version != VERSION:
         # Not a guess. A client that does not know the version must report the
