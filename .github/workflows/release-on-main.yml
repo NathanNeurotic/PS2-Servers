@@ -275,6 +275,7 @@ jobs:
           merge-multiple: true
 
       - name: Generate SHA256 checksums
+        id: sums
         shell: bash
         run: |
           cd release-assets
@@ -308,6 +309,31 @@ jobs:
           sha256sum "${present[@]}" > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+          # Build the "which file do I download" table from what is actually
+          # here. The portable build is best-effort (continue-on-error above),
+          # so a static table could recommend a download that failed to build
+          # and is not attached -- pointing a non-technical user at a 404 on the
+          # exact row the notes tell them to use. When a portable asset is
+          # missing the row falls back to that OS's single-file build and says
+          # why, and if neither exists the row is omitted entirely rather than
+          # listed as broken.
+          row() { # row <label> <preferred> <fallback>
+            if [ -n "$2" ] && [ -f "$2" ]; then
+              printf '| %s | **`%s`** |\n' "$1" "$2"
+            elif [ -n "$3" ] && [ -f "$3" ]; then
+              printf '| %s | **`%s`** — portable build unavailable in this release |\n' "$1" "$3"
+            fi
+          }
+          {
+            echo "downloads_table<<PS2SERVERS_EOF"
+            row "Windows, normal (64-bit)"   PS2Servers-windows-x64-portable.zip   PS2Servers-windows-x64.zip
+            row "Windows, older 32-bit PC"   PS2Servers-windows-x86-portable.zip   PS2Servers-windows-x86.zip
+            row "Linux"                      PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz
+            row "Mac, Apple Silicon (M1–M4)" PS2Servers-macos-arm64.zip            ""
+            row "Mac, Intel"                 PS2Servers-macos-x64.zip              ""
+            echo "PS2SERVERS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create release tag
         id: tag
         run: |
@@ -339,11 +365,7 @@ jobs:
 
             | Your computer | Download this |
             |---|---|
-            | Windows, normal (64-bit) | **`PS2Servers-windows-x64-portable.zip`** |
-            | Windows, older 32-bit PC | **`PS2Servers-windows-x86-portable.zip`** |
-            | Linux | **`PS2Servers-linux-x64`** |
-            | Mac, Apple Silicon (M1–M4) | **`PS2Servers-macos-arm64.zip`** |
-            | Mac, Intel | **`PS2Servers-macos-x64.zip`** |
+            ${{ steps.sums.outputs.downloads_table }}
 
             On Windows: unzip it, open the folder, run `PS2Servers.exe`. That's it.
 

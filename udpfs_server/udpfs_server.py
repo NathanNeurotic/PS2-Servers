@@ -1096,7 +1096,19 @@ class UdpfsServer:
     # --- UDPRDMA packet handling ---
 
     def _handle_discovery(self, data: bytes, addr: Tuple[str, int]):
-        """Handle DISCOVERY packet"""
+        """Handle DISCOVERY packet.
+
+        NOT the implementation the launcher runs. ps2servers_core.
+        AutoUdpfsServer overrides this method, and the launcher registry points
+        at ps2servers_core.py, so editing this copy alone changes nothing for
+        the GUI, the packaged app, or `python -m launcher --serve udpfs`. It is
+        live only for `python udpfs_server/udpfs_server.py`, the standalone
+        entry point the README documents.
+
+        Six methods are overridden this way; tests/test_server_override_contract
+        .py pins the list. Change behaviour in ps2servers_core.py, and mirror it
+        here only if the standalone server needs it too.
+        """
         if len(data) < 6:
             return
 

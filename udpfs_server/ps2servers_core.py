@@ -72,7 +72,21 @@ def classify_profile(discovery_sequence: int, first_data_sequence: int) -> str:
 
 
 class AutoUdpfsServer(UdpfsServer):
-    """Existing Python UDPFS implementation with per-session compatibility."""
+    """Existing Python UDPFS implementation with per-session compatibility.
+
+    This is the class the launcher actually runs: the registry in
+    launcher/servers.py points at this file, not at udpfs_server.py. Six
+    UdpfsServer methods are overridden below -- __init__, run, _sendto,
+    _get_or_create_session, _handle_data and _handle_discovery -- so behaviour
+    changes to any of those belong here. Editing only the udpfs_server.py copy
+    produces code that never executes on the shipped path, which has already
+    happened once.
+
+    udpfs_server.py stays as it is on purpose: it is redistributed upstream code
+    (NOTICE.md) and a standalone entry point the README documents.
+    tests/test_server_override_contract.py pins the override set so adding a
+    seventh is a deliberate, reviewed act.
+    """
 
     def __init__(self, *args, protocol_mode: str = "auto",
                  fallback_interval: float = DEFAULT_FALLBACK_SECONDS, **kwargs):

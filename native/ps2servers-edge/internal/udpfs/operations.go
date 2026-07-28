@@ -17,22 +17,33 @@ import (
 )
 
 func (s *Server) handleMessage(st *session.State, p []byte) {
+	// Counters are incremented at dispatch so one request counts once,
+	// regardless of how a handler exits. WriteData is not counted separately:
+	// a write is one operation however many chunks carry it, which is how the
+	// Desktop server counts it too.
 	switch protocol.MessageType(p[0]) {
 	case protocol.OpenRequest:
+		s.stats.open.Add(1)
 		s.handleOpen(st, p)
 	case protocol.CloseRequest:
+		s.stats.closeOp.Add(1)
 		s.handleClose(st, p)
 	case protocol.ReadRequest:
+		s.stats.read.Add(1)
 		s.handleRead(st, p)
 	case protocol.WriteRequest:
+		s.stats.write.Add(1)
 		s.handleWriteRequest(st, p)
 	case protocol.WriteData:
 		s.handleWriteData(st, p)
 	case protocol.SeekRequest:
+		s.stats.lseek.Add(1)
 		s.handleSeek(st, p)
 	case protocol.DReadRequest:
+		s.stats.dread.Add(1)
 		s.handleDRead(st, p)
 	case protocol.GetStatRequest:
+		s.stats.getstat.Add(1)
 		s.handleGetStat(st, p)
 	default:
 		s.cfg.Log.Debug("unknown UDPFS opcode", map[string]any{"peer": st.Peer, "opcode": p[0]})
@@ -242,6 +253,7 @@ func (s *Server) handleRead(st *session.State, p []byte) {
 		s.sendTransfer(st, result8(protocol.ResultReply, errno(err)), nil)
 		return
 	}
+	s.stats.bytesRead.Add(int64(n))
 	s.sendTransfer(st, result8(protocol.ResultReply, int32(n)), buf[:n])
 }
 // maxWriteBytes caps one assembled write. The WRITE_REQ size field is 32-bit,
@@ -362,6 +374,7 @@ func (s *Server) completeWrite(st *session.State) {
 			return
 		}
 	}
+	s.stats.bytesWritten.Add(int64(n))
 	s.cfg.Log.Debug("WRITE ok", map[string]any{"peer": st.Peer, "handle": id, "bytes": n})
 	s.sendWriteDone(st, int32(n))
 }
