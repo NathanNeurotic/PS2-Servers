@@ -341,6 +341,76 @@ jobs:
           TAG="main-${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Assemble release notes
+        id: notes
+        shell: bash
+        # The prose that is true of every release lives in
+        # .github/release-notes-common.md, not inline here. It used to be
+        # pasted into this workflow and release.yml separately, escaped
+        # differently in each, and it drifted -- it still called Edge
+        # read-only after writes became the default, and never mentioned that
+        # Edge had gained UDPBD. One file, edited in the same PR as the change
+        # it describes.
+        env:
+          DOWNLOADS_TABLE: ${{ steps.sums.outputs.downloads_table }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+          cat > "$notes" <<'HEADER'
+          Automatic development build from `main`, published as a
+          **pre-release**. For stable downloads use the
+          [latest tagged release](https://github.com/NathanNeurotic/PS2-Servers/releases/latest).
+
+          Commit: __COMMIT_SHA__
+
+          ## Downloads
+
+          There are a lot of files below. **You need exactly one.** Find your
+          computer in this table and ignore everything else:
+
+          | Your computer | Download this |
+          |---|---|
+          __DOWNLOADS_TABLE__
+
+          On Windows: unzip it, open the folder, run `PS2Servers.exe`. That's it.
+
+          <details>
+          <summary>Why "portable", and what are the other files?</summary>
+
+          The **portable** build is the same app laid out as a plain folder,
+          with no self-extracting wrapper. The wrapper is what makes some
+          antivirus flag the single-file build, so the portable one usually
+          comes up clean — that is why it is the recommendation rather than the
+          single-file `PS2Servers-windows-x64.zip`, which is published for
+          convenience.
+
+          On Linux, `PS2Servers-linux-x64` is a single executable; take
+          `PS2Servers-linux-x64-portable.tar.gz` instead if `/tmp` is mounted
+          `noexec`. macOS ships as a `.app` inside the zip.
+
+          `PS2Servers-source.zip` is the source, for running from Python
+          directly or for inspection.
+
+          Everything beginning **`PS2ServersEdge-`** is a different program —
+          see the section below. You do not need it on a normal computer.
+          </details>
+          HEADER
+          # Substitute the two dynamic values, then append the shared tail.
+          python3 - "$notes" <<'PYSUB'
+          import os, sys
+          p = sys.argv[1]
+          s = open(p, encoding="utf-8").read()
+          s = s.replace("__COMMIT_SHA__", os.environ["COMMIT_SHA"])
+          s = s.replace("__DOWNLOADS_TABLE__", os.environ["DOWNLOADS_TABLE"].rstrip())
+          open(p, "w", encoding="utf-8").write(s)
+          PYSUB
+          # Strip the leading maintainer comment: it explains why the file
+          # exists, which belongs in the repository and not in what a user
+          # reads on the release page.
+          sed '/^<!--/,/^-->/d' "$GITHUB_WORKSPACE/.github/release-notes-common.md" >> "$notes"
+          echo "path=$notes" >> "$GITHUB_OUTPUT"
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
@@ -351,93 +421,7 @@ jobs:
           # tagged vX.Y.Z release (a same-day merge repeatedly stole it).
           prerelease: true
           make_latest: false
-          body: |
-            Automatic development build from `main`, published as a
-            **pre-release**. For stable downloads use the
-            [latest tagged release](https://github.com/NathanNeurotic/PS2-Servers/releases/latest).
-
-            Commit: ${{ github.sha }}
-
-            ## Downloads
-
-            There are a lot of files below. **You need exactly one.** Find your
-            computer in this table and ignore everything else:
-
-            | Your computer | Download this |
-            |---|---|
-            ${{ steps.sums.outputs.downloads_table }}
-
-            On Windows: unzip it, open the folder, run `PS2Servers.exe`. That's it.
-
-            <details>
-            <summary>Why "portable", and what are the other files?</summary>
-
-            The **portable** build is the same app laid out as a plain folder,
-            with no self-extracting wrapper. The wrapper is what makes some
-            antivirus flag the single-file build, so the portable one usually
-            comes up clean — that is why it is the recommendation rather than the
-            single-file `PS2Servers-windows-x64.zip`, which is published for
-            convenience.
-
-            On Linux, `PS2Servers-linux-x64` is a single executable; take
-            `PS2Servers-linux-x64-portable.tar.gz` instead if `/tmp` is mounted
-            `noexec`. macOS ships as a `.app` inside the zip.
-
-            `PS2Servers-source.zip` is the source, for running from Python
-            directly or for inspection.
-
-            Everything beginning **`PS2ServersEdge-`** is a different program —
-            see the section below. You do not need it on a normal computer.
-            </details>
-
-            ### PS2 Servers Edge (routers, NAS, Raspberry Pi)
-
-            The `PS2ServersEdge-*` files are the headless native server for
-            devices where the desktop GUI and Python runtime do not fit —
-            routers, NAS units, Raspberry Pi and other embedded Linux. **You do
-            not need these for a normal PC**; use the launcher downloads above.
-
-            Each Edge file is named for the device family it serves, for example
-            `armv5-pogoplug-sheevaplug-dockstar`, `edgerouter-octeon-mips64`, or
-            `router-mips-little-endian-mt7621`. Run `uname -m` on the device and
-            match it using
-            [EDGE-WHICH-BUILD.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE-WHICH-BUILD.md).
-            Every archive also contains a `WHICH-DEVICE.txt` confirming what it
-            is for. Downloading the wrong one is harmless — it simply will not
-            run.
-
-            Edge is read-only and supports CSO/ZSO but **not CHD**. For OpenWrt,
-            build the source package for your exact target instead — see
-            [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
-
-            ## Security transparency
-
-            PS2 Servers is an open-source PS2 homebrew utility for user-controlled local server setup. It runs local LAN servers for Open PS2 Loader:
-
-            - SMBv1/RiptOPL: built-in SMB/CIFS subset, normally TCP port `1111` (below 1033 discouraged).
-            - UDPFS: UDP file/block serving, normally UDP port `0xF5F6`.
-            - UDPBD: UDP block-device serving, normally UDP port `0xBDBD`.
-
-            Windows behavior:
-
-            - The Windows SMB server uses PS2 Servers' built-in SMB/CIFS implementation and does not enable Windows SMB1.
-            - The app does not enable or disable Windows optional features.
-            - Windows Firewall changes happen only after user action/consent and use rules named `PS2 Servers - ...`.
-            - Advanced SMB port `445` mode is optional and requires administrator consent.
-            - To uninstall, delete the extracted app folder. To remove PS2 Servers firewall rules, use the GUI action or `tools/remove-windows-firewall-rules.ps1`.
-
-            Verification:
-
-            - Release assets include `SHA256SUMS.txt`.
-            - GitHub artifact attestations are generated for binary and source artifacts.
-            - For the lowest-trust path, use `PS2Servers-source.zip` and run from source.
-
-            PS2 Servers has been submitted to Avast/Gen Threat Labs for false-positive review.
-
-            The application is open source and built from the public GitHub repository. It is a PS2 homebrew utility for user-controlled local server setup and does not contain malware, credential collection, persistence, adware, browser modification, or crypto-mining behavior.
-
-            Repository:
-            https://github.com/NathanNeurotic/PS2-Servers
+          body_path: ${{ steps.notes.outputs.path }}
           files: |
             release-assets/PS2Servers-linux-x64
             release-assets/PS2Servers-linux-x64-portable.tar.gz
