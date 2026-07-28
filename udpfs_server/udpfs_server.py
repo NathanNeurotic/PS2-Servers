@@ -1159,7 +1159,13 @@ class UdpfsServer:
             # Assigned on the session, not through the _session_prop proxies: we are
             # on the demux thread, where _local.session is unset.
             sess.rx_seq_nr_expected = (hdr.seq_nr + 1) & 0xFFF
-        self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY -> INFORM")
+        # Verbose-only: this fires for every broadcast, and both client families
+        # keep discovery running for the life of a transfer, so at default
+        # verbosity it buries the transfer log. The first-contact line above
+        # already gives the default visibility that matters -- proof a console
+        # reached us, and from which address.
+        if self.verbose:
+            self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY -> INFORM")
         self._send_inform(addr, sess)
 
     def _handle_data(self, data: bytes, addr: Tuple[str, int]):
