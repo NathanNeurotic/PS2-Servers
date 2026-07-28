@@ -109,6 +109,63 @@ jobs:
             --host 127.0.0.1 --port "$port" --root "$root" --path probe.iso
         working-directory: native/ps2servers-edge
 
+      # Same idea for the block-device protocol. The probe is server-agnostic
+      # and is run against the Python UDPBD server too, so a divergence between
+      # the two implementations shows up as a CI failure rather than as a
+      # console that will not boot.
+      - name: UDPBD conformance probe against Edge and Core
+        shell: bash
+        run: |
+          set -euo pipefail
+          port=48573
+          work="$(mktemp -d)"
+          # 4 MiB / 8192 sectors: large enough that a 512-sector read exercises
+          # the 32-byte block regime and spans many RDMA packets.
+          python - "$work/edge.img" <<'PYIMG'
+          import random, sys
+          random.seed(1234)
+          with open(sys.argv[1], "wb") as f:
+              f.write(bytes(random.getrandbits(8) for _ in range(4 * 1024 * 1024)))
+          PYIMG
+          cp "$work/edge.img" "$work/core.img"
+
+          go build -o "$RUNNER_TEMP/ps2servers-edge" ./cmd/ps2servers-edge
+
+          run_probe() {
+            local label="$1" image="$2"
+            for _ in $(seq 1 50); do
+              if ss -lun 2>/dev/null | grep -q ":${port}\b"; then break; fi
+              sleep 0.2
+            done
+            python "$GITHUB_WORKSPACE/conformance/integration/udpbd_probe.py" \
+              --host 127.0.0.1 --port "$port" --image "$image"
+            echo "  ^ $label"
+          }
+
+          "$RUNNER_TEMP/ps2servers-edge" udpbd --image "$work/edge.img" --bind 127.0.0.1 --port "$port" &
+          edge_pid=$!
+          trap 'kill "$edge_pid" 2>/dev/null || true' EXIT
+          run_probe "PS2 Servers Edge (Go)" "$work/edge.img"
+          kill "$edge_pid" 2>/dev/null || true
+          wait "$edge_pid" 2>/dev/null || true
+
+          # Control: the same probe against the hardware-validated Python
+          # server. If this ever fails, the probe is wrong rather than Edge.
+          python "$GITHUB_WORKSPACE/udpbd_server/udpbd_server.py" "$work/core.img" &
+          core_pid=$!
+          trap 'kill "$core_pid" 2>/dev/null || true' EXIT
+          run_probe "Python Core (control)" "$work/core.img"
+          kill "$core_pid" 2>/dev/null || true
+
+          # Both servers began from identical images and received identical
+          # writes, so the images must still match byte for byte.
+          if ! cmp -s "$work/edge.img" "$work/core.img"; then
+            echo "::error::Edge and Core produced different images from the same writes"
+            exit 1
+          fi
+          echo "Edge and Core wrote byte-identical images"
+        working-directory: native/ps2servers-edge
+
   build:
     name: Build Edge
     needs: test
