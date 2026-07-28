@@ -160,7 +160,9 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 		s.sendTransfer(st, result8(protocol.ResultReply, errno(err)), nil)
 		return
 	}
-	s.stats.bread.Add(1)
+	// Counted at dispatch, not here: a rejected BREAD is still a BREAD, and an
+	// operator watching --metrics while a console fails to read needs to see the
+	// requests arriving rather than a counter frozen at zero.
 	s.stats.bytesRead.Add(int64(len(data)))
 	s.cfg.Log.Debug("BREAD", map[string]any{
 		"peer": st.Peer, "sector": sector, "count": count, "bytes": len(data)})
@@ -202,11 +204,11 @@ func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
 		s.sendWriteDone(st, -int32(syscall.EINVAL))
 		return
 	}
-	s.stats.bwrite.Add(1)
 	st.WriteActive = true
 	st.WriteIsBlock = true
 	st.WriteHandle = blockHandle
 	st.WriteOffset = sector * dev.sectorSize
+	st.WriteExpectedLen = total
 	st.WriteBuffer = make([]byte, 0, total)
 	st.WriteTotalChunks = 0
 	st.WriteReceivedChunk = 0
@@ -220,10 +222,27 @@ func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
 }
 
 // completeBlockWrite flushes an assembled block write to the image.
-func (s *Server) completeBlockWrite(st *session.State, buf []byte, offset int64) {
+//
+// expected is the byte count the BWRITE header declared, and the buffer must
+// match it exactly. inRange validated the DECLARED sector range, but nothing on
+// the chunk path ties the delivered bytes to that range: handleWriteData is
+// driven by the client's own totalChunks and bounded only by maxWriteBytes. A
+// client could therefore declare one sector at the end of the image, stream
+// megabytes, and have every byte written at the validated offset -- WriteAt past
+// EOF extends the file, so the image silently grows with attacker-chosen
+// contents. Checking a length and then writing a different one is the same
+// defect as the overflow bug in inRange: the quantity validated was not the
+// quantity used.
+func (s *Server) completeBlockWrite(st *session.State, buf []byte, offset, expected int64) {
 	dev := s.blockDev
 	if dev == nil {
 		s.sendWriteDone(st, -int32(syscall.EBADF))
+		return
+	}
+	if int64(len(buf)) != expected {
+		s.cfg.Log.Warn("BWRITE length mismatch", map[string]any{
+			"peer": st.Peer, "declared": expected, "delivered": len(buf)})
+		s.sendWriteDone(st, -int32(syscall.EINVAL))
 		return
 	}
 	if err := dev.writeAt(offset, buf); err != nil {
