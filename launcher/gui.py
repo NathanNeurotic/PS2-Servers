@@ -29,7 +29,7 @@ def _direct_link_experimental():
     """Non-Windows: the setup path is real but unverified on hardware."""
     return platform.system() in ("Linux", "Darwin")
 
-from . import config, directlink, elevate, netinfo, posix_firewall, theme, tray, windows_setup
+from . import config, directlink, elevate, netinfo, posix_firewall, servers, theme, tray, windows_setup
 from .process import ServerProcess
 from .release_metadata import DISPLAY_VERSION
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
@@ -378,6 +378,12 @@ class ServerCard(ttk.LabelFrame):
         return out
 
     def set_values(self, saved):
+        # Migrate first. This loop only restores keys that have a widget, so a
+        # setting whose control was retired is dropped here and can never come
+        # back on save either -- values() walks the same dict. Honouring a
+        # retired key further downstream cannot help, because nothing upstream
+        # can still deliver it.
+        saved = servers.migrate_saved(self.server.key, saved)
         for key, var in self.vars.items():
             if key in saved:
                 var.set(saved[key])

@@ -156,6 +156,36 @@ for _label, _value in PROTOCOL_MODE_CHOICES:
     _PROTOCOL_MODE_BY_NAME[_value.lower()] = _value
 
 
+def migrate_saved(server_key, saved):
+    """Translate retired settings keys into the controls that replaced them.
+
+    Applied when a saved configuration is loaded into a card, because the card
+    restores and collects values by walking its widgets: a key with no widget is
+    dropped on load and can never appear again on save. So honouring a retired
+    key inside build_argv is not enough on its own -- the GUI cannot put it
+    there. It has to become a key that does have a widget, before the widgets are
+    filled in.
+
+    Translating rather than merely preserving is also the better outcome for the
+    person upgrading. Their console keeps working AND the reason is now visible
+    in the interface, where they can see they are on Modulo and change it, rather
+    than being held in a key nothing displays.
+    """
+    if not saved:
+        return saved
+    if server_key != "udpfs":
+        return saved
+    if not saved.get("modulo_mode"):
+        return saved
+    migrated = dict(saved)
+    # Only fills an empty selection. Someone who has since made an explicit
+    # choice in the new control means it.
+    if not protocol_mode_value(migrated.get("protocol_mode")):
+        migrated["protocol_mode"] = "Modulo"
+    migrated.pop("modulo_mode", None)
+    return migrated
+
+
 def protocol_mode_value(raw):
     """Map whatever is stored for protocol_mode to a value the servers accept.
 
