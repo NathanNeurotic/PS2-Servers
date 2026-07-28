@@ -317,20 +317,27 @@ jobs:
           # missing the row falls back to that OS's single-file build and says
           # why, and if neither exists the row is omitted entirely rather than
           # listed as broken.
-          row() { # row <label> <preferred> <fallback>
+          # The fallback note is a parameter rather than a fixed string. Most
+          # rows fall back from the portable build to the single file, but the
+          # Linux row falls the other way -- so a hardcoded "portable build
+          # unavailable" would offer the reader the portable tarball while
+          # telling them the portable build was missing.
+          row() { # row <label> <preferred> <fallback> <why-the-fallback>
             if [ -n "$2" ] && [ -f "$2" ]; then
               printf '| %s | **`%s`** |\n' "$1" "$2"
             elif [ -n "$3" ] && [ -f "$3" ]; then
-              printf '| %s | **`%s`** — portable build unavailable in this release |\n' "$1" "$3"
+              printf '| %s | **`%s`** — %s |\n' "$1" "$3" "$4"
             fi
           }
+          no_portable="portable build unavailable in this release"
+          no_onefile="single-file build unavailable in this release"
           {
             echo "downloads_table<<PS2SERVERS_EOF"
-            row "Windows, normal (64-bit)"   PS2Servers-windows-x64-portable.zip   PS2Servers-windows-x64.zip
-            row "Windows, older 32-bit PC"   PS2Servers-windows-x86-portable.zip   PS2Servers-windows-x86.zip
-            row "Linux"                      PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz
-            row "Mac, Apple Silicon (M1–M4)" PS2Servers-macos-arm64.zip            ""
-            row "Mac, Intel"                 PS2Servers-macos-x64.zip              ""
+            row "Windows, normal (64-bit)"   PS2Servers-windows-x64-portable.zip   PS2Servers-windows-x64.zip           "$no_portable"
+            row "Windows, older 32-bit PC"   PS2Servers-windows-x86-portable.zip   PS2Servers-windows-x86.zip           "$no_portable"
+            row "Linux"                      PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz "$no_onefile"
+            row "Mac, Apple Silicon (M1–M4)" PS2Servers-macos-arm64.zip            ""                                   ""
+            row "Mac, Intel"                 PS2Servers-macos-x64.zip              ""                                   ""
             echo "PS2SERVERS_EOF"
           } >> "$GITHUB_OUTPUT"
 

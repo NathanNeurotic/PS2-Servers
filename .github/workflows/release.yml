@@ -336,6 +336,49 @@ jobs:
             out/PS2Servers-x86_64.AppImage
             out/PS2Servers-x86_64.AppImage.sha256.txt
 
+  # The source archive was built only for rolling pre-releases, so tagged
+  # releases never carried one -- while the shared notes told readers to "use
+  # PS2Servers-source.zip" for the lowest-trust path. That is the download for
+  # anyone who will not run a binary they cannot inspect, which makes it exactly
+  # the wrong one to be missing from the releases people are pointed at.
+  #
+  # Edge binaries are NOT built here: edge.yml already runs on v* tags and
+  # attaches them through edge-build.yml. Adding a second Edge job would build
+  # the same eleven targets twice and race to attach them.
+  source:
+    name: Package source archive
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create portable source zip
+        shell: bash
+        run: git archive --format=zip --output=PS2Servers-source.zip HEAD
+
+      - name: Write source checksum
+        shell: bash
+        run: sha256sum PS2Servers-source.zip > PS2Servers-source.zip.sha256.txt
+
+      - name: Generate source attestation
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: PS2Servers-source.zip
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PS2Servers-source.zip
+          path: |
+            PS2Servers-source.zip
+            PS2Servers-source.zip.sha256.txt
+          if-no-files-found: error
+
   # Publishing is its own job so the release notes can be written by something
   # that has seen every asset.
   #
@@ -354,7 +397,9 @@ jobs:
   # matrix legs each set the release body, all with the same text, all at once.
   release:
     name: Publish release
-    needs: build
+    needs:
+      - build
+      - source
     # Tags publish; the manual "Run workflow" button still builds and uploads
     # artifacts without creating a release.
     #
@@ -478,6 +523,12 @@ jobs:
 
           macOS ships as a `.app` inside the zip — unzip and right-click → Open,
           since it is unsigned.
+
+          `PS2Servers-source.zip` is the source, for running from Python
+          directly or for inspection.
+
+          Everything beginning **`PS2ServersEdge-`** is a different program —
+          see the section below. You do not need it on a normal computer.
 
           Each download has a matching `.sha256.txt` next to it.
 
