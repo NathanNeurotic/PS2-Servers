@@ -75,6 +75,10 @@ func main() {
 	// because a router share is often an entire attached disk. See
 	// packaging/openwrt/files/ps2servers-edge.config.
 	readOnly := fs.Bool("read-only", envBool("RO", false), "serve files read-only; omit to allow the console to write saves")
+	// Names match the Desktop/Core server so a command line or compose file
+	// written for one works on the other.
+	metrics := fs.Bool("metrics", envBool("METRICS", false), "log periodic transfer statistics")
+	metricsPeriod := fs.String("metrics-period", env("METRICS_PERIOD", "1m"), "how often to log statistics")
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
 	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
 	quiet := fs.Bool("quiet", false, "suppress informational logs")
@@ -124,8 +128,16 @@ func main() {
 	if *txDelayMs > 0 {
 		txDelay = time.Duration(*txDelayMs * float64(time.Millisecond))
 	}
+	var metricsEvery time.Duration
+	if *metrics {
+		metricsEvery, err = duration(*metricsPeriod)
+		if err != nil || metricsEvery < time.Second || metricsEvery > 24*time.Hour {
+			fmt.Fprintln(os.Stderr, "error: --metrics-period must be between 1s and 24h")
+			os.Exit(2)
+		}
+	}
 	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
-	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, Log: logger, ServerName: "PS2 Servers Edge"})
+	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, MetricsPeriod: metricsEvery, Log: logger, ServerName: "PS2 Servers Edge"})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

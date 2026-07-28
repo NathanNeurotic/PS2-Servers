@@ -42,6 +42,8 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 	// Only the first discovery per peer is announced at Info: both client
 	// families keep broadcasting discovery for the life of a transfer, so
 	// logging every one would bury the transfer log. --verbose shows them all.
+	s.stats.discovery.Add(1)
+
 	s.sessionsMu.Lock()
 	_, known := s.sessions[in.peer.String()]
 	s.sessionsMu.Unlock()

@@ -34,6 +34,9 @@ type Config struct {
 	PeerTimeout   time.Duration
 	TxDelay       time.Duration
 	ReadOnly      bool
+	// MetricsPeriod logs a periodic counter snapshot when > 0, matching the
+	// Desktop server's --metrics / --metrics-period.
+	MetricsPeriod time.Duration
 	Log           *edgelog.Logger
 	ServerName    string
 	FallbackDelay time.Duration
@@ -67,6 +70,8 @@ type Server struct {
 	closed     chan struct{}
 	closeOnce  sync.Once
 	wg         sync.WaitGroup
+
+	stats metrics
 
 	// writers reserves each file that some peer currently holds open for
 	// writing, mapping resolved path to a reference count. Two consoles
@@ -135,6 +140,7 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{cfg: cfg, root: root, sessions: make(map[string]*peerWorker), incoming: make(chan inbound, 256), closed: make(chan struct{})}
+	s.stats.started = time.Now()
 	return s, nil
 }
 
@@ -187,6 +193,10 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	s.wg.Add(1)
 	go s.reaper()
+	if s.cfg.MetricsPeriod > 0 {
+		s.wg.Add(1)
+		go s.emitMetrics(s.cfg.MetricsPeriod, s.closed)
+	}
 	for {
 		select {
 		case <-ctx.Done():
