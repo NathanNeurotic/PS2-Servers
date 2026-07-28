@@ -25,6 +25,8 @@ type metrics struct {
 	dread     atomic.Int64
 	getstat   atomic.Int64
 	lseek     atomic.Int64
+	bread     atomic.Int64
+	bwrite    atomic.Int64
 
 	bytesRead    atomic.Int64
 	bytesWritten atomic.Int64
@@ -48,6 +50,8 @@ func (m *metrics) snapshot() map[string]any {
 		"dread":         m.dread.Load(),
 		"getstat":       m.getstat.Load(),
 		"lseek":         m.lseek.Load(),
+		"bread":         m.bread.Load(),
+		"bwrite":        m.bwrite.Load(),
 		"bytes_read":    readBytes,
 		"bytes_written": m.bytesWritten.Load(),
 	}

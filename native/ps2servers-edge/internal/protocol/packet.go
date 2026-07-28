@@ -52,6 +52,12 @@ const (
 	GetStatRequest MessageType = 0x1E
 	GetStatReply   MessageType = 0x1F
 	ResultReply    MessageType = 0x26
+	// UDPFS carries block-device access as well as files: BREAD answers with a
+	// ResultReply plus raw sector bytes, and BWRITE opens the same WriteData
+	// chunk sequence a file write uses. Handle 0 is reserved for the shared
+	// block device and is never returned by OPEN.
+	BReadRequest  MessageType = 0x28
+	BWriteRequest MessageType = 0x2A
 )
 
 type Header struct {

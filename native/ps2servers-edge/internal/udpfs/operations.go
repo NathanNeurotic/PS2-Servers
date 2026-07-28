@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/compression"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/filesystem"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
@@ -36,6 +35,10 @@ func (s *Server) handleMessage(st *session.State, p []byte) {
 		s.handleWriteRequest(st, p)
 	case protocol.WriteData:
 		s.handleWriteData(st, p)
+	case protocol.BReadRequest:
+		s.handleBRead(st, p)
+	case protocol.BWriteRequest:
+		s.handleBWriteRequest(st, p)
 	case protocol.SeekRequest:
 		s.stats.lseek.Add(1)
 		s.handleSeek(st, p)
@@ -64,6 +67,12 @@ func (s *Server) resolveImagePath(client string) (string, error) {
 		return p, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	// With --no-compression a missing .iso must stay missing: answering with a
+	// CSO/ZSO container under an .iso name would hand the console bytes it
+	// cannot read.
+	if !s.compressedSiblingsEnabled() {
 		return "", err
 	}
 	if !strings.HasSuffix(strings.ToLower(client), ".iso") {
@@ -121,7 +130,7 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 		s.sendOpen(st, errno(err), 0, 0)
 		return
 	}
-	img, err := compression.Open(real)
+	img, err := s.openImage(real)
 	if err != nil {
 		s.sendOpen(st, errno(err), 0, 0)
 		return
@@ -353,7 +362,13 @@ func (s *Server) handleWriteData(st *session.State, msg []byte) {
 func (s *Server) completeWrite(st *session.State) {
 	id := st.WriteHandle
 	buf := st.WriteBuffer
+	isBlock := st.WriteIsBlock
+	offset := st.WriteOffset
 	st.ResetWrite()
+	if isBlock {
+		s.completeBlockWrite(st, buf, offset)
+		return
+	}
 	h := st.Handles[id]
 	if h == nil || h.Writer == nil {
 		s.sendWriteDone(st, -int32(syscall.EBADF))
@@ -431,15 +446,20 @@ func (s *Server) handleDRead(st *session.State, p []byte) {
 	}
 	entry := h.Directory[h.Index]
 	h.Index++
-	lower := strings.ToLower(entry.Name)
-	for _, ext := range []string{".cso", ".ciso", ".zso", ".ziso"} {
-		if strings.HasSuffix(lower, ext) {
-			entry.Name = entry.Name[:len(entry.Name)-len(ext)] + ".iso"
-			if img, err := compression.Open(entry.SourcePath); err == nil {
-				entry.Size = uint64(img.Size())
-				_ = img.Close()
+	// Compressed containers are listed under an .iso name with their
+	// decompressed size, so the console sees what it will actually receive.
+	// --no-compression turns that off: the entry keeps its real name and size.
+	if s.compressedSiblingsEnabled() {
+		lower := strings.ToLower(entry.Name)
+		for _, ext := range []string{".cso", ".ciso", ".zso", ".ziso"} {
+			if strings.HasSuffix(lower, ext) {
+				entry.Name = entry.Name[:len(entry.Name)-len(ext)] + ".iso"
+				if img, err := s.openImage(entry.SourcePath); err == nil {
+					entry.Size = uint64(img.Size())
+					_ = img.Close()
+				}
+				break
 			}
-			break
 		}
 	}
 	s.sendDRead(st, 1, entry)
@@ -484,8 +504,9 @@ func (s *Server) handleGetStat(st *session.State, p []byte) {
 		return
 	}
 	size := uint64(info.Size())
-	if ext := strings.ToLower(filepath.Ext(real)); ext == ".cso" || ext == ".ciso" || ext == ".zso" || ext == ".ziso" {
-		if img, e := compression.Open(real); e == nil {
+	if ext := strings.ToLower(filepath.Ext(real)); s.compressedSiblingsEnabled() &&
+		(ext == ".cso" || ext == ".ciso" || ext == ".zso" || ext == ".ziso") {
+		if img, e := s.openImage(real); e == nil {
 			size = uint64(img.Size())
 			_ = img.Close()
 		}

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/compression"
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpbd"
@@ -77,6 +78,10 @@ func main() {
 	readOnly := fs.Bool("read-only", envBool("RO", false), "serve files read-only; omit to allow the console to write saves")
 	// Names match the Desktop/Core server so a command line or compose file
 	// written for one works on the other.
+	blockDevice := fs.String("block-device", env("BDPATH", ""), "also serve this disk image over UDPFS block access")
+	sectorSize := fs.Int("sector-size", envInt("SECTOR_SIZE", 512), "sector size for --block-device")
+	noCompression := fs.Bool("no-compression", envBool("NO_COMPRESSION", false), "serve CSO/ZSO as raw bytes instead of decompressing")
+	compressionCache := fs.Int("compression-cache-size", envInt("COMPRESSION_CACHE_SIZE", 32), "decompressed blocks cached per open image")
 	metrics := fs.Bool("metrics", envBool("METRICS", false), "log periodic transfer statistics")
 	metricsPeriod := fs.String("metrics-period", env("METRICS_PERIOD", "1m"), "how often to log statistics")
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
@@ -92,6 +97,23 @@ func main() {
 	}
 	if *root == "" {
 		fmt.Fprintln(os.Stderr, "error: --root is required")
+		os.Exit(2)
+	}
+	if *sectorSize <= 0 || *sectorSize > 65536 || *sectorSize%512 != 0 {
+		// A sector size that is not a multiple of 512 cannot describe a PS2
+		// image, and an unbounded one would let a small sector count request a
+		// huge read.
+		fmt.Fprintln(os.Stderr, "error: --sector-size must be a multiple of 512 and at most 65536")
+		os.Exit(2)
+	}
+	// Bounded, not merely non-negative: the value becomes the initial capacity
+	// of the per-image block map, so a mistyped --compression-cache-size would
+	// force a huge allocation the moment a compressed image is opened -- on the
+	// low-memory routers this build targets, that is an OOM rather than a
+	// slowdown.
+	if *compressionCache < 0 || *compressionCache > compression.MaxCacheBlocks {
+		fmt.Fprintf(os.Stderr, "error: --compression-cache-size must be between 0 and %d\n",
+			compression.MaxCacheBlocks)
 		os.Exit(2)
 	}
 	if *logFormat != "text" && *logFormat != "json" {
@@ -137,7 +159,7 @@ func main() {
 		}
 	}
 	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
-	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, MetricsPeriod: metricsEvery, Log: logger, ServerName: "PS2 Servers Edge"})
+	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, MetricsPeriod: metricsEvery, BlockDevice: *blockDevice, SectorSize: *sectorSize, NoCompression: *noCompression, CompressionCache: *compressionCache, Log: logger, ServerName: "PS2 Servers Edge"})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

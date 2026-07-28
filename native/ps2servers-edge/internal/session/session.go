@@ -77,6 +77,11 @@ type State struct {
 	WriteBuffer        []byte
 	WriteTotalChunks   uint16
 	WriteReceivedChunk uint16
+	// WriteIsBlock routes the assembled buffer to the shared block device at
+	// WriteOffset instead of to a file handle. BWRITE and a file write share
+	// the same WriteData chunk sequence, so only the destination differs.
+	WriteIsBlock bool
+	WriteOffset  int64
 
 	// ReleaseWriter, when set by the server, is called with a handle's
 	// RealPath as that handle is closed if it held write access, so the
@@ -93,6 +98,8 @@ func (s *State) ResetWrite() {
 	s.WriteBuffer = nil
 	s.WriteTotalChunks = 0
 	s.WriteReceivedChunk = 0
+	s.WriteIsBlock = false
+	s.WriteOffset = 0
 }
 
 type BufferedPacket struct {
