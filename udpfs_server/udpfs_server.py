@@ -49,6 +49,9 @@ from typing import Dict, List, Optional, Tuple, Union
 # Compressed ISO support
 from compressed_iso import CompressedFileWrapper, ZsoFileWrapper, CsoFileWrapper, ChdFileWrapper, LIBCHDR_AVAILABLE
 
+# Router status protocol. Encoding only -- see docs/ROUTER-STATUS.md.
+import router_status
+
 # Check LZ4 availability for ZSO format
 try:
     import lz4
@@ -1095,6 +1098,64 @@ class UdpfsServer:
 
     # --- UDPRDMA packet handling ---
 
+    def _maybe_answer_status(self, data: bytes, addr) -> bool:
+        """Answer a router status query. True if the packet was one.
+
+        Unlike almost everything else in this region, this is NOT overridden by
+        ps2servers_core.AutoUdpfsServer -- both discovery handlers call this one
+        implementation, so the two editions cannot answer differently. See
+        docs/ROUTER-STATUS.md.
+
+        Called before the UDPFS service-ID guard and before anything that
+        creates a session. A launcher polling once a second has to stay
+        invisible to the console being served, and must not occupy a slot in the
+        very session count it is reporting.
+
+        The reply goes out on the discovery socket, which is where the query
+        arrived, so a client using a connected UDP socket sees it come back from
+        the address it sent to. In --single-port mode dsock is aliased to sock,
+        so this is still the right socket.
+        """
+        if not router_status.is_status_query(data):
+            return False
+        packet = router_status.build_status_reply(
+            self._status_state(),
+            self._status_flags(),
+            len(self.sessions),
+            time.monotonic() - self._start_time,
+            self.server_name,
+        )
+        _send_with_retry(self.sock, packet, addr, self.send_lock, self.tx_delay_s)
+        return True
+
+    def _status_state(self) -> int:
+        """Collapse the server into the five states a client understands."""
+        # A share that has become unreadable -- an unmounted USB stick, the
+        # ordinary failure on router hardware -- is reported rather than
+        # hidden. Answering "ready" would send someone hunting the network for
+        # a storage fault.
+        if self.root_dir and not os.path.isdir(self.root_dir):
+            return router_status.STATE_DEGRADED
+        # Busy means a transfer is in flight, and it is why this protocol
+        # carries a state rather than just answering "yes, I am here": a board
+        # wired to console power must not be cut mid-write.
+        try:
+            sessions = list(self.sessions.values())
+        except RuntimeError:
+            # The dict changed while being copied. A status poll is the last
+            # thing that should raise, so report what is certain.
+            return router_status.STATE_READY
+        for sess in sessions:
+            if getattr(sess, "rx_streaming", False) or getattr(sess, "write_handle", -1) >= 0:
+                return router_status.STATE_BUSY
+        return router_status.STATE_READY
+
+    def _status_flags(self) -> int:
+        flags = router_status.FLAG_UDPFS
+        if self.read_only:
+            flags |= router_status.FLAG_READ_ONLY
+        return flags
+
     def _handle_discovery(self, data: bytes, addr: Tuple[str, int]):
         """Handle DISCOVERY packet.
 
@@ -1110,6 +1171,11 @@ class UdpfsServer:
         here only if the standalone server needs it too.
         """
         if len(data) < 6:
+            return
+
+        # Before the service-ID guard below, which is what makes older servers
+        # ignore this packet and therefore what makes the feature additive.
+        if self._maybe_answer_status(data, addr):
             return
 
         hdr = Header.unpack(data)
