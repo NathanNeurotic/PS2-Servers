@@ -38,12 +38,23 @@ type Image struct {
 // behave the same when neither is tuned.
 const DefaultCacheBlocks = 32
 
+// MaxCacheBlocks caps the cache. The limit is used as a map's initial capacity,
+// so an absurd value allocates eagerly rather than growing into it -- and Edge
+// runs on routers with tens of megabytes of RAM. At a typical 2 KiB block this
+// ceiling is roughly 8 MiB per open image, far past any useful working set.
+const MaxCacheBlocks = 4096
+
 // SetCacheBlocks bounds the decompressed-block cache. Zero disables caching.
+// Clamped rather than trusted: this is a library entry point, so it must hold
+// even when a caller skips the CLI's validation.
 func (i *Image) SetCacheBlocks(n int) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if n < 0 {
 		n = 0
+	}
+	if n > MaxCacheBlocks {
+		n = MaxCacheBlocks
 	}
 	i.cacheLimit = n
 	i.cache = nil

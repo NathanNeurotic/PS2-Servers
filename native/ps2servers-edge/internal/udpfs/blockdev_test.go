@@ -3,6 +3,7 @@ package udpfs
 import (
 	"context"
 	"encoding/binary"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -156,7 +157,12 @@ func TestBlockWriteRefusedOnAReadOnlyServer(t *testing.T) {
 	if got := result(reply); got != -int32(syscall.EACCES) {
 		t.Fatalf("BWRITE on a read-only server returned %d, want -EACCES", got)
 	}
-	onDisk, _ := os.ReadFile(imgPath)
+	onDisk, err := os.ReadFile(imgPath)
+	if err != nil {
+		// Discarding this would leave onDisk nil and panic on the slice below,
+		// hiding the real I/O failure behind an index-out-of-range.
+		t.Fatal(err)
+	}
 	if string(onDisk[3*512:4*512]) != string(img[3*512:4*512]) {
 		t.Fatal("a read-only server modified the image")
 	}
@@ -260,3 +266,69 @@ func TestCompressionCacheDefaultsAndDisables(t *testing.T) {
 }
 
 var _ = session.Pending // keep the session import meaningful across refactors
+
+// TestBlockRangeCheckSurvivesIntegerOverflow guards a real defect found in
+// review: sector arrives from the client as lo|hi<<32, so a value near
+// MaxInt64 made `sector + count` wrap silently -- Go does not panic on signed
+// overflow. The wrapped sum is negative, so both the `sector < 0` guard and the
+// upper-bound guard passed and the range check was bypassed entirely. The
+// resulting offset could land inside the real file, which on BWRITE is silent
+// corruption of the operator's image at an attacker-chosen position.
+func TestBlockRangeCheckSurvivesIntegerOverflow(t *testing.T) {
+	dev := &blockDevice{size: 64 * 512, sectorSize: 512}
+
+	hostile := []struct {
+		name   string
+		sector int64
+		count  int64
+	}{
+		{"near MaxInt64", math.MaxInt64 - 4, 8},
+		{"exactly MaxInt64", math.MaxInt64, 1},
+		{"negative sector", -1, 1},
+		{"zero count", 0, 0},
+		{"negative count", 0, -1},
+		{"one past the end", 64, 1},
+		{"straddles the end", 60, 8},
+	}
+	for _, c := range hostile {
+		if dev.inRange(c.sector, c.count) {
+			t.Errorf("%s: sector=%d count=%d was accepted; it must be refused",
+				c.name, c.sector, c.count)
+		}
+	}
+
+	valid := []struct{ sector, count int64 }{{0, 1}, {0, 64}, {63, 1}, {32, 32}}
+	for _, c := range valid {
+		if !dev.inRange(c.sector, c.count) {
+			t.Errorf("sector=%d count=%d is inside the image but was refused",
+				c.sector, c.count)
+		}
+	}
+}
+
+// TestBlockReadRejectsOverflowingSectorOverTheWire drives the same case through
+// a live server, because the unit check above would still pass if a handler
+// stopped calling inRange.
+func TestBlockReadRejectsOverflowingSectorOverTheWire(t *testing.T) {
+	disc, imgPath, img := startBlockServer(t, Config{})
+	c := dial(t, disc)
+
+	reply := c.send(blockMsg(protocol.BReadRequest, 0, uint64(math.MaxInt64-4), 8))
+	if got := result(reply); got >= 0 {
+		t.Fatalf("an overflowing BREAD returned %d instead of an error", got)
+	}
+
+	// And the write path, which is the one that could corrupt the image.
+	req := append(blockMsg(protocol.BWriteRequest, 0, uint64(math.MaxInt64-4), 8),
+		writeDataMsg(0, 1, make([]byte, 512))...)
+	if got := result(c.send(req)); got >= 0 {
+		t.Fatalf("an overflowing BWRITE returned %d instead of an error", got)
+	}
+	after, err := os.ReadFile(imgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(img) {
+		t.Fatal("an overflowing BWRITE modified the image")
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/compression"
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpbd"
@@ -105,8 +106,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error: --sector-size must be a multiple of 512 and at most 65536")
 		os.Exit(2)
 	}
-	if *compressionCache < 0 {
-		fmt.Fprintln(os.Stderr, "error: --compression-cache-size cannot be negative")
+	// Bounded, not merely non-negative: the value becomes the initial capacity
+	// of the per-image block map, so a mistyped --compression-cache-size would
+	// force a huge allocation the moment a compressed image is opened -- on the
+	// low-memory routers this build targets, that is an OOM rather than a
+	// slowdown.
+	if *compressionCache < 0 || *compressionCache > compression.MaxCacheBlocks {
+		fmt.Fprintf(os.Stderr, "error: --compression-cache-size must be between 0 and %d\n",
+			compression.MaxCacheBlocks)
 		os.Exit(2)
 	}
 	if *logFormat != "text" && *logFormat != "json" {

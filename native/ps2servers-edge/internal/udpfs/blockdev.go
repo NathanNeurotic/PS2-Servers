@@ -71,6 +71,25 @@ const DefaultSectorSize = 512
 
 func (b *blockDevice) sectorCount() int64 { return b.size / b.sectorSize }
 
+// inRange reports whether [sector, sector+count) lies inside the image.
+//
+// Written as a subtraction rather than `sector+count > sectorCount()` because
+// sector is fully client-controlled: it arrives as lo|hi<<32, so a value near
+// MaxInt64 makes that addition wrap silently -- Go does not panic on signed
+// overflow. The wrapped sum is negative, so BOTH the `sector < 0` guard and the
+// upper-bound guard pass, the range check is bypassed entirely, and
+// sector*sectorSize can then land inside the real file. For BWRITE that is
+// silent corruption of the operator's image at an attacker-chosen offset.
+//
+// Subtracting first cannot overflow: sectorCount() derives from the file size
+// and count is already bounded by the caller.
+func (b *blockDevice) inRange(sector, count int64) bool {
+	if sector < 0 || count <= 0 {
+		return false
+	}
+	return sector <= b.sectorCount()-count
+}
+
 func (b *blockDevice) readAt(offset int64, size int) ([]byte, error) {
 	buf := make([]byte, size)
 	n, err := b.file.ReadAt(buf, offset)
@@ -127,7 +146,7 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
 		return
 	}
-	if sector < 0 || sector+count > dev.sectorCount() {
+	if !dev.inRange(sector, count) {
 		// Refuse rather than pad: a bad count would otherwise make the server
 		// emit an arbitrary amount of zeroes on request.
 		s.cfg.Log.Warn("BREAD out of range", map[string]any{
@@ -177,7 +196,7 @@ func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
 		s.sendWriteDone(st, -int32(syscall.EFBIG))
 		return
 	}
-	if sector < 0 || sector+count > dev.sectorCount() {
+	if !dev.inRange(sector, count) {
 		s.cfg.Log.Warn("BWRITE out of range", map[string]any{
 			"peer": st.Peer, "sector": sector, "count": count})
 		s.sendWriteDone(st, -int32(syscall.EINVAL))
