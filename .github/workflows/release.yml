@@ -279,59 +279,6 @@ jobs:
           checksum = asset.with_name(asset.name + ".sha256.txt")
           checksum.write_text(f"{digest}  {asset.name}\n", encoding="utf-8")
 
-      - name: Write release notes
-        shell: bash
-        run: |
-          cat > out/release-notes.md <<EOF
-          Built from the tagged \`${GITHUB_REF_NAME}\` source so the release tracks \`main\`. Download the correct asset for your OS below.
-
-          ## Downloads
-
-          Portable and AppImage builds are best-effort: their build steps carry
-          \`continue-on-error\` so one failing optional package cannot block the
-          primary downloads. If a file below is not attached to this release, it
-          did not build -- use the single-file build for that OS instead.
-
-          (This table is static, unlike the rolling-build one, because this step
-          runs inside the per-OS build matrix: the Windows runner cannot know
-          whether the Linux portable build succeeded. Generating it from the
-          assets present would mean moving note generation into a later job that
-          sees them all.)
-
-          | OS | Recommended | Also available |
-          | --- | --- | --- |
-          | Windows x64 | \`PS2Servers-windows-x64-portable.zip\` (portable, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |
-          | Windows x86 (32-bit) | \`PS2Servers-windows-x86-portable.zip\` (portable, AV-clean) | \`PS2Servers-windows-x86.zip\` (single file) |
-          | Linux x64 | \`PS2Servers-linux-x64\` (single file) | \`PS2Servers-x86_64.AppImage\` (desktop/menu integration, newer) or \`PS2Servers-linux-x64-portable.tar.gz\` (portable; use if /tmp is noexec) |
-          | macOS — Apple Silicon | \`PS2Servers-macos-arm64.zip\` | |
-          | macOS — Intel | \`PS2Servers-macos-x64.zip\` | |
-
-          Run it: **Windows — unzip the portable build and run \`PS2Servers.exe\` from inside the folder.** The single-file \`.exe\` works too but trips some antivirus heuristics; the portable build comes up clean. Linux — \`chmod +x PS2Servers-linux-x64\` and run it; or try the newer \`.AppImage\` for desktop/menu shortcuts (via AppImageLauncher). macOS — unzip and right-click → Open (unsigned).
-
-          Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
-
-          EOF
-
-          # Everything true of every release lives in
-          # .github/release-notes-common.md and is appended here rather than
-          # duplicated. The same prose used to be pasted into this workflow
-          # and release-on-main.yml, escaped differently in each, and it
-          # drifted: it still described Edge as read-only after writes became
-          # the default, and never mentioned Edge gaining UDPBD.
-          #
-          # The leading maintainer comment is stripped -- it explains why the
-          # file exists, which is not something a user should read here.
-          sed '/^<!--/,/^-->/d' .github/release-notes-common.md >> out/release-notes.md
-
-          cat >> out/release-notes.md <<'TAILEOF'
-
-          Servers pass their protocol self-tests and cross-implementation
-          conformance probes. Validation on real PS2 hardware or PCSX2 is
-          still pending.
-
-          Built by GitHub Actions (Intel macOS cross-built on Apple Silicon).
-          TAILEOF
-
       - name: Attest build provenance
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
@@ -371,45 +318,278 @@ jobs:
             out/${{ matrix.portable_asset }}
             out/${{ matrix.portable_asset }}.sha256.txt
 
+      # The AppImage used to be attached to the release straight from this job
+      # and was never uploaded as an artifact. Now that publishing happens in a
+      # later job, it has to travel there like everything else or it would
+      # silently stop appearing on releases.
+      #
+      # if-no-files-found: ignore because the AppImage build is best-effort --
+      # a missing one must not turn into a failed upload step.
+      - name: Upload Linux AppImage artifact
+        if: runner.os == 'Linux' && matrix.portable_asset != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PS2Servers-x86_64.AppImage
+          if-no-files-found: ignore
+          path: |
+            out/PS2Servers-x86_64.AppImage
+            out/PS2Servers-x86_64.AppImage.sha256.txt
+
+  # The source archive was built only for rolling pre-releases, so tagged
+  # releases never carried one -- while the shared notes told readers to "use
+  # PS2Servers-source.zip" for the lowest-trust path. That is the download for
+  # anyone who will not run a binary they cannot inspect, which makes it exactly
+  # the wrong one to be missing from the releases people are pointed at.
+  #
+  # Edge binaries are NOT built here: edge.yml already runs on v* tags and
+  # attaches them through edge-build.yml. Adding a second Edge job would build
+  # the same eleven targets twice and race to attach them.
+  source:
+    name: Package source archive
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create portable source zip
+        shell: bash
+        run: git archive --format=zip --output=PS2Servers-source.zip HEAD
+
+      - name: Write source checksum
+        shell: bash
+        run: sha256sum PS2Servers-source.zip > PS2Servers-source.zip.sha256.txt
+
+      - name: Generate source attestation
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: PS2Servers-source.zip
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PS2Servers-source.zip
+          path: |
+            PS2Servers-source.zip
+            PS2Servers-source.zip.sha256.txt
+          if-no-files-found: error
+
+  # Publishing is its own job so the release notes can be written by something
+  # that has seen every asset.
+  #
+  # They used to be composed inside the build matrix, which meant each of the
+  # five runners wrote its own copy and attached it -- so the Windows runner
+  # produced a download table while having no way to know whether the Linux
+  # portable build or the AppImage had succeeded. The table was therefore
+  # hardcoded, and since the portable and AppImage steps are deliberately
+  # continue-on-error, a release could publish with the notes recommending a
+  # file that was not attached. That row is the one that matters most: the
+  # portable build is recommended precisely because the single-file .exe trips
+  # antivirus, so the download a wary user is steered to was the one that could
+  # go missing.
+  #
+  # Attaching from one job also ends a race: three attach steps times five
+  # matrix legs each set the release body, all with the same text, all at once.
+  release:
+    name: Publish release
+    needs:
+      - build
+      - source
+    # Tags publish; the manual "Run workflow" button still builds and uploads
+    # artifacts without creating a release.
+    #
+    # !cancelled() rather than the default success(): a plain `needs: build` on a
+    # matrix waits for every leg to succeed, so one flaky macOS runner would take
+    # the whole release down -- which the old per-leg attach steps tolerated,
+    # since each leg published its own assets. It would also make the missing-row
+    # handling below unreachable, because a leg that fails to produce its primary
+    # asset fails outright, so every primary asset would always be present.
+    # Publishing what did build keeps the old resilience and lets the notes tell
+    # the truth about what is there; the step refuses outright if nothing built.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    # Narrower than the workflow-level block: this job publishes, it does not
+    # attest, so it has no use for id-token or attestations.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Only .github/release-notes-common.md is read here and no git command
+          # follows, so the token has no reason to stay in the runner's config.
+          persist-credentials: false
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List what actually built
+        shell: bash
+        run: ls -la release-assets
+
+      - name: Compose release notes
+        id: notes
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+
+          # Build the "which file do I download" table from the files that are
+          # actually here, using the same shape as the rolling build so a user
+          # moving between the two reads the same instructions. A row falls back
+          # to the single-file build when the portable one is missing and says
+          # so; if neither exists the row is dropped rather than pointing at a
+          # 404.
+          cd release-assets
+          # The fallback note is a parameter, not a fixed string. The Windows
+          # rows fall back from the portable build to the single file, but the
+          # Linux row falls the other way -- so a hardcoded "portable build
+          # unavailable" would have offered the reader the portable tarball
+          # while telling them the portable build was missing.
+          row() { # row <label> <preferred> <fallback> <why-the-fallback>
+            if [ -n "$2" ] && [ -f "$2" ]; then
+              printf '| %s | **`%s`** |\n' "$1" "$2"
+            elif [ -n "$3" ] && [ -f "$3" ]; then
+              printf '| %s | **`%s`** — %s |\n' "$1" "$3" "$4"
+            fi
+          }
+          no_portable="portable build unavailable in this release"
+          no_onefile="single-file build unavailable in this release"
+          table=$(
+            row "Windows, normal (64-bit)"   PS2Servers-windows-x64-portable.zip   PS2Servers-windows-x64.zip           "$no_portable"
+            row "Windows, older 32-bit PC"   PS2Servers-windows-x86-portable.zip   PS2Servers-windows-x86.zip           "$no_portable"
+            row "Linux"                      PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz "$no_onefile"
+            row "Mac, Apple Silicon (M1–M4)" PS2Servers-macos-arm64.zip            ""                                   ""
+            row "Mac, Intel"                 PS2Servers-macos-x64.zip              ""                                   ""
+          )
+          # A leg that failed outright now leaves its row out rather than
+          # blocking the release, so say so where a maintainer will see it.
+          for expected in PS2Servers-windows-x64.zip PS2Servers-windows-x86.zip \
+                          PS2Servers-linux-x64 PS2Servers-macos-arm64.zip PS2Servers-macos-x64.zip; do
+            [ -f "$expected" ] || echo "::warning::$expected is absent; its build leg did not finish, and this release will publish without it"
+          done
+          if [ -z "$table" ]; then
+            echo "no downloadable assets were produced; refusing to publish empty notes" >&2
+            exit 1
+          fi
+          # Carries its own leading space, so an absent AppImage leaves the
+          # preceding sentence ending cleanly rather than with a trailing space.
+          appimage=""
+          if [ -f PS2Servers-x86_64.AppImage ]; then
+            appimage=" On Linux you can also take \`PS2Servers-x86_64.AppImage\` for desktop and menu shortcuts (via AppImageLauncher)."
+          fi
+          cd ..
+
+          # Quoted heredoc: the text is written literally, so backticks and
+          # dollar signs need no escaping and the placeholders are substituted
+          # afterwards. The previous unquoted version had to backslash-escape
+          # every backtick in the notes.
+          cat > "$notes" <<'HEADER'
+          Built from the tagged `__TAG__` source, so this release matches `main` at that tag.
+
+          ## Downloads
+
+          There are a lot of files below. **You need exactly one.** Find your
+          computer in this table and ignore everything else:
+
+          | Your computer | Download this |
+          |---|---|
+          __DOWNLOADS_TABLE__
+
+          On Windows: unzip it, open the folder, run `PS2Servers.exe`. That's it.
+
+          <details>
+          <summary>Why "portable", and what are the other files?</summary>
+
+          The **portable** build is the same app laid out as a plain folder,
+          with no self-extracting wrapper. The wrapper is what makes some
+          antivirus flag the single-file build, so the portable one usually
+          comes up clean — that is why it is the recommendation rather than the
+          single-file `PS2Servers-windows-x64.zip`, which is published for
+          convenience.
+
+          On Linux, `PS2Servers-linux-x64` is a single executable; take
+          `PS2Servers-linux-x64-portable.tar.gz` instead if `/tmp` is mounted
+          `noexec`.__APPIMAGE_NOTE__
+
+          macOS ships as a `.app` inside the zip — unzip and right-click → Open,
+          since it is unsigned.
+
+          `PS2Servers-source.zip` is the source, for running from Python
+          directly or for inspection.
+
+          Everything beginning **`PS2ServersEdge-`** is a different program —
+          see the section below. You do not need it on a normal computer.
+
+          Each download has a matching `.sha256.txt` next to it.
+
+          Portable and AppImage builds are best-effort: their build steps are
+          allowed to fail without blocking the primary downloads. The table
+          above is generated from the files actually attached, so anything it
+          lists is present.
+          </details>
+
+          Compression note: ZSO/LZ4 support is bundled. CHD support is backed by
+          a libchdr native library built from source during release packaging.
+          HEADER
+
+          # Passed through the environment rather than interpolated into the
+          # script, so a value containing quotes or backslashes stays literal.
+          export DOWNLOADS_TABLE="$table"
+          export APPIMAGE_NOTE="$appimage"
+          python3 - "$notes" <<'PYSUB'
+          import os, sys
+          p = sys.argv[1]
+          s = open(p, encoding="utf-8").read()
+          s = s.replace("__TAG__", os.environ["TAG"])
+          s = s.replace("__DOWNLOADS_TABLE__", os.environ["DOWNLOADS_TABLE"].rstrip())
+          s = s.replace("__APPIMAGE_NOTE__", os.environ["APPIMAGE_NOTE"])
+          open(p, "w", encoding="utf-8").write(s)
+          PYSUB
+
+          # Everything true of every release lives in
+          # .github/release-notes-common.md and is appended rather than
+          # duplicated. The same prose used to be pasted into this workflow and
+          # release-on-main.yml, escaped differently in each, and it drifted: it
+          # still described Edge as read-only after writes became the default,
+          # and never mentioned Edge gaining UDPBD.
+          #
+          # The leading maintainer comment is stripped -- it explains why the
+          # file exists, which is not something a user should read here.
+          sed '/^<!--/,/^-->/d' .github/release-notes-common.md >> "$notes"
+
+          cat >> "$notes" <<'TAILEOF'
+
+          Servers pass their protocol self-tests and cross-implementation
+          conformance probes. Validation on real PS2 hardware or PCSX2 is
+          still pending.
+
+          Built by GitHub Actions (Intel macOS cross-built on Apple Silicon).
+          TAILEOF
+
+          echo "path=$notes" >> "$GITHUB_OUTPUT"
+
       # A tag with a '-' qualifier (v0.4.5-rc1, v0.5.0-beta2) is a pre-release:
       # publish it as such and never let it take the "Latest" badge from the
       # current stable tag. A plain vX.Y.Z tag is a normal release and does.
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: PS2 Servers ${{ github.ref_name }}
-          body_path: out/release-notes.md
+          body_path: ${{ steps.notes.outputs.path }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
+          # One glob covering every asset and its checksum. Unmatched patterns
+          # are skipped rather than failing, which is what keeps an absent
+          # optional build from blocking the release.
           files: |
-            out/${{ matrix.asset }}
-            out/${{ matrix.asset }}.sha256.txt
-
-      - name: Attach portable build to release
-        if: startsWith(github.ref, 'refs/tags/') && matrix.portable_asset != ''
-        continue-on-error: true
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          name: PS2 Servers ${{ github.ref_name }}
-          body_path: out/release-notes.md
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
-          files: |
-            out/${{ matrix.portable_asset }}
-            out/${{ matrix.portable_asset }}.sha256.txt
-
-      - name: Attach Linux AppImage to release
-        # Only if the build actually produced one -- the glob attaches nothing
-        # when absent, so a failed AppImage build never blocks the release.
-        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux' && matrix.portable_asset != ''
-        continue-on-error: true
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          name: PS2 Servers ${{ github.ref_name }}
-          body_path: out/release-notes.md
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
-          files: |
-            out/PS2Servers-x86_64.AppImage
-            out/PS2Servers-x86_64.AppImage.sha256.txt
+            release-assets/PS2Servers-*
