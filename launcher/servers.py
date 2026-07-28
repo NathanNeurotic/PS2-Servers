@@ -46,6 +46,10 @@ class Field:
     help: str = ""
     advanced: bool = False
     windows_only: bool = False
+    # For kind="choice": the ordered options as (label shown, value sent). The
+    # two differ so the interface can say something a user understands while the
+    # wire keeps the word the servers actually accept.
+    choices: tuple = ()
 
 
 @dataclass
@@ -129,6 +133,71 @@ def _smbv1_argv(v):
     return args
 
 
+# How the protocol mode is offered, and what each choice puts on the wire.
+#
+# "Proper" rather than "Standard" because the choice a user is making is between
+# the protocol as specified and a client that counts sequences differently --
+# "standard" reads like a recommendation, and the recommended setting is Auto.
+# The wire value stays "standard": it is what both the Python server and Edge
+# accept, and renaming it would break every saved configuration and command line.
+PROTOCOL_MODE_CHOICES = (
+    ("Auto", "auto"),
+    ("Proper", "standard"),
+    ("Modulo", "modulo"),
+)
+
+# Accepts the label, the wire value, or any casing of either. A saved settings
+# file predating the dropdown holds "standard"; a new one holds "Proper"; and a
+# user editing the file by hand may write either. All three should work rather
+# than silently falling back to auto.
+_PROTOCOL_MODE_BY_NAME = {}
+for _label, _value in PROTOCOL_MODE_CHOICES:
+    _PROTOCOL_MODE_BY_NAME[_label.lower()] = _value
+    _PROTOCOL_MODE_BY_NAME[_value.lower()] = _value
+
+
+def migrate_saved(server_key, saved):
+    """Translate retired settings keys into the controls that replaced them.
+
+    Applied when a saved configuration is loaded into a card, because the card
+    restores and collects values by walking its widgets: a key with no widget is
+    dropped on load and can never appear again on save. So honouring a retired
+    key inside build_argv is not enough on its own -- the GUI cannot put it
+    there. It has to become a key that does have a widget, before the widgets are
+    filled in.
+
+    Translating rather than merely preserving is also the better outcome for the
+    person upgrading. Their console keeps working AND the reason is now visible
+    in the interface, where they can see they are on Modulo and change it, rather
+    than being held in a key nothing displays.
+    """
+    if not saved:
+        return saved
+    if server_key != "udpfs":
+        return saved
+    if not saved.get("modulo_mode"):
+        return saved
+    migrated = dict(saved)
+    # Only fills an empty selection. Someone who has since made an explicit
+    # choice in the new control means it.
+    if not protocol_mode_value(migrated.get("protocol_mode")):
+        migrated["protocol_mode"] = "Modulo"
+    migrated.pop("modulo_mode", None)
+    return migrated
+
+
+def protocol_mode_value(raw):
+    """Map whatever is stored for protocol_mode to a value the servers accept.
+
+    Returns None for anything unrecognised, which the caller treats as "say
+    nothing and let the server default to auto" -- a bad string must not become
+    a command-line argument the server exits on.
+    """
+    if raw is None:
+        return None
+    return _PROTOCOL_MODE_BY_NAME.get(str(raw).strip().lower())
+
+
 def _udpfs_argv(v):
     if not v.get("root_dir") and not v.get("block_device"):
         raise ValueError("UDPFS needs a Games folder and/or a Disk image.")
@@ -157,12 +226,23 @@ def _udpfs_argv(v):
         args.append("--read-only")
     if not v.get("enable_compression", True):
         args.append("--no-compression")
-    # Existing saved launcher state may still contain modulo_mode. Preserve it as
-    # a strict diagnostic selection, but new GUI sessions use automatic mode and
-    # no longer expose the misleading global checkbox.
-    protocol_mode = v.get("protocol_mode")
+    # The old global "Modulo mode" checkbox was removed because it applied one
+    # client's quirk to every client at once. Auto classifies each session on its
+    # own, so a Proper client and several Modulo clients transfer side by side.
+    #
+    # The selector is back as a visible three-way choice, not because Auto is
+    # unreliable, but because when it does misjudge a client there has to be a
+    # way to say so from the interface rather than by hand-editing a settings
+    # file. Auto stays the default.
+    #
+    # modulo_mode is still read: a settings file written before the dropdown
+    # existed carries it, and losing that on upgrade would silently move someone
+    # off the setting that made their console work.
+    protocol_mode = protocol_mode_value(v.get("protocol_mode"))
     if v.get("modulo_mode"):
         protocol_mode = "modulo"
+    # "auto" is deliberately not passed. It is the server default, so omitting it
+    # keeps the logged command line honest about what was actually chosen.
     if protocol_mode in ("standard", "modulo"):
         args += ["--protocol-mode", protocol_mode]
     if v.get("verbose"):
@@ -223,6 +303,14 @@ UDPFS = ServerDef(
               help="A single disk image to serve as a block device."),
         Field("enable_compression", "Decompress CHD/CSO/ZSO", "bool", default=True,
               help="On by default. Formats without their optional library remain unadvertised."),
+        # Visible rather than advanced. It is the first thing to reach for when a
+        # console will not connect, and a setting you have to know exists is no
+        # use to the person who needs it.
+        Field("protocol_mode", "Protocol mode", "choice", default="Auto",
+              choices=PROTOCOL_MODE_CHOICES,
+              help="Auto handles Proper and Modulo clients at the same time and "
+                   "suits almost everyone. Pick one explicitly only if a console "
+                   "will not connect on Auto."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("port", "Port", "port", default=0xF5F6, advanced=True,
               help="UDP discovery port (default 0xF5F6)."),
