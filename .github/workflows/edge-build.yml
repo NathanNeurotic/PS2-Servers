@@ -234,10 +234,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The base version comes from launcher/release_metadata.py, which is
+          # the one number the maintainer edits and the one the launcher GUI
+          # reports. This step used to hardcode its own literal, so Edge and the
+          # launcher drifted and the drift shipped: main-130-3efbc27 attached
+          # PS2ServersEdge-0.5.0-edge.* beside a launcher reporting 0.4.9, and a
+          # tester quoting "the version" would name a different number depending
+          # on which binary they looked at.
+          #
+          # On a tag the tag wins, because release.yml has already refused to
+          # publish a tag that disagrees with the source.
+          BASE="$(python3 tools/version_source.py)"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="0.5.0-edge.${GITHUB_SHA::7}"
+            VERSION="${BASE}-edge.${GITHUB_SHA::7}"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "source_date_epoch=$(git show -s --format=%ct HEAD)" >> "$GITHUB_OUTPUT"
