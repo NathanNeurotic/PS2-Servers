@@ -1111,8 +1111,29 @@ class UdpfsServer:
 
         self.stats['discovery'] += 1
 
+        # First contact from a console is the most useful line this server can
+        # print. It proves packets are arriving and names the address they came
+        # from, which is what separates "the PS2 never reached us" (wrong subnet,
+        # firewall, wrong interface) from "it reached us but the reply went
+        # astray". Without it a misconfigured setup is silent on both sides and
+        # there is nothing to debug from. Reported by a tester who could not tell
+        # the two cases apart.
+        #
+        # Only the first discovery per peer is announced: both client families
+        # keep broadcasting discovery for the life of a transfer, so logging
+        # every one would bury the transfer log. --verbose shows them all.
+        with self.sessions_lock:
+            first_contact = addr not in self.sessions
+
         # Ensure a per-client session (and its worker thread) exists for this peer.
         sess = self._get_or_create_session(addr)
+
+        if first_contact:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] DISCOVERY received -- console found this server")
+        elif self.verbose:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] DISCOVERY seq={hdr.seq_nr}")
         if self.modulo_compat and (not sess.rx_streaming or hdr.seq_nr != 0):
             # Modulo's client keeps one monotonic sequence for its whole life -- it
             # never restarts at 0, not even across a server restart -- so the
@@ -1138,7 +1159,13 @@ class UdpfsServer:
             # Assigned on the session, not through the _session_prop proxies: we are
             # on the demux thread, where _local.session is unset.
             sess.rx_seq_nr_expected = (hdr.seq_nr + 1) & 0xFFF
-        self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY -> INFORM")
+        # Verbose-only: this fires for every broadcast, and both client families
+        # keep discovery running for the life of a transfer, so at default
+        # verbosity it buries the transfer log. The first-contact line above
+        # already gives the default visibility that matters -- proof a console
+        # reached us, and from which address.
+        if self.verbose:
+            self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY -> INFORM")
         self._send_inform(addr, sess)
 
     def _handle_data(self, data: bytes, addr: Tuple[str, int]):

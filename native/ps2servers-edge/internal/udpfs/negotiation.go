@@ -33,10 +33,30 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 	if err != nil || dh.ServiceID != protocol.ServiceUDPFS {
 		return
 	}
+	// First contact from a console is the most useful line this server emits.
+	// It proves packets are arriving and names the address they came from,
+	// which separates "the PS2 never reached us" -- wrong subnet, firewall,
+	// wrong interface -- from "it reached us but the reply went astray".
+	// Without it a misconfigured setup is silent on both sides.
+	//
+	// Only the first discovery per peer is announced at Info: both client
+	// families keep broadcasting discovery for the life of a transfer, so
+	// logging every one would bury the transfer log. --verbose shows them all.
+	s.sessionsMu.Lock()
+	_, known := s.sessions[in.peer.String()]
+	s.sessionsMu.Unlock()
+
 	w := s.getWorker(in.peer)
 	if w == nil {
 		return
 	}
+	if !known {
+		s.cfg.Log.Info("DISCOVERY received, console found this server",
+			map[string]any{"peer": in.peer.String()})
+	} else {
+		s.cfg.Log.Debug("DISCOVERY", map[string]any{"peer": in.peer.String(), "seq": h.Sequence})
+	}
+
 	st := w.state
 	st.Mu.Lock()
 	defer st.Mu.Unlock()
