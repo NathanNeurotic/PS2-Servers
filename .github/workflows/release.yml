@@ -287,6 +287,17 @@ jobs:
 
           ## Downloads
 
+          Portable and AppImage builds are best-effort: their build steps carry
+          \`continue-on-error\` so one failing optional package cannot block the
+          primary downloads. If a file below is not attached to this release, it
+          did not build -- use the single-file build for that OS instead.
+
+          (This table is static, unlike the rolling-build one, because this step
+          runs inside the per-OS build matrix: the Windows runner cannot know
+          whether the Linux portable build succeeded. Generating it from the
+          assets present would mean moving note generation into a later job that
+          sees them all.)
+
           | OS | Recommended | Also available |
           | --- | --- | --- |
           | Windows x64 | \`PS2Servers-windows-x64-portable.zip\` (portable, AV-clean) | \`PS2Servers-windows-x64.zip\` (single file) |

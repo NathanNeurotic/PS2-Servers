@@ -90,7 +90,9 @@ by rendering the notes and checking, not by reading the sed.
 
 Verification:
 
-- Release assets include `SHA256SUMS.txt`.
+- Release assets include SHA-256 checksums: a single `SHA256SUMS.txt` on
+  development builds from `main`, and a per-asset `<name>.sha256.txt` beside
+  each file on tagged releases.
 - GitHub artifact attestations are generated for binary and source artifacts.
 - For the lowest-trust path, use `PS2Servers-source.zip` and run from source.
 

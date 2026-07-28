@@ -128,9 +128,18 @@ def main():
             workflow,
             "PS2Servers-windows-x64.zip",
             "PS2Servers-windows-x86.zip",
-            # Without this the shared disclosures never reach the release body.
-            "release-notes-common.md",
         )
+        # Require the append COMMAND, not just a mention of the filename.
+        # Checking for "release-notes-common.md" alone was a guard that did not
+        # guard: the explanatory comments above each command contain that
+        # string, so deleting the executable line would still have passed while
+        # published notes silently lost every disclosure. Caught in review.
+        text = read(workflow)
+        if "release-notes-common.md >>" not in text.replace('" >>', ' >>'):
+            errors.append(
+                "{}: no command appending .github/release-notes-common.md to the "
+                "release body. Without it the release publishes without the "
+                "transparency and antivirus disclosures.".format(workflow))
 
     errors += require(".github/workflows/release-on-main.yml", "SHA256SUMS.txt")
     errors += require(".github/workflows/release.yml", ".sha256.txt")
