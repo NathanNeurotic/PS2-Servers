@@ -23,9 +23,88 @@ type Image struct {
 	align     uint8
 	index     []uint32
 	pos       int64
+
+	// Decompressed-block cache. Without one, every read re-inflates its block
+	// straight off disk, and a console reading sequentially touches the same
+	// block repeatedly inside a single request -- wasted CPU on exactly the
+	// low-power routers Edge targets. Bounded by block count, matching the
+	// Desktop server's --compression-cache-size.
+	cacheLimit int
+	cache      map[int64][]byte
+	cacheOrder []int64
 }
 
-func Open(path string) (*Image, error) {
+// DefaultCacheBlocks matches the Desktop/Core server's default so the two
+// behave the same when neither is tuned.
+const DefaultCacheBlocks = 32
+
+// SetCacheBlocks bounds the decompressed-block cache. Zero disables caching.
+func (i *Image) SetCacheBlocks(n int) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if n < 0 {
+		n = 0
+	}
+	i.cacheLimit = n
+	i.cache = nil
+	i.cacheOrder = nil
+}
+
+// cacheStore records a decompressed block, evicting the oldest once the limit
+// is reached. Insertion order rather than true LRU: reads here are
+// overwhelmingly sequential, so the oldest block is also the least likely to be
+// wanted again, and this avoids per-hit bookkeeping on the transfer path.
+func (i *Image) cacheStore(n int64, block []byte) {
+	if i.cacheLimit <= 0 {
+		return
+	}
+	if i.cache == nil {
+		i.cache = make(map[int64][]byte, i.cacheLimit)
+	}
+	if _, exists := i.cache[n]; exists {
+		return
+	}
+	for len(i.cacheOrder) >= i.cacheLimit {
+		oldest := i.cacheOrder[0]
+		i.cacheOrder = i.cacheOrder[1:]
+		delete(i.cache, oldest)
+	}
+	i.cache[n] = block
+	i.cacheOrder = append(i.cacheOrder, n)
+}
+
+// Open reads an image with the default block cache. Use OpenCached to size it.
+func Open(path string) (*Image, error) { return OpenCached(path, DefaultCacheBlocks) }
+
+// OpenCached reads an image, bounding the decompressed-block cache to n blocks.
+// Zero disables caching.
+func OpenCached(path string, n int) (*Image, error) {
+	img, err := openImage(path)
+	if err != nil {
+		return nil, err
+	}
+	img.SetCacheBlocks(n)
+	return img, nil
+}
+
+// OpenRaw serves a file byte-for-byte with no decompression, whatever its
+// extension. Used by --no-compression, which is a diagnostic: a console cannot
+// interpret CSO/ZSO container bytes, so this exists to compare against an
+// undecoded transfer, not to make compressed images loadable.
+func OpenRaw(path string) (*Image, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return &Image{f: f, format: "plain", size: info.Size(), fileSize: info.Size()}, nil
+}
+
+func openImage(path string) (*Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -133,7 +212,25 @@ func (i *Image) readAt(p []byte, off int64) (int, error) {
 	}
 	return total, nil
 }
+// readBlock returns a decompressed block, from cache when possible.
+//
+// Caching is done here, wrapping the decoder, rather than at each of the
+// decoder's several success returns -- one of them would eventually be missed,
+// and a half-cached decoder is the kind of bug that shows up as intermittent
+// slowness rather than as a failure.
 func (i *Image) readBlock(n int64) ([]byte, error) {
+	if blk, ok := i.cache[n]; ok {
+		return blk, nil
+	}
+	blk, err := i.decodeBlock(n)
+	if err != nil {
+		return nil, err
+	}
+	i.cacheStore(n, blk)
+	return blk, nil
+}
+
+func (i *Image) decodeBlock(n int64) ([]byte, error) {
 	if n < 0 || n >= int64(len(i.index)-1) {
 		return nil, io.EOF
 	}

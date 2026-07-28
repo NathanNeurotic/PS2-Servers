@@ -34,6 +34,18 @@ type Config struct {
 	PeerTimeout   time.Duration
 	TxDelay       time.Duration
 	ReadOnly      bool
+	// BlockDevice serves one disk image over UDPFS BREAD/BWRITE alongside the
+	// file share, as the Desktop server's --block-device and udpfsd's -bdpath
+	// do. Empty disables it.
+	BlockDevice string
+	// SectorSize applies to that image. 512 is what every known client uses;
+	// it is configurable only because both siblings expose it.
+	SectorSize int
+	// NoCompression serves CSO/ZSO containers as raw bytes rather than
+	// decompressing them, and stops advertising them under an .iso name.
+	NoCompression bool
+	// CompressionCache bounds decompressed blocks retained per open image.
+	CompressionCache int
 	// MetricsPeriod logs a periodic counter snapshot when > 0, matching the
 	// Desktop server's --metrics / --metrics-period.
 	MetricsPeriod time.Duration
@@ -71,7 +83,8 @@ type Server struct {
 	closeOnce  sync.Once
 	wg         sync.WaitGroup
 
-	stats metrics
+	stats    metrics
+	blockDev *blockDevice
 
 	// writers reserves each file that some peer currently holds open for
 	// writing, mapping resolved path to a reference count. Two consoles
@@ -141,6 +154,20 @@ func New(cfg Config) (*Server, error) {
 	}
 	s := &Server{cfg: cfg, root: root, sessions: make(map[string]*peerWorker), incoming: make(chan inbound, 256), closed: make(chan struct{})}
 	s.stats.started = time.Now()
+	if cfg.BlockDevice != "" {
+		// Opened once and shared: every session addresses the same image
+		// through handle 0, using positional I/O so two consoles cannot move
+		// each other's read position.
+		dev, err := openBlockDevice(cfg.BlockDevice, cfg.SectorSize, cfg.ReadOnly)
+		if err != nil {
+			return nil, fmt.Errorf("block device: %w", err)
+		}
+		if dev.size < dev.sectorSize {
+			dev.close()
+			return nil, fmt.Errorf("block device is smaller than one %d-byte sector", dev.sectorSize)
+		}
+		s.blockDev = dev
+	}
 	return s, nil
 }
 
@@ -213,6 +240,9 @@ func (s *Server) Close() error {
 	var err error
 	s.closeOnce.Do(func() {
 		close(s.closed)
+		if s.blockDev != nil {
+			s.blockDev.close()
+		}
 		if s.discovery != nil {
 			err = s.discovery.Close()
 		}
