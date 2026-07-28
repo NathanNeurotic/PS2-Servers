@@ -1123,10 +1123,26 @@ class UdpfsServer:
             self._status_flags(),
             len(self.sessions),
             time.monotonic() - self._start_time,
-            self.server_name,
+            self._status_name(),
         )
         _send_with_retry(self.sock, packet, addr, self.send_lock, self.tx_delay_s)
         return True
+
+    def _status_name(self) -> str:
+        """The display name for a status reply.
+
+        NOT self.server_name. That one is a protocol field: it goes out in the
+        modulo INFORM and a real PS2 loader shows it, so it stays exactly what
+        it has always been -- the bare hostname -- and is not touched here.
+
+        A status reply is read by launchers and dashboards, where a bare
+        hostname says nothing about what answered; Edge identifies itself as
+        "PS2 Servers Edge" and this should be as recognisable. The host is kept
+        after the product name because the field's real use is telling several
+        boxes apart when more than one answers.
+        """
+        host = (self.server_name or "").strip()
+        return "PS2 Servers ({})".format(host) if host else "PS2 Servers"
 
     def _status_state(self) -> int:
         """Collapse the server into the five states a client understands."""

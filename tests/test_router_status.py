@@ -249,6 +249,21 @@ class LiveServer(unittest.TestCase):
                 f"after {i + 1} status polls the server has sessions; polling is creating them")
             self.assertEqual(got["sessions"], 0)
 
+    def test_reply_names_the_product_not_just_the_host(self):
+        # A bare hostname tells a launcher nothing about what answered, and
+        # Edge identifies itself as "PS2 Servers Edge". The modulo INFORM's
+        # server_name is a different field and must stay the bare hostname,
+        # because a real PS2 loader displays that one.
+        server = self._serve()
+        client = self._client(2.0)
+        server._handle_discovery(router_status.build_status_query(), client.getsockname())
+        got = router_status.parse_status_reply(client.recvfrom(2048)[0])
+        self.assertIsNotNone(got)
+        self.assertTrue(got["name"].startswith("PS2 Servers"),
+                        f"status name {got['name']!r} does not identify the product")
+        self.assertNotEqual(got["name"], server.server_name,
+                            "status name must not be the bare modulo INFORM name")
+
     def test_read_only_is_reported(self):
         server = self._serve(read_only=True)
         client = self._client(2.0)
