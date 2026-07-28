@@ -142,7 +142,7 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 		return
 	}
 	total := count * dev.sectorSize
-	if count <= 0 || total > maxBlockRead {
+	if count <= 0 || total > s.transferCap {
 		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
 		return
 	}
@@ -194,7 +194,7 @@ func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
 		return
 	}
 	total := count * dev.sectorSize
-	if count <= 0 || total > maxWriteBytes {
+	if count <= 0 || total > s.transferCap {
 		s.sendWriteDone(st, -int32(syscall.EFBIG))
 		return
 	}
@@ -259,10 +259,6 @@ func (s *Server) completeBlockWrite(st *session.State, buf []byte, offset, expec
 	s.cfg.Log.Debug("BWRITE ok", map[string]any{"peer": st.Peer, "bytes": len(buf)})
 	s.sendWriteDone(st, int32(len(buf)))
 }
-
-// maxBlockRead bounds one BREAD. The sector count is 16-bit, so a client could
-// otherwise ask for 65535 sectors -- 32 MiB -- in a single request.
-const maxBlockRead = 8 << 20
 
 // openImage opens a game image with the configured cache size, and without the
 // decompression layer when --no-compression is set.

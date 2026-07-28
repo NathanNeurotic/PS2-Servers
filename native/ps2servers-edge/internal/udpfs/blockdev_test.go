@@ -347,7 +347,7 @@ func TestBlockReadRejectsOverflowingSectorOverTheWire(t *testing.T) {
 // inRange validates the sector range the BWRITE header DECLARES. It does not
 // constrain what the chunk-assembly path then accumulates: handleWriteData is
 // driven by the client's own totalChunks/chunkSize fields and bounds the buffer
-// only by maxWriteBytes, which has nothing to do with the declared count. So a
+// only by the server's transfer cap, which has nothing to do with the declared count. So a
 // client could declare one in-range sector at the very end of the image, then
 // stream megabytes of chunks, and completeBlockWrite would hand all of it to
 // WriteAt at the validated offset. WriteAt past EOF extends the file, so the

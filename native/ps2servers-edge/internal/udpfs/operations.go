@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/compression"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/filesystem"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
@@ -267,11 +268,18 @@ func (s *Server) handleRead(st *session.State, p []byte) {
 	s.stats.bytesRead.Add(int64(n))
 	s.sendTransfer(st, result8(protocol.ResultReply, int32(n)), buf[:n])
 }
-// maxWriteBytes caps one assembled write. The WRITE_REQ size field is 32-bit,
-// so without a ceiling a peer could announce 4 GiB and make the server buffer
-// it before a single byte is validated. 8 MiB is far above any real PS2 write
-// (saves are kilobytes) while keeping the worst case per peer bounded.
-const maxWriteBytes = 8 << 20
+// preferredTransfer caps one assembled write and one BREAD on a machine with
+// memory to spare. The WRITE_REQ size field is 32-bit and the BREAD sector
+// count is 16-bit, so without a ceiling a peer could announce 4 GiB, or ask
+// for 65535 sectors, and make the server buffer it before a single byte is
+// validated. 8 MiB is far above any real PS2 transfer (saves are kilobytes)
+// while keeping the worst case per peer bounded.
+//
+// It is the ceiling, not the answer: Server.transferCap is this value or the
+// smaller one the machine's RAM implies, because the write buffer is reserved
+// eagerly from the declared size and 8 MiB is a quarter of a 32 MB router.
+// See internal/memory.
+const preferredTransfer = 8 << 20
 
 // handleWriteRequest begins a write: handle plus total byte count, optionally
 // with the first WRITE_DATA chunk appended inline to the same datagram.
@@ -287,8 +295,11 @@ func (s *Server) handleWriteRequest(st *session.State, p []byte) {
 		s.sendWriteDone(st, -int32(syscall.EACCES))
 		return
 	}
-	if size > maxWriteBytes {
-		s.cfg.Log.Warn("WRITE refused, size over cap", map[string]any{"peer": st.Peer, "size": size, "cap": maxWriteBytes})
+	// int64(size), not a narrowing of the cap: size is the 32-bit field off the
+	// wire and int is 32-bit on the MIPS routers this ships to, so comparing in
+	// int would be the one platform where the check could wrap.
+	if int64(size) > s.transferCap {
+		s.cfg.Log.Warn("WRITE refused, size over cap", map[string]any{"peer": st.Peer, "size": size, "cap": s.transferCap})
 		s.sendWriteDone(st, -int32(syscall.EFBIG))
 		return
 	}
@@ -345,7 +356,7 @@ func (s *Server) handleWriteData(st *session.State, msg []byte) {
 		s.sendWriteDone(st, -int32(syscall.EIO))
 		return
 	}
-	if len(st.WriteBuffer)+int(chunkSize) > maxWriteBytes {
+	if int64(len(st.WriteBuffer))+int64(chunkSize) > s.transferCap {
 		st.ResetWrite()
 		s.sendWriteDone(st, -int32(syscall.EFBIG))
 		return
@@ -469,9 +480,14 @@ func (s *Server) handleDRead(st *session.State, p []byte) {
 		for _, ext := range []string{".cso", ".ciso", ".zso", ".ziso"} {
 			if strings.HasSuffix(lower, ext) {
 				entry.Name = entry.Name[:len(entry.Name)-len(ext)] + ".iso"
-				if img, err := s.openImage(entry.SourcePath); err == nil {
-					entry.Size = uint64(img.Size())
-					_ = img.Close()
+				// SizeOf, not openImage: this needs one number out of the
+				// 24-byte header, and opening the image to get it built the
+				// whole block index -- megabytes per entry, discarded
+				// immediately, once for every compressed game in the folder.
+				// Reachable by a console simply listing a directory, which is
+				// what made it the likeliest way to exhaust a small router.
+				if size, err := compression.SizeOf(entry.SourcePath); err == nil {
+					entry.Size = uint64(size)
 				}
 				break
 			}
@@ -521,9 +537,9 @@ func (s *Server) handleGetStat(st *session.State, p []byte) {
 	size := uint64(info.Size())
 	if ext := strings.ToLower(filepath.Ext(real)); s.compressedSiblingsEnabled() &&
 		(ext == ".cso" || ext == ".ciso" || ext == ".zso" || ext == ".ziso") {
-		if img, e := s.openImage(real); e == nil {
-			size = uint64(img.Size())
-			_ = img.Close()
+		// Header only, for the same reason as the DREAD path above.
+		if n, e := compression.SizeOf(real); e == nil {
+			size = uint64(n)
 		}
 	}
 	s.sendGetStat(st, 0, filesystem.Mode(info), size)
