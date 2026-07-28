@@ -25,9 +25,11 @@ native/ps2servers-edge/
 └── internal/
     ├── protocol/             bounded UDPRDMA packet codecs
     ├── session/              per-peer protocol and handle state
-    ├── udpfs/                discovery, negotiation, transport, operations
+    ├── udpfs/                discovery, negotiation, transport, operations,
+    │                         and BREAD/BWRITE block access
+    ├── udpbd/                the separate UDPBD block protocol
     ├── filesystem/           rooted path and symlink enforcement
-    ├── compression/          ISO, CSO, and ZSO readers
+    ├── compression/          ISO, CSO, and ZSO readers, with a block cache
     └── logging/              text and JSON event output
 ```
 
@@ -66,21 +68,38 @@ queue so a transfer can advance while the request worker is occupied.
 
 ## Filesystem and images
 
-Edge is read-only. It rejects absolute paths, drive-qualified paths, `..`, and
-symlink escapes before opening files. Directory enumeration omits entries that
-cannot be resolved safely beneath the configured root.
+Edge serves writes unless started with `--read-only`. It rejects absolute paths,
+drive-qualified paths, `..`, and symlink escapes before opening files. Directory
+enumeration omits entries that cannot be resolved safely beneath the configured
+root.
 
 Plain files and ISO images are read directly. CSO uses zlib and ZSO uses a
 bounded raw-LZ4 decoder. Compressed images are exposed with virtual `.iso`
-names and their uncompressed size. CHD is deliberately not in the default
+names and their uncompressed size, and decompressed blocks are cached per open
+image up to `--compression-cache-size`. `--no-compression` turns both the
+decoding and the `.iso` substitution off, so a container is served as the raw
+bytes on disk under its real name. CHD is deliberately not in the default
 CGO-free implementation; see `docs/EDGE.md`.
+
+`--block-device` additionally serves one image through the UDPFS `BREAD`/
+`BWRITE` opcodes on handle 0, which `OPEN` never returns. Access is positional
+because one image is shared by every session; a seek cursor would let two
+consoles move each other's read position.
 
 ## UDPBD boundary
 
-The command and package structure leaves room for an `udpbd` subcommand, but
-this pull request does not claim native UDPBD support. The existing Python
-UDPBD implementation remains intact. Native UDPBD requires packet fixtures and
-real sector-read integration evidence before it should be advertised.
+`internal/udpbd/` implements the protocol natively and `ps2servers-edge udpbd`
+exposes it: `INFO`, `READ` with RDMA streaming and the upstream block-size
+optimizer, and `WRITE` with its RDMA handshake. The wire format was ported from
+this repository's hardware-validated Python UDPBD server, which remains intact.
+
+The two are held together by `conformance/integration/udpbd_probe.py`, which
+runs against both implementations in CI and finishes by asserting they produce
+byte-identical images from identical writes. The probe defines its own packet
+encoding rather than importing either server's: a probe that shares an encoder
+with an implementation cannot catch that implementation's encoding bugs.
+
+Still outstanding: no console or emulator has driven native UDPBD.
 
 ## Verification boundary
 

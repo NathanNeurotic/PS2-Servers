@@ -25,11 +25,65 @@ Important options:
 - `--single-port`
 - `--data-port 0` — automatic data port; use a fixed value for strict firewalls
 - `--peer-timeout 1h`
+- `--tx-delay-ms 0` — inter-packet pacing; raise it if a slow link drops packets
 - `--log-format text|json`
 - `--verbose`, `--quiet`, `--version`
 
+Serving a disk image alongside the folder:
+
+- `--block-device /path/ps2.img` — also answer UDPFS block reads and writes
+- `--sector-size 512` — sector size for that image; multiple of 512, max 65536
+
+Compressed images:
+
+- `--compression-cache-size 32` — decompressed blocks kept per open image
+  (`0`–`4096`; `0` disables the cache)
+- `--no-compression` — serve CSO/ZSO as raw bytes; a diagnostic, see below
+
+Observability:
+
+- `--metrics` — log periodic transfer counters
+- `--metrics-period 1m` — how often, from `1s` to `24h`
+
+Every option also reads an environment variable (`FSROOT`, `BIND`, `PORT`,
+`BDPATH`, `RO`, `NO_COMPRESSION`, `METRICS`, and so on), which is what the
+Docker images use.
+
 Edge does not need root. Grant the service account read and directory-traverse
 permission on the game root and open the selected UDP ports in the firewall.
+
+## Serving a disk image over UDPFS
+
+UDPFS carries block access as well as files. `--block-device` serves one image
+through the `BREAD`/`BWRITE` opcodes from the same instance already serving the
+folder, so one server can offer a console both a game directory and a virtual
+drive:
+
+```sh
+ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img
+```
+
+This matches the Desktop server's `--block-device` and udpfsd's `-bdpath`. It is
+**not** the same thing as the `udpbd` subcommand below, which speaks a different
+protocol on a different port.
+
+All access is positional. One image is shared by every session, so a seek cursor
+would let two consoles move each other's read position. Reads past the end of
+the image are refused rather than answered with zero padding, and the image
+inherits `--read-only`.
+
+## Compression cache
+
+A console reading sequentially touches the same compressed block repeatedly
+inside a single request. Without a cache each of those touches re-inflates the
+block from disk — wasted CPU on exactly the low-power hardware Edge targets.
+`--compression-cache-size` bounds how many decompressed blocks are retained per
+open image; the default of 32 is a few hundred kilobytes.
+
+`--no-compression` serves CSO/ZSO containers as the raw bytes on disk and stops
+them standing in for a missing `.iso`. It is a **diagnostic** for comparing
+against an undecoded transfer, not a way to save CPU: the PS2 cannot interpret
+container bytes, so games will not load from a share configured this way.
 
 ## Generic Linux
 
@@ -112,9 +166,13 @@ ps2servers-edge udpbd --image /mnt/ps2.img --read-only
 ```
 
 It is a separate protocol on its own fixed port (`0xBDBD`), so it is a separate
-subcommand: one invocation serves either a folder of files or one image as a raw
-drive, never both. In OPL, choose UDPBD — there is no IP or port to enter, the
-console finds the server by broadcast.
+subcommand: a `udpbd` invocation serves one image and nothing else. In OPL,
+choose UDPBD — there is no IP or port to enter, the console finds the server by
+broadcast.
+
+If you want a folder **and** an image from one server, that is the `udpfs`
+subcommand's `--block-device` option above, not this one. The difference is
+which protocol the console speaks, not which files you have.
 
 **UDPFS versus UDPBD.** UDPFS is a network file share: the console asks for a
 named file and a byte range, and the server understands files. UDPBD is a
@@ -145,10 +203,11 @@ less capable than its siblings for the ordinary case.
 
 Pass `--read-only` (or `RO=1`) to serve read-only instead.
 
-**The OpenWrt package still starts read-only** unless the operator opts in, via
-`option read_only '1'` in `/etc/config/ps2servers-edge`. A router share is
-frequently an entire attached disk, and the service is unauthenticated on the
-LAN, so writes are opt-in on that platform regardless of the binary default.
+**The OpenWrt package still starts read-only.** It ships `option read_only '1'`
+in `/etc/config/ps2servers-edge`; set it to `'0'` to let a console write. A
+router share is frequently an entire attached disk, and the service is
+unauthenticated on the LAN, so writes are opt-in on that platform regardless of
+the binary default.
 
 With writes enabled:
 
@@ -161,7 +220,17 @@ With writes enabled:
 | Write on a handle opened read-only | `EACCES` — access is decided at OPEN and re-checked |
 | Write completes | `fsync` before `WRITE_DONE`, so a console pulled mid-session does not lose the save |
 
-Block-device writes (`BWRITE`) are not implemented; file writes only.
+Block-device writes (`BWRITE`) are implemented too, when `--block-device` is
+set. They reuse the same chunk-assembly path as file writes, so the table above
+applies to them as well, with two additions: the request is refused unless it
+lies wholly inside the image, and the image is `fsync`ed before `WRITE_DONE`.
+
+The range check is written as a subtraction rather than `sector + count >
+sectorCount()`. The sector number arrives from the client as `lo | hi<<32` and
+Go wraps silently on signed overflow, so the addition form accepts a sector near
+`MaxInt64` — the wrapped sum is negative, which passes both the lower and upper
+bound — and the resulting offset can land inside the real file. On a write that
+is silent corruption at a client-chosen offset.
 
 ## Security model
 
