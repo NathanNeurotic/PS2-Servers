@@ -82,6 +82,17 @@ type State struct {
 	// the same WriteData chunk sequence, so only the destination differs.
 	WriteIsBlock bool
 	WriteOffset  int64
+	// WriteExpectedLen is how many bytes a BWRITE said it would deliver, or 0
+	// for a file write, which declares no length up front.
+	//
+	// It exists because the sector range a BWRITE declares and the byte count
+	// the chunk sequence actually delivers are two independent numbers. The
+	// range check validates the first; the chunk loop is driven by the client's
+	// own totalChunks and is bounded only by maxWriteBytes. Without recording
+	// this, a client could declare one in-range sector and then stream
+	// megabytes, and the flush would write all of it at the validated offset --
+	// past the end of the image, which extends the file.
+	WriteExpectedLen int64
 
 	// ReleaseWriter, when set by the server, is called with a handle's
 	// RealPath as that handle is closed if it held write access, so the
@@ -100,6 +111,7 @@ func (s *State) ResetWrite() {
 	s.WriteReceivedChunk = 0
 	s.WriteIsBlock = false
 	s.WriteOffset = 0
+	s.WriteExpectedLen = 0
 }
 
 type BufferedPacket struct {

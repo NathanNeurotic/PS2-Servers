@@ -146,6 +146,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error: --peer-timeout must be between 1m and 24h")
 		os.Exit(2)
 	}
+	// Rejected rather than ignored. envFloat already scrubs negative, NaN and
+	// Inf out of TX_DELAY_MS, but the flag reached the `> 0` test unchecked, so
+	// --tx-delay-ms -1 was silently treated as "no pacing" -- the two paths
+	// disagreed about the same value. On OpenWrt that is a UCI option the
+	// operator set, watched do nothing, and got no error about.
+	if *txDelayMs < 0 || math.IsNaN(*txDelayMs) || math.IsInf(*txDelayMs, 0) {
+		fmt.Fprintln(os.Stderr, "error: --tx-delay-ms must be zero or a positive number of milliseconds")
+		os.Exit(2)
+	}
 	var txDelay time.Duration
 	if *txDelayMs > 0 {
 		txDelay = time.Duration(*txDelayMs * float64(time.Millisecond))

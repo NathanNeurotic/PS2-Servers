@@ -21,6 +21,14 @@ import (
 // carrying block access inside UDPFS rather than requiring a second service.
 func startBlockServer(t *testing.T, cfg Config) (*net.UDPAddr, string, []byte) {
 	t.Helper()
+	_, disc, imgPath, img := startBlockServerFull(t, cfg)
+	return disc, imgPath, img
+}
+
+// startBlockServerFull additionally hands back the server, for tests that need
+// to read its counters rather than only its wire responses.
+func startBlockServerFull(t *testing.T, cfg Config) (*Server, *net.UDPAddr, string, []byte) {
+	t.Helper()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "game.iso"), []byte("0123456789abcdef"), 0o644); err != nil {
 		t.Fatal(err)
@@ -62,7 +70,7 @@ func startBlockServer(t *testing.T, cfg Config) (*net.UDPAddr, string, []byte) {
 		}
 		server.Close()
 	})
-	return disc, imgPath, img
+	return server, disc, imgPath, img
 }
 
 // breadMsg builds the 16-byte BREAD/BWRITE header.
@@ -330,5 +338,116 @@ func TestBlockReadRejectsOverflowingSectorOverTheWire(t *testing.T) {
 	}
 	if string(after) != string(img) {
 		t.Fatal("an overflowing BWRITE modified the image")
+	}
+}
+
+// TestBlockWriteCannotExceedItsDeclaredSectorCount closes the second way the
+// range check could be walked around.
+//
+// inRange validates the sector range the BWRITE header DECLARES. It does not
+// constrain what the chunk-assembly path then accumulates: handleWriteData is
+// driven by the client's own totalChunks/chunkSize fields and bounds the buffer
+// only by maxWriteBytes, which has nothing to do with the declared count. So a
+// client could declare one in-range sector at the very end of the image, then
+// stream megabytes of chunks, and completeBlockWrite would hand all of it to
+// WriteAt at the validated offset. WriteAt past EOF extends the file, so the
+// image silently grows and the bytes past the declared range are attacker-chosen.
+//
+// Validating a length and then writing a different one is the same defect as
+// the overflow bug, wearing different clothes: the quantity that was checked is
+// not the quantity that is used.
+func TestBlockWriteCannotExceedItsDeclaredSectorCount(t *testing.T) {
+	disc, imgPath, img := startBlockServer(t, Config{})
+	c := dial(t, disc)
+
+	last := uint64(len(img)/512) - 1 // in range: [last, last+1) is the final sector
+	payload := make([]byte, 512)
+	for i := range payload {
+		payload[i] = 0xEE
+	}
+
+	// Declare one sector, then announce four chunks and send them. Only the
+	// final chunk draws a WRITE_DONE; the rest answer with a bare ACK.
+	c.sendNoReply(append(blockMsg(protocol.BWriteRequest, 0, last, 1),
+		writeDataMsg(0, 4, payload)...))
+	c.sendNoReply(writeDataMsg(1, 4, payload))
+	c.sendNoReply(writeDataMsg(2, 4, payload))
+	reply := c.send(writeDataMsg(3, 4, payload))
+
+	if got := result(reply); got > 512 {
+		t.Errorf("server accepted %d bytes for a write that declared 512", got)
+	}
+
+	onDisk, err := os.ReadFile(imgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(onDisk) != len(img) {
+		t.Fatalf("the image grew from %d to %d bytes; a BWRITE wrote past the "+
+			"end of the disk it declared", len(img), len(onDisk))
+	}
+	// Everything before the declared sector must be untouched.
+	if string(onDisk[:last*512]) != string(img[:last*512]) {
+		t.Fatal("a BWRITE modified sectors outside its declared range")
+	}
+}
+
+// TestBlockWriteShortOfItsDeclaredCountIsRefused is the mirror case. Declaring
+// four sectors and delivering one is not corruption, but reporting it as a
+// success tells the console a save committed that only partly landed -- and the
+// three sectors it believes it wrote still hold their old contents.
+func TestBlockWriteShortOfItsDeclaredCountIsRefused(t *testing.T) {
+	disc, imgPath, img := startBlockServer(t, Config{})
+	c := dial(t, disc)
+
+	payload := make([]byte, 512)
+	for i := range payload {
+		payload[i] = 0x5A
+	}
+	// Header declares 4 sectors; the chunk sequence delivers one and ends.
+	reply := c.send(append(blockMsg(protocol.BWriteRequest, 0, 2, 4),
+		writeDataMsg(0, 1, payload)...))
+	if got := result(reply); got >= 0 {
+		t.Errorf("a BWRITE that delivered 512 of a declared 2048 bytes "+
+			"reported success (%d)", got)
+	}
+	onDisk, err := os.ReadFile(imgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(onDisk) != string(img) {
+		t.Fatal("a refused BWRITE still modified the image")
+	}
+}
+
+// TestRejectedBlockRequestsAreStillCounted pins the counting invariant that
+// handleMessage's comment states: one request counts once, at dispatch,
+// regardless of how the handler exits.
+//
+// BREAD and BWRITE originally counted inside their handlers, after validation,
+// so a rejected request counted zero. That is backwards for the case metrics
+// exist to serve: an operator on a headless box watching --metrics while a
+// console fails to read needs to see requests arriving and being refused, not a
+// counter frozen at zero that looks identical to a console that never connected.
+func TestRejectedBlockRequestsAreStillCounted(t *testing.T) {
+	server, disc, _, img := startBlockServerFull(t, Config{})
+	c := dial(t, disc)
+	sectors := uint64(len(img) / 512)
+
+	// Both of these are refused: out of range, and aimed at a file handle.
+	c.send(blockMsg(protocol.BReadRequest, 0, sectors+100, 1))
+	c.send(blockMsg(protocol.BReadRequest, 99, 0, 1))
+	// A BWRITE that is refused before any data is assembled.
+	c.send(append(blockMsg(protocol.BWriteRequest, 0, sectors+100, 1),
+		writeDataMsg(0, 1, make([]byte, 512))...))
+
+	if got := server.stats.bread.Load(); got != 2 {
+		t.Errorf("refused BREADs counted %d times, want 2", got)
+	}
+	if got := server.stats.bwrite.Load(); got != 1 {
+		t.Errorf("refused BWRITE counted %d times, want 1", got)
+	}
+	if got := server.stats.bytesRead.Load(); got != 0 {
+		t.Errorf("refused BREADs reported %d bytes transferred, want 0", got)
 	}
 }

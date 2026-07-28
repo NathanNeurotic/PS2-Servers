@@ -36,8 +36,10 @@ func (s *Server) handleMessage(st *session.State, p []byte) {
 	case protocol.WriteData:
 		s.handleWriteData(st, p)
 	case protocol.BReadRequest:
+		s.stats.bread.Add(1)
 		s.handleBRead(st, p)
 	case protocol.BWriteRequest:
+		s.stats.bwrite.Add(1)
 		s.handleBWriteRequest(st, p)
 	case protocol.SeekRequest:
 		s.stats.lseek.Add(1)
@@ -348,6 +350,18 @@ func (s *Server) handleWriteData(st *session.State, msg []byte) {
 		s.sendWriteDone(st, -int32(syscall.EFBIG))
 		return
 	}
+	// A BWRITE declared its length up front, so stop the moment the chunks
+	// exceed it rather than buffering to maxWriteBytes first. completeBlockWrite
+	// would reject the result anyway; refusing here means a client that declares
+	// one sector cannot make the server hold 8 MiB on its behalf.
+	if st.WriteExpectedLen > 0 &&
+		int64(len(st.WriteBuffer))+int64(chunkSize) > st.WriteExpectedLen {
+		s.cfg.Log.Warn("BWRITE overran its declared length", map[string]any{
+			"peer": st.Peer, "declared": st.WriteExpectedLen})
+		st.ResetWrite()
+		s.sendWriteDone(st, -int32(syscall.EINVAL))
+		return
+	}
 	st.WriteBuffer = append(st.WriteBuffer, body[:chunkSize]...)
 	st.WriteTotalChunks = totalChunks
 	st.WriteReceivedChunk++
@@ -364,9 +378,10 @@ func (s *Server) completeWrite(st *session.State) {
 	buf := st.WriteBuffer
 	isBlock := st.WriteIsBlock
 	offset := st.WriteOffset
+	expected := st.WriteExpectedLen
 	st.ResetWrite()
 	if isBlock {
-		s.completeBlockWrite(st, buf, offset)
+		s.completeBlockWrite(st, buf, offset, expected)
 		return
 	}
 	h := st.Handles[id]

@@ -23,7 +23,12 @@ start_service() {
         config_get data_port main data_port 0
         config_get protocol main protocol auto
         config_get peer_timeout main peer_timeout 1h
+        config_get tx_delay_ms main tx_delay_ms 0
         config_get log_format main log_format text
+        config_get block_device main block_device
+        config_get sector_size main sector_size 512
+        config_get compression_cache_size main compression_cache_size 32
+        config_get metrics_period main metrics_period 1m
 
         procd_open_instance
         procd_set_param command "$PROG" udpfs \
@@ -33,6 +38,7 @@ start_service() {
                 --data-port "$data_port" \
                 --protocol-mode "$protocol" \
                 --peer-timeout "$peer_timeout" \
+                --tx-delay-ms "$tx_delay_ms" \
                 --log-format "$log_format"
         # --read-only used to be hardcoded here, which made the read_only UCI
         # option decorative: setting it to 0 changed nothing. It is honoured
@@ -43,6 +49,31 @@ start_service() {
         [ "$read_only" -eq 1 ] && procd_append_param command --read-only
         append_bool_flag main single_port --single-port
         append_bool_flag main verbose --verbose
+
+        # Block access (BREAD/BWRITE) is served by the same UDPFS instance as the
+        # file share, so it belongs here rather than in a second service. Leaving
+        # block_device empty is how it stays off; --sector-size is appended only
+        # alongside it, so the command line procd logs never implies an image is
+        # being served when none is.
+        #
+        # The image inherits read_only above. Setting block_device without also
+        # setting read_only '0' gives the console a disk it cannot save to.
+        if [ -n "$block_device" ]; then
+                procd_append_param command --block-device "$block_device"
+                procd_append_param command --sector-size "$sector_size"
+        fi
+
+        append_bool_flag main no_compression --no-compression
+        procd_append_param command --compression-cache-size "$compression_cache_size"
+
+        # Off by default: the counters go to stdout, procd forwards stdout to
+        # syslog, and a router logging a snapshot every minute forever is a cost
+        # the operator should opt into.
+        config_get_bool metrics main metrics 0
+        if [ "$metrics" -eq 1 ]; then
+                procd_append_param command --metrics
+                procd_append_param command --metrics-period "$metrics_period"
+        fi
         procd_set_param user ps2edge
         procd_set_param group ps2edge
         procd_set_param respawn 10 5 0

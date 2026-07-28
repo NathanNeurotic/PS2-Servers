@@ -27,7 +27,11 @@ both can transfer concurrently.
 - retransmission, NACK handling, send windows, sequence wraparound
 - multiple clients and idle cleanup
 - safe rooted filesystem; writes allowed unless `--read-only` is passed
-- ISO, CSO/CISO, ZSO/ZISO
+- block access over UDPFS: `BREAD` / `BWRITE` against one `--block-device`
+  image on handle 0, positional, bounds-checked against integer overflow
+- ISO, CSO/CISO, ZSO/ZISO, with a `--compression-cache-size` block cache
+- `--no-compression` to serve containers as raw bytes (a diagnostic)
+- `--metrics` periodic transfer counters
 - text and JSON logs
 - graceful SIGINT/SIGTERM shutdown
 
@@ -52,6 +56,31 @@ Guarantees:
 - a chunk arriving out of order aborts the whole write with `EIO` rather than
   silently concatenating it into the wrong place
 - completed writes are flushed with `fsync` before `WRITE_DONE` is sent
+
+## Block access over UDPFS
+
+`--block-device` serves one disk image through the `BREAD` (`0x28`) and `BWRITE`
+(`0x2A`) opcodes, alongside the file share, from the same instance:
+
+```sh
+./ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img
+./ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img --sector-size 2048
+```
+
+This is the same feature as the Desktop server's `--block-device` and udpfsd's
+`-bdpath`, and is distinct from the `udpbd` subcommand below — that is another
+protocol on another port.
+
+The image lives on handle 0, which `OPEN` never hands out, so a client
+addressing handle 0 is unambiguously addressing the image. Access is positional:
+one image is shared by every session, and a seek cursor would let two consoles
+move each other's read position. The image inherits `--read-only`.
+
+Range checks are a subtraction, not `sector + count > sectorCount()`. The sector
+arrives as `lo | hi<<32` and is fully client-controlled, and Go wraps silently
+on signed overflow, so the addition form accepts values near `MaxInt64`: the
+wrapped sum is negative and passes both bounds. On `BWRITE` that would be silent
+corruption of the image at an offset the client picks.
 
 ## UDPBD
 

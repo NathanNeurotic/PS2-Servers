@@ -35,18 +35,25 @@ Edge serves **both** protocols:
 ```sh
 ps2servers-edge udpfs --root /mnt/games      # folder as a network file share
 ps2servers-edge udpbd --image /mnt/ps2.img   # disk image as a network drive
+
+# folder AND a disk image from one server, over UDPFS block access
+ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img
 ```
 
 It supports **CSO and ZSO but not CHD** (CHD needs a native library that would
 break static linking — use the Desktop app for CHD). It **allows the console to
 write by default**, so saves work; pass `--read-only` to prevent that. `--metrics`
 logs periodic transfer statistics, which is the way to tell a slow transfer from
-a stalled one on a machine with no screen.
+a stalled one on a machine with no screen. `--compression-cache-size` tunes how
+many decompressed blocks are held per image, which matters most on the slowest
+devices.
 
 For OpenWrt, build the source package for your exact target rather than using
 these generic binaries — see
 [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
-The OpenWrt package starts read-only unless the operator opts in.
+The OpenWrt package starts read-only; set `option read_only '0'` in
+`/etc/config/ps2servers-edge` to let the console save. Every Edge option is a
+UCI option there, including `block_device`.
 
 > **Edge has not been verified on a physical PlayStation 2 or an emulator.** Its
 > wire behaviour is checked in CI against the hardware-validated Python servers,
