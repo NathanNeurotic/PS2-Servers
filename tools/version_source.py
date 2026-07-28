@@ -43,7 +43,11 @@ EDGE_WORKFLOW = os.path.join(ROOT, ".github", "workflows", "edge-build.yml")
 # checked by --check-sources and by tests/test_version_consistency.py.
 VERSIONED_WORKFLOWS = (EDGE_WORKFLOW,)
 
-_VERSION_LITERAL = re.compile(r'VERSION="(\d+\.\d+\.\d+)')
+# Any shell assignment of a dotted version literal, not just VERSION="...".
+# The first version of this matched double quotes after the exact name VERSION,
+# which a reintroduction as VERSION='0.5.0', VERSION=0.5.0 or BASE="0.5.0" would
+# have walked straight past -- a guard narrower than the thing it guards.
+_VERSION_LITERAL = re.compile(r"""\b([A-Z][A-Z0-9_]*)=["']?(\d+\.\d+\.\d+)""")
 
 
 def _constants():
@@ -118,8 +122,9 @@ def check_sources():
             for number, line in enumerate(handle, 1):
                 match = _VERSION_LITERAL.search(line)
                 if match:
-                    problems.append("%s:%d assigns VERSION=%s as a literal"
-                                    % (os.path.relpath(path, ROOT), number, match.group(1)))
+                    problems.append("%s:%d assigns %s=%s as a literal"
+                                    % (os.path.relpath(path, ROOT), number,
+                                       match.group(1), match.group(2)))
     if problems:
         raise SystemExit(
             "a workflow carries its own version number again:\n  %s\n\n"

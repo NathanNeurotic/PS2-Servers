@@ -66,14 +66,29 @@ class VersionIsReadableWithoutImportingTheLauncher(unittest.TestCase):
                 "VERSION_QUALIFIER %r must start with '-' so DISPLAY_VERSION "
                 "reads like 0.5.0-rc1" % qualifier)
 
-    def test_display_version_matches_the_launcher_package(self):
-        """launcher.__version__ is DISPLAY_VERSION; the parser must agree with it."""
+    def test_display_version_matches_an_independent_read(self):
+        """Cross-check the ast parser against a different way of reading the file.
+
+        Deliberately not the same mechanism: a parser validated only by itself
+        would agree with its own bug. The regex is the naive read, so if the two
+        disagree one of them is wrong.
+
+        Both quote styles are accepted, and a missing match fails with a sentence
+        rather than an AttributeError on .group() -- the assertion should say what
+        is wrong, not crash on the way to finding out.
+        """
         with open(os.path.join(ROOT, "launcher", "release_metadata.py"),
                   encoding="utf-8") as handle:
             text = handle.read()
-        product = re.search(r'PRODUCT_VERSION = "([^"]+)"', text).group(1)
-        qualifier = re.search(r'VERSION_QUALIFIER = "([^"]*)"', text).group(1)
-        self.assertEqual(vs.display_version(), product + qualifier)
+        product = re.search(r"""PRODUCT_VERSION\s*=\s*["']([^"']+)["']""", text)
+        self.assertIsNotNone(
+            product, "PRODUCT_VERSION is no longer a plain string literal in "
+                     "launcher/release_metadata.py")
+        qualifier = re.search(r"""VERSION_QUALIFIER\s*=\s*["']([^"']*)["']""", text)
+        # A missing VERSION_QUALIFIER is legitimate; version_source defaults it
+        # to "", so the independent read has to as well.
+        suffix = qualifier.group(1) if qualifier else ""
+        self.assertEqual(vs.display_version(), product.group(1) + suffix)
 
 
 class NoWorkflowCarriesItsOwnVersion(unittest.TestCase):
@@ -84,16 +99,45 @@ class NoWorkflowCarriesItsOwnVersion(unittest.TestCase):
         except SystemExit as exc:
             self.fail(str(exc))
 
-    def test_edge_workflow_derives_its_base_version(self):
-        """Belt and braces: the fallback must reference the shared tool."""
+    def _edge_version_step(self):
+        """The `run:` body of edge-build.yml's version step, from parsed YAML."""
+        import yaml
         with open(vs.EDGE_WORKFLOW, encoding="utf-8") as handle:
-            text = handle.read()
-        # Compared as a boolean rather than with assertIn, which would print the
-        # entire workflow on failure and bury the one sentence that matters.
+            workflow = yaml.safe_load(handle)
+        for step in workflow["jobs"]["build"]["steps"]:
+            if step.get("id") == "version":
+                return step["run"]
+        self.fail("edge-build.yml has no step with id: version")
+
+    def test_edge_workflow_derives_its_base_version(self):
+        """The step that computes the version must call the shared tool.
+
+        Checked against that step's parsed `run:` body rather than against the
+        whole file. A substring search over the file would be satisfied by the
+        path appearing in a comment or an unrelated step while the fallback went
+        back to a hardcoded literal -- and this file now contains exactly such a
+        comment, explaining the drift, so that weaker check would be self-
+        satisfying.
+        """
+        run = self._edge_version_step()
         self.assertTrue(
-            "tools/version_source.py" in text,
-            "edge-build.yml no longer derives its base version from the shared "
-            "source of truth, so it can drift from the launcher again")
+            "version_source.py" in run,
+            "edge-build.yml's version step no longer calls version_source.py, "
+            "so its base version can drift from the launcher again")
+
+    def test_edge_workflow_validates_a_tag_itself(self):
+        """release.yml's needs-graph cannot gate edge.yml.
+
+        edge.yml triggers on v* tags independently and attaches straight to the
+        release, so a mismatched tag would otherwise publish Edge binaries named
+        for the tag while the launcher half correctly refused to build -- a
+        release holding Edge alone, labelled a version the source denies.
+        """
+        run = self._edge_version_step()
+        self.assertTrue(
+            "--check-tag" in run,
+            "edge-build.yml does not validate the tag against the source, and "
+            "nothing else can validate it on this workflow's behalf")
 
 
 class TagCheckActuallyRejects(unittest.TestCase):
@@ -109,12 +153,26 @@ class TagCheckActuallyRejects(unittest.TestCase):
             vs.check_tag("v" + bumped)
         self.assertIn("mismatch", str(caught.exception))
 
-    def test_missing_qualifier_is_refused(self):
-        """v0.5.0-rc1 against an empty qualifier ships a GUI calling itself 0.5.0."""
+    def test_qualifier_mismatch_is_refused(self):
+        """The qualifier half must be enforced whichever way it is wrong.
+
+        Both directions ship a GUI that contradicts the release it came from:
+        tagging v0.5.0-rc1 with an empty qualifier gives binaries calling
+        themselves 0.5.0, and tagging a bare v0.5.0 while the qualifier still
+        says -rc1 gives binaries calling themselves 0.5.0-rc1.
+
+        Skipping whichever case does not currently apply would mean this test
+        quietly stops checking anything the moment a qualifier is set -- which is
+        precisely when a release is under test and the check matters most.
+        """
+        product = vs.product_version()
         if vs.version_qualifier():
-            self.skipTest("a qualifier is set; this case cannot arise right now")
-        with self.assertRaises(SystemExit):
-            vs.check_tag("v" + vs.product_version() + "-rc1")
+            wrong = "v" + product          # bare tag, qualifier still set
+        else:
+            wrong = "v" + product + "-rc1"  # qualified tag, no qualifier set
+        with self.assertRaises(SystemExit) as caught:
+            vs.check_tag(wrong)
+        self.assertIn("mismatch", str(caught.exception))
 
 
 if __name__ == "__main__":

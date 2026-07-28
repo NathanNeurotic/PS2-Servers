@@ -246,6 +246,14 @@ jobs:
           # publish a tag that disagrees with the source.
           BASE="$(python3 tools/version_source.py)"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            # Checked here as well as in release.yml, because release.yml's
+            # needs-graph cannot gate this workflow: edge.yml triggers on v*
+            # tags on its own, and the step below attaches straight to the
+            # release. Without this, a tag that disagrees with the source would
+            # still publish Edge binaries named for the tag -- producing a
+            # release holding Edge alone, labelled a version the source denies,
+            # while the launcher half correctly refused to build.
+            python3 tools/version_source.py --check-tag "$GITHUB_REF_NAME"
             VERSION="${GITHUB_REF_NAME#v}"
           else
             VERSION="${BASE}-edge.${GITHUB_SHA::7}"
