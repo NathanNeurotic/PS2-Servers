@@ -93,32 +93,47 @@ def main():
         "release_metadata",
     )
 
+    # The transparency prose used to be duplicated inline in both release
+    # workflows, escaped differently in each, and it drifted -- within one day
+    # it still called Edge read-only after writes became the default, and never
+    # mentioned Edge gaining UDPBD. It now lives once in
+    # .github/release-notes-common.md, which both workflows append.
+    #
+    # Checking the shared file is a stronger assertion than checking two copies:
+    # it cannot pass in one release and fail in the other. The pair of checks
+    # below closes the obvious hole -- that someone drops the append line and
+    # the disclosures silently stop shipping while this file still passes.
     errors += require(
-        ".github/workflows/release-on-main.yml",
-        "PS2Servers-windows-x64.zip",
-        "PS2Servers-windows-x86.zip",
-        "SHA256SUMS.txt",
-        "GitHub artifact attestations",
+        ".github/release-notes-common.md",
         "does not enable Windows SMB1",
         "does not enable or disable Windows optional features",
         "Windows Firewall changes happen only after user action/consent",
         "tools/remove-windows-firewall-rules.ps1",
+        "GitHub artifact attestations",
         "Avast/Gen Threat Labs",
+        # Verbatim, on one line, exactly as it is quoted to AV vendors.
         "does not contain malware, credential collection, persistence, adware, browser modification, or crypto-mining behavior",
+        # Capability claims that went stale before and must stay accurate. Each
+        # of these was wrong in a published release at some point today.
+        "TCP port `1111`",
+        "`0xF5F6`",
+        "`0xBDBD`",
+        "write by default",
+        "not been verified on a physical PlayStation 2",
     )
 
-    errors += require(
-        ".github/workflows/release.yml",
-        "PS2Servers-windows-x64.zip",
-        "PS2Servers-windows-x86.zip",
-        ".sha256.txt",
-        "does not enable Windows SMB1",
-        "does not enable or disable Windows optional features",
-        "Windows Firewall changes happen only after user action/consent",
-        "tools/remove-windows-firewall-rules.ps1",
-        "Avast/Gen Threat Labs",
-        "does not contain malware, credential collection, persistence, adware, browser modification, or crypto-mining behavior",
-    )
+    for workflow in (".github/workflows/release-on-main.yml",
+                     ".github/workflows/release.yml"):
+        errors += require(
+            workflow,
+            "PS2Servers-windows-x64.zip",
+            "PS2Servers-windows-x86.zip",
+            # Without this the shared disclosures never reach the release body.
+            "release-notes-common.md",
+        )
+
+    errors += require(".github/workflows/release-on-main.yml", "SHA256SUMS.txt")
+    errors += require(".github/workflows/release.yml", ".sha256.txt")
 
     errors += require(
         "README.md",

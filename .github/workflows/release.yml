@@ -299,48 +299,27 @@ jobs:
 
           Compression note: ZSO/LZ4 support is bundled. CHD support is backed by a libchdr native library built from source during release packaging.
 
-          ### PS2 Servers Edge — routers, NAS, Raspberry Pi
-
-          **If you are on a normal computer, stop here — the table above is what you want.** Everything named \`PS2ServersEdge-*\` is a different program: a small headless server with no GUI and no Python, for devices where the launcher does not fit.
-
-          Each Edge file is named for the device family it serves, for example \`armv5-pogoplug-sheevaplug-dockstar\`, \`edgerouter-octeon-mips64\`, or \`router-mips-little-endian-mt7621\`. Run \`uname -m\` on the device and match it in [EDGE-WHICH-BUILD.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE-WHICH-BUILD.md); every archive also contains a \`WHICH-DEVICE.txt\` confirming what it is for. Picking the wrong one is harmless — it simply will not start.
-
-          Edge serves CSO/ZSO but **not CHD**, and allows the console to write saves by default (\`--read-only\` to prevent that). For OpenWrt, build the source package for your exact target instead — see [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
-
-          One launcher for all three OPL servers (SMBv1, UDPFS, UDPBD): pick a folder, hit Start. On Windows it runs from the system tray (close/minimize → tray; right-click → Open/Quit).
-
-          ## Security transparency
-
-          PS2 Servers is an open-source PS2 homebrew utility for user-controlled local server setup. It runs local LAN servers for Open PS2 Loader:
-
-          - SMBv1/RiptOPL: built-in SMB/CIFS subset, normally TCP port \`1111\` (below 1033 discouraged).
-          - UDPFS: UDP file/block serving, normally UDP port \`0xF5F6\`.
-          - UDPBD: UDP block-device serving, normally UDP port \`0xBDBD\`.
-
-          Windows behavior:
-
-          - The Windows SMB server uses PS2 Servers' built-in SMB/CIFS implementation and does not enable Windows SMB1.
-          - The app does not enable or disable Windows optional features.
-          - Windows Firewall changes happen only after user action/consent and use rules named \`PS2 Servers - ...\`.
-          - Advanced SMB port \`445\` mode is optional and requires administrator consent.
-          - To uninstall, delete the extracted app folder. To remove PS2 Servers firewall rules, use the GUI action or \`tools/remove-windows-firewall-rules.ps1\`.
-
-          Verification:
-
-          - Release assets include SHA-256 checksum files.
-          - For the lowest-trust path, inspect the source and run from source.
-
-          PS2 Servers has been submitted to Avast/Gen Threat Labs for false-positive review.
-
-          The application is open source and built from the public GitHub repository. It is a PS2 homebrew utility for user-controlled local server setup and does not contain malware, credential collection, persistence, adware, browser modification, or crypto-mining behavior.
-
-          Repository:
-          https://github.com/NathanNeurotic/PS2-Servers
-
-          ⚠️ Servers pass protocol self-tests; real PS2 / PCSX2 hardware validation still pending.
-
-          🤖 Built by GitHub Actions (Intel macOS cross-built on Apple Silicon).
           EOF
+
+          # Everything true of every release lives in
+          # .github/release-notes-common.md and is appended here rather than
+          # duplicated. The same prose used to be pasted into this workflow
+          # and release-on-main.yml, escaped differently in each, and it
+          # drifted: it still described Edge as read-only after writes became
+          # the default, and never mentioned Edge gaining UDPBD.
+          #
+          # The leading maintainer comment is stripped -- it explains why the
+          # file exists, which is not something a user should read here.
+          sed '/^<!--/,/^-->/d' .github/release-notes-common.md >> out/release-notes.md
+
+          cat >> out/release-notes.md <<'TAILEOF'
+
+          Servers pass their protocol self-tests and cross-implementation
+          conformance probes. Validation on real PS2 hardware or PCSX2 is
+          still pending.
+
+          Built by GitHub Actions (Intel macOS cross-built on Apple Silicon).
+          TAILEOF
 
       - name: Attest build provenance
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
