@@ -318,6 +318,15 @@ class ServerCard(ttk.LabelFrame):
             var = tk.StringVar(value=default_val)
             ttk.Entry(parent, textvariable=var, width=12).grid(
                 row=row, column=1, sticky="w", padx=6, pady=2)
+        elif f.kind == "choice":
+            # readonly, so the box can be opened and read but not typed into:
+            # an editable combobox would let a typo reach the server as an
+            # unknown value, and the server exits rather than guessing.
+            labels = [label for label, _ in f.choices]
+            var = tk.StringVar(value=str(f.default or (labels[0] if labels else "")))
+            ttk.Combobox(parent, textvariable=var, values=labels,
+                         state="readonly", width=18).grid(
+                row=row, column=1, sticky="w", padx=6, pady=2)
         elif f.kind in ("folder", "file"):
             var = tk.StringVar(value="")
             ttk.Entry(parent, textvariable=var).grid(
