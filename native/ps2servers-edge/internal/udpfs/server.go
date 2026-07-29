@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/filesystem"
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/memory"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"net"
@@ -46,6 +47,13 @@ type Config struct {
 	NoCompression bool
 	// CompressionCache bounds decompressed blocks retained per open image.
 	CompressionCache int
+	// MaxTransferBytes bounds one BREAD and one assembled write. Zero derives
+	// it from the machine's RAM, which is what every caller should do: the
+	// write buffer is reserved eagerly from the size the client declares, so
+	// on a 32 MB router the desktop ceiling is a quarter of the machine per
+	// operation. Set explicitly only by tests and by an operator who has a
+	// reason.
+	MaxTransferBytes int64
 	// MetricsPeriod logs a periodic counter snapshot when > 0, matching the
 	// Desktop server's --metrics / --metrics-period.
 	MetricsPeriod time.Duration
@@ -85,6 +93,11 @@ type Server struct {
 
 	stats    metrics
 	blockDev *blockDevice
+
+	// transferCap bounds one BREAD and one assembled write, resolved once at
+	// construction so every path that allocates from a client-declared size
+	// consults the same number.
+	transferCap int64
 
 	// writers reserves each file that some peer currently holds open for
 	// writing, mapping resolved path to a reference count. Two consoles
@@ -148,11 +161,14 @@ func New(cfg Config) (*Server, error) {
 	if cfg.ServerName == "" {
 		cfg.ServerName = "PS2 Servers Edge"
 	}
+	if cfg.MaxTransferBytes <= 0 {
+		cfg.MaxTransferBytes = memory.Detect().TransferCap(preferredTransfer)
+	}
 	root, err := filesystem.Open(cfg.Root)
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, root: root, sessions: make(map[string]*peerWorker), incoming: make(chan inbound, 256), closed: make(chan struct{})}
+	s := &Server{cfg: cfg, root: root, sessions: make(map[string]*peerWorker), incoming: make(chan inbound, 256), closed: make(chan struct{}), transferCap: cfg.MaxTransferBytes}
 	s.stats.started = time.Now()
 	if cfg.BlockDevice != "" {
 		// Opened once and shared: every session addresses the same image
@@ -211,7 +227,10 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 	}
 	disc, data := s.Addr()
-	s.cfg.Log.Info("UDPFS listening", map[string]any{"root": s.root.Path(), "discovery": disc.String(), "data": data.String(), "protocol": s.cfg.ProtocolMode, "read_only": s.cfg.ReadOnly})
+	// transfer_cap is logged because it is derived from the host's RAM rather
+	// than fixed: an operator on a small router who sees a large write refused
+	// should be able to find the reason in the first line of the log.
+	s.cfg.Log.Info("UDPFS listening", map[string]any{"root": s.root.Path(), "discovery": disc.String(), "data": data.String(), "protocol": s.cfg.ProtocolMode, "read_only": s.cfg.ReadOnly, "transfer_cap": s.transferCap})
 	s.wg.Add(1)
 	go s.readLoop(s.discovery, session.DiscoverySocket)
 	if s.data != s.discovery {

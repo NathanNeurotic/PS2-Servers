@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/compression"
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/memory"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpbd"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpfs"
@@ -42,11 +44,29 @@ func duration(v string) (time.Duration, error) {
 	}
 	return time.Duration(seconds * float64(time.Second)), nil
 }
+// applyMemoryLimit gives the collector a ceiling on machines small enough for
+// it to matter.
+//
+// A backstop, not the fix: a soft limit makes the GC work harder as the heap
+// approaches it, but it does not make an allocation fail, so it cannot on its
+// own stop one oversized buffer from taking the process down. That is the job
+// of the transfer cap in internal/memory. What this adds is that a heap which
+// has already grown past what the board can hold gets collected hard rather
+// than drifting up until the kernel's OOM killer picks a victim -- which on a
+// router is as likely to be something else as it is to be us.
+func applyMemoryLimit() {
+	if limit := memory.Detect().SoftLimit(); limit > 0 {
+		debug.SetMemoryLimit(limit)
+	}
+}
+
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "version") {
 		fmt.Printf("ps2servers-edge %s\n", version)
 		return
 	}
+	// Before either server starts, so both are covered.
+	applyMemoryLimit()
 	if len(os.Args) >= 2 && os.Args[1] == "udpbd" {
 		runUDPBD()
 		return

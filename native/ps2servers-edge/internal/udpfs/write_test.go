@@ -317,7 +317,10 @@ func TestWriteRequestOverCapIsRefused(t *testing.T) {
 	h := openForWriteOK(t, c, "big.sav", fioRead|fioWrite|fioCreate)
 	// A peer announcing a huge write must be refused before the server
 	// allocates a buffer for it.
-	reply := c.send(writeReqMsg(h, maxWriteBytes+1, nil))
+	// preferredTransfer, not the server's resolved cap: the cap is derived from
+	// the host's RAM and is never larger than preferredTransfer, so one byte
+	// past it is over the limit on every machine this test can run on.
+	reply := c.send(writeReqMsg(h, preferredTransfer+1, nil))
 	if got := result(reply); got != -int32(syscall.EFBIG) {
 		t.Fatalf("oversized WRITE_REQ returned %d, want -EFBIG", got)
 	}
