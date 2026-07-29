@@ -154,6 +154,60 @@ func TestParseHeaderReassemblesTheSplitStatus(t *testing.T) {
 	}
 }
 
+func TestMaxMessageClearsTheLargestRealFrame(t *testing.T) {
+	// The biggest message this protocol can produce is a full READ_ANDX reply:
+	// the reference clamps the read to min(maxcount, 0xFFFF), and the response
+	// header is 59 bytes with data starting immediately after it.
+	//
+	//   32 header + 1 WordCount + 24 params + 2 ByteCount + 65535 data = 65594
+	//
+	// A cap below that would break large reads -- which is worse than the
+	// memory it saves, since it fails only on real game loads and looks like
+	// corruption rather than a limit.
+	const largestRealMessage = 32 + 1 + 24 + 2 + 0xFFFF
+	if MaxMessage <= largestRealMessage {
+		t.Fatalf("MaxMessage %d does not clear the largest real message %d",
+			MaxMessage, largestRealMessage)
+	}
+	// And the whole point is that it stays small enough for a 32 MB board.
+	if int64(MaxMessage)*MaxConnections > 4<<20 {
+		t.Fatalf("worst case %d bytes is too much for the boards this targets",
+			int64(MaxMessage)*MaxConnections)
+	}
+}
+
+func TestStatusEncodingIsFaithfulEvenWhereItIsLossy(t *testing.T) {
+	// The reference forces byte 6 to zero and takes only status>>16, so a
+	// status with bits 8..15 set loses them. Every status actually used has
+	// those bits clear, which is why it has never mattered.
+	//
+	// Pinned because the tempting "simplification" -- writing the status as one
+	// little-endian uint32 at offset 5 -- is byte-identical for the four
+	// statuses in use and DIFFERENT for any other. Adopting it would look
+	// correct, pass every other test here, and change the wire the day someone
+	// adds a fifth status.
+	got := PackHeader(ComEcho, 0xC0000103, 0, 0, 0, 0)
+	if got[6] != 0 {
+		t.Fatalf("byte 6 = %#x, must be reserved-zero like the reference", got[6])
+	}
+	if got[5] != 0x03 {
+		t.Fatalf("ErrorClass = %#x, want the low byte 0x03", got[5])
+	}
+	if got[7] != 0x00 || got[8] != 0xC0 {
+		t.Fatalf("ErrorCode = %#x %#x, want 00 C0 (status>>16)", got[7], got[8])
+	}
+	// Round-tripping therefore cannot recover the dropped byte. Stated as a
+	// fact about the encoding rather than a defect to fix.
+	h, err := ParseHeader(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Status == 0xC0000103 {
+		t.Fatal("bits 8..15 survived; this encoding is supposed to drop them, " +
+			"and matching the reference matters more than being lossless")
+	}
+}
+
 func TestParseHeaderRejectsRubbish(t *testing.T) {
 	if _, err := ParseHeader(make([]byte, 31)); err == nil {
 		t.Fatal("accepted a short header")

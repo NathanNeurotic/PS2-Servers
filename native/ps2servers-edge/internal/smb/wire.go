@@ -61,13 +61,39 @@ const (
 // HeaderLen is the fixed SMB header size.
 const HeaderLen = 32
 
-// MaxMessage bounds one SMB message.
+// MaxMessage bounds one SMB message, and with it this server's whole
+// per-connection memory cost.
 //
 // The framing length field is 24 bits, so a peer could otherwise announce 16
-// MiB and have the server allocate it before a single byte is validated -- the
-// same shape of problem as the transfer caps in internal/udpfs. OPL's largest
-// real message is a write of a few tens of kilobytes.
-const MaxMessage = 1 << 20
+// MiB and have the server allocate it before a byte is validated -- the same
+// shape of problem as the transfer caps in internal/udpfs.
+//
+// 128 KiB is chosen against what the protocol actually does rather than
+// against the field width. The reference server clamps a READ_ANDX to
+// min(maxcount, 0xFFFF), so no reply can exceed 64 KiB of file data; and a
+// WRITE_ANDX payload is a slice of the message already received, not a fresh
+// allocation sized from the client's declared count. So one message is the
+// only thing a connection holds, and twice the largest real one is ample.
+//
+// This is deliberately a constant rather than being derived from MemTotal the
+// way the UDPFS caps are. Those had to scale because a single request could
+// reserve 8 MiB eagerly; here the worst case is MaxConnections * MaxMessage =
+// 2 MiB, which no board this runs on will notice. A number that small is
+// better fixed and easy to reason about than correct-looking arithmetic.
+const MaxMessage = 128 << 10
+
+// MaxConnections bounds concurrent SMB sessions.
+//
+// The reference server spawns an unbounded thread per accepted socket, which
+// is fine on a desktop and poor hygiene on a 32 MB router. This is insurance
+// against that, not a tuned figure: a console opens one connection, POPSTARTER
+// another, so sixteen is far above any real use while keeping the worst case
+// bounded at MaxConnections * MaxMessage.
+//
+// Goroutines themselves are not the concern -- they start on a 2 KiB stack, so
+// even at this limit the stacks total 32 KiB. It is the message buffers that
+// are worth bounding.
+const MaxConnections = 16
 
 var (
 	// ErrKeepAlive reports a session keep-alive, which carries no SMB message
