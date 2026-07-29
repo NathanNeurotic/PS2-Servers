@@ -44,9 +44,26 @@ Edit `/etc/default/ps2servers-smbv1` to set the share path and port before
 enabling. The port defaults to **1111**, not 445: binding 445 needs root, and
 on a machine already running Samba it is taken. Set OPL's *SMB Port* to match.
 
-The share is deliberately writable — OPL stores its settings on it, and a
-VMC-on-SMB lives there — which is why the unit sets `ReadWritePaths=/srv/ps2`
-under `ProtectSystem=strict`. Add `--read-only` only if you want saves to fail.
+### Serving a share outside `/srv/ps2`
+
+**Change the unit as well as the env file.** `ProtectSystem=strict` makes the
+whole filesystem read-only apart from `ReadWritePaths=`, which ships as
+`/srv/ps2`. Point `--share` at `/mnt/games` and leave the unit alone and you
+get a share the console can read and never write — the server starts, the game
+list loads, and only saving fails, which looks like a network fault rather than
+a permissions one.
+
+```sh
+sudo systemctl edit ps2servers@smbv1
+```
+
+```ini
+[Service]
+ReadWritePaths=/mnt/games
+```
+
+The share is writable on purpose — OPL stores its settings on it and a
+VMC-on-SMB lives there. Add `--read-only` only if you want saves to fail.
 
 If the share is on removable storage, add the mount unit to
 `After=`/`RequiresMountsFor=` with `systemctl edit ps2servers@smbv1`.

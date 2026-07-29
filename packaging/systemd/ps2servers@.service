@@ -37,6 +37,22 @@ TimeoutStopSec=15s
 # The share is writable on purpose. OPL stores its settings there and a
 # VMC-on-SMB lives there too, so a read-only share silently costs the user
 # their saves. ReadWritePaths is what re-opens it under ProtectSystem=strict.
+#
+# THIS PATH MUST MATCH THE --share PATH IN THE ENV FILE.
+#
+# ProtectSystem=strict makes the whole filesystem read-only apart from what is
+# listed here, so pointing --share at, say, /mnt/games while this still says
+# /srv/ps2 gives a share the console can read and never write. Nothing reports
+# that: the server starts, the game list loads, and only saving fails -- which
+# looks like a network fault rather than a permissions one.
+#
+# Serving a share elsewhere therefore needs both edited together:
+#
+#   systemctl edit ps2servers@smbv1
+#     [Service]
+#     ReadWritePaths=/mnt/games
+#
+# tests/test_systemd_units.py checks the two shipped defaults agree.
 ProtectSystem=strict
 ReadWritePaths=/srv/ps2
 ProtectHome=read-only

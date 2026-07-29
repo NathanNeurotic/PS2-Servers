@@ -53,22 +53,42 @@ class HeadlessGuarantee(unittest.TestCase):
     def test_serve_does_not_import_tkinter(self):
         """The whole reason a systemd unit is possible.
 
-        --serve is dispatched before the GUI is imported. If that ever stops
-        being true, every headless install breaks at once with an import error
-        about a missing display, and nobody running a service would connect it
-        to a launcher change.
+        --serve must reach a running server without the GUI. If that stops
+        being true, every headless install breaks at once with an error about a
+        missing display, and nobody running a service would connect it to a
+        launcher change.
+
+        main() is CALLED, not merely imported. An earlier version of this test
+        only imported launcher.main and checked sys.modules, which sounded
+        equivalent and was not: an `import tkinter` placed directly in
+        launcher/serve.py still passed it, because nothing ever executed the
+        dispatch. Verified by doing exactly that before rewriting it.
+
+        --help makes the server's own argparse exit as soon as it is reached,
+        so this walks the whole path -- main() -> run_serve() -> the server
+        module -- without binding a socket.
         """
         code = (
-            "import sys; sys.argv = ['x', '--serve', 'smbv1', '--help'];"
-            "import launcher.main;"
-            "sys.exit(1 if 'tkinter' in sys.modules else 0)"
+            "import sys\n"
+            "import launcher.main\n"
+            "try:\n"
+            "    launcher.main.main(['--serve', 'smbv1', '--help'])\n"
+            "except SystemExit:\n"
+            "    pass\n"
+            "sys.stderr.write('REACHED\\n')\n"
+            "sys.exit(1 if 'tkinter' in sys.modules else 0)\n"
         )
         result = subprocess.run([sys.executable, "-c", code], cwd=_ROOT,
                                 capture_output=True, text=True, timeout=120)
+        # Proves the dispatch actually ran. Without it a crash on the way in
+        # would look like a pass, since tkinter would not be loaded either.
+        self.assertIn("REACHED", result.stderr,
+                      "the --serve dispatch did not complete, so this test "
+                      "proved nothing:\n" + result.stderr[-800:])
         self.assertEqual(
             result.returncode, 0,
-            "importing launcher.main pulled in tkinter; --serve must stay "
-            "usable on a machine with no display.\n" + result.stderr[-500:])
+            "the --serve path pulled in tkinter; it must stay usable on a "
+            "machine with no display.\n" + result.stderr[-500:])
 
 
 class UnitFiles(unittest.TestCase):
@@ -98,6 +118,38 @@ class UnitFiles(unittest.TestCase):
         self.assertEqual(unit.get("ProtectSystem"), ["strict"])
         self.assertTrue(unit.get("ReadWritePaths"),
                         "the share must be writable or OPL cannot save")
+
+    def test_shipped_share_path_is_actually_writable(self):
+        """The two shipped files must agree on the share path.
+
+        ProtectSystem=strict re-opens only what ReadWritePaths lists, so an
+        env file pointing --share somewhere the unit does not cover produces a
+        share that reads fine and silently cannot be written. Nothing reports
+        it -- the server starts and the game list loads.
+
+        This checks only the defaults we ship. A user who moves the share has
+        to edit both, which the unit and the README now say in the places they
+        would be reading.
+        """
+        share = None
+        for line in _read("ps2servers-smbv1.env").splitlines():
+            if line.startswith("PS2SERVERS_ARGS="):
+                for token in line.split("=", 1)[1].split():
+                    if token.startswith("games=") or "=" in token and "/" in token:
+                        candidate = token.split("=", 1)[1]
+                        if candidate.startswith("/"):
+                            share = candidate
+        self.assertIsNotNone(share, "no --share path found in the env file")
+
+        writable = _directives("ps2servers@.service").get("ReadWritePaths", [])
+        covered = any(
+            share == path or share.startswith(path.rstrip("/") + "/")
+            for path in (p.lstrip("-") for p in writable))
+        self.assertTrue(
+            covered,
+            f"the env file shares {share} but the unit only makes {writable} "
+            "writable; under ProtectSystem=strict that share cannot be written "
+            "and OPL's saves would fail silently")
 
     def test_no_memory_deny_write_execute_for_the_python_build(self):
         # Set on the Edge unit, which is a static Go binary. CPython allocates
