@@ -42,10 +42,10 @@ const (
 	// WriteData chunks, then a single WriteDone carrying the byte count or a
 	// negative errno. The first chunk may be appended inline to the
 	// WriteRequest datagram rather than sent separately.
-	WriteRequest MessageType = 0x16
-	WriteData    MessageType = 0x17
-	WriteDone    MessageType = 0x18
-	SeekRequest  MessageType = 0x1A
+	WriteRequest   MessageType = 0x16
+	WriteData      MessageType = 0x17
+	WriteDone      MessageType = 0x18
+	SeekRequest    MessageType = 0x1A
 	SeekReply      MessageType = 0x1B
 	DReadRequest   MessageType = 0x1C
 	DReadReply     MessageType = 0x1D

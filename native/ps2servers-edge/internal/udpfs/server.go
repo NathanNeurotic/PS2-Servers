@@ -26,15 +26,15 @@ const (
 )
 
 type Config struct {
-	Root          string
-	Bind          string
-	Port          int
-	DataPort      int
-	SinglePort    bool
-	ProtocolMode  session.Profile
-	PeerTimeout   time.Duration
-	TxDelay       time.Duration
-	ReadOnly      bool
+	Root         string
+	Bind         string
+	Port         int
+	DataPort     int
+	SinglePort   bool
+	ProtocolMode session.Profile
+	PeerTimeout  time.Duration
+	TxDelay      time.Duration
+	ReadOnly     bool
 	// BlockDevice serves one disk image over UDPFS BREAD/BWRITE alongside the
 	// file share, as the Desktop server's --block-device and udpfsd's -bdpath
 	// do. Empty disables it.
