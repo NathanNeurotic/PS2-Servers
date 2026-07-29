@@ -195,5 +195,79 @@ class PollerBehaviour(unittest.TestCase):
                                 "the loop stopped after the first failure")
 
 
+class StopAllStaysUnconditional(unittest.TestCase):
+    """stop_all() must never be able to decline to stop.
+
+    Checked at the source level because the GUI cannot be instantiated
+    headlessly, and because this is a mistake that was actually made: a busy
+    prompt was put inside stop_all, where a "No" would skip the stopping while
+    every caller carried on regardless. Seven of its eight callers are
+    elevate-and-relaunch paths that free ports before the new instance binds
+    them, and the eighth is _shutdown_app, which destroys the root immediately
+    afterwards -- so declining would have quit the app and orphaned the very
+    servers the user was trying to protect.
+
+    The asking belongs at the points where a person chose to stop something.
+    """
+
+    @staticmethod
+    def _method(name):
+        import ast
+
+        path = os.path.join(_ROOT, "launcher", "gui.py")
+        with open(path, "r", encoding="utf-8") as handle:
+            tree = ast.parse(handle.read(), filename=path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "LauncherApp":
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == name:
+                        return item
+        return None
+
+    @staticmethod
+    def _calls(func):
+        import ast
+
+        names = set()
+        for node in ast.walk(func):
+            if isinstance(node, ast.Call):
+                target = node.func
+                if isinstance(target, ast.Attribute):
+                    names.add(target.attr)
+                elif isinstance(target, ast.Name):
+                    names.add(target.id)
+        return names
+
+    def test_stop_all_does_not_prompt(self):
+        func = self._method("stop_all")
+        self.assertIsNotNone(func, "LauncherApp.stop_all not found")
+        self.assertNotIn(
+            "confirm_stop_while_busy", self._calls(func),
+            "stop_all must not prompt: its callers proceed regardless of the "
+            "answer, so a 'No' would skip stopping and quit or relaunch anyway")
+        self.assertNotIn("askyesno", self._calls(func))
+
+    def test_the_user_facing_paths_do_prompt(self):
+        for name in ("stop_all_confirmed", "stop_server"):
+            func = self._method(name)
+            self.assertIsNotNone(func, f"LauncherApp.{name} not found")
+            self.assertIn("confirm_stop_while_busy", self._calls(func),
+                          f"{name} is a person deciding and should warn")
+
+    def test_quit_confirmation_consults_busy_state(self):
+        func = self._method("_confirm_app_shutdown")
+        self.assertIsNotNone(func)
+        self.assertIn("is_busy", self._calls(func),
+                      "quitting mid-transfer must warn; _shutdown_app calls "
+                      "stop_all unconditionally, so this is the only gate")
+
+    def test_footer_button_uses_the_confirming_wrapper(self):
+        path = os.path.join(_ROOT, "launcher", "gui.py")
+        with open(path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn('text="Stop all", command=self.stop_all_confirmed', source,
+                      "the footer Stop all button should be the confirming one")
+
+
 if __name__ == "__main__":
     unittest.main()

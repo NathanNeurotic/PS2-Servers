@@ -763,7 +763,7 @@ class LauncherApp:
             remove = ttk.Button(footer, text="Remove PS2 Servers firewall rules",
                                 command=self.remove_windows_setup)
             remove.grid(row=0, column=1, sticky="w", padx=(8, 0))
-        ttk.Button(footer, text="Stop all", command=self.stop_all).grid(
+        ttk.Button(footer, text="Stop all", command=self.stop_all_confirmed).grid(
             row=0, column=3, sticky="e")
         ttk.Button(footer, text="Restart", command=self.restart_app).grid(
             row=0, column=4, sticky="e", padx=(8, 0))
@@ -2028,14 +2028,25 @@ class LauncherApp:
         self._append_log(key, "[launcher] stopped\n")
 
     def stop_all(self):
-        keys = list(self.procs)
-        # Asked once for the whole set, naming every busy server, rather than
-        # once per server: a prompt per card would be clicked through.
-        if not self.confirm_stop_while_busy(keys):
-            return
-        for key in keys:
+        """Stop every server. Unconditional, and it must stay that way.
+
+        Every caller but the footer button is a teardown or an
+        elevate-and-relaunch that frees ports before the new instance binds
+        them. A prompt in here would let a "No" skip the stopping while the
+        caller carried on regardless -- quitting anyway and orphaning the
+        children, or relaunching as admin into ports that were never released.
+        The asking belongs at the points where a person actually chose to stop
+        something: stop_all_confirmed, stop_server, and _confirm_app_shutdown.
+        """
+        for key in list(self.procs):
             self.stop_server(key, confirm=False)
         self._stop_direct_responder()
+
+    def stop_all_confirmed(self):
+        """The footer's Stop all: the one caller that is a person deciding."""
+        if not self.confirm_stop_while_busy(list(self.procs)):
+            return
+        self.stop_all()
 
     # -- logging (thread-safe) ------------------------------------------- #
     def _on_output(self, key, line):
@@ -2336,6 +2347,22 @@ class LauncherApp:
                    for key in self.procs if self.is_running(key)]
         if not running:
             return True
+        # A server that reports a transfer in flight is called out by name and
+        # the prompt defaults to No. Quitting mid-write truncates whatever the
+        # console was writing, and a save is the one thing here that cannot be
+        # got back -- so this is the case where the habitual Enter should not
+        # be the destructive answer.
+        busy = [TAB_TITLES.get(key, key.upper()) for key in self.procs
+                if status_client.is_busy(self.status_poller.status(key))]
+        if busy:
+            return messagebox.askyesno(
+                title,
+                "{} reports a transfer in progress.\n\n"
+                "Quitting now will interrupt it. If a console is writing a "
+                "save, that save will be incomplete.\n\n"
+                "This will stop running servers:\n\n{}\n\nQuit anyway?".format(
+                    ", ".join(busy), ", ".join(running)),
+                icon="warning", default="no")
         return messagebox.askyesno(
             title,
             "This will stop running servers:\n\n{}\n\nContinue?".format(
