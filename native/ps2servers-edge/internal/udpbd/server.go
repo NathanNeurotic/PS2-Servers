@@ -8,8 +8,11 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/statuslistener"
 )
 
 // Config describes one UDPBD service.
@@ -19,6 +22,11 @@ type Config struct {
 	Port     int
 	ReadOnly bool
 	Log      *edgelog.Logger
+	// StatusPort answers router status queries. Zero disables it; negative
+	// means the standard port, which is UDPFS's discovery port -- legitimately
+	// taken on a box already running that server, so a bind failure is logged
+	// and ignored rather than taking UDPBD down over a diagnostic.
+	StatusPort int
 }
 
 // device is an image file addressed as fixed-size sectors.
@@ -107,6 +115,9 @@ type Server struct {
 
 	totalRead  int64
 	totalWrite int64
+
+	started time.Time
+	status  *statuslistener.Listener
 }
 
 func New(cfg Config) (*Server, error) {
@@ -130,7 +141,7 @@ func New(cfg Config) (*Server, error) {
 		dev.close()
 		return nil, fmt.Errorf("image is smaller than one %d-byte sector", SectorSize)
 	}
-	return &Server{cfg: cfg, dev: dev, seen: make(map[string]bool)}, nil
+	return &Server{cfg: cfg, dev: dev, seen: make(map[string]bool), started: time.Now()}, nil
 }
 
 // Listen binds the UDPBD port.
@@ -155,7 +166,46 @@ func (s *Server) Addr() *net.UDPAddr {
 	return s.conn.LocalAddr().(*net.UDPAddr)
 }
 
+// statusReply reports what this server is doing, for the router status
+// protocol. See docs/ROUTER-STATUS.md.
+func (s *Server) statusReply() protocol.StatusReply {
+	flags := protocol.FlagServesUDPBD
+	if s.dev != nil && s.dev.readOnly {
+		flags |= protocol.FlagReadOnly
+	}
+
+	state := protocol.StateReady
+	if s.dev == nil || s.dev.file == nil {
+		state = protocol.StateDegraded
+	} else if _, err := os.Stat(s.dev.path); err != nil {
+		// The image went away -- an unmounted USB stick, most likely, which is
+		// the ordinary failure on this hardware.
+		state = protocol.StateDegraded
+	}
+
+	s.mu.Lock()
+	peers := len(s.seen)
+	// left > 0 is a write with bytes still outstanding. There is no separate
+	// "active" flag: a completed write leaves left at zero.
+	writing := s.write.left > 0
+	s.mu.Unlock()
+	if state == protocol.StateReady && writing {
+		// Only a write in flight counts as busy. That is the case worth
+		// warning about: cutting power mid-write is what costs a save.
+		state = protocol.StateBusy
+	}
+
+	return protocol.StatusReply{
+		State:    state,
+		Flags:    flags,
+		Sessions: uint16(peers),
+		Uptime:   statuslistener.Uptime(s.started),
+		Name:     "PS2 Servers Edge",
+	}
+}
+
 func (s *Server) Close() error {
+	_ = s.status.Close()
 	if s.conn != nil {
 		err := s.conn.Close()
 		s.dev.close()
@@ -176,6 +226,20 @@ func (s *Server) Serve(ctx context.Context) error {
 	if s.dev.readOnly {
 		mode = "read-only"
 	}
+	if s.cfg.StatusPort != 0 {
+		port := s.cfg.StatusPort
+		if port < 0 {
+			port = int(protocol.DefaultPort)
+		}
+		if sl, err := statuslistener.Start(s.cfg.Bind, port, s.statusReply, s.cfg.Log); err != nil {
+			s.cfg.Log.Warn("UDPBD status channel unavailable", map[string]any{
+				"port": port, "error": err.Error()})
+		} else {
+			s.status = sl
+			s.cfg.Log.Info("UDPBD status channel", map[string]any{"addr": sl.Addr().String()})
+		}
+	}
+
 	s.cfg.Log.Info("UDPBD listening", map[string]any{
 		"image":   s.dev.path,
 		"mode":    mode,

@@ -93,6 +93,26 @@ def _udpfs_flags():
     return {"--" + name for name in found}
 
 
+def _section(text, name):
+    """One `config <type> '<name>'` block, without the sections after it.
+
+    These checks are about the udpfs service specifically -- FLAG_TO_UCI maps
+    udpfs flags -- so they must not scan the whole file. Edge later gained smb
+    and udpbd sections whose options map to those subcommands' flags instead;
+    scanning globally reported every one of them as an orphan.
+    tests/test_edge_service_modes.py covers those.
+    """
+    lines = text.splitlines()
+    out, inside = [], False
+    for line in lines:
+        if line.startswith("config "):
+            inside = line.rstrip().endswith("'%s'" % name)
+            continue
+        if inside:
+            out.append(line)
+    return "\n".join(out)
+
+
 class UdpfsFlagsAreReachableFromOpenWrt(unittest.TestCase):
     def setUp(self):
         self.flags = _udpfs_flags()
@@ -121,7 +141,8 @@ class UdpfsFlagsAreReachableFromOpenWrt(unittest.TestCase):
             % ", ".join(stale)))
 
     def test_mapped_options_are_in_the_shipped_config(self):
-        declared = set(re.findall(r"(?m)^\s*option\s+([a-z0-9_]+)\s+'", self.config))
+        declared = set(re.findall(
+            r"(?m)^\s*option\s+([a-z0-9_]+)\s+'", _section(self.config, "main")))
         missing = sorted(
             "%s (for %s)" % (option, flag)
             for flag, option in FLAG_TO_UCI.items() if option not in declared)
@@ -160,7 +181,8 @@ class UdpfsFlagsAreReachableFromOpenWrt(unittest.TestCase):
 
     def test_config_has_no_orphan_options(self):
         """Every shipped option must correspond to a flag the binary accepts."""
-        declared = set(re.findall(r"(?m)^\s*option\s+([a-z0-9_]+)\s+'", self.config))
+        declared = set(re.findall(
+            r"(?m)^\s*option\s+([a-z0-9_]+)\s+'", _section(self.config, "main")))
         known = set(FLAG_TO_UCI.values()) | {"enabled"}
         orphans = sorted(declared - known)
         self.assertEqual(orphans, [], (
@@ -189,9 +211,9 @@ class UdpfsFlagsAreDocumented(unittest.TestCase):
     def test_openwrt_doc_config_block_matches_the_shipped_file(self):
         """The doc quotes the config verbatim; a drifted quote teaches a wrong key."""
         shipped = set(re.findall(
-            r"(?m)^\s*option\s+([a-z0-9_]+)\s+'", _read(UCI_CONFIG)))
+            r"(?m)^\s*option\s+([a-z0-9_]+)\s+'", _section(_read(UCI_CONFIG), "main")))
         documented = set(re.findall(
-            r"(?m)^\s*option\s+([a-z0-9_]+)\s+'", _read(OPENWRT_DOC)))
+            r"(?m)^\s*option\s+([a-z0-9_]+)\s+'", _section(_read(OPENWRT_DOC), "main")))
         self.assertEqual(shipped, documented, (
             "the config block in docs/OPENWRT.md has drifted from the file the "
             "package actually installs: only in the file %s; only in the doc %s"

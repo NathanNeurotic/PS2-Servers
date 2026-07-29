@@ -1,0 +1,63 @@
+[Unit]
+# A template: %i is the Edge subcommand -- udpfs, udpbd or smb.
+#   systemctl enable --now ps2servers-edge@smb
+#
+# ps2servers-edge.service alongside this one runs udpfs only, and predates the
+# other subcommands existing. It still works and is left alone; this is the way
+# to run smb or udpbd, or several at once.
+Description=PS2 Servers Edge (%i)
+Documentation=https://github.com/NathanNeurotic/PS2-Servers/blob/main/packaging/systemd/README.md
+After=network-online.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ps2edge
+Group=ps2edge
+
+# Per-instance, so each service keeps its own share, image and ports:
+#   /etc/default/ps2servers-edge-smb
+#
+# Required, not optional: every subcommand refuses to start without arguments
+# -- udpfs needs --root, smb a --share, udpbd an --image -- so a missing file
+# would become an exit every 5s under Restart=on-failure. One clear "failed to
+# load environment files" beats a restart loop.
+EnvironmentFile=/etc/default/ps2servers-edge-%i
+
+# $PS2EDGE_ARGS is unbraced on purpose: systemd splits an unbraced variable on
+# whitespace into separate arguments and does not split ${VAR}. The cost is
+# that a path containing a space cannot be passed this way.
+ExecStart=/usr/local/bin/ps2servers-edge %i $PS2EDGE_ARGS
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+
+ProtectSystem=strict
+# The `-` makes a missing path non-fatal; without it a directory that does not
+# exist fails at mount-namespace setup, before ExecStart, and Restart loops it.
+#
+# THIS MUST COVER THE PATH IN THE ENV FILE. ProtectSystem=strict re-opens only
+# what is listed here, so serving /mnt/games while this says /srv/ps2 gives a
+# share the console can read and never write -- and only saving fails, which
+# reads as a network fault rather than a permissions one. A `systemctl edit`
+# override ADDS to this list rather than replacing it.
+ReadWritePaths=-/srv/ps2
+ProtectHome=read-only
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

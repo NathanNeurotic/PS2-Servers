@@ -5,12 +5,27 @@ Two units here, and which one you want depends on whether you need SMB.
 | unit | build | serves |
 |---|---|---|
 | `ps2servers@.service` | the normal Linux download | **SMBv1**, UDPFS, UDPBD |
-| `ps2servers-edge.service` | the Go Edge build | UDPFS, UDPBD only |
+| `ps2servers-edge@.service` | the Go Edge build | **SMBv1**, UDPFS, UDPBD |
+| `ps2servers-edge.service` | the Go Edge build | UDPFS only (predates the others) |
 
-**Edge has no SMB.** If a console needs SMB — OPL's network game list, or
-POPSTARTER — Edge cannot serve it and `ps2servers@smbv1` is the unit you want.
-Edge is for routers and other small boxes where a Python runtime is not
-practical.
+**Edge now serves SMB too**, as of the `smb` subcommand. Use
+`ps2servers-edge@smb` on a router or other small box where a Python runtime is
+not practical, and `ps2servers@smbv1` on a normal machine. The older
+`ps2servers-edge.service` runs udpfs only and is left alone for anyone already
+using it.
+
+```sh
+sudo install -m 0644 packaging/systemd/ps2servers-edge@.service /etc/systemd/system/
+sudo install -m 0644 packaging/systemd/ps2servers-edge-smb.env /etc/default/ps2servers-edge-smb
+sudo systemctl enable --now ps2servers-edge@smb
+```
+
+The instance name is the Edge subcommand, so `ps2servers-edge@udpfs` and
+`ps2servers-edge@udpbd` work the same way, each reading its own
+`/etc/default/ps2servers-edge-<subcommand>`. Several can run at once.
+
+Edge's SMB defaults to **port 1111**, not 445, for the same reason as the
+Python one: below 1024 needs root and these units run as `ps2edge`.
 
 ## Any server, on a normal Linux box (`ps2servers@.service`)
 

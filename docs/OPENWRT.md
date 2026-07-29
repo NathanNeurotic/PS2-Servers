@@ -106,6 +106,54 @@ not load compressed games.
 to syslog, and a router logging a snapshot every minute indefinitely is a cost
 worth opting into rather than inheriting.
 
+## Serving SMB, and running more than one service
+
+Edge serves three protocols, and the package starts each as its own `procd`
+instance, so a board can run several at once. Each has its own config section
+and its own `enabled` flag.
+
+**SMB is what OPL's network game list and POPSTARTER use.** Before Edge gained
+it, a router had to fall back on the host's Samba — which modern builds ship
+with SMBv1 disabled and OPL cannot talk to. It is off by default because
+enabling it exposes a share with no password, which should be a decision rather
+than something inherited from an upgrade.
+
+```
+config smb 'smb'
+        option enabled '1'
+        option share 'games=/mnt/sda1/PS2'
+        option port '1111'
+        option read_only '0'
+```
+
+`share` is `NAME=PATH`, and several may be given separated by spaces — so a
+share path cannot contain one.
+
+**Set OPL's *SMB Port* to 1111.** Not 445: ports below 1024 need root and this
+runs as `ps2edge`.
+
+`udpbd` serves **one disk image** rather than a directory, unlike `udpfs` and
+`smb`:
+
+```
+config udpbd 'udpbd'
+        option enabled '1'
+        option image '/mnt/sda1/ps2.img'
+```
+
+Both are read-only by default here, for the same reason `udpfs` is.
+
+### Telling a launcher the board is ready
+
+`status_port` answers router status queries, so a launcher can show whether the
+box is ready and whether a transfer is in flight — the point being not to cut
+power to a board mid-write. `-1` uses the standard discovery port.
+
+When `udpfs` is also enabled it already owns that address, so the `smb` and
+`udpbd` instances log that the status channel is unavailable and carry on
+serving. That is deliberate: losing a diagnostic should never take down the
+service it reports on. Set `0` to disable it outright.
+
 ### A bad value restarts the service in a loop
 
 Edge validates these options at startup and exits with status 2 when one is out

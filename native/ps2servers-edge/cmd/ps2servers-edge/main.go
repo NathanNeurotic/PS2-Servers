@@ -257,6 +257,8 @@ func runUDPBD() {
 	bind := fs.String("bind", env("BIND", "0.0.0.0"), "IPv4 bind address")
 	port := fs.Int("port", envInt("UDPBD_PORT", udpbd.Port), "UDP port (default 0xBDBD)")
 	readOnly := fs.Bool("read-only", envBool("RO", false), "serve the image read-only")
+	bdStatusPort := fs.Int("status-port", envInt("STATUS_PORT", -1),
+		"UDP port answering router status queries; 0 disables")
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
 	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
 	quiet := fs.Bool("quiet", false, "suppress informational logs")
@@ -278,7 +280,8 @@ func runUDPBD() {
 	}
 	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
 	server, err := udpbd.New(udpbd.Config{
-		Image: *image, Bind: *bind, Port: *port, ReadOnly: *readOnly, Log: logger,
+		Image: *image, Bind: *bind, Port: *port, ReadOnly: *readOnly,
+		StatusPort: *bdStatusPort, Log: logger,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -310,6 +313,11 @@ func runSMB() {
 	// init and the systemd unit run Edge unprivileged. See smb.DefaultPort.
 	port := fs.Int("port", envInt("SMB_PORT", smb.DefaultPort), "TCP port (set OPL's SMB Port to match)")
 	readOnly := fs.Bool("read-only", envBool("RO", false), "serve the shares read-only")
+	// Negative means the standard discovery port. A box already running Edge's
+	// udpfs owns that address, so the bind failure is logged and ignored --
+	// see smb.Config.StatusPort.
+	statusPort := fs.Int("status-port", envInt("STATUS_PORT", -1),
+		"UDP port answering router status queries; 0 disables")
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
 	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
 	quiet := fs.Bool("quiet", false, "suppress informational logs")
@@ -345,7 +353,8 @@ func runSMB() {
 	}
 
 	server, err := smb.New(smb.Config{
-		Shares: parsed, Bind: *bind, Port: *port, ReadOnly: *readOnly, Log: logger,
+		Shares: parsed, Bind: *bind, Port: *port, ReadOnly: *readOnly,
+		StatusPort: *statusPort, Log: logger,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

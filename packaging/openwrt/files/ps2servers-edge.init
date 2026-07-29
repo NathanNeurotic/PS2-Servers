@@ -12,8 +12,32 @@ append_bool_flag() {
         [ "$value" -eq 1 ] && procd_append_param command "$flag"
 }
 
+# Shared supervision and hardening, applied to every instance so the three
+# services cannot drift apart in how they are run.
+common_params() {
+        procd_set_param user ps2edge
+        procd_set_param group ps2edge
+        procd_set_param respawn 10 5 0
+        procd_set_param stdout 1
+        procd_set_param stderr 1
+        procd_set_param limits nofile="256 256"
+}
+
+# One procd instance per enabled service, rather than a single command.
+#
+# Edge is a subcommand per process, so a board can serve udpfs and smb at once
+# and procd restarts them independently. This used to start udpfs and nothing
+# else, which meant the binary grew an smb subcommand its own package could not
+# launch: serving SMB required sshing in to run it by hand, and it did not
+# survive a reboot.
 start_service() {
         config_load ps2servers-edge
+        start_udpfs
+        start_smb
+        start_udpbd
+}
+
+start_udpfs() {
         config_get_bool enabled main enabled 0
         [ "$enabled" -eq 1 ] || return 0
 
@@ -30,7 +54,7 @@ start_service() {
         config_get compression_cache_size main compression_cache_size 32
         config_get metrics_period main metrics_period 1m
 
-        procd_open_instance
+        procd_open_instance udpfs
         procd_set_param command "$PROG" udpfs \
                 --root "$root" \
                 --bind "$bind" \
@@ -74,12 +98,78 @@ start_service() {
                 procd_append_param command --metrics
                 procd_append_param command --metrics-period "$metrics_period"
         fi
-        procd_set_param user ps2edge
-        procd_set_param group ps2edge
-        procd_set_param respawn 10 5 0
-        procd_set_param stdout 1
-        procd_set_param stderr 1
-        procd_set_param limits nofile="256 256"
+        common_params
+        procd_close_instance
+}
+
+start_smb() {
+        config_get_bool enabled smb enabled 0
+        [ "$enabled" -eq 1 ] || return 0
+
+        config_get share smb share
+        config_get bind smb bind 0.0.0.0
+        config_get port smb port 1111
+        config_get status_port smb status_port -1
+        config_get log_format smb log_format text
+
+        # Refused rather than started empty. The server exits immediately with
+        # no share, and procd would respawn it every five seconds forever; one
+        # line in the log beats a restart loop nobody can read.
+        if [ -z "$share" ]; then
+                echo "ps2servers-edge: smb is enabled but no share is configured" >&2
+                return 0
+        fi
+
+        procd_open_instance smb
+        procd_set_param command "$PROG" smb \
+                --bind "$bind" \
+                --port "$port" \
+                --status-port "$status_port" \
+                --log-format "$log_format"
+        # Space-separated NAME=PATH pairs, each passed as its own --share.
+        # Deliberately unquoted so the shell splits it, which is also why a
+        # share path containing a space cannot be configured this way.
+        for entry in $share; do
+                procd_append_param command --share "$entry"
+        done
+        # Read-only by default here, unlike the binary. A router share is
+        # frequently an entire attached disk and this server has no password,
+        # so writes are opt-in on this platform.
+        config_get_bool read_only smb read_only 1
+        [ "$read_only" -eq 1 ] && procd_append_param command --read-only
+        append_bool_flag smb verbose --verbose
+
+        common_params
+        procd_close_instance
+}
+
+start_udpbd() {
+        config_get_bool enabled udpbd enabled 0
+        [ "$enabled" -eq 1 ] || return 0
+
+        config_get image udpbd image
+        config_get bind udpbd bind 0.0.0.0
+        config_get port udpbd port 48301
+        config_get status_port udpbd status_port -1
+        config_get log_format udpbd log_format text
+
+        if [ -z "$image" ]; then
+                echo "ps2servers-edge: udpbd is enabled but no image is configured" >&2
+                return 0
+        fi
+
+        procd_open_instance udpbd
+        procd_set_param command "$PROG" udpbd \
+                --image "$image" \
+                --bind "$bind" \
+                --port "$port" \
+                --status-port "$status_port" \
+                --log-format "$log_format"
+        config_get_bool read_only udpbd read_only 1
+        [ "$read_only" -eq 1 ] && procd_append_param command --read-only
+        append_bool_flag udpbd verbose --verbose
+
+        common_params
         procd_close_instance
 }
 
