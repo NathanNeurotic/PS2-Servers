@@ -216,6 +216,7 @@ func openImage(path string) (*Image, error) {
 	}
 	return &Image{f: f, format: format, size: size, fileSize: rawFileSize, blockSize: block, align: align, index: index}, nil
 }
+
 // header is the fixed 24-byte prologue shared by CSO and ZSO.
 type header struct {
 	format     string
@@ -379,6 +380,7 @@ func (i *Image) readAt(p []byte, off int64) (int, error) {
 	}
 	return total, nil
 }
+
 // readBlock returns a decompressed block, from cache when possible.
 //
 // Caching is done here, wrapping the decoder, rather than at each of the

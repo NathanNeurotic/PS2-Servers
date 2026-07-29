@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/compression"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/filesystem"
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/memory"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/smb"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpbd"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpfs"
 )
@@ -27,9 +29,11 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "PS2 Servers Edge %s\n\nUsage:\n"+
 		"  ps2servers-edge udpfs --root /games [options]\n"+
 		"  ps2servers-edge udpbd --image /path/ps2.img [options]\n"+
+		"  ps2servers-edge smb --share games=/games [options]\n"+
 		"  ps2servers-edge --version\n\n"+
 		"  udpfs serves a folder as a network file share.\n"+
-		"  udpbd serves one disk image as a network hard drive.\n\n", version)
+		"  udpbd serves one disk image as a network hard drive.\n"+
+		"  smb   serves folders over SMBv1, for OPL's game list and POPSTARTER.\n\n", version)
 }
 func duration(v string) (time.Duration, error) {
 	if v == "" {
@@ -44,6 +48,7 @@ func duration(v string) (time.Duration, error) {
 	}
 	return time.Duration(seconds * float64(time.Second)), nil
 }
+
 // applyMemoryLimit gives the collector a ceiling on machines small enough for
 // it to matter.
 //
@@ -69,6 +74,10 @@ func main() {
 	applyMemoryLimit()
 	if len(os.Args) >= 2 && os.Args[1] == "udpbd" {
 		runUDPBD()
+		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "smb" {
+		runSMB()
 		return
 	}
 	if len(os.Args) < 2 || os.Args[1] != "udpfs" {
@@ -283,3 +292,101 @@ func runUDPBD() {
 		os.Exit(1)
 	}
 }
+
+// runSMB serves SMBv1 to Open-PS2-Loader.
+//
+// Unified with the other servers as a subcommand on the same binary rather
+// than a separate download, matching how the desktop build ships. Edge served
+// only UDPFS and UDPBD before this, so a router could not answer OPL's network
+// game list or POPSTARTER at all.
+func runSMB() {
+	fs := flag.NewFlagSet("smb", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var shares shareList
+	fs.Var(&shares, "share", "a share as NAME=PATH (repeatable)")
+	root := fs.String("root", env("FSROOT", ""), "shorthand for --share games=PATH")
+	bind := fs.String("bind", env("BIND", "0.0.0.0"), "IPv4 bind address")
+	// Not 445. Ports below 1024 are privileged on Linux, and both the OpenWrt
+	// init and the systemd unit run Edge unprivileged. See smb.DefaultPort.
+	port := fs.Int("port", envInt("SMB_PORT", smb.DefaultPort), "TCP port (set OPL's SMB Port to match)")
+	readOnly := fs.Bool("read-only", envBool("RO", false), "serve the shares read-only")
+	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
+	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
+	quiet := fs.Bool("quiet", false, "suppress informational logs")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(2)
+	}
+	if *root != "" {
+		shares = append(shares, "games="+*root)
+	}
+	if len(shares) == 0 {
+		fmt.Fprintln(os.Stderr, "error: --share NAME=PATH (or --root PATH) is required")
+		os.Exit(2)
+	}
+	if *logFormat != "text" && *logFormat != "json" {
+		fmt.Fprintln(os.Stderr, "error: --log-format must be text or json")
+		os.Exit(2)
+	}
+	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
+
+	var parsed []smb.Share
+	for _, spec := range shares {
+		name, path, ok := strings.Cut(spec, "=")
+		if !ok || name == "" || path == "" {
+			fmt.Fprintf(os.Stderr, "error: --share %q is not NAME=PATH\n", spec)
+			os.Exit(2)
+		}
+		r, err := filesystem.Open(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: share %q: %v\n", name, err)
+			os.Exit(1)
+		}
+		parsed = append(parsed, smb.Share{Name: name, Root: r})
+	}
+
+	server, err := smb.New(smb.Config{
+		Shares: parsed, Bind: *bind, Port: *port, ReadOnly: *readOnly, Log: logger,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	if err := server.Listen(); err != nil {
+		// Naming the privileged-port case explicitly: it is the single most
+		// likely reason this fails, and "permission denied" alone sends people
+		// looking at file permissions rather than at the port number.
+		if *port < 1024 {
+			fmt.Fprintf(os.Stderr,
+				"error: could not bind port %d: %v\n"+
+					"Ports below 1024 need root or CAP_NET_BIND_SERVICE. "+
+					"Use --port %d and set OPL's SMB Port to match.\n",
+				*port, err, smb.DefaultPort)
+		} else {
+			fmt.Fprintln(os.Stderr, "error:", err)
+		}
+		os.Exit(1)
+	}
+	addr := server.Addr()
+	logger.Info("SMB listening", map[string]any{
+		"addr": addr.String(), "shares": len(parsed), "read_only": *readOnly})
+	for _, sh := range parsed {
+		logger.Info("SMB share", map[string]any{"name": sh.Name, "root": sh.Root.Path()})
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		_ = server.Close()
+	}()
+	if err := server.Serve(); err != nil {
+		logger.Error("server stopped", map[string]any{"error": err})
+		os.Exit(1)
+	}
+}
+
+// shareList collects repeated --share flags.
+type shareList []string
+
+func (s *shareList) String() string     { return strings.Join(*s, ",") }
+func (s *shareList) Set(v string) error { *s = append(*s, v); return nil }

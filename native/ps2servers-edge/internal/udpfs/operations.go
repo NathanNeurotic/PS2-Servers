@@ -268,6 +268,7 @@ func (s *Server) handleRead(st *session.State, p []byte) {
 	s.stats.bytesRead.Add(int64(n))
 	s.sendTransfer(st, result8(protocol.ResultReply, int32(n)), buf[:n])
 }
+
 // preferredTransfer caps one assembled write and one BREAD on a machine with
 // memory to spare. The WRITE_REQ size field is 32-bit and the BREAD sector
 // count is 16-bit, so without a ceiling a peer could announce 4 GiB, or ask
