@@ -208,6 +208,17 @@ func TestStatusEncodingIsFaithfulEvenWhereItIsLossy(t *testing.T) {
 	}
 }
 
+func TestDefaultPortIsUnprivileged(t *testing.T) {
+	// The decision recorded on DefaultPort: 445 needs root or
+	// CAP_NET_BIND_SERVICE, and both shipped deployments run Edge as the
+	// unprivileged ps2edge user. A default below 1024 would fail to bind
+	// there, so this fails if someone "corrects" it to the standard SMB port.
+	if DefaultPort < 1024 {
+		t.Fatalf("DefaultPort %d is privileged; Edge runs unprivileged on "+
+			"both OpenWrt and systemd and could not bind it", DefaultPort)
+	}
+}
+
 func TestParseHeaderRejectsRubbish(t *testing.T) {
 	if _, err := ParseHeader(make([]byte, 31)); err == nil {
 		t.Fatal("accepted a short header")

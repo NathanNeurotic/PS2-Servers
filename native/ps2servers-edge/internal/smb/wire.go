@@ -61,6 +61,26 @@ const (
 // HeaderLen is the fixed SMB header size.
 const HeaderLen = 32
 
+// DefaultPort matches the desktop build rather than SMB's standard 445.
+//
+// 445 was considered and rejected. The appeal was that a router has no Windows
+// LanmanServer holding the port, so OPL would need no port change at all --
+// but Windows was never the only obstacle. Ports below 1024 are privileged on
+// Linux too, and both shipped deployments run Edge unprivileged: the OpenWrt
+// init drops to the ps2edge user, and so does the systemd unit. Defaulting to
+// 445 would therefore mean running SMB as root, or adding libcap to a package
+// whose whole point is fitting a 16 MB flash board.
+//
+// So it would not remove an explanation, it would replace "set OPL's SMB port
+// to 1111" with "grant a capability or run as root" -- harder to explain, and
+// it fails at bind time with EACCES rather than working. 1111 works
+// unprivileged on every platform Edge runs on and matches what every existing
+// document and tester already expects.
+//
+// An operator who wants 445 can still have it with --port 445, running that
+// instance privileged. That is documented rather than defaulted.
+const DefaultPort = 1111
+
 // MaxMessage bounds one SMB message, and with it this server's whole
 // per-connection memory cost.
 //
