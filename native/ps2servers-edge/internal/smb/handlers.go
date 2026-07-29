@@ -43,6 +43,12 @@ func u32(b []byte, off int) uint32 {
 	return binary.LittleEndian.Uint32(b[off:])
 }
 
+// dropSearches frees every live directory listing on this connection.
+func (c *conn) dropSearches() {
+	c.searches = make(map[uint16]*search)
+	c.searchAge = nil
+}
+
 // shareForTID returns the share a tree id refers to, or nil for IPC$ and for
 // an unknown tree.
 func (c *conn) shareForTID(tid uint16) *Share {
@@ -145,9 +151,13 @@ func (c *conn) treeConnect(r *req) reply {
 	name := parts[len(parts)-1]
 
 	tid := c.allocTID()
+	c.treeAge = evictOldest(c.trees, c.treeAge, MaxTrees, nil)
 	var service []byte
 	if strings.EqualFold(name, "IPC$") {
-		c.ipc[tid] = true
+		// Nothing is recorded for the IPC tree. shareForTID returning nil is
+		// exactly the right answer for it, and the separate map this used to
+		// keep was never read by anything -- write-only state whose only
+		// effect was to be leaked.
 		service = []byte("IPC\x00")
 	} else {
 		sh, ok := c.server.shares[strings.ToLower(name)]
@@ -166,6 +176,7 @@ func (c *conn) treeConnect(r *req) reply {
 		}
 		share := sh
 		c.trees[tid] = &share
+		c.treeAge = append(c.treeAge, tid)
 		service = []byte("A:\x00")
 	}
 	c.server.cfg.Log.Debug("SMB tree connect", map[string]any{"share": name, "tid": tid})
@@ -199,7 +210,10 @@ func (c *conn) openAndX(r *req) reply {
 		return fail(StatusObjectNameNotFound)
 	}
 	fid := c.allocFID()
+	c.fileAge = evictOldest(c.files, c.fileAge, MaxOpenFiles,
+		func(o *openFile) { o.close() })
 	c.files[fid] = &openFile{path: local, fh: fh, size: info.Size()}
+	c.fileAge = append(c.fileAge, fid)
 	c.server.cfg.Log.Debug("SMB open", map[string]any{
 		"name": name, "fid": fid, "size": info.Size()})
 
@@ -257,7 +271,10 @@ func (c *conn) ntCreateAndX(r *req) reply {
 		of.size = info.Size()
 	}
 	fid := c.allocFID()
+	c.fileAge = evictOldest(c.files, c.fileAge, MaxOpenFiles,
+		func(o *openFile) { o.close() })
 	c.files[fid] = of
+	c.fileAge = append(c.fileAge, fid)
 	ft := toFiletime(info.ModTime())
 	attrs := uint32(attrNormal)
 	if isDir {
@@ -304,19 +321,32 @@ func (c *conn) readAndX(r *req) reply {
 	if len(p) >= 24 {
 		offHigh = u32(p, 20)
 	}
-	maxCount := int(maxLow) | int(maxHigh)<<16
+	// uint32, then clamp, THEN narrow to int.
+	//
+	// `int(maxLow) | int(maxHigh)<<16` is 32-bit on mipsle, mips, arm and 386 --
+	// every small target this build exists for -- so any maxHigh >= 0x8000 sets
+	// the sign bit and makes maxCount negative. The clamp below only catches
+	// values that are too large, and the `> 0` guard then turns a negative into
+	// a zero-length reply carrying STATUS_SUCCESS: a silent short read that a
+	// console would see as a truncated file rather than an error.
+	//
+	// The Python computes this in arbitrary-precision integers and clamps with
+	// min(maxcount, 0xFFFF), so it never wraps. This is a divergence the port
+	// introduced, not one it inherited.
+	maxCount := uint32(maxLow) | uint32(maxHigh)<<16
+	if maxCount > maxReadChunk {
+		maxCount = maxReadChunk
+	}
+	count := int(maxCount)
 
 	of := c.files[fid]
 	if of == nil || of.fh == nil {
 		return fail(StatusObjectNameNotFound)
 	}
-	if maxCount > maxReadChunk {
-		maxCount = maxReadChunk
-	}
 	chunk := []byte{}
-	if maxCount > 0 {
+	if count > 0 {
 		offset := int64(offLow) | int64(offHigh)<<32
-		buf := make([]byte, maxCount)
+		buf := make([]byte, count)
 		n, err := of.fh.ReadAt(buf, offset)
 		if n > 0 {
 			chunk = buf[:n]
@@ -392,6 +422,12 @@ func (c *conn) closeFile(r *req) reply {
 	if of, ok := c.files[fid]; ok {
 		of.close()
 		delete(c.files, fid)
+		for i, id := range c.fileAge {
+			if id == fid {
+				c.fileAge = append(c.fileAge[:i], c.fileAge[i+1:]...)
+				break
+			}
+		}
 	}
 	return reply{params: []byte{}, data: []byte{}}
 }
@@ -561,7 +597,12 @@ func (c *conn) findFirst2(r *req, tParams []byte) reply {
 	if len(entries) == 1 {
 		eos = 1
 	}
+	// The one wire-driven allocation MaxMessage does not cover: this retains a
+	// whole directory listing, and the protocol frees it only on a FIND_NEXT2
+	// issued after EndOfSearch -- which a client has no reason to send.
+	c.searchAge = evictOldest(c.searches, c.searchAge, MaxSearches, nil)
 	c.searches[sid] = &search{entries: entries, cursor: 1}
+	c.searchAge = append(c.searchAge, sid)
 	c.server.cfg.Log.Debug("SMB findfirst", map[string]any{
 		"dir": dirPath, "sid": sid, "entries": len(entries)})
 

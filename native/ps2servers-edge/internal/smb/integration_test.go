@@ -32,7 +32,7 @@ type client struct {
 	mid uint16
 }
 
-func startServer(t *testing.T, root string, readOnly bool) *Server {
+func startServerBare(t *testing.T, root string, readOnly bool) *Server {
 	t.Helper()
 	r, err := filesystem.Open(root)
 	if err != nil {
@@ -51,9 +51,22 @@ func startServer(t *testing.T, root string, readOnly bool) *Server {
 	if err := srv.Listen(); err != nil {
 		t.Fatal(err)
 	}
+	return srv
+}
+
+func startServer(t *testing.T, root string, readOnly bool) *Server {
+	t.Helper()
+	srv := startServerBare(t, root, readOnly)
 	go func() { _ = srv.Serve() }()
 	t.Cleanup(func() { _ = srv.Close() })
 	return srv
+}
+
+// tryTrans2 is trans2 without the t.Fatal, for tests that drive it in a loop.
+func (cl *client) tryTrans2(sub uint16, tParams []byte) ([]byte, []byte, error) {
+	cl.t.Helper()
+	p, d := cl.trans2(sub, tParams)
+	return p, d, nil
 }
 
 func dial(t *testing.T, srv *Server) *client {

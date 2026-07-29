@@ -76,10 +76,27 @@ type Server struct {
 	// desktop and poor hygiene on a 32 MB router.
 	sem chan struct{}
 
+	// live tracks accepted connections so Close can shut them down instead of
+	// waiting on the peer's goodwill, and guards wg.Add against a concurrent
+	// wg.Wait -- adding to a WaitGroup whose counter may already be zero while
+	// another goroutine waits on it is a race, not merely untidy.
+	mu        sync.Mutex
+	live      map[net.Conn]struct{}
+	stopping  bool
 	wg        sync.WaitGroup
 	closeOnce sync.Once
 	closed    chan struct{}
 }
+
+// idleTimeout bounds how long a connection may sit without sending anything.
+//
+// Without it, sixteen sockets that never send a byte hold every slot forever
+// and the console cannot connect at all -- MaxConnections turned a memory
+// concern into an availability one. It is a per-read deadline rather than a
+// session limit because OPL legitimately holds one connection open across a
+// whole game load; every message it sends, including its ComEcho and NetBIOS
+// keep-alives, refreshes it.
+const idleTimeout = 5 * time.Minute
 
 // New validates a configuration and returns a server.
 func New(cfg Config) (*Server, error) {
@@ -96,6 +113,7 @@ func New(cfg Config) (*Server, error) {
 		cfg.Log = edgelog.New(os.Stdout, "text", false, false)
 	}
 	s := &Server{
+		live:   make(map[net.Conn]struct{}),
 		cfg:    cfg,
 		shares: make(map[string]Share, len(cfg.Shares)),
 		sem:    make(chan struct{}, MaxConnections),
@@ -163,6 +181,14 @@ func (s *Server) Serve() error {
 			_ = tcp.SetNoDelay(true)
 		}
 
+		s.mu.Lock()
+		if s.stopping {
+			s.mu.Unlock()
+			_ = conn.Close()
+			continue
+		}
+		s.mu.Unlock()
+
 		select {
 		case s.sem <- struct{}{}:
 		default:
@@ -175,10 +201,28 @@ func (s *Server) Serve() error {
 			continue
 		}
 
+		// Registered under the lock, together with the stopping check, so a
+		// connection accepted as Close runs is either tracked (and therefore
+		// closed by Close) or rejected -- never left running past shutdown.
+		s.mu.Lock()
+		if s.stopping {
+			s.mu.Unlock()
+			<-s.sem
+			_ = conn.Close()
+			continue
+		}
+		s.live[conn] = struct{}{}
 		s.wg.Add(1)
+		s.mu.Unlock()
+
 		go func(c net.Conn) {
 			defer s.wg.Done()
 			defer func() { <-s.sem }()
+			defer func() {
+				s.mu.Lock()
+				delete(s.live, c)
+				s.mu.Unlock()
+			}()
 			s.serveConn(c)
 		}(conn)
 	}
@@ -191,6 +235,16 @@ func (s *Server) Close() error {
 		if s.listener != nil {
 			_ = s.listener.Close()
 		}
+		// Closing the listener only stops new connections. An established one
+		// is parked in a blocking read, so without closing it too this waited
+		// on the peer to hang up -- and OPL holds its connection open across a
+		// whole game load, so "in-flight connections" meant "indefinitely".
+		s.mu.Lock()
+		s.stopping = true
+		for c := range s.live {
+			_ = c.Close()
+		}
+		s.mu.Unlock()
 	})
 	s.wg.Wait()
 	return nil
@@ -224,16 +278,36 @@ type searchEntry struct {
 
 // conn is per-connection state for one PS2 TCP session.
 type conn struct {
-	server   *Server
-	net      net.Conn
-	uid      uint16
-	nextFID  uint16
-	nextTID  uint16
-	nextSID  uint16
-	trees    map[uint16]*Share // nil value means the IPC$ tree
-	ipc      map[uint16]bool
-	files    map[uint16]*openFile
-	searches map[uint16]*search
+	server    *Server
+	net       net.Conn
+	uid       uint16
+	nextFID   uint16
+	nextTID   uint16
+	nextSID   uint16
+	trees     map[uint16]*Share
+	treeAge   []uint16
+	files     map[uint16]*openFile
+	fileAge   []uint16
+	searches  map[uint16]*search
+	searchAge []uint16
+}
+
+// evictOldest keeps a map at or below its cap by dropping the earliest entry,
+// and returns the trimmed age list. Eviction rather than refusal: a client
+// that legitimately exceeds a cap should keep working, and these ceilings sit
+// far above anything a real console does.
+func evictOldest[T any](m map[uint16]T, age []uint16, cap int, free func(T)) []uint16 {
+	for len(age) > 0 && len(m) >= cap {
+		oldest := age[0]
+		age = age[1:]
+		if v, ok := m[oldest]; ok {
+			if free != nil {
+				free(v)
+			}
+			delete(m, oldest)
+		}
+	}
+	return age
 }
 
 func (c *conn) allocFID() uint16 {
@@ -265,7 +339,11 @@ func (c *conn) cleanup() {
 		f.close()
 	}
 	c.files = nil
+	c.fileAge = nil
 	c.searches = nil
+	c.searchAge = nil
+	c.trees = nil
+	c.treeAge = nil
 }
 
 // req is a parsed request: the header fields plus the raw message.
@@ -362,7 +440,6 @@ func (s *Server) serveConn(nc net.Conn) {
 		server: s, net: nc,
 		nextFID: 0x1000, nextTID: 0x0001, nextSID: 0x0001,
 		trees:    make(map[uint16]*Share),
-		ipc:      make(map[uint16]bool),
 		files:    make(map[uint16]*openFile),
 		searches: make(map[uint16]*search),
 	}
@@ -374,6 +451,9 @@ func (s *Server) serveConn(nc net.Conn) {
 	}()
 
 	for {
+		// Refreshed per message, so an active console is never cut off while a
+		// silent socket cannot squat on a slot.
+		_ = nc.SetReadDeadline(time.Now().Add(idleTimeout))
 		msg, err := ReadMessage(nc)
 		if errors.Is(err, ErrKeepAlive) {
 			continue
@@ -437,9 +517,13 @@ func (c *conn) dispatch(r *req) reply {
 		return c.treeConnect(r)
 	case ComTreeDisconnect:
 		delete(c.trees, r.tid)
-		delete(c.ipc, r.tid)
+		// Searches belong to a tree, so dropping the tree must drop them too.
+		// Without this a client that disconnects politely still strands every
+		// listing it made, which is the ordinary case rather than an attack.
+		c.dropSearches()
 		return reply{params: []byte{}, data: []byte{}}
 	case ComLogoffAndX:
+		c.dropSearches()
 		return reply{params: []byte{ComNone, 0, 0, 0}, data: []byte{}}
 	case ComOpenAndX:
 		return c.openAndX(r)

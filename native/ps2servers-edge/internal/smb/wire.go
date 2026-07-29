@@ -115,6 +115,32 @@ const MaxMessage = 128 << 10
 // are worth bounding.
 const MaxConnections = 16
 
+// Per-connection caps on state a client can accumulate without ever closing
+// anything.
+//
+// MaxMessage bounds one message; it does not bound what a handler REMEMBERS.
+// Each of these is state the protocol only frees on an explicit request the
+// client is free never to send, so without a ceiling a peer grows them until
+// the board dies -- measured at tens of megabytes within a second of ordinary
+// traffic on one socket. The reference has the same lifecycles and no ceilings,
+// which is survivable on a desktop and is not here.
+//
+// Each is enforced by evicting the oldest rather than by refusing: a console
+// that legitimately exceeds one of these should keep working, and the values
+// are far above what any real client uses.
+const (
+	// MaxSearches bounds live directory listings. A search is freed only by a
+	// FIND_NEXT2 issued AFTER the one that reported EndOfSearch -- a call a
+	// well-behaved client has no reason to make -- so even OPL leaks one per
+	// directory it browses.
+	MaxSearches = 16
+	// MaxOpenFiles bounds handles, each of which holds an open OS file
+	// descriptor. Matches the udpfs limit.
+	MaxOpenFiles = 64
+	// MaxTrees bounds connected trees. Freed only by TREE_DISCONNECT.
+	MaxTrees = 16
+)
+
 var (
 	// ErrKeepAlive reports a session keep-alive, which carries no SMB message
 	// and must not be treated as a short read or as EOF.
