@@ -268,15 +268,35 @@ func (s *Server) Close() error {
 		if s.data != nil && s.data != s.discovery {
 			_ = s.data.Close()
 		}
+		// Workers are stopped and drained BEFORE their session state is
+		// closed, rather than closing it under State.Mu.
+		//
+		// Taking that mutex here looked sufficient and was not: a peer worker
+		// owns its own state and reads it without locking -- correct, since
+		// exactly one goroutine handles a given peer -- so the mutex only ever
+		// held one side of the pair. Closing a session while its worker was
+		// mid-request was a real data race between State.ResetWrite and
+		// handleWriteData's read of WriteActive, and on shutdown during an
+		// active write it could free handles from under the goroutine using
+		// them. Found by the race detector in CI, intermittently, because it
+		// needs a write in flight at the moment of shutdown.
 		s.sessionsMu.Lock()
+		workers := make([]*peerWorker, 0, len(s.sessions))
 		for _, w := range s.sessions {
-			w.state.Mu.Lock()
-			w.state.Close()
-			w.state.Mu.Unlock()
-			w.stop()
+			workers = append(workers, w)
 		}
 		s.sessions = map[string]*peerWorker{}
 		s.sessionsMu.Unlock()
+
+		for _, w := range workers {
+			w.stop()
+		}
+		// Every worker is in s.wg, so this returns only once none of them can
+		// still be touching a session.
+		s.wg.Wait()
+		for _, w := range workers {
+			w.state.Close()
+		}
 	})
 	s.wg.Wait()
 	return err
