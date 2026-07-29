@@ -1,0 +1,94 @@
+[Unit]
+# A template: %i is the server key -- smbv1, udpfs or udpbd.
+#   systemctl enable --now ps2servers@smbv1
+#
+# Separate from ps2servers-edge.service, which runs the Go build and serves
+# only UDPFS and UDPBD. Edge has no SMB at all, so a user who needs SMB -- the
+# OPL/POPSTARTER case -- cannot use that unit and needs this one.
+Description=PS2 Servers (%i)
+Documentation=https://github.com/NathanNeurotic/PS2-Servers/blob/main/packaging/systemd/README.md
+After=network-online.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ps2servers
+Group=ps2servers
+
+# Per-instance, so each server keeps its own share and port:
+#   /etc/default/ps2servers-smbv1
+#
+# Required, not optional (no `-` prefix), unlike ps2servers-edge.service. Every
+# one of these servers refuses to start without arguments -- smbv1 needs a
+# --share, udpfs a --root-dir, udpbd an image path -- so a missing env file
+# would otherwise become an argparse exit every 5s under Restart=on-failure. A
+# hard "Failed to load environment files" naming the unit is a better answer
+# than a restart loop. A sample ships for each key; install the matching one.
+EnvironmentFile=/etc/default/ps2servers-%i
+
+# --serve runs one server in this process with no GUI. It is dispatched before
+# anything imports tkinter, so this needs no display, no X and no desktop
+# session -- which is the point of running it under systemd rather than leaving
+# a logged-in session open.
+#
+# $PS2SERVERS_ARGS is deliberately unbraced: systemd splits an unbraced
+# variable on whitespace into separate arguments, which is how the flags in the
+# env file reach the server. The cost is that a path containing a space cannot
+# be passed this way; keep the share somewhere like /srv/ps2.
+ExecStart=/usr/local/bin/ps2servers --serve %i $PS2SERVERS_ARGS
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+
+# The share is writable on purpose. OPL stores its settings there and a
+# VMC-on-SMB lives there too, so a read-only share silently costs the user
+# their saves. ReadWritePaths is what re-opens it under ProtectSystem=strict.
+#
+# THIS PATH MUST MATCH THE --share PATH IN THE ENV FILE.
+#
+# ProtectSystem=strict makes the whole filesystem read-only apart from what is
+# listed here, so pointing --share at, say, /mnt/games while this still says
+# /srv/ps2 gives a share the console can read and never write. Nothing reports
+# that: the server starts, the game list loads, and only saving fails -- which
+# looks like a network fault rather than a permissions one.
+#
+# Serving a share elsewhere therefore needs both edited together:
+#
+#   systemctl edit ps2servers@smbv1
+#     [Service]
+#     ReadWritePaths=/mnt/games
+#
+# tests/test_systemd_units.py checks the two shipped defaults agree.
+ProtectSystem=strict
+# The `-` matters. Without it a path that does not exist is fatal at
+# mount-namespace setup -- status=226/NAMESPACE, before ExecStart, looped by
+# Restart=on-failure -- so a user serving /mnt/games who never created (or
+# later removed) an empty /srv/ps2 gets a hard start failure naming a
+# directory that appears nowhere in their own configuration.
+#
+# Note that a `systemctl edit` override ADDS to this list rather than replacing
+# it: ReadWritePaths is a list directive, so the shipped entry survives unless
+# the drop-in first resets it with a bare `ReadWritePaths=`.
+ReadWritePaths=-/srv/ps2
+ProtectHome=read-only
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+SystemCallArchitectures=native
+
+# MemoryDenyWriteExecute is NOT set here, unlike the Edge unit. Edge is a
+# static Go binary; these servers are the Python build, and CPython allocates
+# write-then-execute pages, so the flag would stop the service from starting.
+
+[Install]
+WantedBy=multi-user.target
