@@ -228,13 +228,17 @@ class ShippedStatusPortsDoNotRace(unittest.TestCase):
     def test_systemd_env_files_ship_no_claimant(self):
         # udpfs owns the port implicitly by serving discovery on it, so no
         # Edge env file should claim it by default.
+        # Go's flag package accepts -flag=v, --flag=v, -flag v and --flag v, so
+        # a literal "--status-port -1" check would pass on three spellings that
+        # claim the port just as effectively.
+        claims = re.compile(r"--?status-port[=\s]+-1\b")
         for name in ("smb", "udpbd"):
             path = os.path.join(_SYSTEMD, f"ps2servers-edge-{name}.env")
-            args = [l for l in _read(path).splitlines()
-                    if l.startswith("PS2EDGE_ARGS=")]
+            args = [line for line in _read(path).splitlines()
+                    if line.startswith("PS2EDGE_ARGS=")]
             self.assertEqual(len(args), 1)
-            self.assertNotIn(
-                "--status-port -1", args[0],
+            self.assertNotRegex(
+                args[0], claims,
                 f"ps2servers-edge-{name}.env claims the shared status port by "
                 "default, which races ps2servers-edge@udpfs")
 
