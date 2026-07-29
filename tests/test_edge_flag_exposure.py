@@ -100,7 +100,11 @@ def _section(text, name):
     udpfs flags -- so they must not scan the whole file. Edge later gained smb
     and udpbd sections whose options map to those subcommands' flags instead;
     scanning globally reported every one of them as an orphan.
-    tests/test_edge_service_modes.py covers those.
+
+    The equivalent orphan check for those sections lives in
+    tests/test_edge_service_modes.py (NewSectionOptionsMapToRealFlags), which
+    resolves each option against the flags its own run function declares and
+    against the init script that must read it.
     """
     lines = text.splitlines()
     out, inside = [], False

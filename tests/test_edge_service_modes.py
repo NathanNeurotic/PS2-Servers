@@ -135,6 +135,110 @@ class EveryServerIsLaunchable(unittest.TestCase):
                                 "missing; prefix with - to tolerate it")
 
 
+class NewSectionOptionsMapToRealFlags(unittest.TestCase):
+    """Every smb/udpbd UCI option must correspond to a flag its server accepts.
+
+    The same check test_edge_flag_exposure applies to udpfs. Without it an
+    option can be shipped, documented and set, and do nothing -- which is
+    exactly the bug that once made udpfs's `read_only` decorative.
+
+    Flags are read from main.go rather than by running the binary, so this
+    needs no Go toolchain and still fails when a flag is renamed.
+    """
+
+    @staticmethod
+    def _flags_of(func_name):
+        source = _read(_MAIN_GO)
+        start = source.find(f"func {func_name}(")
+        if start < 0:
+            return set()
+        # To the next top-level func, which is where this one ends.
+        end = source.find("\nfunc ", start + 1)
+        body = source[start:end if end > 0 else len(source)]
+        # Two shapes: fs.String("name", ...) puts the name first, while
+        # fs.Var(&value, "name", ...) puts the value first. Matching only the
+        # first misses every repeatable flag -- --share among them, which is
+        # the one option smb cannot run without.
+        return set(re.findall(r'fs\.\w+\(\s*(?:&\w+,\s*)?"([a-z0-9-]+)"', body))
+
+    @staticmethod
+    def _section_options(config, section_name):
+        options, inside = set(), False
+        for line in config.splitlines():
+            if line.startswith("config "):
+                inside = line.rstrip().endswith(f"'{section_name}'")
+                continue
+            if inside:
+                m = re.match(r"\s*option\s+([a-z0-9_]+)\s+'", line)
+                if m:
+                    options.add(m.group(1))
+        return options
+
+    def test_smb_and_udpbd_options_all_reach_a_flag(self):
+        config = _read(os.path.join(_OPENWRT, "ps2servers-edge.config"))
+        init = _read(os.path.join(_OPENWRT, "ps2servers-edge.init"))
+
+        for section, func in (("smb", "runSMB"), ("udpbd", "runUDPBD")):
+            flags = self._flags_of(func)
+            self.assertTrue(flags, f"no flags parsed out of {func}")
+            for option in sorted(self._section_options(config, section)):
+                if option == "enabled":
+                    continue  # consumed by the init script, not the binary
+                with self.subTest(section=section, option=option):
+                    flag = option.replace("_", "-")
+                    self.assertIn(
+                        flag, flags,
+                        f"{section}.{option} does not map to a --{flag} flag on "
+                        f"{func}, so setting it does nothing")
+                    # And the init must actually read it, or it is decorative
+                    # even though the flag exists.
+                    #
+                    # Two spellings count, as in test_edge_flag_exposure:
+                    # scalars go through config_get, booleans through the
+                    # append_bool_flag helper. Matching only the first reports
+                    # every boolean as unread, which is the opposite of true.
+                    direct = (r"config_get(?:_bool)?\s+\w+\s+" + section +
+                              r"\s+" + re.escape(option) + r"\b")
+                    helper = (r"append_bool_flag\s+" + section + r"\s+" +
+                              re.escape(option) + r"\b")
+                    self.assertTrue(
+                        re.search(direct, init) or re.search(helper, init),
+                        f"the init never reads {section}.{option}, so setting "
+                        "it would be decorative")
+
+
+class ShippedStatusPortsDoNotRace(unittest.TestCase):
+    """Only one service may claim the shared status socket by default.
+
+    -1 resolves to UDPFS's discovery port in every subcommand, and bind
+    failures are deliberately non-fatal, so shipping -1 for several services
+    would make whichever started first the one that answers -- a launcher would
+    get a different service's status across a reboot, for no visible reason.
+    """
+
+    def test_openwrt_ships_at_most_one_claimant(self):
+        config = _read(os.path.join(_OPENWRT, "ps2servers-edge.config"))
+        claiming = re.findall(r"^\s*option\s+status_port\s+'(-?\d+)'",
+                              config, re.MULTILINE)
+        self.assertLessEqual(
+            [c for c in claiming].count("-1"), 1,
+            "more than one shipped section claims the standard status port; "
+            "which one answers would depend on procd start order")
+
+    def test_systemd_env_files_ship_no_claimant(self):
+        # udpfs owns the port implicitly by serving discovery on it, so no
+        # Edge env file should claim it by default.
+        for name in ("smb", "udpbd"):
+            path = os.path.join(_SYSTEMD, f"ps2servers-edge-{name}.env")
+            args = [l for l in _read(path).splitlines()
+                    if l.startswith("PS2EDGE_ARGS=")]
+            self.assertEqual(len(args), 1)
+            self.assertNotIn(
+                "--status-port -1", args[0],
+                f"ps2servers-edge-{name}.env claims the shared status port by "
+                "default, which races ps2servers-edge@udpfs")
+
+
 class InitScriptIsValidShell(unittest.TestCase):
     def test_posix_sh_parses_it(self):
         init = os.path.join(_OPENWRT, "ps2servers-edge.init")

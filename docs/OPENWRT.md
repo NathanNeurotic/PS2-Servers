@@ -87,7 +87,7 @@ the service runs as, not by root. An image owned by `root:root` with mode `0644`
 produces a share that mounts and then fails every write.
 
 This is distinct from the `udpbd` subcommand, which speaks a different protocol
-on its own port. The package's init script starts `udpfs` only.
+on its own port and has its own config section — see below.
 
 ### Compression and metrics
 
@@ -147,12 +147,17 @@ Both are read-only by default here, for the same reason `udpfs` is.
 
 `status_port` answers router status queries, so a launcher can show whether the
 box is ready and whether a transfer is in flight — the point being not to cut
-power to a board mid-write. `-1` uses the standard discovery port.
+power to a board mid-write. `0` is off; `-1` is the standard discovery port.
 
-When `udpfs` is also enabled it already owns that address, so the `smb` and
-`udpbd` instances log that the status channel is unavailable and carry on
-serving. That is deliberate: losing a diagnostic should never take down the
-service it reports on. Set `0` to disable it outright.
+**Only one service should claim it.** That port is `udpfs`'s, and `udpfs`
+already serves discovery on it, so `smb` and `udpbd` ship with `status_port
+'0'`. Setting several to `-1` would not break anything — a bind failure there
+is logged and the service carries on — but *which* one answered would depend on
+the order `procd` happened to start them, so a launcher would get a different
+service's status across a reboot for no visible reason.
+
+Set `-1` on `smb` or `udpbd` when it is the only service enabled on the
+board.
 
 ### A bad value restarts the service in a loop
 
