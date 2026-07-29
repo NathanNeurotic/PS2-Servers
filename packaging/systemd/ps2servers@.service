@@ -17,6 +17,13 @@ Group=ps2servers
 
 # Per-instance, so each server keeps its own share and port:
 #   /etc/default/ps2servers-smbv1
+#
+# Required, not optional (no `-` prefix), unlike ps2servers-edge.service. Every
+# one of these servers refuses to start without arguments -- smbv1 needs a
+# --share, udpfs a --root-dir, udpbd an image path -- so a missing env file
+# would otherwise become an argparse exit every 5s under Restart=on-failure. A
+# hard "Failed to load environment files" naming the unit is a better answer
+# than a restart loop. A sample ships for each key; install the matching one.
 EnvironmentFile=/etc/default/ps2servers-%i
 
 # --serve runs one server in this process with no GUI. It is dispatched before
@@ -54,7 +61,16 @@ TimeoutStopSec=15s
 #
 # tests/test_systemd_units.py checks the two shipped defaults agree.
 ProtectSystem=strict
-ReadWritePaths=/srv/ps2
+# The `-` matters. Without it a path that does not exist is fatal at
+# mount-namespace setup -- status=226/NAMESPACE, before ExecStart, looped by
+# Restart=on-failure -- so a user serving /mnt/games who never created (or
+# later removed) an empty /srv/ps2 gets a hard start failure naming a
+# directory that appears nowhere in their own configuration.
+#
+# Note that a `systemctl edit` override ADDS to this list rather than replacing
+# it: ReadWritePaths is a list directive, so the shipped entry survives unless
+# the drop-in first resets it with a bare `ReadWritePaths=`.
+ReadWritePaths=-/srv/ps2
 ProtectHome=read-only
 
 NoNewPrivileges=true
