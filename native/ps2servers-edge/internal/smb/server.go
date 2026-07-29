@@ -12,6 +12,8 @@ import (
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/filesystem"
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/statuslistener"
 )
 
 // Capability bits advertised in the NEGOTIATE reply.
@@ -63,6 +65,15 @@ type Config struct {
 	Port     int
 	ReadOnly bool
 	Log      *edgelog.Logger
+	// StatusPort answers router status queries, so a launcher can tell whether
+	// this server is ready and whether a transfer is in flight. Zero disables
+	// it; negative means "use the standard port".
+	//
+	// The standard port is UDPFS's discovery port, which is what a client
+	// probes. On a box already running Edge's udpfs that address is
+	// legitimately taken, and the failure is logged and ignored rather than
+	// taking SMB down over a diagnostic.
+	StatusPort int
 }
 
 // Server serves SMBv1 to Open-PS2-Loader.
@@ -86,6 +97,9 @@ type Server struct {
 	wg        sync.WaitGroup
 	closeOnce sync.Once
 	closed    chan struct{}
+
+	started time.Time
+	status  *statuslistener.Listener
 }
 
 // idleTimeout bounds how long a connection may sit without sending anything.
@@ -113,11 +127,12 @@ func New(cfg Config) (*Server, error) {
 		cfg.Log = edgelog.New(os.Stdout, "text", false, false)
 	}
 	s := &Server{
-		live:   make(map[net.Conn]struct{}),
-		cfg:    cfg,
-		shares: make(map[string]Share, len(cfg.Shares)),
-		sem:    make(chan struct{}, MaxConnections),
-		closed: make(chan struct{}),
+		live:    make(map[net.Conn]struct{}),
+		cfg:     cfg,
+		shares:  make(map[string]Share, len(cfg.Shares)),
+		sem:     make(chan struct{}, MaxConnections),
+		closed:  make(chan struct{}),
+		started: time.Now(),
 	}
 	for _, sh := range cfg.Shares {
 		// Keyed lowercase: SMB share names are case-insensitive, and matching
@@ -144,7 +159,76 @@ func (s *Server) Listen() error {
 		return err
 	}
 	s.listener = ln
+
+	if s.cfg.StatusPort != 0 {
+		port := s.cfg.StatusPort
+		if port < 0 {
+			port = int(protocol.DefaultPort)
+		}
+		sl, err := statuslistener.Start(s.cfg.Bind, port, s.statusReply, s.cfg.Log)
+		if err != nil {
+			// Non-fatal on purpose: see Config.StatusPort. Losing the status
+			// channel is a smaller harm than refusing to serve SMB.
+			s.cfg.Log.Warn("SMB status channel unavailable", map[string]any{
+				"port": port, "error": err.Error()})
+		} else {
+			s.status = sl
+			s.cfg.Log.Info("SMB status channel", map[string]any{"addr": sl.Addr().String()})
+		}
+	}
 	return nil
+}
+
+// statusReply reports what this server is doing, for the router status
+// protocol. See docs/ROUTER-STATUS.md.
+func (s *Server) statusReply() protocol.StatusReply {
+	flags := protocol.FlagServesSMB
+	if s.cfg.ReadOnly {
+		flags |= protocol.FlagReadOnly
+	}
+
+	s.mu.Lock()
+	sessions := len(s.live)
+	stopping := s.stopping
+	s.mu.Unlock()
+
+	state := protocol.StateReady
+	switch {
+	case stopping:
+		state = protocol.StateStopping
+	case s.sharesUnreadable():
+		// The ordinary hardware failure on a router: the USB stick went away.
+		// Reporting ready would send someone hunting the network for what is a
+		// storage fault.
+		state = protocol.StateDegraded
+	case sessions > 0:
+		// Busy is per-connection rather than per-transfer here. SMB has no
+		// idle state a server can see -- a console keeps the connection open
+		// across a whole game load -- so a live connection is the closest
+		// honest answer to "is something happening", and it is the one that
+		// matters for "do not cut power".
+		state = protocol.StateBusy
+	}
+
+	return protocol.StatusReply{
+		State:    state,
+		Flags:    flags,
+		Sessions: uint16(sessions),
+		Uptime:   statuslistener.Uptime(s.started),
+		Name:     "PS2 Servers Edge",
+	}
+}
+
+func (s *Server) sharesUnreadable() bool {
+	for _, sh := range s.cfg.Shares {
+		if sh.Root == nil {
+			return true
+		}
+		if info, err := os.Stat(sh.Root.Path()); err != nil || !info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func itoa(n int) string {
@@ -245,6 +329,7 @@ func (s *Server) Close() error {
 			_ = c.Close()
 		}
 		s.mu.Unlock()
+		_ = s.status.Close()
 	})
 	s.wg.Wait()
 	return nil

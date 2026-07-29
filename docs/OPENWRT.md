@@ -87,7 +87,7 @@ the service runs as, not by root. An image owned by `root:root` with mode `0644`
 produces a share that mounts and then fails every write.
 
 This is distinct from the `udpbd` subcommand, which speaks a different protocol
-on its own port. The package's init script starts `udpfs` only.
+on its own port and has its own config section — see below.
 
 ### Compression and metrics
 
@@ -105,6 +105,59 @@ not load compressed games.
 `metrics` is off by default. The counters go to stdout, `procd` forwards stdout
 to syslog, and a router logging a snapshot every minute indefinitely is a cost
 worth opting into rather than inheriting.
+
+## Serving SMB, and running more than one service
+
+Edge serves three protocols, and the package starts each as its own `procd`
+instance, so a board can run several at once. Each has its own config section
+and its own `enabled` flag.
+
+**SMB is what OPL's network game list and POPSTARTER use.** Before Edge gained
+it, a router had to fall back on the host's Samba — which modern builds ship
+with SMBv1 disabled and OPL cannot talk to. It is off by default because
+enabling it exposes a share with no password, which should be a decision rather
+than something inherited from an upgrade.
+
+```
+config smb 'smb'
+        option enabled '1'
+        option share 'games=/mnt/sda1/PS2'
+        option port '1111'
+        option read_only '0'
+```
+
+`share` is `NAME=PATH`, and several may be given separated by spaces — so a
+share path cannot contain one.
+
+**Set OPL's *SMB Port* to 1111.** Not 445: ports below 1024 need root and this
+runs as `ps2edge`.
+
+`udpbd` serves **one disk image** rather than a directory, unlike `udpfs` and
+`smb`:
+
+```
+config udpbd 'udpbd'
+        option enabled '1'
+        option image '/mnt/sda1/ps2.img'
+```
+
+Both are read-only by default here, for the same reason `udpfs` is.
+
+### Telling a launcher the board is ready
+
+`status_port` answers router status queries, so a launcher can show whether the
+box is ready and whether a transfer is in flight — the point being not to cut
+power to a board mid-write. `0` is off; `-1` is the standard discovery port.
+
+**Only one service should claim it.** That port is `udpfs`'s, and `udpfs`
+already serves discovery on it, so `smb` and `udpbd` ship with `status_port
+'0'`. Setting several to `-1` would not break anything — a bind failure there
+is logged and the service carries on — but *which* one answered would depend on
+the order `procd` happened to start them, so a launcher would get a different
+service's status across a reboot for no visible reason.
+
+Set `-1` on `smb` or `udpbd` when it is the only service enabled on the
+board.
 
 ### A bad value restarts the service in a loop
 
