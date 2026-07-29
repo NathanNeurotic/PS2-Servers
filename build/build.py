@@ -45,6 +45,10 @@ from launcher.servers import REGISTRY
 # udpfs_server/ps2servers_core.py does `from udpfs_server import (...)`.
 SUPPORT_FILES = [
     "udpfs_server/udpfs_server.py",
+    # udpfs_server.py does `import router_status` on load. Without this the
+    # packaged build imports fine in source mode and fails at runtime, which is
+    # exactly the failure tests/test_packaging_data_files.py exists to catch.
+    "udpfs_server/router_status.py",
 ]
 
 

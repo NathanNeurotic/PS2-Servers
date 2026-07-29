@@ -29,7 +29,7 @@ def _direct_link_experimental():
     """Non-Windows: the setup path is real but unverified on hardware."""
     return platform.system() in ("Linux", "Darwin")
 
-from . import config, directlink, elevate, netinfo, posix_firewall, servers, theme, tray, windows_setup
+from . import config, directlink, elevate, netinfo, posix_firewall, servers, status_client, theme, tray, windows_setup
 from .process import ServerProcess
 from .release_metadata import DISPLAY_VERSION
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
@@ -395,6 +395,29 @@ class ServerCard(ttk.LabelFrame):
         else:
             self.app.start_server(self.server.key)
 
+    # What the server says about itself, when it says anything. A build that
+    # does not implement the status protocol reports nothing, and the label
+    # falls back to the process-derived "Running" it has always shown.
+    _STATE_LABELS = {"ready": "Running", "busy": "Transferring",
+                     "degraded": "Degraded", "starting": "Starting",
+                     "stopping": "Stopping"}
+
+    def _reported_state(self):
+        status = self.app.status_poller.status(self.server.key)
+        if not status:
+            return None
+        name = status.get("state_name")
+        return name if name in self._STATE_LABELS else None
+
+    def _running_label(self):
+        return self._STATE_LABELS.get(self._reported_state(), "Running")
+
+    def _running_colour(self):
+        # Degraded is the one that must not look healthy: the process is alive,
+        # so the old display called it Running and sent people hunting for a
+        # network fault when the share had simply been unplugged.
+        return COLOR_ERROR if self._reported_state() == "degraded" else COLOR_RUNNING
+
     def refresh_status(self, running, error=False):
         if error or not running:
             self._active_values = None
@@ -402,7 +425,12 @@ class ServerCard(ttk.LabelFrame):
         if error:
             self.status.config(text=DOT_RUNNING + " Error", foreground=COLOR_ERROR)
         elif running:
-            self.status.config(text=DOT_RUNNING + " Running", foreground=COLOR_RUNNING)
+            # "Running" is what the process check can say. Where the server
+            # itself answers, say what it actually reports instead -- a share
+            # that has been unplugged is Degraded, not Running, and a transfer
+            # in flight is worth seeing before reaching for Stop.
+            self.status.config(text=DOT_RUNNING + " " + self._running_label(),
+                               foreground=self._running_colour())
         else:
             self.status.config(text=DOT_RUNNING + " Stopped", foreground=COLOR_STOPPED)
         self.toggle_btn.config(text="Stop" if running else "Start")
@@ -419,6 +447,16 @@ class LauncherApp:
         self.root = root
         self.procs = {}
         self.cards = {}
+        # Truthful per-server state, polled off the Tk thread. The dot used
+        # to mean only "the child process is alive", which stays green when
+        # the share has been unplugged and says nothing about a transfer in
+        # flight. Servers that do not implement the protocol report unknown
+        # and fall back to the process check, so nothing regresses.
+        self.status_poller = status_client.Poller()
+        self.status_poller.start()
+        # Last state painted per card, so the status line is only rebuilt when
+        # the answer actually changes rather than on every 600 ms tick.
+        self._last_reported = {}
         self.out_queue = queue.Queue()
         self.logs = {}
         self.saved = config.load()
@@ -725,7 +763,7 @@ class LauncherApp:
             remove = ttk.Button(footer, text="Remove PS2 Servers firewall rules",
                                 command=self.remove_windows_setup)
             remove.grid(row=0, column=1, sticky="w", padx=(8, 0))
-        ttk.Button(footer, text="Stop all", command=self.stop_all).grid(
+        ttk.Button(footer, text="Stop all", command=self.stop_all_confirmed).grid(
             row=0, column=3, sticky="e")
         ttk.Button(footer, text="Restart", command=self.restart_app).grid(
             row=0, column=4, sticky="e", padx=(8, 0))
@@ -1656,6 +1694,10 @@ class LauncherApp:
             return
         self.procs[key] = proc
         card._active_values = dict(values)
+        # Ask this server what state it is actually in, rather than inferring
+        # it from the child process being alive. Loopback, because the launcher
+        # is asking about a server it started itself.
+        self.status_poller.set_target(key, "127.0.0.1", values.get("port") or 0)
         card.refresh_status(True)
         card.toggle_btn.config(state="normal")
         self.nb.select(self.terminal_tab)
@@ -1947,21 +1989,64 @@ class LauncherApp:
         messagebox.showerror("Firewall removal failed", str(error))
         self._append_log("setup", "[setup] firewall cleanup failed:\n{}\n".format(error))
 
-    def stop_server(self, key):
+    def confirm_stop_while_busy(self, keys):
+        """Ask before stopping a server that says it is mid-transfer.
+
+        Stopping a server while a console is writing truncates whatever it was
+        writing, and a save is the one thing here a user cannot get back. The
+        launcher could not previously tell, so it could not warn.
+
+        Only a server that positively reports busy triggers this. A server that
+        did not answer -- an older build, or one still starting -- is not busy,
+        because a prompt that fired on every unreachable server would be
+        dismissed reflexively long before it mattered.
+        """
+        busy = [k for k in keys
+                if status_client.is_busy(self.status_poller.status(k))]
+        if not busy:
+            return True
+        names = ", ".join(REGISTRY[k].label if k in REGISTRY else k for k in busy)
+        return messagebox.askyesno(
+            "Transfer in progress",
+            "{} reports a transfer in progress.\n\n"
+            "Stopping now will interrupt it. If a console is writing a save, "
+            "that save will be incomplete.\n\nStop anyway?".format(names),
+            icon="warning", default="no")
+
+    def stop_server(self, key, confirm=True):
         proc = self.procs.get(key)
         if not proc:
             return
+        if confirm and not self.confirm_stop_while_busy([key]):
+            return
         if proc.is_running():
             proc.stop()
+        self.status_poller.clear_target(key)
         self.cards[key]._active_values = None
         self.cards[key].refresh_status(False)
         self.cards[key].toggle_btn.config(state="normal")
         self._append_log(key, "[launcher] stopped\n")
 
     def stop_all(self):
+        """Stop every server. Unconditional, and it must stay that way.
+
+        Every caller but the footer button is a teardown or an
+        elevate-and-relaunch that frees ports before the new instance binds
+        them. A prompt in here would let a "No" skip the stopping while the
+        caller carried on regardless -- quitting anyway and orphaning the
+        children, or relaunching as admin into ports that were never released.
+        The asking belongs at the points where a person actually chose to stop
+        something: stop_all_confirmed, stop_server, and _confirm_app_shutdown.
+        """
         for key in list(self.procs):
-            self.stop_server(key)
+            self.stop_server(key, confirm=False)
         self._stop_direct_responder()
+
+    def stop_all_confirmed(self):
+        """The footer's Stop all: the one caller that is a person deciding."""
+        if not self.confirm_stop_while_busy(list(self.procs)):
+            return
+        self.stop_all()
 
     # -- logging (thread-safe) ------------------------------------------- #
     def _on_output(self, key, line):
@@ -2004,10 +2089,19 @@ class LauncherApp:
             current = self.cards[key].toggle_btn.cget("text") == "Stop"
             if current and not running:  # server exited on its own
                 self.cards[key]._active_values = None
+                self.status_poller.clear_target(key)
                 self.cards[key].refresh_status(False)
                 self.cards[key].toggle_btn.config(state="normal")
                 self._append_log(key, "[launcher] server exited (code {})\n".format(
                     proc.returncode))
+            elif running:
+                # Repaint from the poller's latest answer. Cheap: the socket
+                # work happened on the poller thread, and this only reads the
+                # result it left behind.
+                reported = self.cards[key]._reported_state()
+                if reported != self._last_reported.get(key):
+                    self._last_reported[key] = reported
+                    self.cards[key].refresh_status(True)
         if (self._direct_expected and self._direct_proc is not None
                 and not self._direct_proc.is_running()):
             code = self._direct_proc.returncode
@@ -2253,6 +2347,22 @@ class LauncherApp:
                    for key in self.procs if self.is_running(key)]
         if not running:
             return True
+        # A server that reports a transfer in flight is called out by name and
+        # the prompt defaults to No. Quitting mid-write truncates whatever the
+        # console was writing, and a save is the one thing here that cannot be
+        # got back -- so this is the case where the habitual Enter should not
+        # be the destructive answer.
+        busy = [TAB_TITLES.get(key, key.upper()) for key in self.procs
+                if status_client.is_busy(self.status_poller.status(key))]
+        if busy:
+            return messagebox.askyesno(
+                title,
+                "{} reports a transfer in progress.\n\n"
+                "Quitting now will interrupt it. If a console is writing a "
+                "save, that save will be incomplete.\n\n"
+                "This will stop running servers:\n\n{}\n\nQuit anyway?".format(
+                    ", ".join(busy), ", ".join(running)),
+                icon="warning", default="no")
         return messagebox.askyesno(
             title,
             "This will stop running servers:\n\n{}\n\nContinue?".format(

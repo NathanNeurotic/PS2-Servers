@@ -386,6 +386,15 @@ func (s *Server) dispatch(in inbound) {
 	}
 	switch h.Type {
 	case protocol.Discovery:
+		// Before handleDiscovery, which creates a session for the peer. A
+		// status query must not do that: a launcher polling once a second
+		// would otherwise manufacture sessions, occupy slots against the
+		// concurrent-session cap, and show up in the very session count it is
+		// asking about.
+		if protocol.IsStatusQuery(in.packet) {
+			s.handleStatusQuery(in)
+			return
+		}
 		s.handleDiscovery(in, h)
 	case protocol.Data:
 		w := s.getWorker(in.peer)

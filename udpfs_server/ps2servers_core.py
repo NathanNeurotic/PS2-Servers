@@ -207,6 +207,11 @@ class AutoUdpfsServer(UdpfsServer):
     def _handle_discovery(self, data: bytes, addr):
         if len(data) < 6:
             return
+        # Before the service-ID guard below. Shared with the standalone server
+        # rather than overridden, so the two editions cannot answer a status
+        # query differently. See docs/ROUTER-STATUS.md.
+        if self._maybe_answer_status(data, addr):
+            return
         try:
             hdr = Header.unpack(data)
             disc = DiscHeader.unpack(data[2:6])
