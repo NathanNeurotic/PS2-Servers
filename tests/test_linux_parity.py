@@ -156,8 +156,7 @@ class WindowsOnlyFieldTests(unittest.TestCase):
         for server in servers.REGISTRY.values():
             for f in server.fields:
                 if f.windows_only:
-                    self.assertIn((server.key, f.key),
-                                  (("smbv1", "take_445"), ("smbv2", "take_445"), ("smbv3", "take_445")))
+                    self.assertIn((server.key, f.key), (("smbv1", "take_445"),))
 
 
 if __name__ == "__main__":
