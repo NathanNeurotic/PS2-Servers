@@ -94,6 +94,36 @@ INCLUDE_PACKAGES = [
     "lz4",
 ]
 
+INCLUDE_MODULES = [
+    "argparse",
+    "collections",
+    "ctypes",
+    "dataclasses",
+    "enum",
+    "errno",
+    "fnmatch",
+    "gzip",
+    "hashlib",
+    "hmac",
+    "ipaddress",
+    "math",
+    "posixpath",
+    "queue",
+    "re",
+    "secrets",
+    "select",
+    "shutil",
+    "socket",
+    "stat",
+    "struct",
+    "subprocess",
+    "threading",
+    "time",
+    "typing",
+    "uuid",
+    "zlib",
+]
+
 # Optional Linux system-tray backend. pystray (+ Pillow for the icon, + the
 # pure-Python Xlib xorg fallback) is bundled so the packaged Linux build has a
 # working tray. Each is included only if actually installed in the build
@@ -150,6 +180,9 @@ def main():
 
     for pkg in INCLUDE_PACKAGES:
         cmd.append("--include-package=" + pkg)
+
+    for mod in INCLUDE_MODULES:
+        cmd.append("--include-module=" + mod)
 
     if system == "Linux":
         for pkg in LINUX_TRAY_PACKAGES:

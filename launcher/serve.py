@@ -10,6 +10,37 @@ import importlib.util
 import os
 import sys
 
+# Explicitly import standard library modules required by dynamic server engines
+# so PyInstaller, Nuitka, and static bundlers include them in frozen builds.
+import argparse
+import collections
+import ctypes
+import dataclasses
+import enum
+import errno
+import fnmatch
+import gzip
+import hashlib
+import hmac
+import ipaddress
+import math
+import posixpath
+import queue
+import re
+import secrets
+import select
+import shutil
+import socket
+import stat
+import struct
+import subprocess
+import sys
+import threading
+import time
+import typing
+import uuid
+import zlib
+
 
 def _load_module(path):
     name = "_ps2srv_" + os.path.splitext(os.path.basename(path))[0]
