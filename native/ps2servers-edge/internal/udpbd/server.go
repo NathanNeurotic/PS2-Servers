@@ -98,6 +98,7 @@ func (d *device) close() { _ = d.file.Close() }
 // state. The peer is recorded as well so a stray RDMA from a *different*
 // console cannot land in the middle of another one's write.
 type writeState struct {
+	peerIP string
 	peer   string
 	offset int64
 	left   int64
@@ -314,6 +315,8 @@ func (s *Server) handleInfo(p []byte, peer *net.UDPAddr) {
 	s.mu.Lock()
 	first := !s.seen[peer.String()]
 	s.seen[peer.String()] = true
+	// A new discovery/info request from a console resets any stale in-flight write state.
+	s.write = writeState{}
 	readTotal, writeTotal := s.totalRead, s.totalWrite
 	s.mu.Unlock()
 	if first {
@@ -351,6 +354,9 @@ func (s *Server) handleRead(p []byte, peer *net.UDPAddr) {
 	blocksLeft := sectorCount * int64(blocksPerSector)
 
 	s.mu.Lock()
+	if s.write.left > 0 && (s.write.peer == peer.String() || (s.write.peerIP != "" && s.write.peerIP == peer.IP.String())) {
+		s.write = writeState{}
+	}
 	s.totalRead += blocksLeft * int64(blockSize)
 	s.mu.Unlock()
 
@@ -407,6 +413,7 @@ func (s *Server) handleWrite(p []byte, peer *net.UDPAddr) {
 
 	s.mu.Lock()
 	s.write = writeState{
+		peerIP: peer.IP.String(),
 		peer:   peer.String(),
 		offset: sectorNr * SectorSize,
 		left:   sectorCount * SectorSize,
@@ -420,7 +427,8 @@ func (s *Server) handleWriteRDMA(p []byte, peer *net.UDPAddr) {
 
 	s.mu.Lock()
 	st := s.write
-	if st.left <= 0 || st.peer != peer.String() {
+	peerMatch := st.peer == peer.String() || (st.peerIP != "" && st.peerIP == peer.IP.String())
+	if st.left <= 0 || !peerMatch {
 		s.mu.Unlock()
 		// No CMD_WRITE handshake in progress for this peer. Writing here would
 		// land data at whatever offset happened to be current -- an arbitrary
