@@ -368,11 +368,6 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	if w := s.sessions[key]; w != nil {
 		return w
 	}
-	if len(s.sessions) >= 256 {
-		s.cfg.Log.Warn("max session limit reached", map[string]any{"peer": key})
-		return nil
-	}
-
 	// Evict any stale session from the same remote IP address (e.g. PS2 rebooted and changed source port),
 	// but skip loopback test peers (127.0.0.1) so multi-client unit tests are not evicted.
 	peerIP := peer.IP.String()
@@ -401,6 +396,11 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 			oldWorker.state.Mu.Unlock()
 			oldWorker.stop()
 		}
+	}
+
+	if len(s.sessions) >= 256 {
+		s.cfg.Log.Warn("max session limit reached", map[string]any{"peer": key})
+		return nil
 	}
 
 	forced := s.cfg.ProtocolMode
