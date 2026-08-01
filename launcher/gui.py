@@ -173,8 +173,8 @@ def tab_text(label):
 
 
 def opl_hint(key, ip, values):
-    if key == "smbv1":
-        port = "445" if values.get("take_445") else str(values.get("port") or 1111)
+    if key in ("smbv1", "smbv2", "smbv3"):
+        port = "445" if values.get("take_445") else str(values.get("port") or 1025)
         return ("In OPL → Network:  IP {}  ·  Port {}  ·  Share 'games'  "
                 "·  NetBIOS off  ·  User 'guest'  ·  Password blank".format(ip, port))
     if key == "udpfs":
