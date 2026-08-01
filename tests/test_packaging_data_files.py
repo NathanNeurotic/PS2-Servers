@@ -116,6 +116,27 @@ class SiblingImportsAreShippedTests(unittest.TestCase):
                         "the packaged build would fail to import it".format(
                             rel, name, _rel(sibling)))
 
+    def test_all_server_stdlib_imports_are_statically_imported_by_serve(self):
+        serve_path = os.path.join(ROOT, "launcher", "serve.py")
+        serve_imports = self._imported_names(serve_path)
+        shipped = set(BUILD.DATA_FILES)
+        for rel in sorted(shipped):
+            path = os.path.join(ROOT, rel)
+            directory = os.path.dirname(path)
+            for name in self._imported_names(path):
+                sibling = os.path.join(directory, name + ".py")
+                if os.path.isfile(sibling):
+                    continue  # local sibling, not stdlib
+                # Ignore local packages / third-party libs handled via INCLUDE_PACKAGES or sys.path
+                if name in ("compressed_iso", "lz4", "launcher", "udpfs_server", "smb2_server", "smbv1_server", "udpbd_server"):
+                    continue
+                with self.subTest(source=rel, stdlib_module=name):
+                    self.assertIn(
+                        name, serve_imports,
+                        "{} imports stdlib module '{}' but launcher/serve.py does not import it; "
+                        "frozen builds will fail with ModuleNotFoundError: No module named '{}'".format(
+                            rel, name, name))
+
 
 if __name__ == "__main__":
     unittest.main()
