@@ -118,8 +118,8 @@ def _parse_seconds(raw):
     return value if value > 0 else None
 
 
-def _smbv1_argv(v):
-    args = ["--share", "games={}".format(v["games_folder"])]
+def _smb_argv(v, smb_version="1"):
+    args = ["--share", "games={}".format(v["games_folder"]), "--smb-version", str(smb_version)]
     if v.get("port"):
         args += ["--port", str(v["port"])]
     if v.get("bind"):
@@ -131,6 +131,18 @@ def _smbv1_argv(v):
     if v.get("verbose"):
         args.append("-v")
     return args
+
+
+def _smbv1_argv(v):
+    return _smb_argv(v, "1")
+
+
+def _smbv2_argv(v):
+    return _smb_argv(v, "2")
+
+
+def _smbv3_argv(v):
+    return _smb_argv(v, "3")
 
 
 # How the protocol mode is offered, and what each choice puts on the wire.
@@ -308,7 +320,7 @@ SMBV2 = ServerDef(
               help="Interface to bind (blank = all)."),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
     ],
-    _build_argv=_smbv1_argv,
+    _build_argv=_smbv2_argv,
 )
 
 SMBV3 = ServerDef(
@@ -334,7 +346,7 @@ SMBV3 = ServerDef(
               help="Interface to bind (blank = all)."),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
     ],
-    _build_argv=_smbv1_argv,
+    _build_argv=_smbv3_argv,
 )
 
 UDPFS = ServerDef(

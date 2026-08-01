@@ -33,6 +33,18 @@ class ServerRegistryTests(unittest.TestCase):
             self.assertFalse(port_field.advanced, f"{key} port field should not be advanced hidden")
             self.assertEqual(port_field.default, 1025)
 
+    def test_smb_argv_version_flags(self):
+        v = {"games_folder": "C:/Games", "port": 1025}
+        argv1 = servers.REGISTRY["smbv1"]._build_argv(v)
+        argv2 = servers.REGISTRY["smbv2"]._build_argv(v)
+        argv3 = servers.REGISTRY["smbv3"]._build_argv(v)
+        self.assertIn("--smb-version", argv1)
+        self.assertEqual(argv1[argv1.index("--smb-version") + 1], "1")
+        self.assertIn("--smb-version", argv2)
+        self.assertEqual(argv2[argv2.index("--smb-version") + 1], "2")
+        self.assertIn("--smb-version", argv3)
+        self.assertEqual(argv3[argv3.index("--smb-version") + 1], "3")
+
     def test_windows_setup_ports_for_smb(self):
         for key in ("smbv1", "smbv2", "smbv3"):
             rules = windows_setup._server_ports(key, {"port": "1025"})

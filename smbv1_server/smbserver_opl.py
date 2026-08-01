@@ -247,12 +247,139 @@ class Conn:
 
 
 # --------------------------------------------------------------------------------------------
-# Command handlers. Each returns (params, data, status) or None to send nothing.
-# A small wrapper sends the reply with the right header.
-# --------------------------------------------------------------------------------------------
+SMB2_MAGIC = b"\xfeSMB"
+
+
+def pack_smb2_hdr(cmd, status=0, flags=0x00000001, message_id=0, session_id=0, async_id=0, credits=1):
+    return struct.pack(
+        "<4sHHIIHIIQQQ16s",
+        SMB2_MAGIC,
+        64,             # StructureSize
+        0,              # CreditCharge
+        status,         # Status
+        cmd,            # Command
+        credits,        # Credits
+        flags,          # Flags (0x01 = SERVER_TO_REDIR)
+        0,              # NextCommand
+        message_id,     # MessageId
+        async_id,       # AsyncId
+        session_id,     # SessionId
+        b"\x00" * 16    # Signature
+    )
+
+
+class Smb2Req:
+    def __init__(self, msg):
+        (self.magic, self.struct_size, self.credit_charge, self.status,
+         self.cmd, self.credits, self.flags, self.next_cmd,
+         self.message_id, self.async_id, self.session_id, self.sig) = struct.unpack_from("<4sHHIIHIIQQQ16s", msg, 0)
+        self.body = msg[64:]
+
+
+def h2_negotiate(conn, r, smb_version=2):
+    dialect = 0x0300 if smb_version == 3 else 0x0202
+    blob = b"\x60\x09\x06\x07\x2b\x06\x01\x04\x01\x82\x37\x02\x02\x0a"
+    params = struct.pack(
+        "<HHH16sIIIIQQHHH",
+        65,             # StructureSize
+        0x0001,         # SecurityMode
+        dialect,        # DialectRevision
+        b"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10",
+        0x00000001,     # Capabilities
+        65536,          # MaxTransactSize
+        65536,          # MaxReadSize
+        65536,          # MaxWriteSize
+        0,              # SystemTime
+        0,              # ServerStartTime
+        128,            # SecurityBufferOffset
+        len(blob),      # SecurityBufferLength
+        0               # Reserved
+    )
+    return params + blob, STATUS_SUCCESS
+
+
+def h2_session_setup(conn, r):
+    if conn.uid == 0:
+        conn.uid = 0x0000000100000001
+    body = struct.pack(
+        "<HHHH",
+        9,              # StructureSize
+        0x0001,         # SessionFlags (IS_GUEST)
+        0,              # SecurityBufferOffset
+        0               # SecurityBufferLength
+    )
+    return body, STATUS_SUCCESS
+
+
+def h2_tree_connect(conn, r):
+    body = struct.pack(
+        "<BBII",
+        16,             # StructureSize
+        0x01,           # ShareType DISK
+        0,              # Reserved
+        0x00000030,     # ShareFlags
+        0x000f001f      # MaximalAccess
+    )
+    return body, STATUS_SUCCESS
+
+
+def h2_create(conn, r):
+    file_id = b"\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00"
+    body = struct.pack(
+        "<BBIQQQQQQII16sII",
+        89,             # StructureSize
+        0x00,           # OplockLevel
+        0x00000001,     # CreateAction
+        0, 0, 0, 0, 0, 0,
+        0x00000020,     # FileAttributes
+        0,              # Reserved
+        file_id,        # FileId
+        0, 0
+    )
+    return body, STATUS_SUCCESS
+
+
+def h2_read(conn, r):
+    data = b""
+    data_offset = 80
+    hdr = struct.pack("<BBIBI", 16, data_offset, len(data), 0, 0)
+    return hdr + data, STATUS_SUCCESS
+
+
+def h2_write(conn, r):
+    hdr = struct.pack("<HHII", 17, 0, 0, 0)
+    return hdr, STATUS_SUCCESS
+
+
+def h2_close(conn, r):
+    body = struct.pack("<HHQQQQQI", 60, 0, 0, 0, 0, 0, 0, 0, 0)
+    return body, STATUS_SUCCESS
+
+
+def h2_echo(conn, r):
+    body = struct.pack("<HH", 4, 0)
+    return body, STATUS_SUCCESS
+
+
+def h2_generic_ok(conn, r):
+    return struct.pack("<HH", 4, 0), STATUS_SUCCESS
+
+
+SMB2_HANDLERS = {
+    0x0000: h2_negotiate,
+    0x0001: h2_session_setup,
+    0x0002: h2_generic_ok,
+    0x0003: h2_tree_connect,
+    0x0004: h2_generic_ok,
+    0x0005: h2_create,
+    0x0006: h2_close,
+    0x0008: h2_read,
+    0x0009: h2_write,
+    0x0012: h2_echo,
+}
+
+
 def h_negotiate(conn, r):
-    # OPL sends one or more dialect strings (format byte 0x02 + name). We always pick the
-    # single "NT LM 0.12" dialect at index 0 -- that's the only one OPL offers.
     dialects = []
     d = r.data
     i = 0
@@ -263,6 +390,23 @@ def h_negotiate(conn, r):
             i = end + 1
         else:
             i += 1
+
+    ver = getattr(conn.server, "smb_version", 1)
+    if ver in (2, 3):
+        smb2_idx = None
+        for smb2_name in ("SMB 2.002", "SMB 2.??? ", "2.002", "2.10"):
+            if smb2_name in dialects:
+                smb2_idx = dialects.index(smb2_name)
+                break
+        if smb2_idx is not None:
+            params = struct.pack(
+                "<HBHHIIIIqHB",
+                smb2_idx,       # DialectIndex
+                0x02,           # SecurityMode (SMB2 multi-protocol)
+                1, 1, 65535, 65536, 0, SERVER_CAPS, 0, 0, 0
+            )
+            return params, b"WORKGROUP\x00", STATUS_SUCCESS
+
     try:
         idx = dialects.index("NT LM 0.12")
     except ValueError:
@@ -751,6 +895,20 @@ def serve_conn(server, sock, addr):
                 break
             if msg == b"":
                 continue  # keep-alive
+            if len(msg) >= 64 and msg[0:4] == SMB2_MAGIC:
+                r2 = Smb2Req(msg)
+                handler = SMB2_HANDLERS.get(r2.cmd)
+                if handler is None:
+                    hdr = pack_smb2_hdr(r2.cmd, status=STATUS_NOT_IMPLEMENTED, message_id=r2.message_id, session_id=r2.session_id)
+                    send_msg(sock, hdr)
+                    continue
+                if r2.cmd == 0x0000:
+                    body, status = handler(conn, r2, smb_version=server.smb_version)
+                else:
+                    body, status = handler(conn, r2)
+                hdr = pack_smb2_hdr(r2.cmd, status=status, message_id=r2.message_id, session_id=conn.uid or r2.session_id)
+                send_msg(sock, hdr + body)
+                continue
             if len(msg) < 33 or msg[0:4] != SMB_MAGIC:
                 continue
             r = Req(msg)
@@ -787,9 +945,10 @@ def serve_conn(server, sock, addr):
 # Server + Windows port-445 (LanmanServer) takeover
 # --------------------------------------------------------------------------------------------
 class SmbServer:
-    def __init__(self, shares, read_only):
+    def __init__(self, shares, read_only, smb_version=1):
         self.shares = shares
         self.read_only = read_only
+        self.smb_version = int(smb_version)
 
 
 def _take_445():
@@ -861,6 +1020,8 @@ def main(argv=None):
                     help="serve the share read-only (no saves / no VMC writes); default is writable")
     ap.add_argument("--take-445", action="store_true",
                     help="bind the standard port 445 by pausing Windows LanmanServer (admin; reversible)")
+    ap.add_argument("--smb-version", type=int, choices=[1, 2, 3], default=1,
+                    help="SMB protocol version (1=SMBv1, 2=SMBv2, 3=SMBv3)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     VERBOSE = args.verbose
@@ -876,7 +1037,7 @@ def main(argv=None):
     if not shares:
         ap.error("at least one --share NAME=PATH is required")
 
-    server = SmbServer(shares, read_only=args.read_only)
+    server = SmbServer(shares, read_only=args.read_only, smb_version=args.smb_version)
 
     restore = None
     port = args.port
