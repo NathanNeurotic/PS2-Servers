@@ -131,9 +131,10 @@ def server_ports(key, values):
 
 def _server_ports(key, values):
     """Return [(protocol, port, purpose), ...] for fixed inbound ports."""
-    if key == "smbv1":
-        port = 445 if values.get("take_445") else _parse_port(values.get("port"), 1111)
-        return [("TCP", port, "SMBv1")]
+    if key in ("smbv1", "smbv2", "smbv3"):
+        label = "SMBv1" if key == "smbv1" else ("SMBv2" if key == "smbv2" else "SMBv3")
+        port = 445 if values.get("take_445") else _parse_port(values.get("port"), 1025)
+        return [("TCP", port, label)]
     if key == "udpfs":
         ports = [("UDP", _parse_port(values.get("port"), 0xF5F6), "UDPFS discovery")]
         # The data socket is normally ephemeral and covered by the program-wide
@@ -423,7 +424,7 @@ def setup_summary(key, values):
     if not is_windows():
         return ""
     parts = []
-    if key == "smbv1":
+    if key in ("smbv1", "smbv2", "smbv3"):
         parts.append("create Windows Firewall allow rules for the built-in PS2 Servers SMB server")
         if values.get("take_445"):
             parts.append("temporarily use TCP 445 by pausing Windows file sharing while the server runs")

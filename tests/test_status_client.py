@@ -115,6 +115,15 @@ class Query(unittest.TestCase):
         self.assertIsNone(status_client.query("127.0.0.1", 0, timeout=0.2))
         self.assertIsNone(status_client.query("no.such.host.invalid", 9, timeout=0.2))
 
+    def test_hex_string_port_is_parsed(self):
+        server = FakeServer(lambda _d: self.proto.build_status_reply(
+            self.proto.STATE_READY, self.proto.FLAG_UDPFS, 0, 5, "talks"))
+        self.addCleanup(server.close)
+        hex_port = "0x{:X}".format(server.port)
+        got = status_client.query("127.0.0.1", hex_port, timeout=1.0)
+        self.assertIsNotNone(got)
+        self.assertEqual(got["state"], self.proto.STATE_READY)
+
 
 class BusyIsPositiveOnly(unittest.TestCase):
     def setUp(self):

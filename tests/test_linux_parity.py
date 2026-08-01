@@ -14,7 +14,7 @@ from launcher import netinfo, posix_firewall, servers, windows_setup
 
 class FirewallHintTests(unittest.TestCase):
     UDPFS_PORTS = [("UDP", 0xF5F6, "UDPFS discovery")]
-    SMB_PORTS = [("TCP", 1111, "SMBv1")]
+    SMB_PORTS = [("TCP", 1025, "SMBv1")]
 
     def test_no_ports_no_hint(self):
         self.assertEqual(posix_firewall.firewall_hint_lines([]), [])
@@ -23,7 +23,7 @@ class FirewallHintTests(unittest.TestCase):
         with mock.patch.object(posix_firewall.shutil, "which", return_value=None):
             lines = posix_firewall.firewall_hint_lines(self.SMB_PORTS, probe_active=False)
         text = "\n".join(lines)
-        self.assertIn("TCP 1111", text)
+        self.assertIn("TCP 1025", text)
         self.assertIn("SMBv1", text)
         # No tool -> no sudo command, but still an actionable line.
         self.assertNotIn("sudo ", text)
@@ -45,8 +45,8 @@ class FirewallHintTests(unittest.TestCase):
         stripped = [ln.strip() for ln in lines]
         # The command line must be exactly the command -- copy-pasteable, no
         # trailing prose that a shell would choke on.
-        self.assertIn("sudo firewall-cmd --add-port=1111/tcp", stripped)
-        self.assertNotIn("sudo firewall-cmd --add-port=1111/tcp  "
+        self.assertIn("sudo firewall-cmd --add-port=1025/tcp", stripped)
+        self.assertNotIn("sudo firewall-cmd --add-port=1025/tcp  "
                          "(add --permanent to keep it after a reboot)", stripped)
         # The persistence caveat is still present, just on its own line.
         self.assertTrue(any("--permanent" in ln and "firewall-cmd" in ln
@@ -156,7 +156,8 @@ class WindowsOnlyFieldTests(unittest.TestCase):
         for server in servers.REGISTRY.values():
             for f in server.fields:
                 if f.windows_only:
-                    self.assertEqual((server.key, f.key), ("smbv1", "take_445"))
+                    self.assertIn((server.key, f.key),
+                                  (("smbv1", "take_445"), ("smbv2", "take_445"), ("smbv3", "take_445")))
 
 
 if __name__ == "__main__":

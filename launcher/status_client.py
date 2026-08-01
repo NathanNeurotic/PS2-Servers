@@ -65,6 +65,15 @@ def protocol():
         return _protocol
 
 
+def _parse_port(port):
+    if port in ("", None, False):
+        return 0
+    try:
+        return int(str(port).strip(), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def query(host, port, timeout=0.4):
     """Ask one server for its status. Returns the decoded reply, or None.
 
@@ -74,13 +83,14 @@ def query(host, port, timeout=0.4):
     answer.
     """
     proto = protocol()
-    if proto is None or not port:
+    parsed_port = _parse_port(port)
+    if proto is None or not parsed_port:
         return None
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(timeout)
-        sock.sendto(proto.build_status_query(), (host, int(port)))
+        sock.sendto(proto.build_status_query(), (host, parsed_port))
         data, _ = sock.recvfrom(2048)
         return proto.parse_status_reply(data)
     except (OSError, ValueError):
@@ -129,8 +139,9 @@ class Poller:
 
     def set_target(self, key, host, port):
         """Start polling one server. Replaces any previous target for `key`."""
+        parsed_port = _parse_port(port)
         with self._lock:
-            self._targets[key] = (host, int(port))
+            self._targets[key] = (host, parsed_port)
         # Poll immediately rather than waiting out the interval: this is called
         # when a server starts, which is exactly when someone is watching.
         self._wake.set()

@@ -245,6 +245,8 @@ class ShippedStatusPortsDoNotRace(unittest.TestCase):
 
 class InitScriptIsValidShell(unittest.TestCase):
     def test_posix_sh_parses_it(self):
+        if sys.platform == "win32":
+            self.skipTest("POSIX shell syntax check skipped on Windows platform")
         init = os.path.join(_OPENWRT, "ps2servers-edge.init")
         for shell in ("sh", "dash", "bash"):
             try:
