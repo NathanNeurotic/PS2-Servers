@@ -44,6 +44,24 @@ def _probe_values(server):
     return values
 
 
+def _load_server_module(server):
+    """Import a REGISTRY server's entry point the way the launcher does.
+
+    By file path with its own directory on sys.path, because that is how
+    launcher/serve.py loads it -- importing it any other way would test a module
+    that resolves its siblings differently from the one users run.
+    """
+    import importlib.util
+    if server.module_dir and server.module_dir not in sys.path:
+        sys.path.insert(0, server.module_dir)
+    spec = importlib.util.spec_from_file_location(
+        "_probe_" + server.key, server.module_file)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _smb_dialect_of(server):
     """The dialect a REGISTRY entry asks the server for, or None if it is not SMB."""
     argv = server._build_argv(_probe_values(server))
@@ -73,28 +91,48 @@ class ServerRegistryTests(unittest.TestCase):
         user connected successfully and saw an empty folder with no error.
 
         This is not "SMB2 is banned". It is the ordering: the server has to be
-        able to serve a file before the launcher offers the mode. Implement
-        QUERY_DIRECTORY and a real READ, and this test goes green on its own --
-        no edit here, nothing to remember.
+        able to serve a file before the launcher offers the mode. The check is
+        against whichever server the mode actually runs, so it keeps meaning
+        something when a mode is repointed at a different implementation.
         """
-        sys.path.insert(0, os.path.join(_ROOT, "smbv1_server"))
-        try:
-            import smbserver_opl
-        finally:
-            sys.path.pop(0)
-
         SMB2_QUERY_DIRECTORY = 0x000E
-        can_list = SMB2_QUERY_DIRECTORY in smbserver_opl.SMB2_HANDLERS
 
         for key, server in servers.REGISTRY.items():
             dialect = _smb_dialect_of(server)
             if dialect is None or dialect < 2:
                 continue
-            self.assertTrue(
-                can_list,
-                "{} offers SMB{}, but the server implements no QUERY_DIRECTORY, "
-                "so the share cannot be listed. Finish the SMB2 handlers before "
-                "putting the mode back in the REGISTRY.".format(key, dialect))
+            module = _load_server_module(server)
+            handlers = (getattr(module, "SMB2_HANDLERS", None)
+                        or getattr(module, "_HANDLERS", None) or {})
+            self.assertIn(
+                SMB2_QUERY_DIRECTORY, handlers,
+                "{} offers SMB{} via {}, which implements no QUERY_DIRECTORY, so "
+                "the share cannot be listed. Finish the handlers before offering "
+                "the mode.".format(key, dialect,
+                                   os.path.basename(server.module_file or "?")))
+
+    def test_take_445_reaches_every_smb_mode_that_offers_it(self):
+        """A checkbox the server never hears about is a control that does
+        nothing -- the exact defect the SMBv2/SMBv3 modes were pulled for."""
+        for key in ("smbv1", "smbv2", "smbv3"):
+            with self.subTest(key=key):
+                server = servers.REGISTRY[key]
+                self.assertTrue(any(f.key == "take_445" for f in server.fields))
+                values = _probe_values(server)
+                values["take_445"] = True
+                self.assertIn("--take-445", server._build_argv(values))
+
+    def test_the_headless_error_lists_exactly_what_is_registered(self):
+        """The `serve` error text and the REGISTRY drifted apart twice."""
+        import ps2servers
+        import io
+        import contextlib
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ps2servers._normalize_headless_alias(["serve"])
+        message = err.getvalue()
+        for key in servers.REGISTRY:
+            self.assertIn(key, message, "%s is registered but not offered" % key)
 
     def test_windows_setup_ports_for_smb(self):
         # The SMBv2/SMBv3 keys stay mapped here even though no mode offers them:
