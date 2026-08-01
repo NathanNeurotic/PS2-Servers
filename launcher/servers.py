@@ -153,6 +153,8 @@ def _smb2_argv(v, smb_version):
         args += ["--bind", str(v["bind"])]
     if v.get("read_only"):
         args.append("--read-only")
+    if v.get("take_445"):
+        args.append("--take-445")
     # A password is required unless the user deliberately ticks the open box.
     # The server refuses to start with neither, rather than defaulting to open.
     user = (v.get("username") or "").strip()

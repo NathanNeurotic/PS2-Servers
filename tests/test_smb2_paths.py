@@ -201,3 +201,49 @@ class SymlinkEscape(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowsDeviceNames(unittest.TestCase):
+    r"""Win32 resolves these to devices wherever they appear in a path.
+
+    C:/share/NUL is the null device, not a file in the share, so a client could
+    CREATE one and write into a device or open a serial port. Windows' own SMB
+    server refuses them. They are refused on every host here, so a share does
+    not change meaning depending on which OS is serving it.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.share = Share("games", self.root)
+
+    def test_the_reserved_names_are_refused(self):
+        for name in ("NUL", "con", "AUX", "PRN", "COM1", "lpt9", "CLOCK$"):
+            with self.subTest(name=name):
+                with self.assertRaises(PathError):
+                    self.share.resolve(name)
+
+    def test_an_extension_does_not_make_them_safe(self):
+        """CON.txt is the console device too -- Win32 stops at the first dot."""
+        for name in ("CON.txt", "nul.iso", "COM1.bin"):
+            with self.subTest(name=name):
+                with self.assertRaises(PathError):
+                    self.share.resolve(name)
+
+    def test_they_are_refused_in_a_subdirectory_too(self):
+        with self.assertRaises(PathError):
+            self.share.resolve("games/NUL")
+
+    def test_an_ordinary_name_that_merely_starts_the_same_is_served(self):
+        """CONSOLE and NULLS are normal files; only the exact names are devices."""
+        for name in ("CONSOLE.iso", "NULLS.txt", "COMMANDER.elf", "AUXILIARY"):
+            with self.subTest(name=name):
+                self.assertTrue(self.share.resolve(name).startswith(self.share.root))
+
+    def test_a_trailing_dot_or_space_is_refused(self):
+        """Win32 strips both, so 'game.iso.' and 'game.iso' would be one file to
+        a Windows client and two to this server."""
+        for name in ("game.iso.", "game.iso ", "folder ."):
+            with self.subTest(name=name):
+                with self.assertRaises(PathError):
+                    self.share.resolve(name)

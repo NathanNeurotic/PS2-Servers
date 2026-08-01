@@ -142,6 +142,10 @@ STATUS_DIRECTORY_NOT_EMPTY = 0xC0000101
 # arrives on the wire as the status it chose rather than a generic denial.
 STATUS_BY_NAME = {
     "STATUS_ACCESS_DENIED": STATUS_ACCESS_DENIED,
+    # smb2_spnego raises this for a malformed NTLMSSP token. Without it here the
+    # lookup falls back to LOGON_FAILURE, which tells the user their password is
+    # wrong when the token never parsed.
+    "STATUS_INVALID_PARAMETER": STATUS_INVALID_PARAMETER,
     "STATUS_OBJECT_NAME_INVALID": STATUS_OBJECT_NAME_INVALID,
     "STATUS_OBJECT_NAME_NOT_FOUND": STATUS_OBJECT_NAME_NOT_FOUND,
     "STATUS_OBJECT_PATH_SYNTAX_BAD": STATUS_OBJECT_PATH_SYNTAX_BAD,

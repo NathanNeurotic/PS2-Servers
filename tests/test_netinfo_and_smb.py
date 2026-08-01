@@ -111,6 +111,29 @@ class ServerRegistryTests(unittest.TestCase):
                 "the mode.".format(key, dialect,
                                    os.path.basename(server.module_file or "?")))
 
+    def test_take_445_reaches_every_smb_mode_that_offers_it(self):
+        """A checkbox the server never hears about is a control that does
+        nothing -- the exact defect the SMBv2/SMBv3 modes were pulled for."""
+        for key in ("smbv1", "smbv2", "smbv3"):
+            with self.subTest(key=key):
+                server = servers.REGISTRY[key]
+                self.assertTrue(any(f.key == "take_445" for f in server.fields))
+                values = _probe_values(server)
+                values["take_445"] = True
+                self.assertIn("--take-445", server._build_argv(values))
+
+    def test_the_headless_error_lists_exactly_what_is_registered(self):
+        """The `serve` error text and the REGISTRY drifted apart twice."""
+        import ps2servers
+        import io
+        import contextlib
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ps2servers._normalize_headless_alias(["serve"])
+        message = err.getvalue()
+        for key in servers.REGISTRY:
+            self.assertIn(key, message, "%s is registered but not offered" % key)
+
     def test_windows_setup_ports_for_smb(self):
         # The SMBv2/SMBv3 keys stay mapped here even though no mode offers them:
         # the firewall helper is keyed by name, and it is what the modes will

@@ -80,7 +80,8 @@ class Client:
         assert head.status == 0, "NEGOTIATE failed 0x%08X" % head.status
         return struct.unpack_from("<H", reply, 4)[0]
 
-    def session_setup(self, user, password, anonymous=False):
+    def session_setup(self, user, password, anonymous=False,
+                      domain="WORKGROUP"):
         negotiate = (spnego.NTLMSSP_SIGNATURE + struct.pack("<I", 1)
                      + struct.pack("<I", spnego.CHALLENGE_FLAGS)
                      + struct.pack("<HHI", 0, 0, 32) + struct.pack("<HHI", 0, 0, 32))
@@ -104,9 +105,9 @@ class Client:
             blob_body = (struct.pack("<BBHIQ", 1, 1, 0, 0, 0)
                          + os.urandom(8) + struct.pack("<I", 0)
                          + target_info + struct.pack("<I", 0))
-            ntowf = ntowfv2(password, user, "WORKGROUP")
+            ntowf = ntowfv2(password, user, domain)
             proof = ntlmv2_proof(ntowf, challenge, blob_body)
-            auth = self._authenticate(proof + blob_body, user, "WORKGROUP")
+            auth = self._authenticate(proof + blob_body, user, domain)
         head, _ = self._session_blob(auth)
         return head.status
 
@@ -600,3 +601,167 @@ class Robustness(ServerFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MalformedRequestBuffers(ServerFixture):
+    """Every client-declared buffer offset, bounds-checked.
+
+    SMB2 offsets are measured from the start of the message, so a valid one is
+    never below 64. Subtracting the header from a smaller value gave a negative
+    index, and Python slices from the END rather than failing -- which for WRITE
+    meant the file received the wrong bytes and the client was told it worked.
+    """
+
+    def test_a_write_with_a_low_data_offset_is_refused_not_mis_sliced(self):
+        original = b"O" * 64
+        with open(os.path.join(self.dir, "save.bin"), "wb") as f:
+            f.write(original)
+        c = self.connected()
+        _status, fid = c.create("save.bin")
+        payload = b"ATTACKER" * 16
+        for data_off in (0, 1, 63, 64):          # 64 is the header itself
+            with self.subTest(data_off=data_off):
+                body = struct.pack("<HHIQ", 49, data_off, 16, 0) + fid
+                body += struct.pack("<IIHHI", 0, 0, 0, 0, 0) + payload
+                head, _ = c.call(wire.CMD_WRITE, body)
+                self.assertEqual(head.status, wire.STATUS_INVALID_PARAMETER)
+        c.close_handle(fid)
+        with open(os.path.join(self.dir, "save.bin"), "rb") as f:
+            self.assertEqual(f.read(), original, "the file was written to anyway")
+
+    def test_a_write_longer_than_it_sent_is_refused(self):
+        c = self.connected()
+        _status, fid = c.create("big.bin", disposition=wire.FILE_OVERWRITE_IF)
+        body = struct.pack("<HHIQ", 49, wire.HEADER_SIZE + 48, 1 << 20, 0) + fid
+        body += struct.pack("<IIHHI", 0, 0, 0, 0, 0) + b"only eight"
+        head, _ = c.call(wire.CMD_WRITE, body)
+        self.assertEqual(head.status, wire.STATUS_INVALID_PARAMETER)
+
+    def test_every_other_declared_buffer_is_bounded_too(self):
+        c = self.connected()
+        _status, fid = c.create("", options=wire.FILE_DIRECTORY_FILE)
+        # CREATE name, QUERY_DIRECTORY pattern, SET_INFO payload: offset 0.
+        name = "x".encode("utf-16-le")
+        create = struct.pack("<HBBIQQIIIIIHHII", 57, 0, 0, 2, 0, 0, 0x00120089,
+                             0, 7, wire.FILE_OPEN, 0, 0, len(name), 0, 0) + name
+        head, _ = c.call(wire.CMD_CREATE, create)
+        self.assertEqual(head.status, wire.STATUS_INVALID_PARAMETER)
+
+        qd = (struct.pack("<HBBI", 33, wire.FILE_BOTH_DIRECTORY_INFORMATION, 1, 0)
+              + fid + struct.pack("<HHI", 0, 8, 65536) + name)
+        head, _ = c.call(wire.CMD_QUERY_DIRECTORY, qd)
+        self.assertEqual(head.status, wire.STATUS_INVALID_PARAMETER)
+
+        si = (struct.pack("<HBBIHHI", 33, wire.INFO_TYPE_FILE,
+                          wire.FILE_END_OF_FILE_INFORMATION, 8, 0, 0, 0) + fid
+              + struct.pack("<q", 0))
+        head, _ = c.call(wire.CMD_SET_INFO, si)
+        self.assertEqual(head.status, wire.STATUS_INVALID_PARAMETER)
+
+    def test_a_malformed_token_says_so_instead_of_blaming_the_password(self):
+        """STATUS_LOGON_FAILURE for a token that never parsed sends the user to
+        check a password that was never the problem."""
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        c.negotiate()
+        # Establish a challenge first, or the server refuses for the unrelated
+        # (and correct) reason that an AUTHENTICATE arrived without one.
+        negotiate = (spnego.NTLMSSP_SIGNATURE + struct.pack("<I", 1)
+                     + struct.pack("<I", spnego.CHALLENGE_FLAGS)
+                     + struct.pack("<HHI", 0, 0, 32) + struct.pack("<HHI", 0, 0, 32))
+        head, _ = c._session_blob(negotiate)
+        c.session_id = head.session_id
+        token = (spnego.NTLMSSP_SIGNATURE + struct.pack("<I", 3)
+                 + struct.pack("<HHI", 24, 24, 0xFFFF) * 6
+                 + struct.pack("<I", 0) + b"\x00" * 8)
+        body = struct.pack("<HBBIIHHQ", 25, 0, 1, 0, 0,
+                           wire.HEADER_SIZE + 24, len(token), 0)
+        head, _ = c.call(wire.CMD_SESSION_SETUP, body + token)
+        self.assertEqual(head.status, wire.STATUS_INVALID_PARAMETER)
+
+
+class RenameSafety(ServerFixture):
+    def _rename(self, c, fid, target, replace):
+        raw = target.encode("utf-16-le")
+        payload = (bytes([1 if replace else 0]) + b"\x00" * 7 + b"\x00" * 8
+                   + struct.pack("<I", len(raw)) + raw)
+        body = (struct.pack("<HBBIHHI", 33, wire.INFO_TYPE_FILE,
+                            wire.FILE_RENAME_INFORMATION, len(payload),
+                            wire.HEADER_SIZE + 32, 0, 0) + fid + payload)
+        head, _ = c.call(wire.CMD_SET_INFO, body)
+        return head.status
+
+    def test_rename_onto_an_existing_file_is_refused_by_default(self):
+        """ReplaceIfExists=0 is what a file manager sends for an ordinary
+        rename. Overwriting there destroys a file the user never named."""
+        keep = os.path.join(self.dir, "keep.iso")
+        with open(keep, "wb") as f:
+            f.write(b"IRREPLACEABLE")
+        c = self.connected()
+        _status, fid = c.create("game.iso")
+        self.assertEqual(self._rename(c, fid, "keep.iso", replace=False),
+                         wire.STATUS_OBJECT_NAME_COLLISION)
+        with open(keep, "rb") as f:
+            self.assertEqual(f.read(), b"IRREPLACEABLE")
+
+    def test_rename_replaces_when_the_client_asks_for_it(self):
+        with open(os.path.join(self.dir, "old.iso"), "wb") as f:
+            f.write(b"OLD")
+        c = self.connected()
+        _status, fid = c.create("game.iso")
+        self.assertEqual(self._rename(c, fid, "old.iso", replace=True), 0)
+        c.close_handle(fid)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "game.iso")))
+
+    def test_a_rename_out_of_the_share_is_refused(self):
+        c = self.connected()
+        _status, fid = c.create("game.iso")
+        self.assertNotEqual(self._rename(c, fid, "..\escaped.iso", replace=True), 0)
+
+
+class ParentEntry(ServerFixture):
+    def test_dotdot_at_the_share_root_describes_the_root(self):
+        """The parent of the share root is outside the share, and nothing above
+        the root may be described to a client -- not even its timestamps."""
+        c = self.connected()
+        _status, fid = c.create("", options=wire.FILE_DIRECTORY_FILE)
+        buffers = c.query_directory_raw(fid)
+        blob = b"".join(buffers)
+        entries, at = {}, 0
+        while at < len(blob):
+            next_off = struct.unpack_from("<I", blob, at)[0]
+            name_len = struct.unpack_from("<I", blob, at + 60)[0]
+            name = blob[at + 94:at + 94 + name_len].decode("utf-16-le")
+            entries[name] = struct.unpack_from("<Q", blob, at + 8)[0]   # creation
+            if next_off == 0:
+                break
+            at += next_off
+        self.assertIn("..", entries)
+        self.assertEqual(entries[".."], entries["."],
+                         "'..' described a directory outside the share")
+
+
+class DomainHandling(ServerFixture):
+    """NTOWFv2 folds the domain into the key, so the server must use exactly the
+    one the client used -- empty is a value, not a missing field."""
+
+    def test_a_client_that_sends_no_domain_still_authenticates(self):
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        c.negotiate()
+        self.assertEqual(c.session_setup(USER, PASSWORD, domain=""), 0)
+
+    def test_a_client_that_sends_the_workgroup_authenticates(self):
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        c.negotiate()
+        self.assertEqual(c.session_setup(USER, PASSWORD, domain="WORKGROUP"), 0)
+
+    def test_the_wrong_password_still_fails_whatever_the_domain(self):
+        for domain in ("", "WORKGROUP", "SOMETHINGELSE"):
+            with self.subTest(domain=domain):
+                c = Client(self.port)
+                self.addCleanup(c.close)
+                c.negotiate()
+                self.assertEqual(c.session_setup(USER, "wrong", domain=domain),
+                                 wire.STATUS_LOGON_FAILURE)

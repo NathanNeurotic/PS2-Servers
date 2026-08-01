@@ -309,6 +309,34 @@ class Smb2Server:
                             "share is read-only")
 
 
+def request_buffer(body, offset, length, what, least=wire.HEADER_SIZE):
+    """The slice a request declares, bounds-checked.
+
+    SMB2 offsets are measured from the start of the MESSAGE, header included, so
+    a valid one is never below 64. Subtracting the header from a smaller value
+    gives a negative index, and Python then slices from the END of the body
+    instead of failing -- so a WRITE with DataOffset 0 wrote whatever bytes
+    happened to be there, at the offset the client asked for, and reported
+    success. Everything the client sent is its own, so nothing leaks; what it
+    loses is the file it was writing to.
+
+    Bounds are checked once, here, rather than at each of the six call sites,
+    because five of them only ended in a confusing refusal and were therefore
+    easy to leave alone.
+    """
+    if length == 0:
+        return b""
+    start = offset - wire.HEADER_SIZE
+    # `least` is the end of the request's own fixed structure. A buffer that
+    # starts before it overlaps the fields that describe it, which no client can
+    # have meant -- for WRITE it meant the file received the request header.
+    if offset < least or start < 0 or length < 0 or start + length > len(body):
+        raise Smb2Error(wire.STATUS_INVALID_PARAMETER,
+                        "%s buffer offset %d length %d does not fit a %d-byte body"
+                        % (what, offset, length, len(body)))
+    return body[start:start + length]
+
+
 def _status_for_oserror(e):
     if e.errno in (errno.ENOENT,):
         return wire.STATUS_OBJECT_NAME_NOT_FOUND
@@ -374,8 +402,8 @@ def h_session_setup(srv, conn, hdr, body):
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short SESSION_SETUP")
     _size, _flags, _mode, _caps, _chan, buf_off, buf_len, _prev = struct.unpack_from(
         "<HBBIIHHQ", body, 0)
-    start = buf_off - wire.HEADER_SIZE
-    blob = body[start:start + buf_len] if buf_len else b""
+    blob = request_buffer(body, buf_off, buf_len, "SESSION_SETUP security",
+                          least=wire.HEADER_SIZE + 24)
     token = spnego.extract_ntlm(blob)
     if token is None:
         raise Smb2Error(wire.STATUS_LOGON_FAILURE, "no NTLMSSP token offered")
@@ -414,8 +442,12 @@ def h_session_setup(srv, conn, hdr, body):
                             "anonymous session refused; this share needs a password")
         session_flags = wire.SESSION_FLAG_IS_NULL
     else:
+        # Pass the domain through exactly as claimed, including empty. NTOWFv2
+        # folds it into the key, so substituting the server's default for a
+        # client that sent none derives a different key and fails a correct
+        # password. Empty is a value here, not a missing one.
         srv.auth.verify(creds.user, creds.nt_response, conn.challenge,
-                        domain=creds.domain or None)
+                        domain=creds.domain)
 
     conn.authenticated = True
     conn.user = creds.user or "(anonymous)"
@@ -442,8 +474,9 @@ def h_tree_connect(srv, conn, hdr, body):
     if len(body) < 8:
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short TREE_CONNECT")
     _size, _flags, path_off, path_len = struct.unpack_from("<HHHH", body, 0)
-    start = path_off - wire.HEADER_SIZE
-    path = wire.from_utf16(body[start:start + path_len])
+    path = wire.from_utf16(request_buffer(body, path_off, path_len,
+                                          "TREE_CONNECT path",
+                                          least=wire.HEADER_SIZE + 8))
 
     # \\server\share -- only the last component names anything here.
     name = path.rstrip("\\").rsplit("\\", 1)[-1]
@@ -480,8 +513,8 @@ def h_create(srv, conn, hdr, body):
      _access, _attrs, _share_access, disposition, options,
      name_off, name_len, _cc_off, _cc_len) = struct.unpack_from(
         "<HBBIQQIIIIIHHII", body, 0)
-    start = name_off - wire.HEADER_SIZE
-    rel = wire.from_utf16(body[start:start + name_len]) if name_len else ""
+    rel = wire.from_utf16(request_buffer(body, name_off, name_len, "CREATE name",
+                                        least=wire.HEADER_SIZE + 56))
 
     path = share.resolve(rel)
     exists = os.path.exists(path)
@@ -633,8 +666,11 @@ def h_write(srv, conn, hdr, body):
     if h.is_dir:
         raise Smb2Error(wire.STATUS_INVALID_DEVICE_REQUEST, "write to a directory")
 
-    start = data_off - wire.HEADER_SIZE
-    data = body[start:start + length]
+    if length > wire.MAX_WRITE:
+        raise Smb2Error(wire.STATUS_INVALID_PARAMETER,
+                        "write of %d bytes exceeds the advertised maximum" % length)
+    data = request_buffer(body, data_off, length, "WRITE data",
+                          least=wire.HEADER_SIZE + 48)
     fh = _open_file(h, writable=True)
     fh.seek(offset)
     written = fh.write(data)
@@ -668,8 +704,9 @@ def h_query_directory(srv, conn, hdr, body):
     _size, info_class, flags, _index = struct.unpack_from("<HBBI", body, 0)
     h = conn.handle_from(body[8:24])
     name_off, name_len, out_len = struct.unpack_from("<HHI", body, 24)
-    start = name_off - wire.HEADER_SIZE
-    pattern = wire.from_utf16(body[start:start + name_len]) if name_len else "*"
+    pattern = wire.from_utf16(request_buffer(
+        body, name_off, name_len, "QUERY_DIRECTORY pattern",
+        least=wire.HEADER_SIZE + 32)) or "*"
 
     if not h.is_dir:
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "not a directory")
@@ -687,8 +724,17 @@ def h_query_directory(srv, conn, hdr, body):
     total = 0
     while h.cursor < len(h.listing):
         name = h.listing[h.cursor]
-        target = h.path if name == "." else (
-            os.path.dirname(h.path) if name == ".." else os.path.join(h.path, name))
+        if name == ".":
+            target = h.path
+        elif name == "..":
+            # At the share root the parent is outside the share, and the whole
+            # point of the boundary is that nothing above the root is described
+            # to a client -- not even its size and timestamps. Report the root
+            # itself, which is what a client needs the entry to exist for.
+            target = (h.path if os.path.realpath(h.path) == share.root
+                      else os.path.dirname(h.path))
+        else:
+            target = os.path.join(h.path, name)
         try:
             st = os.stat(target)
         except OSError:
@@ -760,8 +806,8 @@ def h_set_info(srv, conn, hdr, body):
     _size, info_type, info_class, buf_len, buf_off = struct.unpack_from(
         "<HBBIH", body, 0)
     h = conn.handle_from(body[16:32])
-    start = buf_off - wire.HEADER_SIZE
-    payload = body[start:start + buf_len]
+    payload = request_buffer(body, buf_off, buf_len, "SET_INFO",
+                             least=wire.HEADER_SIZE + 32)
 
     if info_type != wire.INFO_TYPE_FILE:
         raise Smb2Error(wire.STATUS_NOT_SUPPORTED, "only file info can be set")
@@ -779,11 +825,22 @@ def h_set_info(srv, conn, hdr, body):
         # them on every copy, and failing the call fails the copy.
         return wire.STATUS_SUCCESS, struct.pack("<H", 2)
     if info_class == wire.FILE_RENAME_INFORMATION and len(payload) >= 20:
+        # Byte 0 is ReplaceIfExists, and it is not advisory: a file manager sends
+        # 0 for an ordinary rename and expects a collision to be refused.
+        # os.replace overwrites unconditionally, so honouring the flag is the
+        # difference between a refused rename and a destroyed file.
+        replace_if_exists = bool(payload[0])
         name_len = struct.unpack_from("<I", payload, 16)[0]
+        if 20 + name_len > len(payload):
+            raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "rename name runs past the buffer")
         target = wire.from_utf16(payload[20:20 + name_len])
         dest = h.share.resolve(target)
+        if os.path.exists(dest) and not os.path.samefile(dest, h.path):
+            if not replace_if_exists:
+                raise Smb2Error(wire.STATUS_OBJECT_NAME_COLLISION, target)
         os.replace(h.path, dest)
         h.path = dest
+        h.rel = target
         return wire.STATUS_SUCCESS, struct.pack("<H", 2)
 
     raise Smb2Error(wire.STATUS_NOT_SUPPORTED,
