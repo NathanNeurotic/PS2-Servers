@@ -123,7 +123,9 @@ def _smb_argv(v, smb_version="1"):
     # choose. "games" stays the default because it is what every OPL guide and
     # every existing saved configuration says.
     share = (v.get("share_name") or "games").strip() or "games"
-    folder = v.get("games_folder") or v.get("root_dir") or ""
+    folder = (v.get("games_folder") or v.get("root_dir") or "").strip()
+    if not folder:
+        raise ValueError("SMB server requires a Games folder to share.")
     args = ["--share", "{}={}".format(share, folder),
             "--smb-version", str(smb_version)]
     if v.get("port"):
@@ -354,6 +356,8 @@ SMBV1 = ServerDef(
     module_file=_repo("smbv1_server", "smbserver_opl.py"),
     module_dir=_repo("smbv1_server"),
     fields=[
+        Field("games_folder", "Games folder", "folder", required=True,
+              help="Folder to share over SMBv1 for OPL."),
         Field("share_name", "Share name", "text", default="games",
               help="The name typed after the IP on a client, and in OPL's "
                    "Share field. 'games' is what the guides assume."),
