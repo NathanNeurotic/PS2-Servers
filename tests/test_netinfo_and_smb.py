@@ -8,7 +8,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from launcher import netinfo, servers, windows_setup
+from launcher import gui, netinfo, servers, windows_setup
 
 
 class NetInfoTests(unittest.TestCase):
@@ -135,12 +135,17 @@ class ServerRegistryTests(unittest.TestCase):
             self.assertIn(key, message, "%s is registered but not offered" % key)
 
     def test_windows_setup_ports_for_smb(self):
-        # The SMBv2/SMBv3 keys stay mapped here even though no mode offers them:
-        # the firewall helper is keyed by name, and it is what the modes will
-        # need again once the server can serve them.
         for key in ("smbv1", "smbv2", "smbv3"):
             rules = windows_setup._server_ports(key, {"port": "1025"})
             self.assertEqual(rules[0][1], 1025)
+
+    def test_opl_hint_smb_versions(self):
+        for key in ("smbv1", "smbv2", "smbv3"):
+            hint = gui.opl_hint(key, "192.168.1.100", {"port": 1025, "share_name": "games", "username": "", "password": ""})
+            self.assertIn("192.168.1.100", hint)
+            self.assertIn("1025", hint)
+            self.assertIn("Port 1025", hint)
+            self.assertIn("User 'guest'", hint)
 
 
 if __name__ == "__main__":

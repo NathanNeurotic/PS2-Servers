@@ -55,7 +55,7 @@ APP_MIN_HEIGHT = 420
 # The tab strip's right-hand tail: the notebook's right tabmargin and border, which
 # sit past the last tab and so are not included when the strip is measured, plus a
 # few pixels of slack so the last tab keeps its whole border at the minimum width.
-TAB_STRIP_TAIL = 18
+TAB_STRIP_TAIL = 20
 
 # The window resizes in both directions and the scroll canvas hands its full width
 # to the content, so nothing may carry a hard-coded wraplength: every wrapping label
@@ -228,14 +228,15 @@ def tab_text(label):
 
 
 def opl_hint(key, ip, values):
-    if key == "smbv1":
-        port = "445" if values.get("take_445") else str(values.get("port") or 1111)
+    if key in ("smbv1", "smbv2", "smbv3"):
+        port = "445" if values.get("take_445") else str(values.get("port") or 1025)
         # Read back what this card is actually running, not what the defaults
         # were: a hint that says 'games' next to a share called 'roms' sends the
         # user to check their network when the name was the whole problem.
         share = (values.get("share_name") or "games").strip() or "games"
-        user = (values.get("username") or "guest").strip() or "guest"
-        password = values.get("password") or ""
+        user = (values.get("username") or "").strip()
+        password = (values.get("password") or "") if user else ""
+        user = user or "guest"
         creds = ("User '{}'  ·  Password {}".format(
             user, "as set" if password else "blank"))
         return ("In OPL → Network:  IP {}  ·  Port {}  ·  Share '{}'  "
@@ -805,7 +806,7 @@ class LauncherApp:
         # Always-visible version, so a tester can read it off the screen without
         # opening About. Right-aligned in the header's stretchy column.
         ttk.Label(header, text="PS2 Servers " + APP_VERSION_LABEL,
-                  style="TopStripHint.TLabel").grid(row=0, column=4, sticky="e",
+                  style="TopStripHint.TLabel").grid(row=0, column=5, sticky="e",
                                                     padx=(12, 0))
         self.ip_var = tk.StringVar(value=netinfo.best_lan_ip())
         # Editable, not readonly: detection leans on getaddrinfo(gethostname()),

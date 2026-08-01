@@ -123,7 +123,8 @@ def _smb_argv(v, smb_version="1"):
     # choose. "games" stays the default because it is what every OPL guide and
     # every existing saved configuration says.
     share = (v.get("share_name") or "games").strip() or "games"
-    args = ["--share", "{}={}".format(share, v["games_folder"]),
+    folder = v.get("games_folder") or v.get("root_dir") or ""
+    args = ["--share", "{}={}".format(share, folder),
             "--smb-version", str(smb_version)]
     if v.get("port"):
         args += ["--port", str(v["port"])]
@@ -353,8 +354,6 @@ SMBV1 = ServerDef(
     module_file=_repo("smbv1_server", "smbserver_opl.py"),
     module_dir=_repo("smbv1_server"),
     fields=[
-        Field("games_folder", "Games folder", "folder", required=True,
-              help="Folder of PS2 games/apps to share."),
         Field("share_name", "Share name", "text", default="games",
               help="The name typed after the IP on a client, and in OPL's "
                    "Share field. 'games' is what the guides assume."),
@@ -471,4 +470,4 @@ UDPBD = ServerDef(
     _build_argv=_udpbd_argv,
 )
 
-REGISTRY = {s.key: s for s in (SMBV1, UDPFS, UDPBD)}
+REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, UDPBD)}
