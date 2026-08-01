@@ -255,13 +255,18 @@ func (s *Server) handleData(st *session.State, in inbound) {
 			st.Mu.Unlock()
 			return
 		}
-		if h.Sequence == 0 && st.Profile == session.Standard {
-			// A standard peer restarted on the same address. Its old handles must
-			// not leak into the replacement session.
-			st.Reset(session.Standard)
+		if h.Sequence == 0 {
+			// A peer restarted on the same address (e.g. NHDDL -> Neutrino handoff).
+			// Reset connection state so old handles and sequence numbers do not leak into the replacement session.
+			prof := st.Profile
+			if prof == "" || prof == session.Pending {
+				prof = session.Standard
+			}
+			st.Reset(prof)
 			st.ResponseSocket = in.socket
 			st.ExpectedReceive = 0
 			st.Touch()
+			s.cfg.Log.Info("peer sequence reset (seq 0 received)", map[string]any{"peer": in.peer})
 		} else {
 			s.sendACK(st, false)
 			st.Mu.Unlock()

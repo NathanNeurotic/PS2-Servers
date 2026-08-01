@@ -236,9 +236,12 @@ def opl_hint(key, ip, values):
         share = (values.get("share_name") or "games").strip() or "games"
         user = (values.get("username") or "").strip()
         password = (values.get("password") or "") if user else ""
-        user = user or "guest"
-        creds = ("User '{}'  ·  Password {}".format(
-            user, "as set" if password else "blank"))
+        if values.get("open_share") and not user:
+            creds = "Anonymous / Guest (No Auth)"
+        else:
+            user_display = user or "guest"
+            creds = "User '{}'  ·  Password {}".format(
+                user_display, "as set" if password else "blank")
         return ("In OPL → Network:  IP {}  ·  Port {}  ·  Share '{}'  "
                 "·  NetBIOS off  ·  {}".format(ip, port, share, creds))
     if key == "udpfs":

@@ -147,6 +147,9 @@ class ServerRegistryTests(unittest.TestCase):
             self.assertIn("Port 1025", hint)
             self.assertIn("User 'guest'", hint)
 
+            # Omitted/empty port should default to 1025
+            hint_fallback = gui.opl_hint(key, "192.168.1.100", {"share_name": "games", "username": "", "password": ""})
+            self.assertIn("Port 1025", hint_fallback)
 
 if __name__ == "__main__":
     unittest.main()
