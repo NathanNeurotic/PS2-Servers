@@ -49,6 +49,13 @@ SUPPORT_FILES = [
     # packaged build imports fine in source mode and fails at runtime, which is
     # exactly the failure tests/test_packaging_data_files.py exists to catch.
     "udpfs_server/router_status.py",
+    # smb2_server.py imports all four of these at load. _server_entry_points
+    # only sees the entry point itself, so a sibling module missing here is a
+    # packaged build whose SMBv2/SMBv3 modes die on ImportError at start.
+    "smb2_server/smb2_wire.py",
+    "smb2_server/smb2_spnego.py",
+    "smb2_server/smb2_auth.py",
+    "smb2_server/smb2_paths.py",
 ]
 
 
