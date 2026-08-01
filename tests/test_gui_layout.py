@@ -50,6 +50,8 @@ class LauncherLayout(unittest.TestCase):
             os.environ[var] = cls._scratch
 
         from launcher import config, main as launcher_main, tray
+        cls._saved_config_save = config.save
+        cls._saved_tray_available = tray.AVAILABLE
         config.save = lambda data: None
         tray.AVAILABLE = False              # no tray icon during the test
 
@@ -61,12 +63,34 @@ class LauncherLayout(unittest.TestCase):
         try:
             cls.root = tk.Tk()
         except tk.TclError:
+            cls._restore_env_and_stubs()
             raise unittest.SkipTest("no display")
         cls.app = gui.LauncherApp(cls.root)
         cls._settle()
         cls.app._apply_tab_minimum_width()  # normally fires 200ms after launch
         cls._settle()
         cls.min_width = cls.root.minsize()[0]
+
+    @classmethod
+    def _restore_env_and_stubs(cls):
+        for var, was in getattr(cls, "_saved_env", {}).items():
+            if was is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = was
+        scratch = getattr(cls, "_scratch", None)
+        if scratch:
+            import shutil
+            shutil.rmtree(scratch, ignore_errors=True)
+            cls._scratch = None
+        saved_config_save = getattr(cls, "_saved_config_save", None)
+        if saved_config_save is not None:
+            from launcher import config
+            config.save = saved_config_save
+        saved_tray = getattr(cls, "_saved_tray_available", None)
+        if saved_tray is not None:
+            from launcher import tray
+            tray.AVAILABLE = saved_tray
 
     @classmethod
     def tearDownClass(cls):
@@ -81,15 +105,7 @@ class LauncherLayout(unittest.TestCase):
         if root is not None:
             root.destroy()
 
-        for var, was in getattr(cls, "_saved_env", {}).items():
-            if was is None:
-                os.environ.pop(var, None)
-            else:
-                os.environ[var] = was
-        scratch = getattr(cls, "_scratch", None)
-        if scratch:
-            import shutil
-            shutil.rmtree(scratch, ignore_errors=True)
+        cls._restore_env_and_stubs()
 
     # The module patch _apply_gui_review_fixes applies is deliberately NOT undone:
     # it is idempotent (launcher/main.py guards it) and it is what the real app
