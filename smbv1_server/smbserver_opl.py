@@ -16,6 +16,7 @@
 # License: same as the surrounding RiptOPL project.
 
 import argparse
+import hmac
 import os
 import socket
 import struct
@@ -52,6 +53,7 @@ STATUS_SUCCESS = 0x00000000
 STATUS_NOT_IMPLEMENTED = 0xC0000002
 STATUS_ACCESS_DENIED = 0xC0000022
 STATUS_OBJECT_NAME_NOT_FOUND = 0xC0000034
+STATUS_LOGON_FAILURE = 0xC000006D
 
 # NEGOTIATE response capabilities. UNICODE deliberately OFF so every string stays ASCII/OEM --
 # that keeps the whole server single-byte and avoids the large UTF-16 surface (smbman supports
@@ -431,11 +433,69 @@ def h_negotiate(conn, r):
     return params, data, STATUS_SUCCESS
 
 
+def _parse_session_setup(r):
+    """(account, password) from SESSION_SETUP_ANDX. Either may be empty.
+
+    NT LM 0.12 puts two password fields at the front of the data -- the ANSI one
+    then the Unicode one -- whose lengths are words 7 and 8 of the parameters.
+    The account name is the first NUL-terminated string after them.
+
+    The password is PLAINTEXT, because NEGOTIATE advertises EncryptionKeyLength
+    0. See h_session_setup for why that is deliberately not being changed.
+    """
+    if r.wordcount < 13:
+        return "", ""
+    ansi_len, uni_len = struct.unpack_from("<HH", r.params, 14)
+    d = r.data
+    at = 0
+    ansi_pw = d[at:at + ansi_len]
+    at += ansi_len
+    uni_pw = d[at:at + uni_len]
+    at += uni_len
+    end = d.index(0, at) if 0 in d[at:] else len(d)
+    account = d[at:end].decode("ascii", "ignore")
+    password = ansi_pw.rstrip(b"\x00").decode("ascii", "ignore")
+    if not password and uni_pw:
+        password = uni_pw.decode("utf-16-le", "ignore").rstrip("\x00")
+    return account, password
+
+
 def h_session_setup(conn, r):
-    # Accept the (password-less) guest logon unconditionally and hand out a UID.
+    """Guest by default; a real check only when credentials are configured.
+
+    With no users configured this is byte-for-byte what it has always been:
+    accept unconditionally, hand out a UID, report Action=guest. That is the
+    path OPL and POPSTARTER are tested against on real hardware, and it is not
+    worth risking for an option nobody asked to have on by default.
+
+    With users configured, the account and password in the request must match.
+    The password arrives in the CLEAR -- NEGOTIATE advertises share-level
+    security with no encryption key, and the alternative (NTLM challenge and
+    response over SMB1) needs DES, which is no more present in the standard
+    library than AES is. Changing NEGOTIATE to demand a challenge would also
+    change the bytes OPL sees on every connection, which is exactly the kind of
+    change that turns a working console into a black screen.
+
+    So this keeps other machines off the share. It is not protection against
+    someone watching the network; the SMBv2/SMBv3 modes do a real NTLMv2
+    exchange for that.
+    """
+    users = getattr(conn.server, "users", None)
+    action = 0x0001                                   # logged on as guest
+    if users:
+        account, password = _parse_session_setup(r)
+        expected = users.get(account.casefold())
+        # compare_digest, not ==: a byte-at-a-time comparison leaks how much of
+        # the password was right through its timing.
+        if expected is None or not hmac.compare_digest(password, expected):
+            log("session setup refused for account %r" % account)
+            return None, None, STATUS_LOGON_FAILURE
+        action = 0x0000                               # a real account, not guest
+        log("session setup accepted for account %r" % account)
+
     if conn.uid == 0:
         conn.uid = 0x0800
-    params = struct.pack("<BBHH", SMB_COM_NONE, 0, 0, 0x0001)  # AndX none, Action=guest
+    params = struct.pack("<BBHH", SMB_COM_NONE, 0, 0, action)  # AndX none
     data = b"OPLSMB\x00OPLSMB\x00"  # NativeOS, NativeLanMan (ignored by OPL)
     return params, data, STATUS_SUCCESS, conn.uid  # 4-tuple => override UID in header
 
@@ -945,10 +1005,15 @@ def serve_conn(server, sock, addr):
 # Server + Windows port-445 (LanmanServer) takeover
 # --------------------------------------------------------------------------------------------
 class SmbServer:
-    def __init__(self, shares, read_only, smb_version=1):
+    def __init__(self, shares, read_only, smb_version=1, users=None):
         self.shares = shares
         self.read_only = read_only
         self.smb_version = int(smb_version)
+        # Empty means the guest behaviour this server has always had: every
+        # SESSION_SETUP accepted, no password read. That path is what consoles
+        # are tested against, so configuring credentials must be the thing that
+        # changes it -- never the default.
+        self.users = {u.casefold(): p for u, p in (users or {}).items()}
 
 
 def _take_445():
@@ -1020,6 +1085,10 @@ def main(argv=None):
                     help="serve the share read-only (no saves / no VMC writes); default is writable")
     ap.add_argument("--take-445", action="store_true",
                     help="bind the standard port 445 by pausing Windows LanmanServer (admin; reversible)")
+    ap.add_argument("--user", action="append", metavar="NAME:PASSWORD",
+                    help="require this account instead of accepting the "
+                         "password-less guest logon; repeatable. SMBv1 sends "
+                         "passwords in the clear -- see --help notes.")
     ap.add_argument("--smb-version", type=int, choices=[1, 2, 3], default=1,
                     help="SMB protocol version (1=SMBv1; 2 and 3 are INCOMPLETE "
                          "-- they negotiate and connect but serve no files)")
@@ -1050,7 +1119,17 @@ def main(argv=None):
               "nothing and the share cannot be listed. Use --smb-version 1 to serve "
               "a console." % (args.smb_version, args.smb_version), file=sys.stderr)
 
-    server = SmbServer(shares, read_only=args.read_only, smb_version=args.smb_version)
+    users = {}
+    for spec in args.user or []:
+        if ":" not in spec:
+            ap.error("--user must be NAME:PASSWORD, got %r" % spec)
+        name, password = spec.split(":", 1)
+        if not name:
+            ap.error("--user needs a name: %r" % spec)
+        users[name] = password
+
+    server = SmbServer(shares, read_only=args.read_only,
+                       smb_version=args.smb_version, users=users)
 
     restore = None
     port = args.port
@@ -1090,7 +1169,14 @@ def main(argv=None):
     ips = _lan_ips()
     print("=" * 64)
     print(" RiptOPL SMBv1 server -- listening on %s:%d" % (args.bind, bound))
-    print(" In OPL set:  SMB Port: %d   |   User: guest   Password: blank" % bound)
+    if users:
+        first = sorted(users)[0]
+        creds = "User: %s   Password: %s" % (
+            first, "(as configured)" if users[first] else "blank")
+    else:
+        creds = "User: guest   Password: blank"
+    print(" In OPL set:  SMB Port: %d   |   %s" % (bound, creds))
+    print("              Share: %s" % "  ".join(sorted(shares)))
     if len(ips) == 1:
         print("              PC IP Address: %s" % ips[0])
     else:
