@@ -1021,7 +1021,8 @@ def main(argv=None):
     ap.add_argument("--take-445", action="store_true",
                     help="bind the standard port 445 by pausing Windows LanmanServer (admin; reversible)")
     ap.add_argument("--smb-version", type=int, choices=[1, 2, 3], default=1,
-                    help="SMB protocol version (1=SMBv1, 2=SMBv2, 3=SMBv3)")
+                    help="SMB protocol version (1=SMBv1; 2 and 3 are INCOMPLETE "
+                         "-- they negotiate and connect but serve no files)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     VERBOSE = args.verbose
@@ -1036,6 +1037,18 @@ def main(argv=None):
         shares[name] = Share(name, path)
     if not shares:
         ap.error("at least one --share NAME=PATH is required")
+
+    # The SMB2/SMB3 handlers negotiate, authenticate and accept a tree connect,
+    # then serve nothing: READ returns zero bytes, CREATE ignores the path it was
+    # given, WRITE reports success without writing, and QUERY_DIRECTORY is absent
+    # so the share cannot be listed. A client sees an empty folder and no error.
+    # The flag stays because it is how the real implementation gets developed and
+    # tested, but it must never look finished to whoever runs it.
+    if args.smb_version != 1:
+        print("WARNING: --smb-version %d is INCOMPLETE. The server will negotiate "
+              "SMB%d and accept a connection, but it serves no files: reads return "
+              "nothing and the share cannot be listed. Use --smb-version 1 to serve "
+              "a console." % (args.smb_version, args.smb_version), file=sys.stderr)
 
     server = SmbServer(shares, read_only=args.read_only, smb_version=args.smb_version)
 

@@ -137,12 +137,19 @@ def _smbv1_argv(v):
     return _smb_argv(v, "1")
 
 
-def _smbv2_argv(v):
-    return _smb_argv(v, "2")
-
-
-def _smbv3_argv(v):
-    return _smb_argv(v, "3")
+# There is deliberately no SMBv2/SMBv3 entry here. The server answers those
+# dialects far enough to negotiate, authenticate and connect, and then serves
+# nothing: SMB2 READ returns zero bytes, CREATE ignores the requested path, and
+# QUERY_DIRECTORY is not implemented at all, so a share cannot even be listed.
+# Offering the modes on that meant a user picked SMBv2, connected successfully,
+# and saw an empty folder with no error to explain it -- and an SMB2 WRITE
+# reported success without writing, which tells a client a save committed when
+# nothing did.
+#
+# The work to make them real is a rooted path guard and NTLMv2 credential
+# checking (both written, see smb2_server/) plus a QUERY_DIRECTORY that packs
+# many entries per response. When the server can serve a file, add the entries
+# back -- tests/test_netinfo_and_smb.py enforces that order.
 
 
 # How the protocol mode is offered, and what each choice puts on the wire.
@@ -297,58 +304,6 @@ SMBV1 = ServerDef(
     _build_argv=_smbv1_argv,
 )
 
-SMBV2 = ServerDef(
-    key="smbv2",
-    label="SMBv2 server",
-    blurb="Share a games folder over SMB2 for modern clients and supported OPL builds.",
-    runtime="python",
-    default_port=1025,
-    share_hint="games",
-    module_file=_repo("smbv1_server", "smbserver_opl.py"),
-    module_dir=_repo("smbv1_server"),
-    fields=[
-        Field("games_folder", "Games folder", "folder", required=True,
-              help="Folder of PS2 games/apps to share over SMB2."),
-        Field("port", "Port", "port", default=1025, advanced=False,
-              help="TCP port (default 1025). Ports below 1025 require Administrator."),
-        Field("read_only", "Read-only", "bool", default=False, advanced=True,
-              help="No saves / no VMC writes."),
-        Field("take_445", "Take port 445 (admin)", "bool", default=False,
-              advanced=True, windows_only=True,
-              help="Bind standard port 445 by pausing Windows file sharing. Needs admin."),
-        Field("bind", "Bind address", "text", default="", advanced=True,
-              help="Interface to bind (blank = all)."),
-        Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
-    ],
-    _build_argv=_smbv2_argv,
-)
-
-SMBV3 = ServerDef(
-    key="smbv3",
-    label="SMBv3 server",
-    blurb="Share a games folder over SMB3 with modern authentication and encryption support.",
-    runtime="python",
-    default_port=1025,
-    share_hint="games",
-    module_file=_repo("smbv1_server", "smbserver_opl.py"),
-    module_dir=_repo("smbv1_server"),
-    fields=[
-        Field("games_folder", "Games folder", "folder", required=True,
-              help="Folder of PS2 games/apps to share over SMB3."),
-        Field("port", "Port", "port", default=1025, advanced=False,
-              help="TCP port (default 1025). Ports below 1025 require Administrator."),
-        Field("read_only", "Read-only", "bool", default=False, advanced=True,
-              help="No saves / no VMC writes."),
-        Field("take_445", "Take port 445 (admin)", "bool", default=False,
-              advanced=True, windows_only=True,
-              help="Bind standard port 445 by pausing Windows file sharing. Needs admin."),
-        Field("bind", "Bind address", "text", default="", advanced=True,
-              help="Interface to bind (blank = all)."),
-        Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
-    ],
-    _build_argv=_smbv3_argv,
-)
-
 UDPFS = ServerDef(
     key="udpfs",
     label="UDPFS server",
@@ -412,4 +367,4 @@ UDPBD = ServerDef(
     _build_argv=_udpbd_argv,
 )
 
-REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, UDPBD)}
+REGISTRY = {s.key: s for s in (SMBV1, UDPFS, UDPBD)}
