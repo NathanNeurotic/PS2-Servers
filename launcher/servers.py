@@ -447,4 +447,4 @@ UDPBD = ServerDef(
     _build_argv=_udpbd_argv,
 )
 
-REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, UDPBD)}
+REGISTRY = {s.key: s for s in (SMBV1, UDPFS, UDPBD)}
