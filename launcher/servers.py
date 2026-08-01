@@ -123,7 +123,7 @@ def _smb_argv(v, smb_version="1"):
     # choose. "games" stays the default because it is what every OPL guide and
     # every existing saved configuration says.
     share = (v.get("share_name") or "games").strip() or "games"
-    folder = v.get("games_folder") or v.get("root_dir") or ""
+    folder = (v.get("games_folder") or v.get("root_dir") or "").strip()
     if not folder:
         raise ValueError("SMB server requires a Games folder to share.")
     args = ["--share", "{}={}".format(share, folder),
