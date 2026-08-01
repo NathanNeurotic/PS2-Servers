@@ -81,11 +81,21 @@ PS2 Servers runs the same three servers here as on Windows. A few things differ:
 
 
 def _apply_gui_review_fixes(gui):
-    """Apply the active launcher theme and a stable, responsive layout baseline.
+    """Apply the active launcher theme, the admin panel, and the styled tab bar.
 
-    This stays as a runtime shim so release-risk remains low, but it deliberately
-    avoids image stretching, fixed-width root geometry, and off-screen button rows.
+    This stays as a runtime shim so release-risk remains low. It no longer touches
+    window sizing or the scrolling body: those are gui.py's, and keeping a second
+    copy here only gave the two a way to disagree.
+
+    Applied once per process. Every wrapper below captures the CURRENT attribute
+    and calls it, so a second application would wrap the wrappers -- two admin
+    panels, tab text padded twice, every log line written twice. The other three
+    patchers in this package guard themselves the same way (asset_skin,
+    full_skin_controls, __init__); this one was the exception.
     """
+    if getattr(gui, "_ps2_gui_review_fixes_patched", False):
+        return
+
     original_notebook = gui.ttk.Notebook
     original_launcher_init = gui.LauncherApp.__init__
     original_build = gui.LauncherApp._build
@@ -202,7 +212,13 @@ def _apply_gui_review_fixes(gui):
         # page below. clam otherwise blends its own lighter fill onto the raised
         # selected tab (a washed-out, low-contrast box), so light/dark/bordercolor
         # are pinned per state to keep every tab exactly the colour asked for.
-        style.configure("Server.TNotebook.Tab", padding=(18, 9), font=("", 10, "bold"),
+        #
+        # 12px of horizontal padding, not 18: the tab strip is the one part of the
+        # page that cannot reflow, so its width sets how narrow the window is
+        # allowed to get (see gui._apply_tab_minimum_width). Six pixels a side
+        # across seven tabs is ~84px off that floor, and the tab labels already
+        # carry a space either side.
+        style.configure("Server.TNotebook.Tab", padding=(12, 9), font=("", 10, "bold"),
                         background=palette["panel"], foreground=palette["muted"],
                         borderwidth=1, bordercolor=palette["edge"],
                         lightcolor=palette["panel"], darkcolor=palette["panel"])
@@ -250,67 +266,9 @@ def _apply_gui_review_fixes(gui):
                                   ("active", palette["accent2"]),
                                   ("!active", palette["panel3"])])
 
-    def configure_window(self):
-        screen_width = max(640, self.root.winfo_screenwidth())
-        screen_height = max(480, self.root.winfo_screenheight())
-        width = min(1040, max(760, screen_width - 96))
-        height = min(780, max(520, screen_height - 96))
-        min_width = min(760, max(640, screen_width - 96))
-        min_height = min(480, max(420, screen_height - 96))
-        x = max(0, int((screen_width - width) / 2))
-        y = max(0, int((screen_height - height) / 3))
-        self.root.geometry("{}x{}+{}+{}".format(width, height, x, y))
-        self.root.minsize(min_width, min_height)
-        self.root.resizable(True, True)
-
-    def build_scroll_body(self):
-        bg = self.root.cget("background")
-        shell = gui.ttk.Frame(self.root)
-        shell.pack(fill="both", expand=True)
-
-        canvas = gui.tk.Canvas(shell, highlightthickness=0, bd=0, background=bg)
-        scrollbar = gui.ttk.Scrollbar(shell, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
-
-        body = gui.ttk.Frame(canvas)
-        window = canvas.create_window((0, 0), window=body, anchor="nw")
-
-        def refresh_scroll_region(event=None):
-            try:
-                width = max(1, canvas.winfo_width())
-                height = max(1, body.winfo_reqheight())
-                canvas.itemconfigure(window, width=width)
-                canvas.configure(scrollregion=(0, 0, width, height))
-            except gui.tk.TclError:
-                pass
-
-        body.bind("<Configure>", refresh_scroll_region)
-        canvas.bind("<Configure>", refresh_scroll_region)
-        self._scroll_shell = shell
-        self._scroll_canvas = canvas
-        self._scrollbar = scrollbar
-        self._scroll_window = window
-        self._bind_body_mousewheel(canvas)
-        self._refresh_scroll_body = refresh_scroll_region
-        return body
-
-    def set_wrap(widget, width):
-        try:
-            widget.configure(wraplength=max(220, int(width)))
-        except gui.tk.TclError:
-            pass
-
-    def bind_wrap(widget, offset=48):
-        def update(event=None):
-            try:
-                root_width = widget.winfo_toplevel().winfo_width()
-                set_wrap(widget, root_width - offset)
-            except gui.tk.TclError:
-                pass
-        widget.bind("<Configure>", update, add="+")
-        widget.after_idle(update)
+    # Window sizing and the scrolling body used to be overridden here as well.
+    # They are not any more: gui.py owns one responsive implementation, and a
+    # second copy in this shim was free to drift out of step with it.
 
     def add_admin_panel(self):
         if not gui.windows_setup.is_windows():
@@ -322,21 +280,26 @@ def _apply_gui_review_fixes(gui):
         is_admin = gui.elevate.is_admin()
         status_style = "AdminYes.TLabel" if is_admin else "AdminNo.TLabel"
         status_text = "Administrator: Yes" if is_admin else "Administrator: No"
-        gui.ttk.Label(frame, text=status_text, style=status_style,
-                      font=("", 9, "bold")).grid(row=0, column=0, sticky="w",
-                                                 padx=(0, 12), pady=(0, 4))
+        status = gui.ttk.Label(frame, text=status_text, style=status_style,
+                               font=("", 9, "bold"))
+        status.grid(row=0, column=0, sticky="w", padx=(0, 12), pady=(0, 4))
         note = gui.ttk.Label(
             frame,
             text="Normal launch stays non-admin. Elevate only for firewall changes or advanced port 445.",
             style="Admin.TLabel")
         note.grid(row=0, column=1, sticky="ew", pady=(0, 4))
-        bind_wrap(note, offset=360)
         button = gui.ttk.Button(frame, text="Restart as administrator",
                                 style="Accent.TButton",
                                 command=lambda: restart_as_admin(self))
         button.grid(row=0, column=2, sticky="e", padx=(12, 0), pady=(0, 4))
         if is_admin or not gui.elevate.can_elevate():
             button.config(state="disabled")
+        # Wraps against the panel's real width, holding back the two widgets that
+        # share the row, so it reflows with the window like everything else.
+        # 48 = the frame's own padding either side, plus the padx on the status
+        # label and on the button. Miss one and the row asks for more width than
+        # the window has, which is how a panel ends up clipped at the minimum.
+        gui.bind_wraplength(note, frame, reserve=48, siblings=(status, button))
         self._ps2_admin_frame = frame
 
     def restart_as_admin(app):
@@ -377,18 +340,10 @@ def _apply_gui_review_fixes(gui):
             return super().add(child, **kwargs)
 
     def normalize_original_widgets(self):
-        try:
-            self.nb.pack_configure(fill="both", expand=True)
-        except (gui.tk.TclError, AttributeError):
-            pass
-
-        for card in getattr(self, "cards", {}).values():
-            for child in card.winfo_children():
-                if getattr(child, "winfo_class", lambda: "")() == "TLabel":
-                    text = str(child.cget("text"))
-                    if text:
-                        bind_wrap(child, offset=96)
-
+        # Card labels are no longer re-wrapped here: gui.py binds each one to the
+        # notebook's width as it builds it. Re-wrapping them against the root width
+        # fought that, and reached only the cards' direct children -- never the help
+        # text inside the advanced-fields frame.
         parent = content_parent(self)
         for child in parent.winfo_children():
             try:
@@ -423,11 +378,10 @@ def _apply_gui_review_fixes(gui):
         widget.config(state="disabled")
 
     gui.ttk.Notebook = StyledNotebook
-    gui.LauncherApp._configure_window = configure_window
-    gui.LauncherApp._build_scroll_body = build_scroll_body
     gui.LauncherApp._build = launcher_build
     gui.LauncherApp.__init__ = launcher_init
     gui.LauncherApp._append_log = append_log
+    gui._ps2_gui_review_fixes_patched = True
 
 
 def _selfcheck():
