@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultFallback     = 250 * time.Millisecond
-	sessionReplaceQuiet = 2 * time.Second
+	sessionReplaceQuiet = 1 * time.Second
 	windowSize          = 8
 	ackTimeout          = 120 * time.Millisecond
 	maxWindowRetries    = 4
@@ -372,6 +372,37 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 		s.cfg.Log.Warn("max session limit reached", map[string]any{"peer": key})
 		return nil
 	}
+
+	// Evict any stale session from the same remote IP address (e.g. PS2 rebooted and changed source port),
+	// but skip loopback test peers (127.0.0.1) so multi-client unit tests are not evicted.
+	peerIP := peer.IP.String()
+	if !peer.IP.IsLoopback() {
+		var oldKey string
+		var oldWorker *peerWorker
+		now := time.Now()
+		for k, w := range s.sessions {
+			if w.state != nil && w.state.Peer != nil && w.state.Peer.IP.Equal(peer.IP) {
+				w.state.Mu.Lock()
+				quiet := now.Sub(w.state.LastActivity)
+				writeActive := w.state.WriteActive
+				w.state.Mu.Unlock()
+				if !writeActive || quiet > time.Second {
+					oldKey = k
+					oldWorker = w
+					break
+				}
+			}
+		}
+		if oldWorker != nil {
+			s.cfg.Log.Info("replacing stale session for IP", map[string]any{"ip": peerIP, "old_peer": oldKey, "new_peer": key})
+			delete(s.sessions, oldKey)
+			oldWorker.state.Mu.Lock()
+			oldWorker.state.Close()
+			oldWorker.state.Mu.Unlock()
+			oldWorker.stop()
+		}
+	}
+
 	forced := s.cfg.ProtocolMode
 	if forced == session.Pending {
 		forced = ""
