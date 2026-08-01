@@ -131,6 +131,80 @@ def _lan_rank(ip):
     return 3
 
 
+def ip_choices():
+    """All detected IPv4 addresses plus a Custom IP choice."""
+    return all_ipv4() + ["Custom IP..."]
+
+
+def get_adapter_ip_pairs():
+    """Returns [(adapter_name, ip_address), ...] for all active IPv4 interfaces."""
+    pairs = []
+    try:
+        if sys.platform == "win32" and shutil.which("ipconfig"):
+            out = subprocess.run(["ipconfig"], capture_output=True, text=True, timeout=3).stdout
+            current_adapter = None
+            for line in (out or "").splitlines():
+                line_s = line.strip()
+                if line and not line[0].isspace() and ("adapter" in line.lower() or ":" in line):
+                    current_adapter = line.split(":", 1)[0].strip()
+                    continue
+                if "IPv4 Address" in line_s or "IP Address" in line_s:
+                    parts = line_s.split(":", 1)
+                    if len(parts) == 2:
+                        ip = parts[1].replace("(Preferred)", "").strip()
+                        if ip and not ip.startswith(("127.", "169.254.")):
+                            name = current_adapter or "Network Adapter"
+                            pairs.append((name, ip))
+            if pairs:
+                return pairs
+        elif sys.platform.startswith("linux") and shutil.which("ip"):
+            out = subprocess.run(["ip", "-o", "-4", "addr", "show"],
+                                 capture_output=True, text=True, timeout=3).stdout
+            for line in (out or "").splitlines():
+                parts = line.split()
+                if len(parts) >= 4 and parts[2] == "inet":
+                    iface = parts[1]
+                    if not _iface_is_virtual(iface):
+                        ip = parts[3].split("/")[0]
+                        if not ip.startswith(("127.", "169.254.")):
+                            pairs.append((iface, ip))
+            if pairs:
+                return pairs
+        elif sys.platform == "darwin" and shutil.which("ifconfig"):
+            out = subprocess.run(["ifconfig"],
+                                 capture_output=True, text=True, timeout=3).stdout
+            current = None
+            for line in (out or "").splitlines():
+                if line and not line[0].isspace():
+                    current = line.split(":", 1)[0]
+                    continue
+                stripped = line.strip()
+                if stripped.startswith("inet ") and current and not _iface_is_virtual(current):
+                    ip = stripped.split()[1]
+                    if not ip.startswith(("127.", "169.254.")):
+                        pairs.append((current, ip))
+            if pairs:
+                return pairs
+    except Exception:
+        pass
+
+    # Fallback to all_ipv4()
+    return [("Network Adapter", ip) for ip in all_ipv4()]
+
+
+def detailed_ip_info():
+    """Returns a formatted multi-line string listing current network adapters and IP addresses."""
+    pairs = get_adapter_ip_pairs()
+    lines = ["[network] Current IP Addresses and Network Adapters:"]
+    if not pairs:
+        lines.append("  • No active network adapters found.")
+    else:
+        for adapter, ip in pairs:
+            lines.append(f"  • {adapter}: {ip}")
+    lines.append("(If your PS2 is connected to a specific network device, select its IP in the dropdown above or pick 'Custom IP...' to type your own.)")
+    return "\n".join(lines)
+
+
 def best_lan_ip():
     """The address most likely to be the one OPL should connect to.
 
@@ -142,3 +216,4 @@ def best_lan_ip():
         return primary
     candidates = sorted(all_ipv4(), key=_lan_rank)
     return candidates[0] if candidates else "127.0.0.1"
+

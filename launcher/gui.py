@@ -141,6 +141,8 @@ Unsigned Windows network tools can still trigger antivirus heuristics. That does
 
 TAB_TITLES = {
     "smbv1": "SMBv1",
+    "smbv2": "SMBv2",
+    "smbv3": "SMBv3",
     "udpfs": "UDPFS",
     "udpbd": "UDPBD",
     "setup": "SETUP",
@@ -641,13 +643,13 @@ class LauncherApp:
         # header: LAN IP the user types into OPL
         header = ttk.Frame(parent, style="TopStrip.TFrame", padding=(12, 10))
         header.pack(fill="x", padx=16, pady=(12, 8))
-        header.columnconfigure(3, weight=1)
+        header.columnconfigure(4, weight=1)
         ttk.Label(header, text="LAN IP", font=("", 10, "bold"),
                   style="TopStripTitle.TLabel").grid(row=0, column=0, sticky="w")
         # Always-visible version, so a tester can read it off the screen without
         # opening About. Right-aligned in the header's stretchy column.
         ttk.Label(header, text="PS2 Servers " + APP_VERSION_LABEL,
-                  style="TopStripHint.TLabel").grid(row=0, column=4, sticky="e",
+                  style="TopStripHint.TLabel").grid(row=0, column=5, sticky="e",
                                                     padx=(12, 0))
         self.ip_var = tk.StringVar(value=netinfo.best_lan_ip())
         # Editable, not readonly: detection leans on getaddrinfo(gethostname()),
@@ -656,8 +658,9 @@ class LauncherApp:
         # user has to be able to type it. This value only feeds the OPL hint text
         # -- what a server binds to is its own Bind address field.
         self.ip_combo = ttk.Combobox(header, textvariable=self.ip_var, width=18,
-                                     values=netinfo.all_ipv4(), state="normal")
+                                     values=netinfo.ip_choices(), state="normal")
         self.ip_combo.grid(row=0, column=1, sticky="w", padx=(10, 6))
+        self.ip_combo.bind("<<ComboboxSelected>>", self._on_ip_combobox_select)
         # A typed address applies as you type: the OPL hint on any running card
         # follows it, and it persists without waiting for something else to save.
         # Without this, typing gave no feedback at all until the next start/stop,
@@ -665,11 +668,13 @@ class LauncherApp:
         self.ip_var.trace_add("write", self._on_ip_edited)
         ttk.Button(header, text="Refresh", command=self._refresh_ips).grid(
             row=0, column=2, sticky="w")
+        ttk.Button(header, text="What's my IP?", command=self._show_whats_my_ip).grid(
+            row=0, column=3, sticky="w", padx=(4, 0))
         ttk.Label(header, text="Enter this in OPL where it asks for the PC/server IP. "
                   "Pick from the list, or type your own if the right address "
                   "isn't shown -- it saves as you type.",
                   style="TopStripHint.TLabel", wraplength=420).grid(
-            row=0, column=3, sticky="w", padx=(12, 0))
+            row=0, column=4, sticky="w", padx=(12, 0))
 
         # direct PS2-to-PC link: adapter setup + DHCP helper behind one checkbox.
         # Available on every desktop OS; the per-OS network plumbing differs, and
@@ -911,9 +916,21 @@ class LauncherApp:
                 card.refresh_status(running=True)
         self._save()
 
+    def _on_ip_combobox_select(self, event=None):
+        if self.ip_var.get() == "Custom IP...":
+            self.ip_var.set("")
+            self.ip_combo.focus_set()
+
+    def _show_whats_my_ip(self):
+        info = netinfo.detailed_ip_info()
+        self._append_log("setup", f"{info}\n")
+        self.nb.select(self.terminal_tab)
+
     def _refresh_ips(self):
-        self.ip_combo.config(values=netinfo.all_ipv4())
-        self.ip_var.set(netinfo.best_lan_ip())
+        self.ip_combo.config(values=netinfo.ip_choices())
+        current = self.ip_var.get()
+        if not current or current in (netinfo.all_ipv4() + ["Custom IP..."]):
+            self.ip_var.set(netinfo.best_lan_ip())
         for key in self.procs:
             self.cards[key].refresh_status(self.is_running(key))
 
@@ -1580,29 +1597,43 @@ class LauncherApp:
                 and not any("timed out" in n for n in (notes or [])):
             self._remember_firewall_ok(fingerprint)
 
-        take_445 = key == "smbv1" and bool(values.get("take_445"))
-        admin_required = setup_needed or take_445
+        take_445 = key.startswith("smb") and bool(values.get("take_445"))
+        raw_port = values.get("port")
+        port_num = 0
+        if raw_port:
+            try:
+                port_num = int(str(raw_port).strip(), 0)
+            except (TypeError, ValueError):
+                port_num = 0
+        low_port_required = (0 < port_num < 1025)
+        admin_required = setup_needed or take_445 or low_port_required
         if admin_required and not elevate.is_admin():
             self._set_card_busy(key, False, "Start")
             if not elevate.can_elevate():
                 messagebox.showerror(
                     "Administrator required",
-                    "Windows network setup needs administrator rights.")
+                    "Administrator privileges are required to configure network setup or bind ports below 1025.")
                 return
 
-            summary = windows_setup.setup_summary(key, values)
-            message = (
-                "PS2 Servers needs administrator rights to {}.\n\n"
-                "This will not enable Windows SMB1. It only manages PS2 Servers "
-                "firewall rules, and advanced port 445 mode only pauses Windows "
-                "file sharing while that server is running.\n\n"
-                "Restart the launcher as administrator now? Your settings are "
-                "saved and the server will continue automatically.".format(summary))
-            if not take_445:
-                message += (
-                    "\n\nChoose No to start the server anyway without firewall "
-                    "setup (if Windows Firewall is active, the PS2 may not be "
-                    "able to connect).")
+            if low_port_required and not setup_needed and not take_445:
+                message = (
+                    "Binding ports below 1025 (such as port {}) requires administrator privileges.\n\n"
+                    "Do you want to restart PS2 Servers as Administrator?".format(port_num)
+                )
+            else:
+                summary = windows_setup.setup_summary(key, values)
+                message = (
+                    "PS2 Servers needs administrator rights to {}.\n\n"
+                    "This will not enable Windows SMB1. It only manages PS2 Servers "
+                    "firewall rules, and advanced port 445 mode only pauses Windows "
+                    "file sharing while that server is running.\n\n"
+                    "Restart the launcher as administrator now? Your settings are "
+                    "saved and the server will continue automatically.".format(summary))
+                if not take_445 and not low_port_required:
+                    message += (
+                        "\n\nChoose No to start the server anyway without firewall "
+                        "setup (if Windows Firewall is active, the PS2 may not be "
+                        "able to connect).")
             if messagebox.askyesno("Administrator required", message):
                 self._save(pending_start=key)
                 if elevate.relaunch_as_admin():
@@ -1614,7 +1645,7 @@ class LauncherApp:
                     messagebox.showerror(
                         "Elevation failed",
                         "Could not restart as administrator.")
-            elif not take_445:
+            elif not take_445 and not low_port_required:
                 self._append_log(key, "[setup] firewall setup skipped by user; starting anyway\n")
                 self._launch_server(key, values)
             return
@@ -1630,7 +1661,7 @@ class LauncherApp:
 
     def _confirm_windows_setup(self, key, values):
         summary = windows_setup.setup_summary(key, values)
-        if key == "smbv1":
+        if key.startswith("smb"):
             detail = (
                 "The SMB server is PS2 Servers' built-in OPL-compatible SMB/CIFS "
                 "server. This does not enable Windows SMB1 or expose Windows file "
@@ -1697,7 +1728,10 @@ class LauncherApp:
         # Ask this server what state it is actually in, rather than inferring
         # it from the child process being alive. Loopback, because the launcher
         # is asking about a server it started itself.
-        self.status_poller.set_target(key, "127.0.0.1", values.get("port") or 0)
+        try:
+            self.status_poller.set_target(key, "127.0.0.1", values.get("port") or 0)
+        except Exception as e:
+            self._append_log(key, "[launcher] status poller target setup warning: {}\n".format(e))
         card.refresh_status(True)
         card.toggle_btn.config(state="normal")
         self.nb.select(self.terminal_tab)
