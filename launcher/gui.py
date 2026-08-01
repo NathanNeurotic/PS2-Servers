@@ -922,9 +922,13 @@ class LauncherApp:
             self.ip_combo.focus_set()
 
     def _show_whats_my_ip(self):
-        info = netinfo.detailed_ip_info()
-        self._append_log("setup", f"{info}\n")
         self.nb.select(self.terminal_tab)
+
+        def worker():
+            info = netinfo.detailed_ip_info()
+            self.root.after(0, lambda: self._append_log("setup", f"{info}\n"))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _refresh_ips(self):
         self.ip_combo.config(values=netinfo.ip_choices())
