@@ -49,7 +49,11 @@ jobs:
       - name: Test and vet Edge
         working-directory: native/ps2servers-edge
         run: |
-          go test -race ./... -count=1
+          # -count=2, not 1. Both bypass the test cache, but a socket test that
+          # only fails when the process is warm passes the first run and fails
+          # the second -- which is exactly how the udpbd RDMA flake survived in
+          # main for a week while CI stayed green. Costs about 8 seconds.
+          go test -race ./... -count=2
           go vet ./...
       - name: Test Python protocol negotiation and launcher compatibility
         run: |
