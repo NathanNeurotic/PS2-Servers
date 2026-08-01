@@ -38,8 +38,14 @@ class LauncherLayout(unittest.TestCase):
             raise unittest.SkipTest("no tkinter")
 
         # Point the settings file at a scratch dir and stub the write, so a test
-        # run cannot touch (or create) the user's real launcher.json.
+        # run cannot touch (or create) the user's real launcher.json. Both the
+        # variables and the directory are put back in tearDownClass: this runs in
+        # the same process as every other test, and a config path left pointing
+        # at a temp dir is the kind of thing that makes an unrelated test pass
+        # for the wrong reason.
         cls._scratch = tempfile.mkdtemp(prefix="ps2-layout-")
+        cls._saved_env = {v: os.environ.get(v)
+                          for v in ("APPDATA", "XDG_CONFIG_HOME")}
         for var in ("APPDATA", "XDG_CONFIG_HOME"):
             os.environ[var] = cls._scratch
 
@@ -74,6 +80,21 @@ class LauncherLayout(unittest.TestCase):
         root = getattr(cls, "root", None)
         if root is not None:
             root.destroy()
+
+        for var, was in getattr(cls, "_saved_env", {}).items():
+            if was is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = was
+        scratch = getattr(cls, "_scratch", None)
+        if scratch:
+            import shutil
+            shutil.rmtree(scratch, ignore_errors=True)
+
+    # The module patch _apply_gui_review_fixes applies is deliberately NOT undone:
+    # it is idempotent (launcher/main.py guards it) and it is what the real app
+    # runs, so a later GUI test that expects the launcher as users get it should
+    # find it already in place rather than having to know to re-apply it.
 
     @classmethod
     def _settle(cls, rounds=6):

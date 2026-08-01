@@ -86,7 +86,16 @@ def _apply_gui_review_fixes(gui):
     This stays as a runtime shim so release-risk remains low. It no longer touches
     window sizing or the scrolling body: those are gui.py's, and keeping a second
     copy here only gave the two a way to disagree.
+
+    Applied once per process. Every wrapper below captures the CURRENT attribute
+    and calls it, so a second application would wrap the wrappers -- two admin
+    panels, tab text padded twice, every log line written twice. The other three
+    patchers in this package guard themselves the same way (asset_skin,
+    full_skin_controls, __init__); this one was the exception.
     """
+    if getattr(gui, "_ps2_gui_review_fixes_patched", False):
+        return
+
     original_notebook = gui.ttk.Notebook
     original_launcher_init = gui.LauncherApp.__init__
     original_build = gui.LauncherApp._build
@@ -372,6 +381,7 @@ def _apply_gui_review_fixes(gui):
     gui.LauncherApp._build = launcher_build
     gui.LauncherApp.__init__ = launcher_init
     gui.LauncherApp._append_log = append_log
+    gui._ps2_gui_review_fixes_patched = True
 
 
 def _selfcheck():
