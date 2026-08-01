@@ -48,18 +48,73 @@ COLOR_RUNNING = "#2e9e44"
 COLOR_STOPPED = "#b0b0b0"
 COLOR_ERROR = "#d23c3c"
 
-APP_CONTENT_WIDTH = 1000
-APP_WINDOW_WIDTH = 1024
+APP_WINDOW_WIDTH = 1024     # preferred opening width; the window resizes freely
 APP_INITIAL_HEIGHT = 760
+APP_MIN_WIDTH = 780
 APP_MIN_HEIGHT = 420
+# The tab strip's right-hand tail: the notebook's right tabmargin and border, which
+# sit past the last tab and so are not included when the strip is measured, plus a
+# few pixels of slack so the last tab keeps its whole border at the minimum width.
+TAB_STRIP_TAIL = 18
 
-# Field help wraps at a fixed pixel width: the window is width-locked (resizable(False, True)
-# plus _enforce_fixed_width) and the scroll canvas pins its content to APP_CONTENT_WIDTH, so
-# there is no horizontal resize for a wraplength to track. The 220px reserve clears the widest
-# field label (161px) plus card padding and grid padx at either placement below.
-HELP_WRAPLENGTH = APP_CONTENT_WIDTH - 220
+# The window resizes in both directions and the scroll canvas hands its full width
+# to the content, so nothing may carry a hard-coded wraplength: every wrapping label
+# tracks the real width of a frame that resizes with the window (bind_wraplength).
+#
+# Card text measures against the NOTEBOOK, not the card: ttk unmaps unselected tabs,
+# so a card the user has not visited has no width yet, and asking it would feed each
+# label a made-up figure -- which the card then reports back as the width it needs,
+# widening the whole page. The notebook is always laid out. These reserves are the
+# padding chain between it and the text: notebook padding + tab border + the card's
+# grid padx + card padding + label padx, then the field label column for help text.
+CARD_TEXT_RESERVE = 72
+HELP_RESERVE = 190
 # Indent checkbox help past the indicator so it lines up under the label, not under the box.
 CHECK_HELP_INDENT = 27
+CHECK_HELP_RESERVE = CARD_TEXT_RESERVE + CHECK_HELP_INDENT
+# Never wrap narrower than this, however small the window gets: past this point the
+# text is unreadable anyway, and letting it clip is the honest failure -- the page
+# scrollbar and the window's own minsize are what keep it from happening.
+WRAP_MIN = 200
+# Ignore sub-8px width changes. Setting wraplength re-requests the label's size, so a
+# label that chases every pixel can trade requests with its container forever; a dead
+# band that big is below one character and settles immediately.
+WRAP_STEP = 8
+
+
+def bind_wraplength(widget, source, reserve=0, siblings=(), minimum=WRAP_MIN):
+    """Keep widget's wraplength tracking the real width of source.
+
+    reserve is fixed padding to hold back; siblings are widgets sharing the row,
+    whose measured width is held back too -- so the reserve follows the actual
+    font, theme and DPI rather than a number guessed at one screen size.
+    """
+    def update(_event=None):
+        try:
+            width = source.winfo_width()
+            if width <= 1:
+                # Not laid out yet. Leave the current wrap alone rather than wrap
+                # to a guess: the first <Configure> after the window is drawn is
+                # what sets the real value, and it always arrives.
+                return
+            for sibling in siblings:
+                width -= max(sibling.winfo_width(), sibling.winfo_reqwidth())
+            width = max(minimum, width - reserve)
+            current = int(widget.cget("wraplength") or 0)
+            if abs(current - width) >= WRAP_STEP:
+                widget.configure(wraplength=width)
+        except (tk.TclError, ValueError):
+            pass
+
+    try:
+        source.bind("<Configure>", update, add="+")
+        widget.after_idle(update)
+    except (tk.TclError, AttributeError):
+        # Nothing to track (a card built outside a real window, say). The label
+        # keeps its default wrap; text that does not resize is not worth an
+        # exception out of a widget constructor.
+        pass
+    return update
 
 PROJECT_URL = "https://www.psx-place.com/resources/windows-linux-mac-ps2-servers-smbv1-udpbd-udpfs-for-everyone.1728/"
 REPO_URL = "https://github.com/NathanNeurotic/PS2-Servers"
@@ -205,6 +260,15 @@ class ServerCard(ttk.LabelFrame):
         self._advanced_shown = False
         self._build()
 
+    def _wrap_source(self):
+        """The widget whose width the card's wrapping text follows.
+
+        The notebook, because it is always mapped (see CARD_TEXT_RESERVE). The
+        card itself is the fallback for anywhere a card is built outside one --
+        including a bare card in a test, which has no app at all.
+        """
+        return getattr(getattr(self, "app", None), "nb", None) or self
+
     # -- widget construction ---------------------------------------------- #
     def _build(self):
         self.configure(padding=(12, 10, 12, 12))
@@ -222,9 +286,9 @@ class ServerCard(ttk.LabelFrame):
             row += 1
 
         # header: blurb + status + start/stop
-        ttk.Label(self, text=self.server.blurb, wraplength=560,
-                  style="CardMuted.TLabel").grid(row=row, column=0, columnspan=3,
-                                                 sticky="w", padx=4, pady=(2, 6))
+        blurb = ttk.Label(self, text=self.server.blurb, style="CardMuted.TLabel")
+        blurb.grid(row=row, column=0, columnspan=3, sticky="w", padx=4, pady=(2, 6))
+        bind_wraplength(blurb, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
         row += 1
 
         self.status = ttk.Label(self, text=DOT_RUNNING + " Stopped",
@@ -264,10 +328,10 @@ class ServerCard(ttk.LabelFrame):
                 arow = self._add_field(self.adv_frame, f, arow)
             row += 1
 
-        self.hint = ttk.Label(self, text="", style="CardHint.TLabel",
-                              wraplength=720)
+        self.hint = ttk.Label(self, text="", style="CardHint.TLabel")
         self.hint.grid(row=row, column=0, columnspan=3, sticky="w",
                        padx=4, pady=(4, 0))
+        bind_wraplength(self.hint, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
 
     def _refresh_tab_dot(self, running):
         """Mark this server's tab up or down.
@@ -291,13 +355,13 @@ class ServerCard(ttk.LabelFrame):
         except tk.TclError:
             pass
 
-    def _add_help(self, parent, text, row, column, indent):
+    def _add_help(self, parent, text, row, column, indent, reserve):
         # Own row, so help never overlaps the entry or Browse button. columnspan
         # reaches the card's last column (2) from wherever it starts.
-        ttk.Label(parent, text=text, style="CardHelp.TLabel", font=("", 8),
-                  wraplength=HELP_WRAPLENGTH).grid(
-            row=row, column=column, columnspan=3 - column, sticky="w",
-            padx=(indent, 4), pady=(0, 4))
+        label = ttk.Label(parent, text=text, style="CardHelp.TLabel", font=("", 8))
+        label.grid(row=row, column=column, columnspan=3 - column, sticky="w",
+                   padx=(indent, 4), pady=(0, 4))
+        bind_wraplength(label, self._wrap_source(), reserve=reserve)
         return row + 1
 
     def _add_field(self, parent, f, row):
@@ -309,7 +373,8 @@ class ServerCard(ttk.LabelFrame):
             self.vars[f.key] = var
             row += 1
             if f.help:
-                row = self._add_help(parent, f.help, row, 0, CHECK_HELP_INDENT)
+                row = self._add_help(parent, f.help, row, 0, CHECK_HELP_INDENT,
+                                     CHECK_HELP_RESERVE)
             return row
 
         ttk.Label(parent, text=f.label + ":", style="Card.TLabel").grid(
@@ -351,7 +416,7 @@ class ServerCard(ttk.LabelFrame):
         self.vars[f.key] = var
         row += 1
         if f.help:
-            row = self._add_help(parent, f.help, row, 1, 6)
+            row = self._add_help(parent, f.help, row, 1, 6, HELP_RESERVE)
         return row
 
     def _toggle_advanced(self):
@@ -523,6 +588,8 @@ class LauncherApp:
         self._update_tray_option_controls()
 
         self.root.after(150, self._drain_logs)
+        # Once the window is drawn, so the tab strip has a width to measure.
+        self.root.after(200, self._apply_tab_minimum_width)
         self.root.after(600, self._poll_status)
         if self.saved.get("pending_firewall_allow"):
             self.root.after(350, self._allow_pending)
@@ -549,66 +616,147 @@ class LauncherApp:
                 self.root.after(600, self._direct_link_reset_stale_unix)
 
     def _configure_window(self):
-        screen_height = self.root.winfo_screenheight()
+        screen_width = max(640, self.root.winfo_screenwidth())
+        screen_height = max(480, self.root.winfo_screenheight())
+        width = min(APP_WINDOW_WIDTH, max(APP_MIN_WIDTH, screen_width - 96))
         height = min(APP_INITIAL_HEIGHT, max(APP_MIN_HEIGHT, screen_height - 80))
-        self.root.geometry("{}x{}".format(APP_WINDOW_WIDTH, height))
-        self.root.minsize(APP_WINDOW_WIDTH, APP_MIN_HEIGHT)
-        self.root.maxsize(APP_WINDOW_WIDTH, max(APP_MIN_HEIGHT, screen_height))
-        self.root.resizable(False, True)
-        self.root.bind("<Configure>", self._enforce_fixed_width, add="+")
+        x = max(0, int((screen_width - width) / 2))
+        y = max(0, int((screen_height - height) / 3))
+        self.root.geometry("{}x{}+{}+{}".format(width, height, x, y))
+        # Free in both directions, with no maxsize: the content reflows to the
+        # width it is given, so there is nothing left for a width lock to protect.
+        # The minimum is what the button rows and field columns need, capped to the
+        # screen so a small display can still show the whole window.
+        self._min_height = min(APP_MIN_HEIGHT, screen_height - 40)
+        self.root.minsize(min(APP_MIN_WIDTH, screen_width - 40), self._min_height)
+        self.root.resizable(True, True)
 
-    def _enforce_fixed_width(self, event):
-        if str(event.widget) != str(self.root) or event.height <= 1:
+    def _tab_strip_width(self):
+        """How much width the tab row actually uses, measured rather than guessed.
+
+        ttk offers no query for it, so probe the row: identify() names an element
+        while x is over a tab and returns nothing past the last one. Binary search,
+        so it costs about ten calls instead of one per pixel. Returns 0 if the
+        notebook is not laid out or the probe finds no tab -- callers keep their
+        default rather than act on a measurement that did not happen.
+        """
+        nb = getattr(self, "nb", None)
+        if nb is None:
+            return 0
+        try:
+            width = nb.winfo_width()
+            if width <= 1:
+                return 0
+            # Start inside the first tab, past the notebook's own left tabmargin.
+            probe = 20
+            row = next((y for y in (10, 14, 18, 22, 6) if nb.identify(probe, y)),
+                       None)
+            if row is None:
+                return 0
+            if nb.identify(width - 2, row):
+                return width              # already filling the notebook, or clipped
+            low, high = probe, width - 2  # low is over a tab; high is past the last
+            while high - low > 2:
+                mid = (low + high) // 2
+                if nb.identify(mid, row):
+                    low = mid
+                else:
+                    high = mid
+            return high
+        except tk.TclError:
+            return 0
+
+    def _apply_tab_minimum_width(self):
+        """Never let the window shrink past its own tab strip.
+
+        The tabs are the one thing on the page that cannot reflow -- ttk neither
+        wraps nor scrolls them, so a window narrower than the strip simply hides
+        the last tab (ABOUT). Measuring beats a constant here: the strip's width
+        follows the theme's tab padding, the user's font and DPI, and how many
+        servers this build ships, none of which are known when writing a number.
+        """
+        strip = self._tab_strip_width()
+        if strip <= 0:
             return
-        if event.width == APP_WINDOW_WIDTH and self.root.state() != "zoomed":
-            return
-
-        def resize():
-            try:
-                height = self.root.winfo_height()
-                if height <= 1:
-                    height = event.height
-                height = min(max(APP_MIN_HEIGHT, height),
-                             self.root.winfo_screenheight())
-                if self.root.state() == "zoomed":
-                    self.root.state("normal")
-                self.root.geometry("{}x{}".format(APP_WINDOW_WIDTH, height))
-            except tk.TclError:
-                pass
-
-        self.root.after_idle(resize)
+        # Everything the window spends before the notebook starts -- page padding,
+        # window border, and the page scrollbar when it is out -- measured rather
+        # than added up from the padx values, which would miss the scrollbar and
+        # go stale the moment any of them changes.
+        chrome = max(0, self.root.winfo_width() - self.nb.winfo_width())
+        if not self._scrollbar.winfo_ismapped():
+            chrome += self._scrollbar.winfo_reqwidth()
+        screen_width = max(640, self.root.winfo_screenwidth())
+        needed = strip + TAB_STRIP_TAIL + chrome
+        minimum = min(max(APP_MIN_WIDTH, needed), screen_width - 40)
+        try:
+            self.root.minsize(minimum, self._min_height)
+            if self.root.winfo_width() < minimum:
+                self.root.geometry("{}x{}".format(minimum,
+                                                  self.root.winfo_height()))
+        except tk.TclError:
+            pass
 
     def _build_scroll_body(self):
         bg = self.root.cget("background")
-        canvas = tk.Canvas(self.root, width=APP_CONTENT_WIDTH, highlightthickness=0,
-                           bd=0, background=bg)
-        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
+        shell = ttk.Frame(self.root)
+        shell.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(shell, highlightthickness=0, bd=0, background=bg)
+        scrollbar = ttk.Scrollbar(shell, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
         canvas.pack(side="left", fill="both", expand=True)
 
         body = ttk.Frame(canvas)
-        window = canvas.create_window((0, 0), window=body, anchor="nw",
-                                      width=APP_CONTENT_WIDTH)
+        window = canvas.create_window((0, 0), window=body, anchor="nw")
 
         def refresh_scroll_region(event=None):
-            height = max(1, body.winfo_reqheight())
-            current_width = str(canvas.itemcget(window, "width"))
-            current_height = str(canvas.itemcget(window, "height"))
-            if current_width != str(APP_CONTENT_WIDTH) or current_height != str(height):
-                canvas.itemconfigure(window, width=APP_CONTENT_WIDTH, height=height)
-                scrollregion = canvas.bbox("all")
-                if scrollregion:
-                    canvas.configure(scrollregion=scrollregion)
+            try:
+                width = max(1, canvas.winfo_width())
+                view = max(1, canvas.winfo_height())
+                content = max(1, body.winfo_reqheight())
+                # Hand the body the full viewport, not just what it asked for, so
+                # spare vertical space goes to the notebook (a taller TERMINAL)
+                # instead of sitting as dead grey under the page.
+                height = max(content, view)
+                if (str(canvas.itemcget(window, "width")) != str(width)
+                        or str(canvas.itemcget(window, "height")) != str(height)):
+                    canvas.itemconfigure(window, width=width, height=height)
+                canvas.configure(scrollregion=(0, 0, width, height))
+                self._sync_body_scrollbar(content, view)
+            except tk.TclError:
+                pass
 
         body.bind("<Configure>", refresh_scroll_region)
         canvas.bind("<Configure>", refresh_scroll_region)
+        self._scroll_shell = shell
         self._scroll_canvas = canvas
         self._scrollbar = scrollbar
         self._scroll_window = window
         self._bind_body_mousewheel(canvas)
         self._refresh_scroll_body = refresh_scroll_region
         return body
+
+    def _sync_body_scrollbar(self, content_height, view_height):
+        """Show the page scrollbar only when the page genuinely overflows.
+
+        A permanent bar on a page that fits is noise, and it eats width the text
+        could have used. Hiding it can only ever give the content MORE width, and
+        more width never makes the page taller, so this settles in one pass
+        instead of flickering between the two states.
+        """
+        bar, canvas = self._scrollbar, self._scroll_canvas
+        needed = content_height > view_height + 2
+        try:
+            shown = bool(bar.winfo_ismapped())
+            if needed and not shown:
+                # before=canvas: the canvas is packed fill+expand and would
+                # otherwise swallow the whole cavity, leaving the bar zero width.
+                bar.pack(side="right", fill="y", before=canvas)
+            elif not needed and shown:
+                bar.pack_forget()
+                canvas.yview_moveto(0)   # nothing left to scroll back with
+        except tk.TclError:
+            pass
 
     def _bind_body_mousewheel(self, canvas):
         def should_scroll_page(event):
@@ -657,7 +805,7 @@ class LauncherApp:
         # Always-visible version, so a tester can read it off the screen without
         # opening About. Right-aligned in the header's stretchy column.
         ttk.Label(header, text="PS2 Servers " + APP_VERSION_LABEL,
-                  style="TopStripHint.TLabel").grid(row=0, column=5, sticky="e",
+                  style="TopStripHint.TLabel").grid(row=0, column=4, sticky="e",
                                                     padx=(12, 0))
         self.ip_var = tk.StringVar(value=netinfo.best_lan_ip())
         # Editable, not readonly: detection leans on getaddrinfo(gethostname()),
@@ -678,11 +826,15 @@ class LauncherApp:
             row=0, column=2, sticky="w")
         ttk.Button(header, text="What's my IP?", command=self._show_whats_my_ip).grid(
             row=0, column=3, sticky="w", padx=(4, 0))
-        ttk.Label(header, text="Enter this in OPL where it asks for the PC/server IP. "
-                  "Pick from the list, or type your own if the right address "
-                  "isn't shown -- it saves as you type.",
-                  style="TopStripHint.TLabel", wraplength=420).grid(
-            row=0, column=4, sticky="w", padx=(12, 0))
+        # Its own full-width row rather than a fifth column on the controls row:
+        # four controls plus a paragraph cannot share one row at every window
+        # width, and a row of its own reflows to any width without squeezing them.
+        ip_hint = ttk.Label(header, text="Enter this in OPL where it asks for the "
+                            "PC/server IP. Pick from the list, or type your own if "
+                            "the right address isn't shown -- it saves as you type.",
+                            style="TopStripHint.TLabel")
+        ip_hint.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        bind_wraplength(ip_hint, header, reserve=24)
 
         # direct PS2-to-PC link: adapter setup + DHCP helper behind one checkbox.
         # Available on every desktop OS; the per-OS network plumbing differs, and
@@ -699,24 +851,32 @@ class LauncherApp:
             self._direct_check.grid(row=0, column=0, sticky="w")
             self._direct_status = ttk.Label(
                 direct, text=self._DIRECT_STATUS_OFF,
-                style="TopStripHint.TLabel", wraplength=640)
+                style="TopStripHint.TLabel")
             self._direct_status.grid(row=0, column=1, sticky="w", padx=(12, 0))
+            # Reserve the checkbox's measured width, so the status wraps against
+            # whatever the tick box actually takes at this font and DPI.
+            bind_wraplength(self._direct_status, direct, reserve=36,
+                            siblings=(self._direct_check,))
             if _direct_link_experimental():
                 osname = "macOS" if platform.system() == "Darwin" else "Linux"
-                ttk.Label(
-                    direct, style="TopStripHint.TLabel", wraplength=900,
+                experimental = ttk.Label(
+                    direct, style="TopStripHint.TLabel",
                     text="Experimental on {}: it sets up the port and needs your "
                          "password. If anything looks off, untick it and send the "
-                         "TERMINAL output.".format(osname)).grid(
-                    row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+                         "TERMINAL output.".format(osname))
+                experimental.grid(row=1, column=0, columnspan=2, sticky="w",
+                                  pady=(4, 0))
+                bind_wraplength(experimental, direct, reserve=24)
         else:
             self.direct_link_var = None
             self._direct_check = None
             self._direct_status = None
 
-        # main tabs: one server per tab, plus a shared terminal tab
+        # main tabs: one server per tab, plus a shared terminal tab. expand=True so
+        # a taller window grows the tab body (mainly the TERMINAL log) instead of
+        # leaving empty page below it.
         self.nb = ttk.Notebook(parent)
-        self.nb.pack(fill="x", padx=16, pady=(0, 12))
+        self.nb.pack(fill="both", expand=True, padx=16, pady=(0, 12))
         self.server_tabs = {}
         self._init_tab_dots()
 
@@ -740,7 +900,13 @@ class LauncherApp:
         self.terminal_tab.rowconfigure(0, weight=1)
         self.terminal_tab.columnconfigure(0, weight=1)
         _p = theme.PALETTE
-        self.terminal = tk.Text(self.terminal_tab, height=16, wrap="none",
+        # wrap="word": a log line is read, not scrolled to. With no wrap, the long
+        # lines servers print (paths, commands, firewall rules) ran off the right
+        # edge with no horizontal bar to chase them, so the end of the line -- the
+        # part that says what went wrong -- was simply unreachable. Wrapping is the
+        # only setting here that can never hide text. height is a floor, not a size:
+        # the tab expands, so the log takes whatever the window has spare.
+        self.terminal = tk.Text(self.terminal_tab, height=10, wrap="word",
                                 state="disabled", background=_p["entry"],
                                 foreground=_p["text"], insertbackground=_p["accent"],
                                 selectbackground=_p["panel3"], selectforeground=_p["text"],
@@ -852,15 +1018,26 @@ class LauncherApp:
         text_frame.rowconfigure(0, weight=1)
         text_frame.columnconfigure(0, weight=1)
         _p = theme.PALETTE
-        text = tk.Text(text_frame, wrap="word", height=18, state="normal",
+        # height is a floor: the tab expands, so About uses the window it is given.
+        text = tk.Text(text_frame, wrap="word", height=10, state="normal",
                        background=_p["panel"], foreground=_p["text"],
                        insertbackground=_p["accent"], selectbackground=_p["panel3"],
                        selectforeground=_p["text"], borderwidth=0,
                        highlightthickness=0, padx=12, pady=10)
         scroll = ttk.Scrollbar(text_frame, orient="vertical", command=text.yview)
-        text.configure(yscrollcommand=scroll.set)
         text.grid(row=0, column=0, sticky="nsew")
         scroll.grid(row=0, column=1, sticky="ns")
+        # Out only while there is something to scroll. Unlike the TERMINAL -- where
+        # the bar is a standing sign that the log runs past the window -- About is a
+        # page of prose, and on a tall window the whole thing fits.
+        def sync(first, last):
+            scroll.set(first, last)
+            if float(first) <= 0.0 and float(last) >= 1.0:
+                scroll.grid_remove()
+            else:
+                scroll.grid()
+
+        text.configure(yscrollcommand=sync)
         text.insert("1.0", ABOUT_TEXT)
         text.config(state="disabled")
 
