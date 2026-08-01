@@ -119,7 +119,12 @@ def _parse_seconds(raw):
 
 
 def _smb_argv(v, smb_version="1"):
-    args = ["--share", "games={}".format(v["games_folder"]), "--smb-version", str(smb_version)]
+    # The share name is what a client types after the IP, so it is the user's to
+    # choose. "games" stays the default because it is what every OPL guide and
+    # every existing saved configuration says.
+    share = (v.get("share_name") or "games").strip() or "games"
+    args = ["--share", "{}={}".format(share, v["games_folder"]),
+            "--smb-version", str(smb_version)]
     if v.get("port"):
         args += ["--port", str(v["port"])]
     if v.get("bind"):
@@ -128,6 +133,14 @@ def _smb_argv(v, smb_version="1"):
         args.append("--read-only")
     if v.get("take_445"):
         args.append("--take-445")
+    # Only when the user actually set a password. Guest with a blank password is
+    # what OPL sends and what this server has always accepted, so the default
+    # must produce exactly the command line it produced before this option
+    # existed -- no --user, no behaviour change on hardware.
+    user = (v.get("username") or "").strip()
+    password = v.get("password") or ""
+    if password and user:
+        args += ["--user", "{}:{}".format(user, password)]
     if v.get("verbose"):
         args.append("-v")
     return args
@@ -342,6 +355,17 @@ SMBV1 = ServerDef(
     fields=[
         Field("games_folder", "Games folder", "folder", required=True,
               help="Folder of PS2 games/apps to share."),
+        Field("share_name", "Share name", "text", default="games",
+              help="The name typed after the IP on a client, and in OPL's "
+                   "Share field. 'games' is what the guides assume."),
+        Field("username", "Username", "text", default="guest",
+              help="Leave as guest with a blank password for OPL and "
+                   "POPSTARTER -- that is what a console sends."),
+        Field("password", "Password", "text", default="",
+              help="Blank means no login is required, which is how a console "
+                   "connects. Set one to keep other machines off the share. "
+                   "SMBv1 sends it in the clear, so use SMBv2/SMBv3 if that "
+                   "matters."),
         Field("port", "Port", "port", default=1025, advanced=False,
               help="TCP port (default 1025). Ports below 1025 require Administrator."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True,

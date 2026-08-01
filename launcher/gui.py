@@ -175,8 +175,16 @@ def tab_text(label):
 def opl_hint(key, ip, values):
     if key == "smbv1":
         port = "445" if values.get("take_445") else str(values.get("port") or 1111)
-        return ("In OPL → Network:  IP {}  ·  Port {}  ·  Share 'games'  "
-                "·  NetBIOS off  ·  User 'guest'  ·  Password blank".format(ip, port))
+        # Read back what this card is actually running, not what the defaults
+        # were: a hint that says 'games' next to a share called 'roms' sends the
+        # user to check their network when the name was the whole problem.
+        share = (values.get("share_name") or "games").strip() or "games"
+        user = (values.get("username") or "guest").strip() or "guest"
+        password = values.get("password") or ""
+        creds = ("User '{}'  ·  Password {}".format(
+            user, "as set" if password else "blank"))
+        return ("In OPL → Network:  IP {}  ·  Port {}  ·  Share '{}'  "
+                "·  NetBIOS off  ·  {}".format(ip, port, share, creds))
     if key == "udpfs":
         return "In OPL → select UDPFS  ·  server IP {} (if prompted)".format(ip)
     if key == "udpbd":
