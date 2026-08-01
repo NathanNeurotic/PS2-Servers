@@ -158,6 +158,7 @@ class UdpbdServer:
     def _handle_info(self, addr, datagram):
         _, cmdid, _ = unpack_header(datagram)
         print("UDPBD_CMD_INFO from {}".format(addr[0]))
+        self._write_left = 0  # reset any stale in-flight write state on console discovery/reboot
         self._print_stats()
         reply = pack_header(CMD_INFO_REPLY, cmdid, 1) + struct.pack(
             "<II", SECTOR_SIZE, self.bd.sector_count()
@@ -171,6 +172,7 @@ class UdpbdServer:
             print("UDPBD_CMD_READ(cmdid={}, start={}, count={})".format(
                 cmdid, sector_nr, sector_count))
 
+        self._write_left = 0  # starting a read resets any stale write state
         self._set_block_shift_for_sectors(sector_count)
         blocks_left = sector_count * self._blocks_per_sector
         self._total_read += blocks_left * self._block_size

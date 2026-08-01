@@ -462,3 +462,28 @@ func TestMalformedDatagramsDoNotKillTheServer(t *testing.T) {
 		t.Fatalf("server died on malformed input: %v", err)
 	}
 }
+
+func TestInfoResetsStaleWriteState(t *testing.T) {
+	addr, _, _ := startServer(t, false)
+	c := dialServer(t, addr)
+
+	// Initiate a write but never send WriteRDMA.
+	if _, err := c.Write(sectorReq(CmdWrite, 1, 10, 2)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now send CMD_INFO (reboot/rediscovery).
+	if _, err := c.Write(append(packHeader(CmdInfo, 2, 0), make([]byte, 6)...)); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 2048)
+	if _, err := readPacket(t, c, buf); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify a read works immediately afterwards.
+	got := readSectors(t, c, 3, 10, 1)
+	if len(got) != SectorSize {
+		t.Fatalf("read after INFO reset got %d bytes, want %d", len(got), SectorSize)
+	}
+}
