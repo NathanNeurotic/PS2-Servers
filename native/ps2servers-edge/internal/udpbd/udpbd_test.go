@@ -3,6 +3,7 @@ package udpbd
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"math/rand"
 	"net"
 	"os"
@@ -137,6 +138,34 @@ func freePort(t *testing.T) int {
 	return c.LocalAddr().(*net.UDPAddr).Port
 }
 
+// clientReadBuffer sizes the test client's receive buffer for the largest burst
+// it asks for -- a 512-sector READ is 256 KiB, which handleRead sends as ~180
+// datagrams back to back with no pacing, because that is what the console
+// expects and what the Python reference does.
+//
+// Nothing throttles that on loopback. There is no 100 Mbit link between the two
+// sockets to spread the burst out the way a real console's wire does, so the
+// send loop can outrun the receiving goroutine by more than the OS default
+// buffer holds (64 KiB on Windows, ~208 KiB on Linux -- both under 256 KiB).
+// The kernel then drops the tail, and since UDPBD has no retransmission those
+// packets never arrive: the test blocked until its deadline and failed with an
+// i/o timeout after ~66 KiB, which read like a server bug and is not one.
+//
+// This is not leniency. A console has its own buffering in the SMAP driver and
+// re-requests what it misses; the strict reassembler here does neither, so it
+// has to be given the room the burst actually needs.
+const clientReadBuffer = 1 << 20
+
+// packetDeadline bounds the wait for ONE datagram. The connection used to carry
+// a single absolute 5s deadline covering everything after the dial, so a slow
+// early read spent budget the last read needed, and the failure named whichever
+// read happened to be holding the clock rather than whatever actually stalled.
+const packetDeadline = 3 * time.Second
+
+// readAttempts bounds the re-requesting in readSectors. Three, because one
+// stall is the host's buffer policy and three in a row is the server.
+const readAttempts = 3
+
 func dialServer(t *testing.T, addr *net.UDPAddr) *net.UDPConn {
 	t.Helper()
 	c, err := net.DialUDP("udp4", nil, addr)
@@ -144,8 +173,20 @@ func dialServer(t *testing.T, addr *net.UDPAddr) *net.UDPConn {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { c.Close() })
-	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := c.SetReadBuffer(clientReadBuffer); err != nil {
+		t.Fatalf("could not size the receive buffer to %d bytes: %v",
+			clientReadBuffer, err)
+	}
+	_ = c.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	_ = c.SetReadDeadline(time.Now().Add(packetDeadline))
 	return c
+}
+
+// readPacket reads one datagram, giving it its own deadline.
+func readPacket(t *testing.T, c *net.UDPConn, buf []byte) (int, error) {
+	t.Helper()
+	_ = c.SetReadDeadline(time.Now().Add(packetDeadline))
+	return c.Read(buf)
 }
 
 func sectorReq(cmd, cmdid uint8, sector uint32, count uint16) []byte {
@@ -162,7 +203,7 @@ func TestInfoReportsSectorGeometry(t *testing.T) {
 		t.Fatal(err)
 	}
 	buf := make([]byte, 2048)
-	n, err := c.Read(buf)
+	n, err := readPacket(t, c, buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,29 +222,68 @@ func TestInfoReportsSectorGeometry(t *testing.T) {
 // readSectors reassembles an RDMA stream, the way a console does.
 func readSectors(t *testing.T, c *net.UDPConn, cmdid uint8, sector uint32, count uint16) []byte {
 	t.Helper()
-	if _, err := c.Write(sectorReq(CmdRead, cmdid, sector, count)); err != nil {
-		t.Fatal(err)
-	}
 	want := int(count) * SectorSize
-	out := make([]byte, 0, want)
 	buf := make([]byte, 2048)
-	for len(out) < want {
-		n, err := c.Read(buf)
-		if err != nil {
-			t.Fatalf("read sectors %d+%d: %v (got %d/%d bytes)", sector, count, err, len(out), want)
+
+	// Re-request a stream that stalls, which is what a console does: UDPBD has
+	// no retransmission, so a lost RDMA packet is only ever recovered by asking
+	// again. Sizing the receive buffer is not enough on its own to make that
+	// impossible -- Linux caps SO_RCVBUF at net.core.rmem_max (212992 by
+	// default, under the 256 KiB a 512-sector read delivers), so how much of
+	// the ask survives is the host's policy, not ours.
+	//
+	// This does not soften what the test checks. Every byte still has to match
+	// the image, and a server that truncates or stops answering fails all the
+	// attempts rather than one.
+	for attempt := 1; ; attempt++ {
+		if _, err := c.Write(sectorReq(CmdRead, cmdid, sector, count)); err != nil {
+			t.Fatal(err)
 		}
-		cmd, gotID, _ := unpackHeader(buf[:n])
-		if cmd != CmdReadRDMA || gotID != cmdid {
-			t.Fatalf("unexpected reply cmd=0x%02x cmdid=%d", cmd, gotID)
+		out := make([]byte, 0, want)
+		stalled := false
+		for len(out) < want {
+			// Per packet, not per transfer: 180 datagrams sharing one deadline
+			// made the timeout depend on how many had already arrived.
+			n, err := readPacket(t, c, buf)
+			if err != nil {
+				if errors.Is(err, os.ErrDeadlineExceeded) && attempt < readAttempts {
+					stalled = true
+					break
+				}
+				t.Fatalf("read sectors %d+%d after %d attempt(s): %v (got %d/%d bytes)",
+					sector, count, attempt, err, len(out), want)
+			}
+			cmd, gotID, _ := unpackHeader(buf[:n])
+			if cmd != CmdReadRDMA || gotID != cmdid {
+				t.Fatalf("unexpected reply cmd=0x%02x cmdid=%d", cmd, gotID)
+			}
+			shift, blocks := unpackBlockType(buf[:n], 2)
+			size := int(blocks) * (1 << (shift + 2))
+			if n < 6+size {
+				t.Fatalf("RDMA payload %d shorter than its block_type %d", n-6, size)
+			}
+			out = append(out, buf[6:6+size]...)
 		}
-		shift, blocks := unpackBlockType(buf[:n], 2)
-		size := int(blocks) * (1 << (shift + 2))
-		if n < 6+size {
-			t.Fatalf("RDMA payload %d shorter than its block_type %d", n-6, size)
+		if !stalled {
+			return out[:want]
 		}
-		out = append(out, buf[6:6+size]...)
+		// Late packets from the abandoned burst are still queued, and appending
+		// them to the retry would splice two streams into one wrong answer.
+		drain(t, c)
 	}
-	return out[:want]
+}
+
+// drain discards whatever is already queued, so an abandoned transfer cannot
+// leak into the next one.
+func drain(t *testing.T, c *net.UDPConn) {
+	t.Helper()
+	buf := make([]byte, 2048)
+	for {
+		_ = c.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+		if _, err := c.Read(buf); err != nil {
+			return
+		}
+	}
 }
 
 // TestReadsMatchTheImageAcrossBlockRegimes covers each branch of the optimizer,
@@ -244,7 +324,7 @@ func TestWriteLandsInTheImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	buf := make([]byte, 2048)
-	n, err := c.Read(buf)
+	n, err := readPacket(t, c, buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +401,7 @@ func TestReadOnlyImageReportsWriteFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	buf := make([]byte, 2048)
-	n, err := c.Read(buf)
+	n, err := readPacket(t, c, buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +458,7 @@ func TestMalformedDatagramsDoNotKillTheServer(t *testing.T) {
 	if _, err := c.Write(append(packHeader(CmdInfo, 0, 0), make([]byte, 6)...)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Read(buf); err != nil {
+	if _, err := readPacket(t, c, buf); err != nil {
 		t.Fatalf("server died on malformed input: %v", err)
 	}
 }
