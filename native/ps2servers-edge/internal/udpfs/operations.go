@@ -14,9 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode"
+	"unicode/utf8"
 )
 
 func (s *Server) handleMessage(st *session.State, p []byte) {
+	s.logRequest(st, p)
 	// Counters are incremented at dispatch so one request counts once,
 	// regardless of how a handler exits. WriteData is not counted separately:
 	// a write is one operation however many chunks carry it, which is how the
@@ -55,6 +58,75 @@ func (s *Server) handleMessage(st *session.State, p []byte) {
 		s.cfg.Log.Debug("unknown UDPFS opcode", map[string]any{"peer": st.Peer, "opcode": p[0]})
 	}
 }
+
+// logRequest emits only decoded request metadata. In particular, READ logs the
+// handle and requested byte count, never returned file data, and OPEN includes
+// a path only when it is valid UTF-8 without log-control characters.
+func (s *Server) logRequest(st *session.State, p []byte) {
+	if !s.cfg.Log.Verbose || len(p) == 0 {
+		return
+	}
+	opcode := protocol.MessageType(p[0])
+	fields := map[string]any{"peer": inboundPeerString(st.Peer), "opcode": p[0]}
+	switch opcode {
+	case protocol.OpenRequest:
+		fields["operation"] = "OPEN"
+		if len(p) >= 8 {
+			fields["is_dir"] = p[1] != 0
+			fields["flags"] = binary.LittleEndian.Uint16(p[2:4])
+			if path, err := cString(p[8:]); err == nil {
+				if safe, ok := safePathForLog(path); ok {
+					fields["path"] = safe
+				} else {
+					fields["path_omitted"] = true
+				}
+			}
+		}
+	case protocol.CloseRequest:
+		fields["operation"] = "CLOSE"
+	case protocol.ReadRequest:
+		fields["operation"] = "READ"
+		if len(p) >= 12 {
+			fields["handle"] = int32(binary.LittleEndian.Uint32(p[4:8]))
+			fields["size"] = binary.LittleEndian.Uint32(p[8:12])
+		}
+	case protocol.WriteRequest:
+		fields["operation"] = "WRITE"
+	case protocol.WriteData:
+		fields["operation"] = "WRITE_DATA"
+	case protocol.BReadRequest:
+		fields["operation"] = "BREAD"
+	case protocol.BWriteRequest:
+		fields["operation"] = "BWRITE"
+	case protocol.SeekRequest:
+		fields["operation"] = "LSEEK"
+	case protocol.DReadRequest:
+		fields["operation"] = "DREAD"
+	case protocol.GetStatRequest:
+		fields["operation"] = "GETSTAT"
+	default:
+		fields["operation"] = "UNKNOWN"
+	}
+	s.cfg.Log.Debug("UDPFS request", fields)
+}
+
+func safePathForLog(path string) (string, bool) {
+	if !utf8.ValidString(path) {
+		return "", false
+	}
+	for _, r := range path {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
+			return "", false
+		}
+	}
+	const maxRunes = 256
+	if utf8.RuneCountInString(path) > maxRunes {
+		runes := []rune(path)
+		path = string(runes[:maxRunes]) + "..."
+	}
+	return path, true
+}
+
 func cString(b []byte) (string, error) {
 	if idx := bytes.IndexByte(b, 0); idx >= 0 {
 		b = b[:idx]

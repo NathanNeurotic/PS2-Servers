@@ -45,6 +45,10 @@ Observability:
 - `--metrics` — log periodic transfer counters
 - `--metrics-period 1m` — how often, from `1s` to `24h`
 
+For an OpenWrt command reference and a packet-by-packet NHDDL-to-Neutrino
+diagnostic procedure, see
+[UDPFS-HANDOFF-DIAGNOSTICS.md](UDPFS-HANDOFF-DIAGNOSTICS.md).
+
 Every option also reads an environment variable (`FSROOT`, `BIND`, `PORT`,
 `BDPATH`, `RO`, `NO_COMPRESSION`, `METRICS`, and so on), which is what the
 Docker images use.
