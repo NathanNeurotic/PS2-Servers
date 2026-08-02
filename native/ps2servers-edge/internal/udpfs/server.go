@@ -315,6 +315,16 @@ func (s *Server) readLoop(conn *net.UDPConn, which session.Socket) {
 				continue
 			}
 		}
+		// Under --metrics, record the datagram; under --verbose, describe it
+		// before it can be queued behind another peer's work. This is the
+		// closest observable boundary to the kernel receive: if the trace never
+		// appears after a console-side reset, no UDPFS datagram reached Edge.
+		if s.cfg.MetricsPeriod > 0 {
+			s.stats.recordRX(which, n, peer, buf[:n])
+		}
+		if s.cfg.Log.Verbose {
+			s.cfg.Log.Debug("UDP RX", receivedDatagramTraceFields(conn, which, peer, buf[:n], n))
+		}
 		pkt := append([]byte(nil), buf[:n]...)
 		select {
 		case s.incoming <- inbound{pkt, peer, which}:
@@ -374,6 +384,7 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	if !peer.IP.IsLoopback() {
 		var oldKey string
 		var oldWorker *peerWorker
+		var replacementFields map[string]any
 		now := time.Now()
 		for k, w := range s.sessions {
 			if w.state != nil && w.state.Peer != nil && w.state.Peer.IP.Equal(peer.IP) {
@@ -381,15 +392,36 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 				quiet := now.Sub(w.state.LastActivity)
 				writeActive := w.state.WriteActive
 				w.state.Mu.Unlock()
-				if !writeActive || quiet > time.Second {
+				eligible := !writeActive || quiet > sessionReplaceQuiet
+				reason := "active_write_recent"
+				if !writeActive {
+					reason = "no_active_write"
+				} else if eligible {
+					reason = "active_write_quiet_over_1s"
+				}
+				candidateFields := map[string]any{
+					"ip":              peerIP,
+					"old_peer":        k,
+					"new_peer":        key,
+					"old_source_port": w.state.Peer.Port,
+					"new_source_port": peer.Port,
+					"quiet":           quiet.String(),
+					"write_active":    writeActive,
+					"eligible":        eligible,
+					"reason":          reason,
+				}
+				s.cfg.Log.Debug("same-IP session replacement candidate", candidateFields)
+				if eligible {
 					oldKey = k
 					oldWorker = w
+					replacementFields = candidateFields
 					break
 				}
 			}
 		}
 		if oldWorker != nil {
-			s.cfg.Log.Info("replacing stale session for IP", map[string]any{"ip": peerIP, "old_peer": oldKey, "new_peer": key})
+			s.cfg.Log.Info("replacing stale session for IP", replacementFields)
+			s.stats.sameIPReplacements.Add(1)
 			delete(s.sessions, oldKey)
 			oldWorker.state.Mu.Lock()
 			oldWorker.state.Close()
@@ -414,6 +446,13 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	st.ReleaseWriter = s.releaseWriter
 	w := &peerWorker{state: st, queue: make(chan inbound, 256), done: make(chan struct{})}
 	s.sessions[key] = w
+	s.cfg.Log.Debug("session created", map[string]any{
+		"peer":                key,
+		"ip":                  peerIP,
+		"source_port":         peer.Port,
+		"profile":             st.Profile,
+		"configured_protocol": s.cfg.ProtocolMode,
+	})
 	s.wg.Add(1)
 	go s.worker(w)
 	return w
@@ -432,7 +471,10 @@ func (s *Server) worker(w *peerWorker) {
 func (s *Server) dispatch(in inbound) {
 	h, err := protocol.ParseHeader(in.packet)
 	if err != nil {
-		s.cfg.Log.Debug("dropping malformed datagram", map[string]any{"peer": in.peer, "error": err})
+		s.stats.malformedDatagrams.Add(1)
+		s.cfg.Log.Debug("dropping malformed datagram", map[string]any{
+			"peer": inboundPeerString(in.peer), "socket": in.socket, "bytes": len(in.packet), "error": err,
+		})
 		return
 	}
 	switch h.Type {
@@ -465,6 +507,64 @@ func (s *Server) dispatch(in inbound) {
 			s.cfg.Log.Warn("peer queue full", map[string]any{"peer": in.peer})
 		}
 	default:
-		s.cfg.Log.Debug("unknown packet type", map[string]any{"peer": in.peer, "type": h.Type})
+		s.cfg.Log.Debug("unknown packet type", map[string]any{
+			"peer": inboundPeerString(in.peer), "socket": in.socket, "bytes": len(in.packet), "type": h.Type, "sequence": h.Sequence,
+		})
 	}
+}
+
+// datagramTraceFields extracts transport and protocol headers only. On a sent
+// packet, HeaderWords is the wire-level proof that the payload begins with an
+// application header; continuation data with HeaderWords == 0 is never treated
+// as an opcode, even when its first content byte happens to equal one.
+func datagramTraceFields(conn *net.UDPConn, which session.Socket, peer *net.UDPAddr, packet []byte, bytes int) map[string]any {
+	local := ""
+	if conn != nil && conn.LocalAddr() != nil {
+		local = conn.LocalAddr().String()
+	}
+	peerString := ""
+	if peer != nil {
+		peerString = peer.String()
+	}
+	fields := map[string]any{
+		"socket": which,
+		"local":  local,
+		"peer":   peerString,
+		"bytes":  bytes,
+	}
+	h, err := protocol.ParseHeader(packet)
+	if err != nil {
+		return fields
+	}
+	fields["type"] = h.Type
+	fields["sequence"] = h.Sequence
+	if h.Type != protocol.Data {
+		return fields
+	}
+	_, dh, payload, err := protocol.ParseDataPacket(packet)
+	if err != nil {
+		return fields
+	}
+	fields["ack"] = dh.AckSequence
+	fields["flags"] = dh.Flags
+	fields["header_words"] = dh.HeaderWords
+	fields["data_bytes"] = dh.DataBytes
+	if dh.HeaderWords > 0 && len(payload) > 0 {
+		fields["opcode"] = payload[0]
+	}
+	return fields
+}
+
+// receivedDatagramTraceFields adds the request opcode for an inbound DATA
+// payload. The receive path hands every non-empty payload to handleMessage,
+// where byte zero is the UDPFS opcode even though clients encode request bytes
+// under DataBytes rather than HeaderWords. Keeping this receive-only prevents
+// outgoing ISO/save continuation bytes from being exposed as fake opcodes.
+func receivedDatagramTraceFields(conn *net.UDPConn, which session.Socket, peer *net.UDPAddr, packet []byte, bytes int) map[string]any {
+	fields := datagramTraceFields(conn, which, peer, packet, bytes)
+	h, _, payload, err := protocol.ParseDataPacket(packet)
+	if err == nil && h.Type == protocol.Data && len(payload) > 0 {
+		fields["opcode"] = payload[0]
+	}
+	return fields
 }

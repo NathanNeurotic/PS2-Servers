@@ -27,10 +27,27 @@ func (s *Server) handleControl(st *session.State, dh protocol.DataHeader) {
 
 func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 	if len(in.packet) < 6 {
+		s.stats.malformedDatagrams.Add(1)
+		s.cfg.Log.Debug("dropping invalid DISCOVERY", map[string]any{
+			"peer": inboundPeerString(in.peer), "socket": in.socket, "bytes": len(in.packet), "sequence": h.Sequence,
+			"reason": "truncated discovery header",
+		})
 		return
 	}
 	dh, err := protocol.ParseDiscoveryHeader(in.packet[2:])
-	if err != nil || dh.ServiceID != protocol.ServiceUDPFS {
+	if err != nil {
+		s.stats.malformedDatagrams.Add(1)
+		s.cfg.Log.Debug("dropping invalid DISCOVERY", map[string]any{
+			"peer": inboundPeerString(in.peer), "socket": in.socket, "bytes": len(in.packet), "sequence": h.Sequence,
+			"reason": "malformed discovery header", "error": err,
+		})
+		return
+	}
+	if dh.ServiceID != protocol.ServiceUDPFS {
+		s.cfg.Log.Debug("dropping invalid DISCOVERY", map[string]any{
+			"peer": inboundPeerString(in.peer), "socket": in.socket, "bytes": len(in.packet), "sequence": h.Sequence,
+			"service_id": dh.ServiceID, "service_port": dh.Port, "reason": "unsupported service",
+		})
 		return
 	}
 	// First contact from a console is the most useful line this server emits.
@@ -54,9 +71,16 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 	}
 	if !known {
 		s.cfg.Log.Info("DISCOVERY received, console found this server",
-			map[string]any{"peer": in.peer.String()})
+			map[string]any{
+				"peer": in.peer.String(), "socket": in.socket, "sequence": h.Sequence,
+				"service_id": dh.ServiceID, "service_port": dh.Port,
+			})
 	} else {
-		s.cfg.Log.Debug("DISCOVERY", map[string]any{"peer": in.peer.String(), "seq": h.Sequence})
+		// Keep seq as the legacy alias for existing structured-log consumers.
+		s.cfg.Log.Debug("DISCOVERY", map[string]any{
+			"peer": in.peer.String(), "socket": in.socket, "seq": h.Sequence, "sequence": h.Sequence,
+			"service_id": dh.ServiceID, "service_port": dh.Port,
+		})
 	}
 
 	st := w.state
@@ -64,6 +88,10 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 	defer st.Mu.Unlock()
 
 	quiet := time.Since(st.LastActivity)
+	s.cfg.Log.Debug("discovery negotiation input", map[string]any{
+		"peer": in.peer.String(), "socket": in.socket, "sequence": h.Sequence,
+		"profile": st.Profile, "streaming": st.Streaming, "quiet": quiet.String(), "known": known,
+	})
 	// Both client families may keep broadcasting sequence-zero discovery while
 	// an established transfer is active. Reply, but never reset that live stream.
 	// A quiet session is treated as a replacement from the same UDP endpoint.
@@ -180,8 +208,22 @@ func (s *Server) sendOn(which session.Socket, p []byte, peer *net.UDPAddr) {
 	if s.cfg.TxDelay > 0 {
 		time.Sleep(s.cfg.TxDelay)
 	}
-	if _, err := conn.WriteToUDP(p, peer); err != nil {
-		s.cfg.Log.Debug("UDP send failed", map[string]any{"peer": peer, "socket": which, "error": err})
+	n, err := conn.WriteToUDP(p, peer)
+	if err != nil {
+		if s.cfg.MetricsPeriod > 0 {
+			s.stats.txSendErrors.Add(1)
+		}
+		fields := datagramTraceFields(conn, which, peer, p, len(p))
+		fields["written_bytes"] = n
+		fields["error"] = err
+		s.cfg.Log.Debug("UDP send failed", fields)
+		return
+	}
+	if s.cfg.MetricsPeriod > 0 {
+		s.stats.recordTX(which, n)
+	}
+	if s.cfg.Log.Verbose {
+		s.cfg.Log.Debug("UDP TX", datagramTraceFields(conn, which, peer, p, n))
 	}
 }
 
@@ -195,7 +237,15 @@ func classify(discovery, first uint16) session.Profile {
 func (s *Server) handleData(st *session.State, in inbound) {
 	h, dh, payload, err := protocol.ParseDataPacket(in.packet)
 	if err != nil {
-		s.cfg.Log.Debug("dropping malformed DATA", map[string]any{"peer": in.peer, "error": err})
+		s.stats.malformedDatagrams.Add(1)
+		fields := map[string]any{
+			"peer": inboundPeerString(in.peer), "socket": in.socket, "bytes": len(in.packet), "error": err,
+		}
+		if parsed, headerErr := protocol.ParseHeader(in.packet); headerErr == nil {
+			fields["type"] = parsed.Type
+			fields["sequence"] = parsed.Sequence
+		}
+		s.cfg.Log.Debug("dropping malformed DATA", fields)
 		return
 	}
 
@@ -222,7 +272,15 @@ func (s *Server) handleData(st *session.State, in inbound) {
 				st.FallbackSent = false
 			}
 		}
-		s.cfg.Log.Info("session negotiated", map[string]any{"peer": in.peer, "profile": st.Profile, "response_socket": st.ResponseSocket})
+		fields := map[string]any{
+			"peer": inboundPeerString(in.peer), "profile": st.Profile, "response_socket": st.ResponseSocket,
+			"discovery_sequence": st.DiscoverySequence, "first_data_sequence": h.Sequence,
+			"ack": dh.AckSequence, "flags": dh.Flags, "data_bytes": dh.DataBytes,
+		}
+		if len(payload) > 0 {
+			fields["opcode"] = payload[0]
+		}
+		s.cfg.Log.Info("session negotiated", fields)
 	} else if !st.Streaming {
 		// Strict diagnostic modes still tolerate either local endpoint. The mode
 		// controls sequence interpretation, not network topology.
@@ -247,7 +305,14 @@ func (s *Server) handleData(st *session.State, in inbound) {
 	}
 
 	if h.Sequence != st.ExpectedReceive {
+		expected := st.ExpectedReceive
+		s.stats.sequenceMismatches.Add(1)
 		if h.Sequence == protocol.Previous(st.ExpectedReceive) {
+			s.cfg.Log.Debug("peer sequence mismatch", map[string]any{
+				"peer": inboundPeerString(in.peer), "socket": in.socket, "profile": st.Profile,
+				"expected": expected, "received": h.Sequence, "ack": dh.AckSequence,
+				"flags": dh.Flags, "outcome": "duplicate_reack",
+			})
 			s.sendACK(st, true)
 			if len(st.TxBuffer) > 0 {
 				s.retransmit(st, st.TxBuffer[0].Sequence)
@@ -262,12 +327,26 @@ func (s *Server) handleData(st *session.State, in inbound) {
 			if prof == "" || prof == session.Pending {
 				prof = session.Standard
 			}
+			s.cfg.Log.Debug("peer sequence mismatch", map[string]any{
+				"peer": inboundPeerString(in.peer), "socket": in.socket, "profile": prof,
+				"expected": expected, "received": h.Sequence, "ack": dh.AckSequence,
+				"flags": dh.Flags, "outcome": "session_reset",
+			})
 			st.Reset(prof)
 			st.ResponseSocket = in.socket
 			st.ExpectedReceive = 0
 			st.Touch()
-			s.cfg.Log.Info("peer sequence reset (seq 0 received)", map[string]any{"peer": in.peer})
+			s.stats.sequenceResets.Add(1)
+			s.cfg.Log.Info("peer sequence reset (seq 0 received)", map[string]any{
+				"peer": inboundPeerString(in.peer), "socket": in.socket, "profile": prof,
+				"expected": expected, "received": h.Sequence, "outcome": "session_reset",
+			})
 		} else {
+			s.cfg.Log.Debug("peer sequence mismatch", map[string]any{
+				"peer": inboundPeerString(in.peer), "socket": in.socket, "profile": st.Profile,
+				"expected": expected, "received": h.Sequence, "ack": dh.AckSequence,
+				"flags": dh.Flags, "outcome": "nack",
+			})
 			s.sendACK(st, false)
 			st.Mu.Unlock()
 			return
