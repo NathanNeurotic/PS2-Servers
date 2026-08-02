@@ -7,6 +7,8 @@ for testing:
   --list                    print the servers available on this machine
   --selfcheck               verify the re-exec path can actually start a server
                             (used to confirm the packaged build works)
+  --autostart               automatically start last saved servers on launch
+  --ignore-firewall-prompt  bypass Windows Firewall prompts on server start
 """
 
 import platform
