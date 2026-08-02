@@ -46,7 +46,7 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
         except ImportError:
             raise unittest.SkipTest("no tkinter")
 
-        from launcher import gui, windows_setup
+        from launcher import gui
         try:
             root = tk.Tk()
         except tk.TclError:
@@ -70,6 +70,31 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
             self.assertTrue(app._save())
             self.assertTrue(saved_data.get("ignore_firewall_prompt"))
             self.assertTrue(saved_data.get("autostart_last_config"))
+            self.assertEqual(saved_data.get("last_active_servers"), [])
+        finally:
+            app._shutting_down = True
+            root.destroy()
+
+    def test_autostart_servers_saved_list(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            raise unittest.SkipTest("no tkinter")
+
+        from launcher import gui
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            raise unittest.SkipTest("no display")
+
+        try:
+            app = gui.LauncherApp(root)
+            started_keys = []
+            app.start_server = lambda key: started_keys.append(key)
+            app.saved["last_active_servers"] = ["udpfs"]
+
+            app._autostart_servers()
+            self.assertEqual(started_keys, ["udpfs"])
         finally:
             app._shutting_down = True
             root.destroy()
@@ -90,11 +115,39 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
             app = gui.LauncherApp(root)
             started_keys = []
             app.start_server = lambda key: started_keys.append(key)
-            app.saved["last_active_servers"] = ["udpfs"]
+            app.saved["last_active_servers"] = []
+
+            # Seed a card with required fields populated
+            card = app.cards["udpfs"]
+            card.set_values({"root": "/tmp/games", "port": 62966})
 
             app._autostart_servers()
             self.assertIn("udpfs", started_keys)
         finally:
+            app._shutting_down = True
+            root.destroy()
+
+    def test_cli_flags_precedence(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            raise unittest.SkipTest("no tkinter")
+
+        old_argv = list(sys.argv)
+        sys.argv.extend(["--ignore-firewall-prompt", "--autostart"])
+        from launcher import gui
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            sys.argv = old_argv
+            raise unittest.SkipTest("no display")
+
+        try:
+            app = gui.LauncherApp(root)
+            self.assertTrue(app.ignore_firewall_var.get())
+            self.assertTrue(app.autostart_var.get())
+        finally:
+            sys.argv = old_argv
             app._shutting_down = True
             root.destroy()
 

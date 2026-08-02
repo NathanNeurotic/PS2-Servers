@@ -2544,9 +2544,9 @@ class LauncherApp:
         self.minimize_to_tray_var.set(
             self._saved_bool("minimize_to_tray", self.minimize_to_tray_var.get()))
         self.ignore_firewall_var.set(
-            self._saved_bool("ignore_firewall_prompt", self.ignore_firewall_var.get()))
+            bool(self._saved_bool("ignore_firewall_prompt", self.ignore_firewall_var.get()) or ("--ignore-firewall-prompt" in sys.argv)))
         self.autostart_var.set(
-            self._saved_bool("autostart_last_config", self.autostart_var.get()))
+            bool(self._saved_bool("autostart_last_config", self.autostart_var.get()) or ("--autostart" in sys.argv)))
 
     def _autostart_servers(self):
         if getattr(self, "_shutting_down", False):
@@ -2576,7 +2576,7 @@ class LauncherApp:
                 "minimize_to_tray": bool(self.minimize_to_tray_var.get()),
                 "ignore_firewall_prompt": bool(self.ignore_firewall_var.get()),
                 "autostart_last_config": bool(self.autostart_var.get()),
-                "last_active_servers": active if active else (self.saved.get("last_active_servers") or [])}
+                "last_active_servers": active}
         if self.saved.get("direct_link"):
             data["direct_link"] = self.saved["direct_link"]
         if self.saved.get("pending_direct_link_restore"):
