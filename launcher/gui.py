@@ -560,6 +560,10 @@ class LauncherApp:
             value=self._saved_bool("close_to_tray", _tray_default))
         self.minimize_to_tray_var = tk.BooleanVar(
             value=self._saved_bool("minimize_to_tray", _tray_default))
+        self.ignore_firewall_var = tk.BooleanVar(
+            value=self._saved_bool("ignore_firewall_prompt", "--ignore-firewall-prompt" in sys.argv))
+        self.autostart_var = tk.BooleanVar(
+            value=self._saved_bool("autostart_last_config", "--autostart" in sys.argv))
 
         root.title("PS2 Servers " + APP_VERSION_LABEL)
         self._configure_window()
@@ -618,6 +622,9 @@ class LauncherApp:
                 # not survive a restart, and re-arming would re-prompt for a
                 # password. Show it as off; the user re-ticks to set it up.
                 self.root.after(600, self._direct_link_reset_stale_unix)
+
+        if self.autostart_var.get() or "--autostart" in sys.argv:
+            self.root.after(750, self._autostart_servers)
 
     def _configure_window(self):
         screen_width = max(640, self.root.winfo_screenwidth())
@@ -1001,20 +1008,39 @@ class LauncherApp:
         # (on Linux closing the window quits, with a confirm if servers are up).
         # Gate on tray.AVAILABLE, not self._tray: the tray instance is created
         # AFTER _build() runs, so self._tray is still None here on every OS.
+        behavior = ttk.LabelFrame(about, text=" Options ")
+        behavior.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
+        behavior.columnconfigure(3, weight=1)
+        row += 1
+        b_col = 0
+        b_row = 0
         if tray.AVAILABLE:
-            behavior = ttk.LabelFrame(about, text=" Window behavior ")
-            behavior.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
-            behavior.columnconfigure(2, weight=1)
-            row += 1
             close_to_tray = ttk.Checkbutton(
                 behavior, text="Close to tray", variable=self.close_to_tray_var,
                 command=self._save, style="Card.TCheckbutton")
-            close_to_tray.grid(row=0, column=0, sticky="w", padx=(6, 12), pady=6)
+            close_to_tray.grid(row=b_row, column=b_col, sticky="w", padx=(6, 12), pady=6)
+            b_col += 1
             minimize_to_tray = ttk.Checkbutton(
                 behavior, text="Minimize to tray", variable=self.minimize_to_tray_var,
                 command=self._save, style="Card.TCheckbutton")
-            minimize_to_tray.grid(row=0, column=1, sticky="w", padx=(0, 12), pady=6)
+            minimize_to_tray.grid(row=b_row, column=b_col, sticky="w", padx=(0, 12), pady=6)
+            b_col += 1
             self._tray_option_widgets.extend([close_to_tray, minimize_to_tray])
+
+        autostart_chk = ttk.Checkbutton(
+            behavior, text="Auto-start servers on launch", variable=self.autostart_var,
+            command=self._save, style="Card.TCheckbutton")
+        autostart_chk.grid(row=b_row, column=b_col, sticky="w", padx=(6 if b_col == 0 else 0, 12), pady=6)
+        b_col += 1
+
+        if windows_setup.is_windows():
+            if b_col >= 3:
+                b_row += 1
+                b_col = 0
+            ignore_fw_chk = ttk.Checkbutton(
+                behavior, text="Ignore Windows Firewall prompts", variable=self.ignore_firewall_var,
+                command=self._save, style="Card.TCheckbutton")
+            ignore_fw_chk.grid(row=b_row, column=b_col, sticky="w", padx=(6 if b_col == 0 else 0, 12), pady=6)
 
         text_frame = ttk.Frame(about)
         about.rowconfigure(row, weight=1)
@@ -1800,6 +1826,12 @@ class LauncherApp:
                 port_num = 0
         low_port_required = (0 < port_num < 1025)
         admin_required = setup_needed or take_445 or low_port_required
+
+        if self.ignore_firewall_var.get() and not take_445 and not low_port_required:
+            self._append_log(key, "[setup] firewall setup prompt ignored per user setting; starting anyway\n")
+            self._launch_server(key, values)
+            return
+
         if admin_required and not elevate.is_admin():
             self._set_card_busy(key, False, "Start")
             if not elevate.can_elevate():
@@ -1844,6 +1876,10 @@ class LauncherApp:
             return
 
         if setup_needed and elevate.is_admin():
+            if self.ignore_firewall_var.get():
+                self._append_log(key, "[setup] firewall setup prompt ignored per user setting; starting anyway\n")
+                self._launch_server(key, values)
+                return
             if not self._confirm_windows_setup(key, values):
                 self._set_card_busy(key, False, "Start")
                 return
@@ -1918,6 +1954,7 @@ class LauncherApp:
             return
         self.procs[key] = proc
         card._active_values = dict(values)
+        self._save()
         # Ask this server what state it is actually in, rather than inferring
         # it from the child process being alive. Loopback, because the launcher
         # is asking about a server it started itself.
@@ -2253,6 +2290,7 @@ class LauncherApp:
         self.cards[key].refresh_status(False)
         self.cards[key].toggle_btn.config(state="normal")
         self._append_log(key, "[launcher] stopped\n")
+        self._save()
 
     def stop_all(self):
         """Stop every server. Unconditional, and it must stay that way.
@@ -2508,22 +2546,40 @@ class LauncherApp:
             self._saved_bool("close_to_tray", self.close_to_tray_var.get()))
         self.minimize_to_tray_var.set(
             self._saved_bool("minimize_to_tray", self.minimize_to_tray_var.get()))
+        self.ignore_firewall_var.set(
+            bool(self._saved_bool("ignore_firewall_prompt", self.ignore_firewall_var.get()) or ("--ignore-firewall-prompt" in sys.argv)))
+        self.autostart_var.set(
+            bool(self._saved_bool("autostart_last_config", self.autostart_var.get()) or ("--autostart" in sys.argv)))
+
+    def _autostart_servers(self):
+        if getattr(self, "_shutting_down", False):
+            return
+        last = list(self.saved.get("last_active_servers") or [])
+        if not last:
+            for key, card in self.cards.items():
+                server = REGISTRY[key]
+                values = card.values()
+                missing = [f.label for f in server.fields if f.required and not values.get(f.key)]
+                if not missing:
+                    last.append(key)
+        for key in last:
+            if key in self.cards and not self.is_running(key):
+                self._append_log(key, "[autostart] auto-starting server on launch\n")
+                self.start_server(key)
 
     def _save(self, pending_start=None, pending_cleanup=False,
               pending_firewall_allow=False, pending_direct_link=False,
               pending_direct_link_off=False) -> bool:
+        active = [k for k in self.cards if self.is_running(k)]
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get(),
                 "firewall_ok": sorted(getattr(self, "_firewall_ok", ())),
-                # Not in the pick-list => the user typed it. See _restore.
-                # Must be the combo's values, not a fresh all_ipv4(): _save runs on
-                # every minimize/close-to-tray, so it would block the UI on
-                # getaddrinfo -- and worse, an address that vanished since startup
-                # (roamed, DHCP, cable out) would be misread as hand-typed and then
-                # persist forever, defeating the stale check above.
                 "ip_custom": self.ip_var.get() not in self._detected_ips(),
                 "close_to_tray": bool(self.close_to_tray_var.get()),
-                "minimize_to_tray": bool(self.minimize_to_tray_var.get())}
+                "minimize_to_tray": bool(self.minimize_to_tray_var.get()),
+                "ignore_firewall_prompt": bool(self.ignore_firewall_var.get()),
+                "autostart_last_config": bool(self.autostart_var.get()),
+                "last_active_servers": active}
         if self.saved.get("direct_link"):
             data["direct_link"] = self.saved["direct_link"]
         if self.saved.get("pending_direct_link_restore"):
