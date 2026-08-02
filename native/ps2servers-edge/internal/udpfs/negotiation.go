@@ -76,6 +76,7 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 				"service_id": dh.ServiceID, "service_port": dh.Port,
 			})
 	} else {
+		// Keep seq as the legacy alias for existing structured-log consumers.
 		s.cfg.Log.Debug("DISCOVERY", map[string]any{
 			"peer": in.peer.String(), "socket": in.socket, "seq": h.Sequence, "sequence": h.Sequence,
 			"service_id": dh.ServiceID, "service_port": dh.Port,
