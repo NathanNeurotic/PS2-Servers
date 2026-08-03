@@ -346,10 +346,10 @@ jobs:
             printf '                   in Edge builds -- CHD needs a native\n'
             printf '                   library that would break static linking.\n'
             printf '                   Use the Desktop (Python) server for CHD.\n'
-            printf '  Access         : read-only by default. Pass\n'
-            printf '                   --read-only=false to allow the console to\n'
-            printf '                   write (saves). Only one client may hold a\n'
-            printf '                   given file open for writing at a time.\n\n'
+            printf '  Access         : read-write by default. Pass --read-only\n'
+            printf '                   to restrict clients to read-only access.\n'
+            printf '                   Only one client may hold a given file open\n'
+            printf '                   for writing at a time.\n\n'
             printf 'QUICK START\n\n'
             if [ "${GOOS_V}" = "windows" ]; then
               printf '    %s udpfs --root D:\\PS2Games\n\n' "${binary}"

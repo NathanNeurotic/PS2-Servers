@@ -2551,8 +2551,10 @@ class LauncherApp:
     def _autostart_servers(self):
         if getattr(self, "_shutting_down", False):
             return
-        last = list(self.saved.get("last_active_servers") or [])
-        if not last:
+        if "last_active_servers" in self.saved:
+            last = list(self.saved["last_active_servers"] or [])
+        else:
+            last = []
             for key, card in self.cards.items():
                 server = REGISTRY[key]
                 values = card.values()
@@ -2581,15 +2583,18 @@ class LauncherApp:
             data["direct_link"] = self.saved["direct_link"]
         if self.saved.get("pending_direct_link_restore"):
             data["pending_direct_link_restore"] = True
-        if pending_start:
-            data["pending_start"] = pending_start
-        if pending_cleanup:
+
+        p_start = pending_start or self.saved.get("pending_start")
+        if p_start:
+            data["pending_start"] = p_start
+
+        if pending_cleanup or self.saved.get("pending_cleanup"):
             data["pending_cleanup"] = True
-        if pending_firewall_allow:
+        if pending_firewall_allow or self.saved.get("pending_firewall_allow"):
             data["pending_firewall_allow"] = True
-        if pending_direct_link:
+        if pending_direct_link or self.saved.get("pending_direct_link"):
             data["pending_direct_link"] = True
-        if pending_direct_link_off:
+        if pending_direct_link_off or self.saved.get("pending_direct_link_off"):
             data["pending_direct_link_off"] = True
         try:
             config.save(data)

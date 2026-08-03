@@ -99,7 +99,7 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
             app._shutting_down = True
             root.destroy()
 
-    def test_autostart_servers_fallback(self):
+    def test_autostart_servers_explicit_empty_list(self):
         try:
             import tkinter as tk
         except ImportError:
@@ -122,7 +122,62 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
             card.set_values({"root": "/tmp/games", "port": 62966})
 
             app._autostart_servers()
+            # Explicit empty list means user stopped all servers -- autostart should NOT run fallback
+            self.assertEqual(started_keys, [])
+        finally:
+            app._shutting_down = True
+            root.destroy()
+
+    def test_autostart_servers_fallback_missing_key(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            raise unittest.SkipTest("no tkinter")
+
+        from launcher import gui
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            raise unittest.SkipTest("no display")
+
+        try:
+            app = gui.LauncherApp(root)
+            started_keys = []
+            app.start_server = lambda key: started_keys.append(key)
+            app.saved.pop("last_active_servers", None)
+
+            # Seed a card with required fields populated
+            card = app.cards["udpfs"]
+            card.set_values({"root": "/tmp/games", "port": 62966})
+
+            app._autostart_servers()
             self.assertIn("udpfs", started_keys)
+        finally:
+            app._shutting_down = True
+            root.destroy()
+
+    def test_pending_markers_preserved_in_plain_save(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            raise unittest.SkipTest("no tkinter")
+
+        from launcher import gui
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            raise unittest.SkipTest("no display")
+
+        try:
+            app = gui.LauncherApp(root)
+            app.saved["pending_start"] = "udpfs"
+            saved_data = {}
+            from launcher import config
+            config.save = lambda data: (saved_data.update(data), True)[1]
+
+            # Execute plain save without explicit pending_start argument
+            app._save()
+            self.assertEqual(saved_data.get("pending_start"), "udpfs")
         finally:
             app._shutting_down = True
             root.destroy()
@@ -144,6 +199,10 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
 
         try:
             app = gui.LauncherApp(root)
+            app.saved["ignore_firewall_prompt"] = False
+            app.saved["autostart_last_config"] = False
+            app._restore()
+
             self.assertTrue(app.ignore_firewall_var.get())
             self.assertTrue(app.autostart_var.get())
         finally:

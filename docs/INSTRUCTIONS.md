@@ -179,7 +179,7 @@ ps2servers-edge udpfs \
 ### Key Diagnostic Log Triggers
 
 - **`UDP RX`**: Confirms a physical datagram reached Edge on the discovery or data socket.
-- **`last_rx_age`**: Shows elapsed time since the last received packet. Growing `last_rx_age` with no RX increase proves network silence from the client.
+- **`last_rx_age`**: Shows elapsed time since the last received packet. Growing `last_rx_age` with no RX increase confirms no packets reached Edge on this socket.
 - **`UDPFS request operation=OPEN`**: Logs file open requests, path resolution, and returned file handles.
 - **`peer sequence reset (seq 0 received)`**: Identifies an accepted console reset/restart.
 - **`replacing stale session for IP`**: Logs when a console shifts source ports across loader transitions.
