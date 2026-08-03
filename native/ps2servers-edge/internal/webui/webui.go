@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
 )
@@ -68,7 +69,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.Handle("/", http.FileServer(http.FS(subFS)))
 
 	s.server = &http.Server{
-		Handler: mux,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	bind := s.cfg.Bind
@@ -82,7 +85,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", bind, s.cfg.Port))
 		if err != nil {
 			s.cfg.Log.Warn("Failed to bind to user configured WebUI port", map[string]any{"port": s.cfg.Port, "err": err.Error()})
-			return nil
+			return fmt.Errorf("failed to bind to user configured WebUI port %d: %w", s.cfg.Port, err)
 		}
 		listener = l
 	} else {

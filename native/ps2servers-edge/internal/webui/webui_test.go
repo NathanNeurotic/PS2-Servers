@@ -56,7 +56,7 @@ func TestJSONBackend(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
 
-	backend := DetectBackend(cfgPath)
+	backend := &jsonBackend{path: cfgPath}
 
 	// Load non-existent -> returns default
 	cfg, err := backend.Load()

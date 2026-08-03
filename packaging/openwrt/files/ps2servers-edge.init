@@ -181,6 +181,9 @@ start_webui() {
         config_get bind webui bind 0.0.0.0
         config_get port webui port 8082
 
+        # Ensure ps2edge service user has write permission for UCI commits
+        [ -f /etc/config/ps2servers-edge ] && chown ps2edge:ps2edge /etc/config/ps2servers-edge 2>/dev/null
+
         procd_open_instance webui
         procd_set_param command "$PROG" webui \
                 --bind "$bind" \

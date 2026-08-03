@@ -10,14 +10,15 @@
 3. [Subcommand: `udpfs` (Directory & ISO Serving)](#3-subcommand-udpfs-directory--iso-serving)
 4. [Subcommand: `udpbd` (Virtual Hard Drive Emulation)](#4-subcommand-udpbd-virtual-hard-drive-emulation)
 5. [Subcommand: `smb` (OPL SMBv1 Share Serving)](#5-subcommand-smb-opl-smbv1-share-serving)
-6. [Diagnostics & Observability Guide](#6-diagnostics--observability-guide)
-7. [System Deployment Guides (OpenWrt & Linux `systemd`)](#7-system-deployment-guides-openwrt--linux-systemd)
+6. [Subcommand: `webui` (Embedded Web Management GUI)](#6-subcommand-webui-embedded-web-management-gui)
+7. [Diagnostics & Observability Guide](#7-diagnostics--observability-guide)
+8. [System Deployment Guides (OpenWrt & Linux `systemd`)](#8-system-deployment-guides-openwrt--linux-systemd)
 
 ---
 
 ## 1. Core Architecture & Modes
 
-`ps2servers-edge` provides three independent server subcommands:
+`ps2servers-edge` provides four independent subcommands:
 
 | Subcommand | Protocol | Client Applications | Purpose |
 |---|---|---|---|
@@ -167,7 +168,41 @@ ps2servers-edge smb \
 
 ---
 
-## 6. Diagnostics & Observability Guide
+## 6. Subcommand: `webui` (Embedded Web Management GUI)
+
+`webui` serves a mobile-responsive single-page dashboard for full configuration, real-time log streaming, and process management across all Edge servers.
+
+> [!NOTE]
+> **Network Scope**: The web UI is unauthenticated and intended for trusted private LANs. Access can be restricted with `--no-browse` or pinned to loopback via `--bind 127.0.0.1`.
+
+### Command Syntax
+```bash
+ps2servers-edge webui [OPTIONS]
+```
+
+### Complete `webui` Arguments
+
+| Argument Flag | Value Type | Default | Description & Usage |
+|---|---|---|---|
+| **`--webui-port <PORT>`** | `int` | `8082` | HTTP port for the web dashboard (0 uses 8082 with fallback to OS-assigned port). |
+| **`--bind <IP>`** | `string` | `"0.0.0.0"` | IPv4 bind address. |
+| **`--config-file <PATH>`** | `string` | `"/etc/ps2servers-edge/config.json"` | Path to JSON config file (used on generic Linux/systemd/Docker). |
+| **`--log-lines <N>`** | `int` | `1000` | Capacity of the in-memory ring buffer for live SSE log streaming. |
+| **`--no-browse`** | `bool` | `false` | Disables the file browser modal/endpoint (`/api/browse`) for security. |
+| **`--verbose`** | `bool` | `false` | Enables verbose HTTP access logging. |
+| **`--quiet`** | `bool` | `false` | Suppresses non-essential log output. |
+| **`--log-format <FORMAT>`** | `string` | `"text"` | Log format: `text` or `json`. |
+
+#### Real-World `webui` Example:
+```bash
+ps2servers-edge webui \
+  --webui-port 8082 \
+  --bind 0.0.0.0
+```
+
+---
+
+## 7. Diagnostics & Observability Guide
 
 When troubleshooting network connectivity or handoff behavior between loaders (e.g. NHDDL → Neutrino), enable the diagnostic suite:
 
@@ -190,7 +225,7 @@ ps2servers-edge udpfs \
 
 ---
 
-## 7. System Deployment Guides
+## 8. System Deployment Guides
 
 ### Option A: Running as an OpenWrt Service (`uci`)
 

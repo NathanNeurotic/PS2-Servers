@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
@@ -25,7 +26,7 @@ type ServiceStatus struct {
 	Running  bool   `json:"running"`
 	State    string `json:"state"`
 	Sessions int    `json:"sessions"`
-	Uptime   int    `json:"uptime"`
+	Uptime   uint32 `json:"uptime"`
 }
 
 // DetectServiceManager checks the host environment and returns the most
@@ -64,10 +65,13 @@ type systemdManager struct {
 
 func (m *systemdManager) Restart(service string) error {
 	if service == "all" {
+		var firstErr error
 		for _, s := range []string{"udpfs", "smb", "udpbd"} {
-			exec.Command("systemctl", "restart", "ps2servers-edge@"+s).Run()
+			if err := exec.Command("systemctl", "restart", "ps2servers-edge@"+s).Run(); err != nil && firstErr == nil {
+				firstErr = err
+			}
 		}
-		return nil
+		return firstErr
 	}
 	return exec.Command("systemctl", "restart", "ps2servers-edge@"+service).Run()
 }
@@ -100,16 +104,16 @@ func (m *genericManager) Status() (map[string]ServiceStatus, error) {
 // default; SMB and UDPBD use the same status listener port when configured.
 func queryAllStatus() (map[string]ServiceStatus, error) {
 	res := map[string]ServiceStatus{
-		"udpfs": queryStatus(62966),
-		"smb":   queryStatus(62966),
-		"udpbd": queryStatus(62966),
+		"udpfs": queryStatus("udpfs", 62966),
+		"smb":   queryStatus("smb", 62966),
+		"udpbd": queryStatus("udpbd", 62966),
 	}
 	return res, nil
 }
 
 // queryStatus sends a 10-byte UDPRDMA status query (service 0xF5F7) to
 // 127.0.0.1:port and decodes the reply per docs/ROUTER-STATUS.md.
-func queryStatus(port int) ServiceStatus {
+func queryStatus(targetService string, port int) ServiceStatus {
 	unknown := ServiceStatus{Running: false, State: "unknown", Sessions: 0, Uptime: 0}
 
 	// Build the 10-byte query:
@@ -165,6 +169,15 @@ func queryStatus(port int) ServiceStatus {
 		return unknown
 	}
 
+	nameLen := int(buf[18])
+	if n >= 19+nameLen && nameLen > 0 {
+		nameStr := strings.ToLower(string(buf[19 : 19+nameLen]))
+		if !strings.Contains(nameStr, strings.ToLower(targetService)) {
+			// Response came from a different service on that port
+			return unknown
+		}
+	}
+
 	stateByte := buf[9]
 	stateStr := "unknown"
 	switch stateByte {
@@ -181,7 +194,7 @@ func queryStatus(port int) ServiceStatus {
 	}
 
 	sessions := int(binary.LittleEndian.Uint16(buf[12:14]))
-	uptime := int(binary.LittleEndian.Uint32(buf[14:18]))
+	uptime := binary.LittleEndian.Uint32(buf[14:18])
 
 	return ServiceStatus{
 		Running:  true,

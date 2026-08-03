@@ -113,9 +113,17 @@ type ConfigBackend interface {
 	Save(cfg *EdgeConfig) error
 }
 
+const defaultJSONConfigPath = "/etc/ps2servers-edge/config.json"
+
 func DetectBackend(jsonPath string) ConfigBackend {
+	if jsonPath != "" && jsonPath != defaultJSONConfigPath {
+		return &jsonBackend{path: jsonPath}
+	}
 	if _, err := os.Stat("/sbin/uci"); err == nil {
 		return &uciBackend{}
+	}
+	if jsonPath == "" {
+		jsonPath = defaultJSONConfigPath
 	}
 	return &jsonBackend{path: jsonPath}
 }
