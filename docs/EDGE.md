@@ -238,7 +238,7 @@ Options:
 - `--log-lines 1000` — SSE log streaming buffer capacity
 
 > [!IMPORTANT]
-> **Security & Scope**: The web dashboard is unauthenticated by default and intended for private trusted home LANs. Access can be restricted with `--no-browse` or pinned to loopback via `--bind 127.0.0.1`.
+> **Security & Scope**: The web dashboard is unauthenticated by default and intended for private trusted home LANs. Note that `--no-browse` disables directory browsing (`/api/browse`) specifically; to restrict dashboard access entirely to the host machine, use `--bind 127.0.0.1` or firewall rules.
 
 ## Writes
 

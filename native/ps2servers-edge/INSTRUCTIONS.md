@@ -173,7 +173,7 @@ ps2servers-edge smb \
 `webui` serves a mobile-responsive single-page dashboard for full configuration, real-time log streaming, and process management across all Edge servers.
 
 > [!NOTE]
-> **Network Scope**: The web UI is unauthenticated and intended for trusted private LANs. Access can be restricted with `--no-browse` or pinned to loopback via `--bind 127.0.0.1`.
+> **Network Scope**: The web UI is unauthenticated and intended for trusted private LANs. Note that `--no-browse` disables filesystem browsing (`/api/browse`) specifically; to restrict dashboard access to loopback, use `--bind 127.0.0.1`.
 
 ### Command Syntax
 ```bash
