@@ -309,6 +309,8 @@ jobs:
           mv "out/stage/${binary}" "out/${package}/${binary}"
           chmod +x "out/${package}/${binary}"
           cp native/ps2servers-edge/README.md "out/${package}/README.md"
+          cp docs/INSTRUCTIONS.md "out/${package}/INSTRUCTIONS.md"
+          cp docs/INSTRUCTIONS.md "out/${package}/instructions.md"
           cp docs/EDGE.md docs/EDGE-WHICH-BUILD.md docs/PROTOCOL-COMPATIBILITY.md \
              docs/EDITIONS.md "out/${package}/"
           cp THIRD_PARTY_NOTICES.md "out/${package}/licenses/THIRD_PARTY_NOTICES.md"
