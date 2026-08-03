@@ -36,6 +36,7 @@ Current Edge scope:
 - UDPFS with reads and writes; writable by default, `--read-only` to restrict
 - UDPFS block access (`BREAD`/`BWRITE`) for one disk image via `--block-device`
 - native UDPBD as the `udpbd` subcommand
+- embedded responsive Web GUI management dashboard (`ps2servers-edge webui`)
 - automatic per-session standard/Modulo compatibility
 - multiple concurrent clients
 - ISO, CSO, and ZSO, with a bounded decompressed-block cache

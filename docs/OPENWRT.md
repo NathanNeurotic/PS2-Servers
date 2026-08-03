@@ -29,6 +29,11 @@ config udpfs 'main'
     option compression_cache_size '32'
     option metrics '0'
     option metrics_period '1m'
+
+config webui 'webui'
+    option enabled '1'
+    option port '8082'
+    option bind '0.0.0.0'
 ```
 
 Every option maps to one Edge flag:
@@ -158,6 +163,19 @@ service's status across a reboot for no visible reason.
 
 Set `-1` on `smb` or `udpbd` when it is the only service enabled on the
 board.
+
+### Web Management GUI
+
+Edge includes an embedded, responsive Web GUI dashboard to manage all services without SSH or command-line experience:
+
+```sh
+uci set ps2servers-edge.webui.enabled='1'
+uci set ps2servers-edge.webui.port='8082'
+uci commit ps2servers-edge
+/etc/init.d/ps2servers-edge restart
+```
+
+Open `http://<router-ip>:8082` in any browser (phone or PC) to view live status, configure all services with Save/Apply/Reset, browse files, and tail live logs.
 
 ### A bad value restarts the service in a loop
 

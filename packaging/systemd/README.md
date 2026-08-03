@@ -20,9 +20,10 @@ sudo install -m 0644 packaging/systemd/ps2servers-edge-smb.env /etc/default/ps2s
 sudo systemctl enable --now ps2servers-edge@smb
 ```
 
-The instance name is the Edge subcommand, so `ps2servers-edge@udpfs` and
-`ps2servers-edge@udpbd` work the same way, each reading its own
-`/etc/default/ps2servers-edge-<subcommand>`. Several can run at once.
+The instance name is the Edge subcommand, so `ps2servers-edge@udpfs`,
+`ps2servers-edge@udpbd`, and `ps2servers-edge@webui` work the same way, each
+reading its own `/etc/default/ps2servers-edge-<subcommand>`. Several can run
+at once. Enable the web GUI with `systemctl enable --now ps2servers-edge@webui`.
 
 Edge's SMB defaults to **port 1111**, not 445, for the same reason as the
 Python one: below 1024 needs root and these units run as `ps2edge`.
