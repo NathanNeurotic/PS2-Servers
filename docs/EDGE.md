@@ -40,10 +40,15 @@ Compressed images:
   (`0`–`4096`; `0` disables the cache)
 - `--no-compression` — serve CSO/ZSO as raw bytes; a diagnostic, see below
 
-Observability:
+Observability & Web Management:
 
 - `--metrics` — log periodic transfer counters
 - `--metrics-period 1m` — how often, from `1s` to `24h`
+
+Web UI:
+
+- `ps2servers-edge webui` — run embedded web dashboard on port `8082` (or OS assigned)
+- Options: `--webui-port 8082`, `--bind 0.0.0.0`, `--config-file /etc/ps2servers-edge/config.json`, `--no-browse`
 
 For an OpenWrt command reference and a packet-by-packet NHDDL-to-Neutrino
 diagnostic procedure, see
