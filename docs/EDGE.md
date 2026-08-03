@@ -202,6 +202,44 @@ implementations in CI, finishing by asserting that the two produce byte-identica
 images from identical writes. A divergence surfaces as a CI failure rather than
 as a console that will not boot.
 
+## SMBv1
+
+Edge includes a standalone SMBv1 server (`ps2servers-edge smb`), enabling routers
+and headless boards to serve shares to Open-PS2-Loader (OPL) and POPSTARTER
+directly without host Samba dependencies:
+
+```sh
+ps2servers-edge smb --share games=/mnt/storage/ps2 --port 1111
+```
+
+Options:
+- `--share NAME=PATH` — share mapping (repeatable)
+- `--root PATH` — shorthand helper for `--share games=PATH`
+- `--bind 0.0.0.0` — bind address
+- `--port 1111` — TCP port (set OPL's SMB Port to match; ports below 1024 require root)
+- `--read-only` — serve share read-only
+- `--status-port 0` — router status query port (`0` disables, `-1` binds standard discovery port)
+
+## Web Management GUI
+
+Edge includes an embedded, responsive Web GUI dashboard (`ps2servers-edge webui`)
+so users on phones, tablets, or remote computers can manage all Edge services without
+touching a terminal:
+
+```sh
+ps2servers-edge webui --webui-port 8082
+```
+
+Options:
+- `--webui-port 8082` — HTTP port for web dashboard (`0` uses `8082` with fallback to OS-assigned port)
+- `--bind 0.0.0.0` — bind address
+- `--config-file /etc/ps2servers-edge/config.json` — path to JSON config file (used on generic Linux/systemd/Docker)
+- `--no-browse` — disables the file browser modal/endpoint (`/api/browse`) for security
+- `--log-lines 1000` — SSE log streaming buffer capacity
+
+> [!IMPORTANT]
+> **Security & Scope**: The web dashboard is unauthenticated by default and intended for private trusted home LANs. Access can be restricted with `--no-browse` or pinned to loopback via `--bind 127.0.0.1`.
+
 ## Writes
 
 Edge supports file writes, so a console can save. They are **on by default**,

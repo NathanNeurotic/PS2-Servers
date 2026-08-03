@@ -28,6 +28,9 @@ native/ps2servers-edge/
     ├── udpfs/                discovery, negotiation, transport, operations,
     │                         and BREAD/BWRITE block access
     ├── udpbd/                the separate UDPBD block protocol
+    ├── smb/                  native SMBv1 protocol server
+    ├── webui/                embedded responsive web dashboard, JSON API,
+    │                         log ring buffer, and UCI/JSON config backends
     ├── filesystem/           rooted path and symlink enforcement
     ├── compression/          ISO, CSO, and ZSO readers, with a block cache
     └── logging/              text and JSON event output
