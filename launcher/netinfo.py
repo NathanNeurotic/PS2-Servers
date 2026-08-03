@@ -136,27 +136,39 @@ def ip_choices():
     return all_ipv4() + ["Custom IP..."]
 
 
-def get_adapter_ip_pairs():
-    """Returns [(adapter_name, ip_address), ...] for all active IPv4 interfaces."""
+def get_all_adapters_info():
+    """Returns (active_pairs, unconfigured_adapters) for system network interfaces.
+
+    active_pairs is [(adapter_name, ip_address), ...] for active IPv4 interfaces.
+    unconfigured_adapters is [adapter_name, ...] for physical NICs without a valid LAN IPv4.
+    """
     pairs = []
+    unconfigured = set()
     try:
         if sys.platform == "win32" and shutil.which("ipconfig"):
             out = subprocess.run(["ipconfig"], capture_output=True, text=True, timeout=3).stdout
             current_adapter = None
+            has_valid_ip = False
             for line in (out or "").splitlines():
                 line_s = line.strip()
                 if line and not line[0].isspace() and ("adapter" in line.lower() or ":" in line):
+                    if current_adapter and not has_valid_ip and not _iface_is_virtual(current_adapter.lower()):
+                        unconfigured.add(current_adapter)
                     current_adapter = line.split(":", 1)[0].strip()
+                    has_valid_ip = False
                     continue
                 if "IPv4 Address" in line_s or "IP Address" in line_s:
                     parts = line_s.split(":", 1)
                     if len(parts) == 2:
                         ip = parts[1].replace("(Preferred)", "").strip()
-                        if ip and not ip.startswith(("127.", "169.254.")):
-                            name = current_adapter or "Network Adapter"
-                            pairs.append((name, ip))
-            if pairs:
-                return pairs
+                        if ip and not ip.startswith("127."):
+                            if not ip.startswith("169.254."):
+                                name = current_adapter or "Network Adapter"
+                                pairs.append((name, ip))
+                                has_valid_ip = True
+            if current_adapter and not has_valid_ip and not _iface_is_virtual(current_adapter.lower()):
+                unconfigured.add(current_adapter)
+            return pairs, sorted(unconfigured)
         elif sys.platform.startswith("linux") and shutil.which("ip"):
             out = subprocess.run(["ip", "-o", "-4", "addr", "show"],
                                  capture_output=True, text=True, timeout=3).stdout
@@ -169,7 +181,7 @@ def get_adapter_ip_pairs():
                         if not ip.startswith(("127.", "169.254.")):
                             pairs.append((iface, ip))
             if pairs:
-                return pairs
+                return pairs, []
         elif sys.platform == "darwin" and shutil.which("ifconfig"):
             out = subprocess.run(["ifconfig"],
                                  capture_output=True, text=True, timeout=3).stdout
@@ -184,17 +196,22 @@ def get_adapter_ip_pairs():
                     if not ip.startswith(("127.", "169.254.")):
                         pairs.append((current, ip))
             if pairs:
-                return pairs
+                return pairs, []
     except Exception:
         pass
 
-    # Fallback to all_ipv4()
-    return [("Network Adapter", ip) for ip in all_ipv4()]
+    return [("Network Adapter", ip) for ip in all_ipv4()], []
+
+
+def get_adapter_ip_pairs():
+    """Returns [(adapter_name, ip_address), ...] for all active IPv4 interfaces."""
+    pairs, _ = get_all_adapters_info()
+    return pairs
 
 
 def detailed_ip_info():
     """Returns a formatted multi-line string listing current network adapters and IP addresses."""
-    pairs = get_adapter_ip_pairs()
+    pairs, unconfigured = get_all_adapters_info()
     lines = ["[network] Current IP Addresses and Network Adapters:"]
     if not pairs:
         lines.append("  • No active network adapters found.")
@@ -202,6 +219,11 @@ def detailed_ip_info():
         for adapter, ip in pairs:
             lines.append(f"  • {adapter}: {ip}")
     lines.append("(If your PS2 is connected to a specific network device, select its IP in the dropdown above or pick 'Custom IP...' to type your own.)")
+    if unconfigured:
+        lines.append("\n[network] Unconfigured / Direct Cable Adapters (No IPv4 assigned):")
+        for adapter in unconfigured:
+            lines.append(f"  • {adapter}: Disconnected or direct cable without DHCP")
+        lines.append("  --> TIP: If your PS2 is plugged directly into one of these Ethernet ports with a cable, tick 'PS2 is plugged directly into this PC' above!")
     return "\n".join(lines)
 
 
