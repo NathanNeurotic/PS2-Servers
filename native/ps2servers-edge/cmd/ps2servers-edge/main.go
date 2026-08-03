@@ -21,6 +21,7 @@ import (
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/smb"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpbd"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/udpfs"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/webui"
 )
 
 var version = "dev"
@@ -30,10 +31,12 @@ func usage() {
 		"  ps2servers-edge udpfs --root /games [options]\n"+
 		"  ps2servers-edge udpbd --image /path/ps2.img [options]\n"+
 		"  ps2servers-edge smb --share games=/games [options]\n"+
+		"  ps2servers-edge webui [options]\n"+
 		"  ps2servers-edge --version\n\n"+
 		"  udpfs serves a folder as a network file share.\n"+
 		"  udpbd serves one disk image as a network hard drive.\n"+
-		"  smb   serves folders over SMBv1, for OPL's game list and POPSTARTER.\n\n", version)
+		"  smb   serves folders over SMBv1, for OPL's game list and POPSTARTER.\n"+
+		"  webui serves a web dashboard to configure and manage Edge servers.\n\n", version)
 }
 func duration(v string) (time.Duration, error) {
 	if v == "" {
@@ -78,6 +81,10 @@ func main() {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "smb" {
 		runSMB()
+		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "webui" {
+		runWebUI()
 		return
 	}
 	if len(os.Args) < 2 || os.Args[1] != "udpfs" {
@@ -399,3 +406,48 @@ type shareList []string
 
 func (s *shareList) String() string     { return strings.Join(*s, ",") }
 func (s *shareList) Set(v string) error { *s = append(*s, v); return nil }
+
+// runWebUI serves the embedded web dashboard and API for managing Edge.
+func runWebUI() {
+	fs := flag.NewFlagSet("webui", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	bind := fs.String("bind", env("WEBUI_BIND", "0.0.0.0"), "IPv4 bind address")
+	port := fs.Int("webui-port", envInt("WEBUI_PORT", 8082), "HTTP port (0 uses 8082 or OS assigned)")
+	configFile := fs.String("config-file", env("CONFIG_FILE", "/etc/ps2servers-edge/config.json"), "path to config file")
+	logLines := fs.Int("log-lines", envInt("LOG_LINES", 1000), "number of log lines to buffer")
+	noBrowse := fs.Bool("no-browse", envBool("NO_BROWSE", false), "disable file browser API endpoint")
+	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
+	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose logging")
+	quiet := fs.Bool("quiet", false, "suppress informational logs")
+
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(2)
+	}
+
+	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
+	logBuffer := webui.NewLogBuffer(*logLines)
+
+	srv, err := webui.New(webui.Config{
+		Port:       *port,
+		Bind:       *bind,
+		ConfigFile: *configFile,
+		LogLines:   *logLines,
+		NoBrowse:   *noBrowse,
+		Version:    version,
+		Log:        logger,
+		LogBuffer:  logBuffer,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := srv.Serve(ctx); err != nil {
+		logger.Error("webui server stopped", map[string]any{"error": err})
+		os.Exit(1)
+	}
+}
+

@@ -24,6 +24,7 @@
 | **`udpfs`** | UDPFS | NHDDL, Neutrino, UDPFS File Browsers | Serves game ISOs, homebrew, VMCs, and save files directly from a directory folder structure. |
 | **`udpbd`** | UDPBD | OPL (UDPBD mode) | Serves one raw hard drive disk image (`.img`) over UDP block-level hardware emulation. |
 | **`smb`** | SMBv1 | Open-PS2-Loader (OPL), POPSTARTER | Serves directory shares over an OPL-compatible SMBv1 TCP port. |
+| **`webui`** | HTTP/JSON | Web Browsers (Mobile & Desktop) | Embedded responsive web GUI dashboard for full configuration, live log streaming, and service control. |
 
 ---
 
@@ -39,6 +40,9 @@ ps2servers-edge smb --share games=/srv/ps2/games --port 1111
 
 # 3. Serve a single disk image over UDPBD (Default Port 48573 / 0xBDBD)
 ps2servers-edge udpbd --image /srv/ps2/hdd.img
+
+# 4. Serve the Web Management GUI (Default Port 8082)
+ps2servers-edge webui --webui-port 8082
 ```
 
 ---

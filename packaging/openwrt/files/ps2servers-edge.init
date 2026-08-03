@@ -35,6 +35,7 @@ start_service() {
         start_udpfs
         start_smb
         start_udpbd
+        start_webui
 }
 
 start_udpfs() {
@@ -173,6 +174,22 @@ start_udpbd() {
         procd_close_instance
 }
 
+start_webui() {
+        config_get_bool enabled webui enabled 0
+        [ "$enabled" -eq 1 ] || return 0
+
+        config_get bind webui bind 0.0.0.0
+        config_get port webui port 8082
+
+        procd_open_instance webui
+        procd_set_param command "$PROG" webui \
+                --bind "$bind" \
+                --webui-port "$port"
+        common_params
+        procd_close_instance
+}
+
 service_triggers() {
         procd_add_reload_trigger ps2servers-edge
 }
+

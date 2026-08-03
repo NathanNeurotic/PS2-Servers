@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PS2 Servers Edge</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="brand">PS2 Servers Edge</div>
+        <a href="#dashboard" class="nav-link active" data-tab="dashboard">Dashboard</a>
+        <a href="#udpfs" class="nav-link" data-tab="udpfs">UDPFS<span class="dirty-dot"></span></a>
+        <a href="#smb" class="nav-link" data-tab="smb">SMB<span class="dirty-dot"></span></a>
+        <a href="#udpbd" class="nav-link" data-tab="udpbd">UDPBD<span class="dirty-dot"></span></a>
+        <a href="#logs" class="nav-link" data-tab="logs">Logs</a>
+        <a href="#about" class="nav-link" data-tab="about">About</a>
+    </nav>
+
+    <main class="content">
+        <!-- Dashboard Tab -->
+        <section id="tab-dashboard" class="tab-content active">
+            <header><h2>Dashboard</h2></header>
+            <div class="dashboard-grid">
+                <!-- UDPFS Card -->
+                <div class="card status-card">
+                    <div class="card-header">
+                        <h3>UDPFS</h3>
+                        <span id="dash-udpfs-status" class="badge badge-grey">Unknown</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="stat"><span class="label">Sessions:</span> <span id="dash-udpfs-sessions">0</span></div>
+                        <div class="stat"><span class="label">Uptime:</span> <span id="dash-udpfs-uptime">-</span></div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="btn" onclick="restartService('udpfs')">Restart Service</button>
+                    </div>
+                </div>
+                <!-- SMB Card -->
+                <div class="card status-card">
+                    <div class="card-header">
+                        <h3>SMB</h3>
+                        <span id="dash-smb-status" class="badge badge-grey">Unknown</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="stat"><span class="label">Sessions:</span> <span id="dash-smb-sessions">0</span></div>
+                        <div class="stat"><span class="label">Uptime:</span> <span id="dash-smb-uptime">-</span></div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="btn" onclick="restartService('smb')">Restart Service</button>
+                    </div>
+                </div>
+                <!-- UDPBD Card -->
+                <div class="card status-card">
+                    <div class="card-header">
+                        <h3>UDPBD</h3>
+                        <span id="dash-udpbd-status" class="badge badge-grey">Unknown</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="stat"><span class="label">Sessions:</span> <span id="dash-udpbd-sessions">0</span></div>
+                        <div class="stat"><span class="label">Uptime:</span> <span id="dash-udpbd-uptime">-</span></div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="btn" onclick="restartService('udpbd')">Restart Service</button>
+                    </div>
+                </div>
+                <!-- System Info Card -->
+                <div class="card info-card">
+                    <div class="card-header">
+                        <h3>System Info</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="stat"><span class="label">Version:</span> <span id="dash-sys-version">-</span></div>
+                        <div class="stat"><span class="label">Platform:</span> <span id="dash-sys-platform">-</span></div>
+                        <div class="stat"><span class="label">Arch:</span> <span id="dash-sys-arch">-</span></div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="btn" onclick="restartService('all')">Restart All</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- UDPFS Tab -->
+        <section id="tab-udpfs" class="tab-content">
+            <header>
+                <h2>UDPFS Configuration</h2>
+                <div class="action-bar">
+                    <button class="btn" onclick="formActions.reset('udpfs')">Reset</button>
+                    <button class="btn" onclick="formActions.defaults('udpfs')">Defaults</button>
+                    <button class="btn btn-primary" onclick="formActions.save('udpfs')">Save</button>
+                    <button class="btn btn-accent" onclick="formActions.apply('udpfs')">Apply</button>
+                </div>
+            </header>
+            <form id="form-udpfs" class="config-form" data-service="udpfs">
+                <div class="card">
+                    <h3>Basic Settings</h3>
+                    <div class="form-group">
+                        <label class="toggle">
+                            <input type="checkbox" name="enabled">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Enable UDPFS</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>Games Folder (root)</label>
+                        <div class="input-with-btn">
+                            <input type="text" name="root" placeholder="/path/to/games">
+                            <button type="button" class="btn" onclick="openBrowser('form-udpfs', 'root', true)">Browse</button>
+                        </div>
+                        <small class="help-text">Base directory containing PS2 game folders (DVD/, CD/, APPS/, VMC/).</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Protocol Mode</label>
+                        <select name="protocol_mode">
+                            <option value="Auto">Auto</option>
+                            <option value="Standard">Standard</option>
+                            <option value="Modulo">Modulo</option>
+                        </select>
+                        <small class="help-text">Auto handles Standard and Modulo clients simultaneously. Pick one explicitly only if a console will not connect on Auto.</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle">
+                            <input type="checkbox" name="read_only">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Read-only</span>
+                        </label>
+                        <small class="help-text">Serve read-only. Omit to allow the console to write saves (VMC, etc).</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle">
+                            <!-- Note: UI is "Decompress", backend is "no_compression". Handled in JS -->
+                            <input type="checkbox" name="_decompress">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Decompress CSO/ZSO</span>
+                        </label>
+                        <small class="help-text">Automatically decompress CSO/ZSO images so games load from compressed files.</small>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header collapsible" onclick="toggleCollapse('udpfs-adv')">
+                        <h3>Advanced Settings</h3>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div id="udpfs-adv" class="card-body collapsed">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Bind Address</label>
+                                <input type="text" name="bind" placeholder="0.0.0.0">
+                                <small class="help-text">IPv4 address to listen on. 0.0.0.0 for all interfaces.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Port</label>
+                                <input type="number" name="port" placeholder="62966">
+                                <small class="help-text">Discovery UDP port (default 62966 / 0xF5F6).</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Data Port</label>
+                                <input type="number" name="data_port" placeholder="0">
+                                <small class="help-text">Fixed data UDP port. 0 picks automatically.</small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="toggle">
+                                <input type="checkbox" name="single_port">
+                                <span class="slider"></span>
+                                <span class="toggle-label">Single Port Mode</span>
+                            </label>
+                            <small class="help-text">Forces all traffic through the discovery port. Use for strict firewalls or legacy clients.</small>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Peer Timeout</label>
+                                <input type="text" name="peer_timeout" placeholder="1h">
+                                <small class="help-text">Drop inactive consoles after this duration (1m–24h). Default 1h.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>TX Delay (ms)</label>
+                                <input type="number" name="tx_delay_ms" placeholder="0">
+                                <small class="help-text">Inter-packet pacing delay in milliseconds. Raise if a slow link drops packets.</small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Block Device</label>
+                            <div class="input-with-btn">
+                                <input type="text" name="block_device" placeholder="/path/to/image.raw">
+                                <button type="button" class="btn" onclick="openBrowser('form-udpfs', 'block_device', false)">Browse</button>
+                            </div>
+                            <small class="help-text">Serve this disk image over UDPFS block access alongside the file share.</small>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Sector Size</label>
+                                <select name="sector_size">
+                                    <option value="512">512</option>
+                                    <option value="1024">1024</option>
+                                    <option value="2048">2048</option>
+                                    <option value="4096">4096</option>
+                                    <option value="8192">8192</option>
+                                    <option value="16384">16384</option>
+                                    <option value="32768">32768</option>
+                                    <option value="65536">65536</option>
+                                </select>
+                                <small class="help-text">Sector size for block device. Multiple of 512, max 65536.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Compression Cache Size</label>
+                                <input type="number" name="compression_cache_size" placeholder="32">
+                                <small class="help-text">Decompressed blocks cached per image (0–4096). Default 32.</small>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="toggle">
+                                    <input type="checkbox" name="metrics">
+                                    <span class="slider"></span>
+                                    <span class="toggle-label">Enable Metrics</span>
+                                </label>
+                                <small class="help-text">Log periodic transfer statistics.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Metrics Period</label>
+                                <input type="text" name="metrics_period" placeholder="1m">
+                                <small class="help-text">How often to log statistics (1s–24h). Default 1m.</small>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Log Format</label>
+                                <select name="log_format">
+                                    <option value="text">Text</option>
+                                    <option value="json">JSON</option>
+                                </select>
+                                <small class="help-text">Log output format.</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="toggle">
+                                    <input type="checkbox" name="verbose">
+                                    <span class="slider"></span>
+                                    <span class="toggle-label">Verbose Logging</span>
+                                </label>
+                                <small class="help-text">Enable detailed protocol-level logging.</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </section>
+
+        <!-- SMB Tab -->
+        <section id="tab-smb" class="tab-content">
+            <header>
+                <h2>SMB Configuration</h2>
+                <div class="action-bar">
+                    <button class="btn" onclick="formActions.reset('smb')">Reset</button>
+                    <button class="btn" onclick="formActions.defaults('smb')">Defaults</button>
+                    <button class="btn btn-primary" onclick="formActions.save('smb')">Save</button>
+                    <button class="btn btn-accent" onclick="formActions.apply('smb')">Apply</button>
+                </div>
+            </header>
+            <form id="form-smb" class="config-form" data-service="smb">
+                <div class="card">
+                    <div class="form-group">
+                        <label class="toggle">
+                            <input type="checkbox" name="enabled">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Enable SMB</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>Share (NAME=PATH)</label>
+                        <div class="input-with-btn">
+                            <input type="text" name="share" placeholder="PS2SMB=/path/to/games">
+                        </div>
+                        <small class="help-text">Share as NAME=PATH. The name is what OPL enters after the IP.</small>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Bind Address</label>
+                            <input type="text" name="bind" placeholder="0.0.0.0">
+                            <small class="help-text">IPv4 address to listen on. 0.0.0.0 for all interfaces.</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Port</label>
+                            <input type="number" name="port" placeholder="1111">
+                            <small class="help-text">TCP port. Set OPL's SMB Port to match. Default 1111. Ports below 1024 need root.</small>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle">
+                            <input type="checkbox" name="read_only">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Read-only</span>
+                        </label>
+                        <small class="help-text">Serve read-only. Omit to allow the console to write saves (VMC, etc).</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Status Port</label>
+                        <input type="number" name="status_port" placeholder="0">
+                        <small class="help-text">UDP port for router status queries. 0 disables, -1 uses the standard discovery port.</small>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Log Format</label>
+                            <select name="log_format">
+                                <option value="text">Text</option>
+                                <option value="json">JSON</option>
+                            </select>
+                            <small class="help-text">Log output format.</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="toggle">
+                                <input type="checkbox" name="verbose">
+                                <span class="slider"></span>
+                                <span class="toggle-label">Verbose Logging</span>
+                            </label>
+                            <small class="help-text">Enable detailed protocol-level logging.</small>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </section>
+
+        <!-- UDPBD Tab -->
+        <section id="tab-udpbd" class="tab-content">
+            <header>
+                <h2>UDPBD Configuration</h2>
+                <div class="action-bar">
+                    <button class="btn" onclick="formActions.reset('udpbd')">Reset</button>
+                    <button class="btn" onclick="formActions.defaults('udpbd')">Defaults</button>
+                    <button class="btn btn-primary" onclick="formActions.save('udpbd')">Save</button>
+                    <button class="btn btn-accent" onclick="formActions.apply('udpbd')">Apply</button>
+                </div>
+            </header>
+            <form id="form-udpbd" class="config-form" data-service="udpbd">
+                <div class="card">
+                    <div class="form-group">
+                        <label class="toggle">
+                            <input type="checkbox" name="enabled">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Enable UDPBD</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>Disk Image</label>
+                        <div class="input-with-btn">
+                            <input type="text" name="image" placeholder="/path/to/hdd.img">
+                            <button type="button" class="btn" onclick="openBrowser('form-udpbd', 'image', false)">Browse</button>
+                        </div>
+                        <small class="help-text">Raw disk image file to serve as a virtual hard drive.</small>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Bind Address</label>
+                            <input type="text" name="bind" placeholder="0.0.0.0">
+                            <small class="help-text">IPv4 address to listen on. 0.0.0.0 for all interfaces.</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Port</label>
+                            <input type="number" name="port" placeholder="48301">
+                            <small class="help-text">UDP port for UDPBD traffic. Default 48301 (0xBDBD).</small>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle">
+                            <input type="checkbox" name="read_only">
+                            <span class="slider"></span>
+                            <span class="toggle-label">Read-only</span>
+                        </label>
+                        <small class="help-text">Serve read-only. Omit to allow the console to write saves (VMC, etc).</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Status Port</label>
+                        <input type="number" name="status_port" placeholder="0">
+                        <small class="help-text">UDP port for router status queries. 0 disables, -1 uses the standard discovery port.</small>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Log Format</label>
+                            <select name="log_format">
+                                <option value="text">Text</option>
+                                <option value="json">JSON</option>
+                            </select>
+                            <small class="help-text">Log output format.</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="toggle">
+                                <input type="checkbox" name="verbose">
+                                <span class="slider"></span>
+                                <span class="toggle-label">Verbose Logging</span>
+                            </label>
+                            <small class="help-text">Enable detailed protocol-level logging.</small>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </section>
+
+        <!-- Logs Tab -->
+        <section id="tab-logs" class="tab-content h-full flex-col">
+            <header>
+                <h2>Live Logs</h2>
+                <div class="log-controls">
+                    <span id="log-status" class="badge badge-grey">Disconnected</span>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
+                    </label>
+                    <button class="btn" onclick="clearLogs()">Clear</button>
+                </div>
+            </header>
+            <div class="card log-viewer-card h-full">
+                <div id="log-viewer" class="log-viewer"></div>
+            </div>
+        </section>
+
+        <!-- About Tab -->
+        <section id="tab-about" class="tab-content">
+            <header><h2>About</h2></header>
+            <div class="card text-center">
+                <h1 class="about-title">PS2 Servers Edge</h1>
+                <p class="muted">A high-performance embedded server suite for the PlayStation 2.</p>
+                <div class="about-stats">
+                    <p><strong>Version:</strong> <span id="about-sys-version">...</span></p>
+                    <p><strong>Platform:</strong> <span id="about-sys-platform">...</span></p>
+                    <p><strong>Architecture:</strong> <span id="about-sys-arch">...</span></p>
+                </div>
+                <div class="about-links">
+                    <a href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" class="btn btn-primary">GitHub Repository</a>
+                </div>
+                <p class="muted mt-4"><small>&copy; PS2 Servers Edge Contributors</small></p>
+            </div>
+        </section>
+    </main>
+
+    <!-- File Browser Modal -->
+    <div id="browser-modal" class="modal-backdrop">
+        <div class="modal card">
+            <div class="modal-header">
+                <h3>Select Path</h3>
+                <button class="btn-close" onclick="closeBrowser()">×</button>
+            </div>
+            <div class="breadcrumbs" id="browser-breadcrumbs"></div>
+            <div class="browser-list" id="browser-list">
+                <!-- populated by JS -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeBrowser()">Cancel</button>
+                <button class="btn btn-accent" onclick="selectBrowserPath()">Select Current Directory</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toasts -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
