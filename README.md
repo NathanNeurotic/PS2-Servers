@@ -1,3 +1,4 @@
+<img width="1254" height="1254" alt="image" src="https://github.com/user-attachments/assets/322622b6-24e8-4a17-89c6-fef98bbf7673" />
 <p align="center">
   <img src="ps2serversgithubbanner.png" alt="PS2 Servers" width="820">
 </p>
