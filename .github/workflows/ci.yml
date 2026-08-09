@@ -32,6 +32,12 @@ jobs:
           go-version-file: native/ps2servers-edge/go.mod
           cache-dependency-path: native/ps2servers-edge/go.mod
 
+      - name: Install test dependencies
+        # PyYAML only: tests/test_version_consistency.py parses edge-build.yml
+        # rather than grepping it, so that a version literal in a comment cannot
+        # satisfy the check. Nothing shipped needs it.
+        run: python -m pip install --disable-pip-version-check PyYAML
+
       - name: Compile Python sources
         run: python -m compileall -q launcher smbv1_server smb2_server udpbd_server udpfs_server ps2servers.py
 

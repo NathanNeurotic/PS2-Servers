@@ -251,14 +251,19 @@ MAX_WINDOW_RETRIES = 4    # Max retries waiting for window ACK (matches IOP)
 # 65535 sectors is still ~32 MiB per packet at the default sector size, and the
 # assembled write buffer had no ceiling of its own at all.
 #
-# 64 KiB for READ is Edge's number exactly (internal/udpfs/operations.go), so
-# the two implementations refuse the same request. Edge derives its BREAD/write
-# cap from installed RAM because it runs on 32 MB routers; this server runs on
-# desktops, so a constant well above any observed request is enough. The largest
-# transfer seen from any real client is comfortably under 256 KiB -- a console
-# reads in sector-sized chunks -- so 8 MiB leaves two orders of magnitude of
-# headroom while still refusing the pathological case.
-MAX_READ_BYTES = 64 * 1024
+# One cap for all three, deliberately NOT Edge's 64 KiB for READ.
+#
+# Copying that number here was a mistake caught by CI: multiclient_selftest.py
+# reads a 200,000-byte file in a single READ, so a 64 KiB ceiling refused a
+# request an in-tree client actually makes. This server is the one validated
+# against real consoles, so its limits have to be set by what real clients do,
+# not by what the newer implementation happens to allow -- Edge's number was
+# chosen for a 32 MB router and was never exercised against a large read.
+#
+# 8 MiB is far above anything observed (a console reads in sector-sized chunks)
+# and still refuses the case the cap exists for: READ carries an unbounded
+# uint32, so twelve bytes on the wire used to be a 4 GiB allocation request
+# from an unauthenticated peer.
 DEFAULT_MAX_TRANSFER_BYTES = 8 * 1024 * 1024
 # Floor, mirroring Edge's minTransferCap: a cap so small that ordinary console
 # requests fail is worse than no cap, so --max-transfer-bytes cannot go below it.
@@ -1563,13 +1568,11 @@ class UdpfsServer:
 
         # Before the handle lookup, and before read(): size is an unbounded
         # uint32 straight off the wire, so 0xFFFFFFFF here is a 4 GiB
-        # allocation attempt that no later check can undo. Edge refuses the
-        # same request with the same limit, so a client cannot tell the two
-        # servers apart by probing this.
-        if size > MAX_READ_BYTES:
+        # allocation attempt that no later check can undo.
+        if size > self.max_transfer_bytes:
             self._print_event(
                 f"[{addr[0]}:{addr[1]}] READ size={size} over "
-                f"{MAX_READ_BYTES} -> EINVAL")
+                f"{self.max_transfer_bytes} -> EINVAL")
             self._send_read_result(addr, -errno.EINVAL, b'')
             return
 
@@ -2832,10 +2835,9 @@ def main():
     parser.add_argument(
         '--max-transfer-bytes', type=int,
         default=int(_env_float('MAX_TRANSFER_BYTES', DEFAULT_MAX_TRANSFER_BYTES)),
-        help='Ceiling on one BREAD and on one assembled write '
+        help='Ceiling on one READ, one BREAD and one assembled write '
              f'(default: {DEFAULT_MAX_TRANSFER_BYTES}, floor '
-             f'{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES). READ is '
-             f'separately capped at {MAX_READ_BYTES} bytes, matching Edge.'
+             f'{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES)'
     )
 
     args = parser.parse_args()

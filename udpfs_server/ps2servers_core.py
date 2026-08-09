@@ -423,10 +423,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-transfer-bytes", type=int,
                         default=int(_env_float("MAX_TRANSFER_BYTES",
                                                DEFAULT_MAX_TRANSFER_BYTES)),
-                        help="Ceiling on one BREAD and on one assembled write "
-                             f"(default {DEFAULT_MAX_TRANSFER_BYTES}, floor "
-                             f"{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES). "
-                             "READ is separately capped at 64 KiB, matching Edge.")
+                        help="Ceiling on one READ, one BREAD and one assembled "
+                             f"write (default {DEFAULT_MAX_TRANSFER_BYTES}, floor "
+                             f"{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES)")
     return parser
 
 

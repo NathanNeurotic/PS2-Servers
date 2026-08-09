@@ -319,7 +319,19 @@ func (s *Server) handleRead(st *session.State, p []byte) {
 	}
 	id := int32(binary.LittleEndian.Uint32(p[4:8]))
 	size := binary.LittleEndian.Uint32(p[8:12])
-	if size > 64<<10 {
+	// transferCap, not a private 64 KiB constant.
+	//
+	// The old ceiling here was 64 KiB while BREAD and assembled writes used
+	// transferCap, so READ alone had a limit an order of magnitude tighter than
+	// everything else -- and it was never exercised against a large read,
+	// because the conformance probe's fixture is deliberately one packet.
+	// udpfs_server/multiclient_selftest.py reads a 200,000-byte file in a single
+	// READ and the Python server serves it, so 64 KiB refused a request a real
+	// in-tree client makes. That server is the one validated against consoles;
+	// where the two disagree, it is right.
+	if int64(size) > s.transferCap {
+		s.cfg.Log.Warn("READ refused, size over cap", map[string]any{
+			"peer": st.Peer, "size": size, "cap": s.transferCap})
 		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
 		return
 	}
