@@ -72,6 +72,12 @@ instance, so a board can serve UDPFS and SMB at once. There are systemd units
 for the same thing on ordinary Linux, where `systemctl restart
 ps2servers-edge@smb` does restart just that one.
 
+On OpenWrt the dashboard's **Save and Restart need root** — `uci commit` rewrites
+a file in `/etc/config` and restarting goes through `/etc/init.d` — so they are
+off by default and report a permission error. Status, configuration and file
+browsing all work regardless. Set `option run_as_root '1'` to enable them, which
+runs the dashboard as root; that is a real trade, which is why it is a choice.
+
 > **Edge has not been verified on a physical PlayStation 2 or an emulator.** Its
 > wire behaviour is checked in CI against the hardware-validated Python servers,
 > including a byte-for-byte comparison for UDPBD, which is the strongest evidence
