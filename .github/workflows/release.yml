@@ -310,14 +310,14 @@ jobs:
           checksum.write_text(f"{digest}  {asset.name}\n", encoding="utf-8")
 
       - name: Attest build provenance
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: out/${{ matrix.asset }}
 
       - name: Attest portable build provenance
         if: matrix.portable_asset != ''
         continue-on-error: true
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: out/${{ matrix.portable_asset }}
 
@@ -326,7 +326,7 @@ jobs:
         # and never fail the release if the AppImage wasn't produced.
         if: runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: out/PS2Servers-x86_64.AppImage
 
@@ -397,7 +397,7 @@ jobs:
         run: sha256sum PS2Servers-source.zip > PS2Servers-source.zip.sha256.txt
 
       - name: Generate source attestation
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: PS2Servers-source.zip
 
