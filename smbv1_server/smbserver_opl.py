@@ -184,17 +184,62 @@ def build_body(params, data):
 class Share:
     def __init__(self, name, root):
         self.name = name
-        self.root = os.path.abspath(root)
+        # realpath, not abspath: the root itself is commonly reached through a
+        # symlink (/home/user/games -> /mnt/disk2/games), and if the root is not
+        # already resolved then every containment test below compares against
+        # the wrong string.
+        self.root = os.path.realpath(root)
 
     def resolve(self, smb_path):
         """Map an SMB path ('\\dir\\file' or '/dir/file') under the share root, blocking escapes.
-        Returns an absolute local path, or None if it would escape the share."""
+        Returns an absolute local path, or None if it would escape the share.
+
+        Containment is decided on the REAL path. The previous version resolved
+        with os.path.abspath, which normalises ".." textually but does not
+        follow symbolic links, so a symlink inside the share resolved to a name
+        that still began with the share root while opening a file outside it:
+
+            share/elsewhere -> /tmp/outside
+            resolve("elsewhere/secret.txt")
+              -> .../share/elsewhere/secret.txt   (accepted: starts with root)
+              real path .../outside/secret.txt    (outside the share)
+
+        Never remotely exploitable on its own -- this server implements no
+        command that creates a symlink, so a client cannot plant one -- but it
+        meant the declared root was not the actual boundary, and symlinking a
+        games folder onto a second disk is an ordinary thing to do. The UDPFS
+        guard, the SMB2 server and Edge all already refused this; smb2_paths.py
+        documented the gap by name and it stayed open here, in the SMB server
+        most OPL users actually run.
+
+        Deliberately NOT swapped for smb2_server.smb2_paths.Share. That resolver
+        also refuses "..", reserved device names, alternate data streams and
+        trailing dots -- all good rules, and all changes to which paths this
+        hardware-validated server accepts. Adopting them is a separate change
+        that wants a console to test against. This fixes the boundary only.
+        """
         p = smb_path.replace("\\", "/").lstrip("/")
         # Drop a leading "share/" if the client included it (some paths are share-relative already).
-        full = os.path.abspath(os.path.join(self.root, p))
-        if full == self.root or full.startswith(self.root + os.sep):
+        full = os.path.realpath(os.path.join(self.root, p))
+        if self._inside(full):
             return full
         return None
+
+    def _inside(self, real):
+        """True if a resolved path is the share root or beneath it.
+
+        os.path.commonpath rather than a startswith on root + os.sep, because
+        the string test accepts a sibling whose name merely begins with the
+        root's: with a root of /srv/games it lets /srv/games-private through.
+        commonpath compares whole components.
+        """
+        if real == self.root:
+            return True
+        try:
+            return os.path.commonpath([real, self.root]) == self.root
+        except ValueError:
+            # Different drives on Windows, which is conclusively outside.
+            return False
 
 
 class OpenFile:

@@ -171,11 +171,26 @@ Edge includes an embedded, responsive Web GUI dashboard to manage all services w
 ```sh
 uci set ps2servers-edge.webui.enabled='1'
 uci set ps2servers-edge.webui.port='8082'
+# Required to reach it from another device. Without a password the server
+# refuses any non-loopback bind, which on a router means it will not start.
+uci set ps2servers-edge.webui.auth_pass='pick something long'
 uci commit ps2servers-edge
 /etc/init.d/ps2servers-edge restart
 ```
 
-Open `http://<router-ip>:8082` in any browser (phone or PC) to view live status, configure all services with Save/Apply/Reset, browse files, and tail live logs.
+Open `http://<router-ip>:8082` in any browser (phone or PC) to view live status,
+configure all services with Save/Apply/Reset, and browse the directories this
+board serves.
+
+> [!IMPORTANT]
+> The dashboard rewrites configuration and restarts services, so reaching it is
+> equivalent to shell access on the router. It is not exposed without a
+> password: set `auth_pass`, or set `insecure '1'` to have one generated and
+> printed to the log on each start. There is no TLS — the password crosses the
+> LAN in the clear, so it stops casual access, not packet capture.
+
+The **Logs** view shows the web UI's own output. Each server runs as its own
+procd instance, so for their logs use `logread -e ps2servers-edge`.
 
 ### A bad value restarts the service in a loop
 

@@ -29,7 +29,6 @@ Compression Support:
 
 import argparse
 import errno
-import gzip
 import math
 import os
 import queue
@@ -41,10 +40,9 @@ import sys
 import threading
 import time
 import zlib
-from collections import OrderedDict
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 # Compressed ISO support
 from compressed_iso import CompressedFileWrapper, ZsoFileWrapper, CsoFileWrapper, ChdFileWrapper, LIBCHDR_AVAILABLE
@@ -244,6 +242,44 @@ HAS_PWRITE = hasattr(os, 'pwrite')
 SEND_WINDOW = 8           # Max unacked packets in flight
 WINDOW_ACK_TIMEOUT = 0.1  # Seconds to wait for window ACK
 MAX_WINDOW_RETRIES = 4    # Max retries waiting for window ACK (matches IOP)
+
+# Request size limits.
+#
+# READ carries an unbounded uint32 size, so a twelve-byte datagram used to be a
+# 4 GiB allocation request -- from an unauthenticated peer, before any handle
+# check that could reject it. BREAD is bounded by its uint16 sector count, but
+# 65535 sectors is still ~32 MiB per packet at the default sector size, and the
+# assembled write buffer had no ceiling of its own at all.
+#
+# 64 KiB for READ is Edge's number exactly (internal/udpfs/operations.go), so
+# the two implementations refuse the same request. Edge derives its BREAD/write
+# cap from installed RAM because it runs on 32 MB routers; this server runs on
+# desktops, so a constant well above any observed request is enough. The largest
+# transfer seen from any real client is comfortably under 256 KiB -- a console
+# reads in sector-sized chunks -- so 8 MiB leaves two orders of magnitude of
+# headroom while still refusing the pathological case.
+MAX_READ_BYTES = 64 * 1024
+DEFAULT_MAX_TRANSFER_BYTES = 8 * 1024 * 1024
+# Floor, mirroring Edge's minTransferCap: a cap so small that ordinary console
+# requests fail is worse than no cap, so --max-transfer-bytes cannot go below it.
+MIN_MAX_TRANSFER_BYTES = 256 * 1024
+
+
+def _clamp_max_transfer(value):
+    """Bound --max-transfer-bytes, the same way _clamp_peer_timeout does.
+
+    Clamped rather than rejected: a bad number should not stop someone serving
+    their games. The floor matters more than the ceiling -- a mistyped 100 would
+    otherwise produce a server that refuses every real request while looking
+    perfectly healthy.
+    """
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_TRANSFER_BYTES
+    if value <= 0:
+        return DEFAULT_MAX_TRANSFER_BYTES
+    return max(MIN_MAX_TRANSFER_BYTES, value)
 
 # Fixed handle for block device
 BLOCK_DEVICE_HANDLE = 0
@@ -483,7 +519,8 @@ class UdpfsServer:
                  single_port: bool = False,
                  modulo_compat: bool = False,
                  data_port: int = 0,
-                 tx_delay_ms: float = 0.0):
+                 tx_delay_ms: float = 0.0,
+                 max_transfer_bytes: int = DEFAULT_MAX_TRANSFER_BYTES):
         # Modulo's client only ever talked to Modulo's own bundled server, which is
         # single-socket, so the two always travel together.
         if modulo_compat:
@@ -503,6 +540,7 @@ class UdpfsServer:
         # it would reap every peer at the next sweep -- so it clamps up like any
         # other out-of-range value.
         self.session_timeout = _clamp_peer_timeout(peer_timeout)
+        self.max_transfer_bytes = _clamp_max_transfer(max_transfer_bytes)
         self.metrics = metrics
         self.metrics_period = metrics_period
         self.single_port = single_port
@@ -1523,6 +1561,18 @@ class UdpfsServer:
 
         self.stats['read'] += 1
 
+        # Before the handle lookup, and before read(): size is an unbounded
+        # uint32 straight off the wire, so 0xFFFFFFFF here is a 4 GiB
+        # allocation attempt that no later check can undo. Edge refuses the
+        # same request with the same limit, so a client cannot tell the two
+        # servers apart by probing this.
+        if size > MAX_READ_BYTES:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] READ size={size} over "
+                f"{MAX_READ_BYTES} -> EINVAL")
+            self._send_read_result(addr, -errno.EINVAL, b'')
+            return
+
         fh = self.handles.get(handle)
         if fh is None or fh.is_dir:
             self._send_read_result(addr, -errno.EBADF, b'')
@@ -1556,6 +1606,16 @@ class UdpfsServer:
         if self.read_only:
             self._print_event(f"[{addr[0]}:{addr[1]}] WRITE -> EACCES (read-only)")
             self._send_write_done(addr, -errno.EACCES)
+            return
+
+        # The declared size, refused here as Edge does, so an oversized write is
+        # rejected before any of its data is accepted rather than after the
+        # buffer has already grown.
+        if size > self.max_transfer_bytes:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] WRITE size={size} over "
+                f"{self.max_transfer_bytes} -> EINVAL")
+            self._send_write_done(addr, -errno.EINVAL)
             return
 
         fh = self.handles.get(handle)
@@ -1594,6 +1654,22 @@ class UdpfsServer:
         if chunk_nr != self.write_received_chunks:
             self._print_event(f"  ERROR: Chunk order error (expected {self.write_received_chunks}, got {chunk_nr})")
             self._send_ack(addr, is_ack=True)
+            return
+
+        # The assembled buffer had no ceiling: a client declaring 65535 chunks
+        # could grow it without limit, one datagram at a time, and nothing in
+        # the write path ever looked at its size. Checked per chunk so the
+        # buffer is dropped as soon as it goes over rather than after the last
+        # chunk arrives.
+        if len(self.write_data) + len(chunk_data) > self.max_transfer_bytes:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] WRITE over {self.max_transfer_bytes} "
+                "bytes -> EINVAL, buffer discarded")
+            self.write_data = bytearray()
+            self.write_handle = -1
+            self.write_received_chunks = 0
+            self.write_total_chunks = 0
+            self._send_write_done(addr, -errno.EINVAL)
             return
 
         self.write_data.extend(chunk_data)
@@ -1910,6 +1986,16 @@ class UdpfsServer:
         sector_size = self.bd_sector_size if handle == BLOCK_DEVICE_HANDLE else 512
         total_size = sector_count * sector_size
 
+        # 65535 sectors is ~32 MiB at the default sector size, allocated in one
+        # piece from a single unauthenticated packet. Real clients read in
+        # sector-sized chunks and never come close to the cap.
+        if total_size > self.max_transfer_bytes:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] BREAD {total_size} bytes over "
+                f"{self.max_transfer_bytes} -> EINVAL")
+            self._send_read_result(addr, -errno.EINVAL, b'')
+            return
+
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] BREAD handle={handle} sector={sector_nr} count={sector_count} ({total_size} bytes)")
 
@@ -1951,6 +2037,17 @@ class UdpfsServer:
         fh = self.handles.get(handle)
         if fh is None or fh.is_dir:
             self._send_write_done(addr, -errno.EBADF)
+            return
+
+        # Refused up front rather than once the chunks have arrived: the client
+        # declares the size here, so this is the earliest point it is known.
+        declared = sector_count * (self.bd_sector_size
+                                   if handle == BLOCK_DEVICE_HANDLE else 512)
+        if declared > self.max_transfer_bytes:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] BWRITE {declared} bytes over "
+                f"{self.max_transfer_bytes} -> EINVAL")
+            self._send_write_done(addr, -errno.EINVAL)
             return
 
         if self.verbose:
@@ -2732,6 +2829,14 @@ def main():
         help='Seconds between metrics log lines. Accepts a duration '
              '(e.g. 90s, 5m). (default: 60; env: METRICS_PERIOD)'
     )
+    parser.add_argument(
+        '--max-transfer-bytes', type=int,
+        default=int(_env_float('MAX_TRANSFER_BYTES', DEFAULT_MAX_TRANSFER_BYTES)),
+        help='Ceiling on one BREAD and on one assembled write '
+             f'(default: {DEFAULT_MAX_TRANSFER_BYTES}, floor '
+             f'{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES). READ is '
+             f'separately capped at {MAX_READ_BYTES} bytes, matching Edge.'
+    )
 
     args = parser.parse_args()
 
@@ -2798,7 +2903,8 @@ def main():
         metrics_period=args.metrics_period,
         single_port=args.single_port,
         modulo_compat=args.modulo_mode,
-        data_port=args.data_port
+        data_port=args.data_port,
+        max_transfer_bytes=args.max_transfer_bytes
     )
     server.run()
 

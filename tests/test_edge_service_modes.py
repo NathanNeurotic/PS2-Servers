@@ -48,7 +48,7 @@ class EveryServerIsLaunchable(unittest.TestCase):
     def test_main_go_dispatches_the_expected_set(self):
         # A guard on the guard: if this changes, the tests below are checking
         # the wrong list and should be looked at rather than silently passing.
-        self.assertEqual(edge_subcommands(), {"udpfs", "udpbd", "smb"},
+        self.assertEqual(edge_subcommands(), {"udpfs", "udpbd", "smb", "webui"},
                          "Edge's subcommands changed; update the packaging too")
 
     def test_openwrt_init_starts_each_one(self):
@@ -241,6 +241,89 @@ class ShippedStatusPortsDoNotRace(unittest.TestCase):
                 args[0], claims,
                 f"ps2servers-edge-{name}.env claims the shared status port by "
                 "default, which races ps2servers-edge@udpfs")
+
+
+class ShippedPortsMatchTheBinary(unittest.TestCase):
+    """Packaging may not ship a port the binary would not have chosen itself.
+
+    ps2servers-edge-udpbd.env shipped `--port 48301` for several releases. The
+    PS2's udpbd client broadcasts to 0xBDBD (48573) and cannot be told to use
+    anything else, so that unit served a port no console would ever reach --
+    and udpbd has no "nobody answered" error path, so both ends stayed silent
+    and it presented as a cabling or firewall fault.
+
+    The existing flag check (tests/test_systemd_units.py) only proves a flag
+    *exists*; it never looks at the value, which is why this went through. Read
+    from the Go source rather than by running the binary, so no toolchain is
+    needed and a renamed constant still fails.
+    """
+
+    #: subcommand -> (file, regex capturing the default as a Go int literal)
+    _DEFAULTS = {
+        "udpbd": (os.path.join("internal", "udpbd", "protocol.go"),
+                  r"\bPort\s*=\s*(0[xX][0-9a-fA-F]+|\d+)"),
+        "smb": (os.path.join("internal", "smb", "wire.go"),
+                r"\bDefaultPort\s*=\s*(0[xX][0-9a-fA-F]+|\d+)"),
+    }
+
+    @classmethod
+    def _binary_default(cls, subcommand):
+        if subcommand == "udpfs":
+            # Spelled inline in main.go rather than as a named constant.
+            m = re.search(r'envInt\("PORT",\s*(0[xX][0-9a-fA-F]+|\d+)\)',
+                          _read(_MAIN_GO))
+        else:
+            rel, pattern = cls._DEFAULTS[subcommand]
+            path = os.path.join(_ROOT, "native", "ps2servers-edge", rel)
+            m = re.search(pattern, _read(path))
+        assert m, f"could not read the default port for {subcommand}"
+        return int(m.group(1), 0)
+
+    def test_systemd_env_files_ship_the_binary_default_port(self):
+        # Go's flag package accepts -flag=v, --flag=v, -flag v and --flag v.
+        port_arg = re.compile(r"--?port[=\s]+(\d+)\b")
+        for name in ("smb", "udpbd"):
+            expected = self._binary_default(name)
+            args = [l for l in _read(os.path.join(_SYSTEMD, f"ps2servers-edge-{name}.env")).splitlines()
+                    if l.startswith("PS2EDGE_ARGS=")]
+            self.assertEqual(len(args), 1)
+            found = port_arg.search(args[0])
+            if found is None:
+                continue  # omitting it is fine; the binary's own default applies
+            with self.subTest(service=name):
+                self.assertEqual(
+                    int(found.group(1)), expected,
+                    f"ps2servers-edge-{name}.env pins --port {found.group(1)} "
+                    f"but the binary defaults to {expected}; a shipped override "
+                    "must be deliberate, and for udpbd the console cannot "
+                    "follow it anywhere")
+
+    def test_openwrt_init_falls_back_to_the_binary_default(self):
+        # The fallback is what a section created without an explicit `port`
+        # gets -- including one the web UI writes.
+        init = _read(os.path.join(_OPENWRT, "ps2servers-edge.init"))
+        for section, sub in (("main", "udpfs"), ("smb", "smb"), ("udpbd", "udpbd")):
+            m = re.search(r"config_get\s+port\s+" + section + r"\s+port\s+(\d+)", init)
+            with self.subTest(section=section):
+                self.assertIsNotNone(m, f"no port fallback for the {section} section")
+                self.assertEqual(
+                    int(m.group(1)), self._binary_default(sub),
+                    f"the init falls back to port {m.group(1)} for {section}, "
+                    f"but the binary defaults to {self._binary_default(sub)}")
+
+    def test_openwrt_config_ships_the_binary_default_port(self):
+        config = _read(os.path.join(_OPENWRT, "ps2servers-edge.config"))
+        for section, sub in (("main", "udpfs"), ("smb", "smb"), ("udpbd", "udpbd")):
+            body = re.search(r"^config\s+\w+\s+'" + section + r"'(.*?)(?=^config\s|\Z)",
+                             config, re.MULTILINE | re.DOTALL)
+            self.assertIsNotNone(body, f"no '{section}' section in the UCI config")
+            m = re.search(r"^\s*option\s+port\s+'(\d+)'", body.group(1), re.MULTILINE)
+            with self.subTest(section=section):
+                self.assertIsNotNone(m, f"the {section} section ships no port")
+                self.assertEqual(
+                    int(m.group(1)), self._binary_default(sub),
+                    f"the {section} section ships port {m.group(1)}, but the "
+                    f"binary defaults to {self._binary_default(sub)}")
 
 
 class InitScriptIsValidShell(unittest.TestCase):

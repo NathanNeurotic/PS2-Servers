@@ -23,16 +23,27 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Compile Python sources
-        run: python -m compileall -q launcher smbv1_server udpbd_server udpfs_server ps2servers.py
+      - name: Set up Go
+        # For tests/test_smb_wire_parity.py, which compares Edge's SMB bytes
+        # against the Python server's. Without a toolchain it skips, and a skip
+        # nobody reads is the same as not having the test.
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: native/ps2servers-edge/go.mod
+          cache-dependency-path: native/ps2servers-edge/go.mod
 
-      - name: Check the packaged build ships every server source
-        # The launcher loads each server by file path, so Nuitka cannot see
-        # those imports and build.py has to list them as data. When that list
-        # drifted from the registry a release shipped whose UDPFS mode died
-        # with FileNotFoundError on ps2servers_core.py -- invisible from
-        # source, since the file is simply on disk there.
-        run: python -m unittest tests.test_packaging_data_files -v
+      - name: Compile Python sources
+        run: python -m compileall -q launcher smbv1_server smb2_server udpbd_server udpfs_server ps2servers.py
+
+      - name: Run the Python test suite
+        # Discovery, not a hand-written list. This step used to name exactly one
+        # module -- tests.test_packaging_data_files -- so 23 of the 26 modules
+        # in tests/ gated nothing, and a failing assertion in
+        # test_edge_service_modes sat on main with every workflow green.
+        #
+        # The GUI tests skip themselves where there is no display, so this is
+        # safe on a headless runner; see tests/test_gui_layout.py.
+        run: python -m unittest discover -s tests -t . -v
 
       - name: Check release compliance posture
         run: python tools/check_release_compliance.py
