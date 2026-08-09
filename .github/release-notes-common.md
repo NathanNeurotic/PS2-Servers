@@ -30,17 +30,31 @@ Each file is named for the device family it serves, for example
 every archive also contains a `WHICH-DEVICE.txt` confirming what it is for.
 Picking the wrong one is harmless — it simply will not start.
 
-Edge serves **both** protocols:
+Edge serves **three** protocols, one subcommand each, and can run more than one
+at a time:
 
 ```sh
 ps2servers-edge udpfs --root /mnt/games      # folder as a network file share
 ps2servers-edge udpbd --image /mnt/ps2.img   # disk image as a network drive
+ps2servers-edge smb   --share games=/mnt/games   # SMBv1, for OPL and POPSTARTER
 
 # folder AND a disk image from one server, over UDPFS block access
 ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img
 ```
 
-It supports **CSO and ZSO but not CHD** (CHD needs a native library that would
+`smb` is what OPL's own network game list and POPSTARTER use. It listens on
+**TCP port `1111`** rather than 445, because ports below 1024 need root and Edge
+runs unprivileged — set OPL's "SMB Port" to match.
+
+There is also a fourth subcommand, `webui`, which serves a small web dashboard
+for configuring and restarting the others from a phone or a browser. **It binds
+`127.0.0.1` and refuses to start on any other address without a password**
+(`--auth-pass`, or `--insecure` to have one generated and logged), because it
+rewrites configuration and restarts services — reaching it is equivalent to
+shell access on the device. It speaks plain HTTP, so the password stops casual
+access on the LAN, not someone capturing traffic.
+
+Edge supports **CSO and ZSO but not CHD** (CHD needs a native library that would
 break static linking — use the Desktop app for CHD). It **allows the console to
 write by default**, so saves work; pass `--read-only` to prevent that. `--metrics`
 logs periodic transfer statistics, which is the way to tell a slow transfer from
@@ -53,7 +67,9 @@ these generic binaries — see
 [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
 The OpenWrt package starts read-only; set `option read_only '0'` in
 `/etc/config/ps2servers-edge` to let the console save. Every Edge option is a
-UCI option there, including `block_device`.
+UCI option there, including `block_device`. Each subcommand is its own procd
+instance, so a board can serve UDPFS and SMB at once and restart them
+independently. There are systemd units for the same thing on ordinary Linux.
 
 > **Edge has not been verified on a physical PlayStation 2 or an emulator.** Its
 > wire behaviour is checked in CI against the hardware-validated Python servers,
@@ -68,8 +84,18 @@ server setup. It runs local LAN servers for Open PS2 Loader:
 
 - **SMBv1/RiptOPL** — built-in SMB/CIFS subset, normally TCP port `1111`
   (below 1033 discouraged).
+- **SMB2/SMB3** — a separate, newer server for clients that speak them,
+  off by default and with NTLMv2 authentication when credentials are set.
 - **UDPFS** — UDP file serving, normally UDP port `0xF5F6` (62966).
 - **UDPBD** — UDP block-device serving, normally UDP port `0xBDBD` (48573).
+
+The PS2 Servers Edge build additionally offers an optional HTTP management
+dashboard on TCP `8082` (`ps2servers-edge webui`). It is **off by default**,
+binds loopback when started, and refuses any other bind address without a
+password. No listener is opened unless you start it.
+
+Every server here is started by the user and listens on the local network only.
+Nothing phones home, and nothing opens a port at install time.
 
 Windows behavior:
 

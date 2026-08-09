@@ -20,8 +20,29 @@ source of truth**, not whatever a worktree has checked out.
 
 ## State right now
 
+> Updated 2026-08-09 for the v0.5.0 cut. Everything below this block is from the
+> 2026-07-29 session and is kept for its reasoning, not its facts — the state
+> lines in it are stale by ~20 PRs.
+
+- **Version is `0.5.0`** in `launcher/release_metadata.py`, bumped for the
+  release. That file is the single source; `tools/version_source.py` reads it and
+  `release.yml` refuses a tag that disagrees.
+- **v0.5.0 is the release that introduces PS2 Servers Edge.** Everything from
+  #119 onward landed after the v0.4.9 tag: 43 PRs, ~30k lines, Edge in Go across
+  11 targets serving UDPFS/UDPBD/SMB plus a web dashboard, the SMB2/SMB3 server,
+  the router status protocol, and systemd + OpenWrt packaging.
+- Full suite green: **492 Python tests**, Go race- and vet-clean, gofmt gated.
+- Edge mipsle binary: **7.19 MiB** (was 3.31 MiB before the web GUI). CI now
+  fails the build above 9 MiB per target — see the comment in `edge-build.yml`
+  before raising it.
+- An audit ran 2026-08-09; findings and their status are in
+  `AUDIT-2026-08-09.md`. Still open from it: no session cap in the Python UDPFS
+  server, the OpenWrt web-UI privilege model, and reading real per-service logs
+  in the dashboard.
+
+### Older state (2026-07-29, stale)
+
 - **`main` = `4010459`**, zero open PRs, working tree clean.
-- **Version is still `0.4.9`** in `launcher/release_metadata.py`. *Do not bump it.*
 - Latest rolling build: `main-138-4010459`.
 - Full suite green: **316 Python tests**, **7 Go packages under `-race`**.
 - Edge mipsle binary: **3.31 MB**.
