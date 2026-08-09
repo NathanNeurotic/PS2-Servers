@@ -24,21 +24,37 @@ source of truth**, not whatever a worktree has checked out.
 > the "Older state" subsection below it, and every section after it, are from the
 > 2026-07-29 session and are kept for their reasoning, not their numbers.
 
-- **Version is `0.5.0`** in `launcher/release_metadata.py`, bumped for the
-  release. That file is the single source; `tools/version_source.py` reads it and
-  `release.yml` refuses a tag that disagrees.
+- **Version is `0.5.1`** in `launcher/release_metadata.py` — the single source;
+  `tools/version_source.py` reads it and `release.yml` refuses a tag that
+  disagrees. Both v0.5.0 and v0.5.1 were cut on 2026-08-09.
 - **v0.5.0 is the release that introduces PS2 Servers Edge.** Everything from
   #119 onward landed after the v0.4.9 tag: 43 PRs, ~30k lines, Edge in Go across
-  11 targets serving UDPFS/UDPBD/SMB plus a web dashboard, the SMB2/SMB3 server,
+  12 targets serving UDPFS/UDPBD/SMB plus a web dashboard, the SMB2/SMB3 server,
   the router status protocol, and systemd + OpenWrt packaging.
-- Full suite green: **492 Python tests**, Go race- and vet-clean, gofmt gated.
-- Edge mipsle binary: **7.19 MiB** (was 3.31 MiB before the web GUI). CI now
-  fails the build above 9 MiB per target — see the comment in `edge-build.yml`
-  before raising it.
-- An audit ran 2026-08-09; findings and their status are in
-  `AUDIT-2026-08-09.md`. Still open from it: no session cap in the Python UDPFS
-  server, the OpenWrt web-UI privilege model, and reading real per-service logs
-  in the dashboard.
+- **v0.5.1 carries the completed audit work**: the UDPFS session cap
+  (`--max-sessions`), the OpenWrt web-UI privilege model (`webui.run_as_root`,
+  default off), real per-service logs in the dashboard, and `.gitattributes`.
+- Full suite green: **515 Python tests**, Go race- and vet-clean, gofmt gated,
+  and CI now runs the *whole* suite — it ran 1 of 26 modules until v0.5.0.
+- Edge mipsle binary: **6.19 MiB in CI** (was 3.31 MiB before the web GUI; a
+  local Go 1.26 build is ~1 MiB larger). CI fails above 9 MiB per target — read
+  the comment in `edge-build.yml` before raising it.
+- **`AUDIT-2026-08-09.md` is fully closed.** Every finding has a status; nothing
+  is outstanding in it. Read it before re-deriving anything about the web UI,
+  the packaging, or the transfer limits.
+
+### How a release is cut here
+
+1. Bump `PRODUCT_VERSION` in `launcher/release_metadata.py`, alone, in a commit
+   named `Release vX.Y.Z`. Make it the **last** commit on the branch.
+2. Open a PR and let CI go green.
+3. **Rebase-merge** (not squash) so that commit survives on `main` and the tag
+   shows only the bump, as every past release tag does.
+4. `git tag -a vX.Y.Z <bump-commit> -m "PS2 Servers vX.Y.Z"` and push the tag.
+   That is the entire publish step; `release.yml` and `edge.yml` do the rest.
+
+`.github/release-notes-common.md` is appended to every published release. If a
+capability changes, it changes in the same PR — it has gone stale twice.
 
 ### Older state (2026-07-29, stale)
 
