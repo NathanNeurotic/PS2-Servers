@@ -96,6 +96,32 @@ class ShutdownSentinelIsHandledByEveryConsumer(unittest.TestCase):
         self.sess = _FakeSession()
         self.server = _Waiter(self.sess)
 
+    def test_a_queued_packet_is_a_three_tuple(self):
+        """Pins the item shape every consumer unpacks.
+
+        (data, addr, ingress). The third element used to live in a side map
+        keyed on id(data); moving it into the item is what makes an early
+        return in a handler unable to strand a stale entry.
+        """
+        server = object.__new__(srv.UdpfsServer)
+        server.sessions = {}
+        server.sessions_lock = threading.Lock()
+        captured = []
+
+        class _S:
+            def __init__(self):
+                self.queue = type("q", (), {"put": lambda _self, item: captured.append(item)})()
+                self.last_activity = 0.0
+
+        server._get_or_create_session = lambda addr: _S()
+        hdr = srv.Header(packet_type=srv.PacketType.DATA, seq_nr=0)
+        body = srv.DataHeader(flags=0, seq_nr_ack=0, hdr_word_count=0,
+                              data_byte_count=0)
+        srv.UdpfsServer._route_data(server, hdr.pack() + body.pack(), ADDR)
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(len(captured[0]), 3,
+                         "queued items must be (data, addr, ingress)")
+
     def test_the_sentinel_is_a_bare_none(self):
         """Pins the shape the consumers below are written against.
 
@@ -129,10 +155,60 @@ class ShutdownSentinelIsHandledByEveryConsumer(unittest.TestCase):
         hdr = srv.Header(packet_type=srv.PacketType.DATA, seq_nr=0)
         ack = srv.DataHeader(flags=srv.DataFlags.ACK, seq_nr_ack=0,
                              hdr_word_count=0, data_byte_count=0)
-        self.sess.queue.put((hdr.pack() + ack.pack(), ADDR))
+        self.sess.queue.put((hdr.pack() + ack.pack(), ADDR, None))
         self.assertTrue(
             self.server._wait_for_ack(ADDR, timeout=1.0),
             "an ACK covering the FIN must still complete the wait")
+
+
+class AMalformedItemDoesNotKillTheWorker(unittest.TestCase):
+    """The unpack must be inside the handler's try, not before it.
+
+    A queued item of the wrong shape is a programming error, not a network
+    condition -- but when the unpack sat outside the try it took the worker
+    thread with it. The session then still existed and still held its handles
+    while serving nothing, and the only trace was a thread traceback on
+    stderr, which is not where this server's diagnostics go.
+    """
+
+    def test_a_two_tuple_is_reported_and_survived(self):
+        events = []
+
+        class _Server:
+            _shutdown = False
+            _local = threading.local()
+
+            def _print_event(self, msg):
+                events.append(msg)
+
+            def _handle_data(self, data, addr):
+                events.append("handled")
+
+        sess = object.__new__(srv.Session)
+        sess.server = _Server()
+        sess.addr = ADDR
+        sess.queue = queue.Queue()
+        sess.handles = {}
+        sess.ingress = None
+        sess._closing = False
+        sess._thread = threading.Thread(target=sess._run, daemon=True)
+        sess.start()
+
+        sess.queue.put(("wrong", "shape"))       # the malformed one
+        time.sleep(0.2)
+        self.assertTrue(sess._thread.is_alive(),
+                        "a malformed item killed the worker thread")
+
+        # And the session still serves the next, well-formed packet.
+        sess.queue.put((b"\x00" * 8, ADDR, None))
+        time.sleep(0.2)
+        sess.shutdown()
+        sess._thread.join(timeout=3.0)
+
+        self.assertIn("handled", events,
+                      "the session stopped serving after a malformed item")
+        self.assertTrue(any("session error" in e for e in events),
+                        "the malformed item was swallowed silently")
 
 
 class AReapedTransferLogsNoError(unittest.TestCase):
@@ -165,7 +241,7 @@ class AReapedTransferLogsNoError(unittest.TestCase):
         sess.start()
 
         # Get the worker into the handler, then reap it.
-        sess.queue.put((b"\x00" * 8, ADDR))
+        sess.queue.put((b"\x00" * 8, ADDR, None))
         time.sleep(0.2)
         sess.shutdown()
         sess._thread.join(timeout=3.0)

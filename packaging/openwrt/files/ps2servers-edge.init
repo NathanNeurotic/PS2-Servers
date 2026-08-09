@@ -12,11 +12,16 @@ append_bool_flag() {
         [ "$value" -eq 1 ] && procd_append_param command "$flag"
 }
 
-# Shared supervision and hardening, applied to every instance so the three
-# services cannot drift apart in how they are run.
+# Shared supervision and hardening, applied to every instance so the services
+# cannot drift apart in how they are run.
+#
+# Takes the user as an argument rather than hardcoding it, because exactly one
+# instance has a reason to differ -- see start_webui. Everything else passes
+# nothing and gets ps2edge.
 common_params() {
-        procd_set_param user ps2edge
-        procd_set_param group ps2edge
+        local as_user="${1:-ps2edge}"
+        procd_set_param user "$as_user"
+        procd_set_param group "$as_user"
         procd_set_param respawn 10 5 0
         procd_set_param stdout 1
         procd_set_param stderr 1
@@ -203,29 +208,43 @@ start_webui() {
                 esac
         fi
 
-        # The web UI runs as ps2edge like every other instance, so it needs
-        # ownership of the config file to commit a change to it.
+        # Which user this instance runs as is the operator's decision, because
+        # the honest answer is that it is a trade and neither side is free.
         #
-        # This is a real widening -- an unprivileged, network-facing service
-        # owns a file in /etc/config -- and it is only defensible because that
-        # service now requires a password and validates every value it writes.
-        # Before both of those it meant any host on the LAN could rewrite this
-        # file. If you would rather it could not, leave webui.enabled at 0; the
-        # dashboard's Save is the only thing this line exists for.
+        # Default 0 -- unprivileged, like everything else. The dashboard then
+        # shows status, reads configuration and browses the shares, but Save
+        # and Restart FAIL: `uci commit` rewrites a file in /etc/config (and
+        # needs write access to the directory for its rename), and restarting
+        # is `/etc/init.d/ps2servers-edge restart`. Both are root's. The error
+        # says so rather than "exit status 1".
         #
-        # Untested against a real uci commit, which also wants write access to
-        # /etc/config itself for its rename. If Save reports a permission error,
-        # that is why, and the error now says so rather than "exit status 1".
-        [ -f /etc/config/ps2servers-edge ] && chown ps2edge:ps2edge /etc/config/ps2servers-edge 2>/dev/null
+        # Set 1 to make Save and Restart work. That runs a network-facing HTTP
+        # server as root, which is exactly as serious as it sounds -- it is
+        # gated behind a password, it validates every value it writes, and it
+        # is still root. Only turn it on if you want configuration from a
+        # browser more than you want that separation.
+        #
+        # The previous version tried to have both by chowning the config file
+        # to ps2edge. That widened permissions on a file in /etc/config for an
+        # unprivileged network service AND still could not commit, because the
+        # rename needs the directory. A half-measure that is neither safe nor
+        # working is worse than a choice.
+        config_get_bool run_as_root webui run_as_root 0
+        webui_user=ps2edge
+        if [ "$run_as_root" -eq 1 ]; then
+                webui_user=root
+        fi
 
         procd_open_instance webui
         procd_set_param command "$PROG" webui \
                 --bind "$bind" \
                 --webui-port "$port" \
                 --auth-user "$auth_user"
-        [ -n "$auth_pass" ] && procd_append_param command --auth-pass "$auth_pass"
+        # Through the environment, not argv: a command line is world-readable
+        # in /proc and in `ps` output, and runWebUI already reads WEBUI_PASS.
+        [ -n "$auth_pass" ] && procd_set_param env WEBUI_PASS="$auth_pass"
         [ "$insecure" -eq 1 ] && procd_append_param command --insecure
-        common_params
+        common_params "$webui_user"
         procd_close_instance
 }
 

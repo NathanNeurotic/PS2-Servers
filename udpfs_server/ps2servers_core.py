@@ -17,6 +17,7 @@ import time
 
 from udpfs_server import (
     BLOCK_DEVICE_HANDLE,
+    DEFAULT_MAX_SESSIONS,
     DEFAULT_MAX_TRANSFER_BYTES,
     LIBCHDR_AVAILABLE,
     LZ4_AVAILABLE,
@@ -35,6 +36,7 @@ from udpfs_server import (
     _duration_arg,
     _env_bool,
     _env_float,
+    _env_max_sessions,
     _env_max_transfer,
     _env_duration,
     _env_int,
@@ -114,7 +116,6 @@ class AutoUdpfsServer(UdpfsServer):
             sess.fallback_sent = False
             sess.first_data_seen = False
             sess.compat_lock = threading.RLock()
-            sess.ingress_by_packet = {}
         return sess
 
     def _reset_session_state(self, sess, profile):
@@ -149,7 +150,6 @@ class AutoUdpfsServer(UdpfsServer):
         sess.response_socket = SOCKET_DATA
         sess.fallback_sent = False
         sess.first_data_seen = False
-        sess.ingress_by_packet.clear()
 
     def _get_or_create_session(self, addr):
         return self._init_compat(super()._get_or_create_session(addr))
@@ -296,12 +296,13 @@ class AutoUdpfsServer(UdpfsServer):
         if payload_size > len(data) - 6:
             return
         sess = self._get_or_create_session(addr)
-        # ACK/NACK packets are consumed directly by the base transfer waiters and
-        # never reach _handle_data, so only payload packets need ingress metadata.
-        if payload_size:
-            with sess.compat_lock:
-                sess.ingress_by_packet[id(data)] = ingress
-        sess.queue.put((data, addr))
+        # Carried in the queued item, not in a side map keyed on id(data).
+        # That map was correct only while the packet object stayed alive, and
+        # any path that skipped its pop -- an early return in _handle_data --
+        # left an entry that a later object could match by reusing the id, so a
+        # reply would go out of the wrong socket. ACK/NACK packets never reach
+        # _handle_data at all, so the value is simply unused for them.
+        sess.queue.put((data, addr, ingress))
 
     def _handle_data(self, data: bytes, addr):
         sess = self._local.session
@@ -310,7 +311,7 @@ class AutoUdpfsServer(UdpfsServer):
         except (struct.error, ValueError):
             return
         with sess.compat_lock:
-            ingress = sess.ingress_by_packet.pop(id(data), SOCKET_DATA)
+            ingress = sess.ingress or SOCKET_DATA
             if sess.protocol_profile == PROFILE_PENDING:
                 profile = classify_profile(sess.discovery_sequence, hdr.seq_nr)
                 sess.protocol_profile = profile
@@ -426,6 +427,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Ceiling on one READ, one BREAD and one assembled "
                              f"write (default {DEFAULT_MAX_TRANSFER_BYTES}, floor "
                              f"{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES)")
+    parser.add_argument("--max-sessions", type=int, default=_env_max_sessions(),
+                        help="Maximum concurrent peers; past this the least "
+                             "recently active is dropped (default "
+                             f"{DEFAULT_MAX_SESSIONS}; env: MAX_SESSIONS)")
     return parser
 
 
@@ -494,6 +499,7 @@ def main():
         data_port=data_port,
         tx_delay_ms=args.tx_delay_ms,
         max_transfer_bytes=args.max_transfer_bytes,
+        max_sessions=args.max_sessions,
         protocol_mode=args.protocol_mode,
         fallback_interval=args.compat_fallback,
     )

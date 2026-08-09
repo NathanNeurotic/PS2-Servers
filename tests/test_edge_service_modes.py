@@ -99,14 +99,72 @@ class EveryServerIsLaunchable(unittest.TestCase):
                          "every instance must be named, or they overwrite each other")
         self.assertEqual(len(names), len(set(names)), f"duplicate instance names: {names}")
 
-    def test_every_instance_runs_unprivileged(self):
+    def test_every_instance_applies_the_shared_hardening(self):
         init = _read(os.path.join(_OPENWRT, "ps2servers-edge.init"))
         opens = init.count("procd_open_instance")
-        # common_params applies the hardening; each instance must call it, or
-        # one of them quietly runs as root.
+        # common_params applies the user, the respawn policy and the fd limit.
+        # Each instance must call it, or one of them quietly runs without them.
         self.assertEqual(init.count("common_params"), opens + 1,
                          "an instance is not applying common_params, so it may "
                          "run without the user/limits the others have")
+
+    def test_only_the_web_ui_can_run_as_root_and_does_not_by_default(self):
+        """One instance may differ, by explicit opt-in, defaulting to off.
+
+        Save and Restart genuinely need root on this platform -- `uci commit`
+        rewrites /etc/config and restarting goes through /etc/init.d -- so the
+        dashboard is read-only unless the operator says otherwise. What must
+        not happen is that becoming the default, or spreading to a server that
+        has no reason to be root.
+        """
+        init = _read(os.path.join(_OPENWRT, "ps2servers-edge.init"))
+        config = _read(os.path.join(_OPENWRT, "ps2servers-edge.config"))
+
+        self.assertRegex(
+            config, r"option\s+run_as_root\s+'0'",
+            "run_as_root must ship as 0; a network-facing dashboard running as "
+            "root should never be what you get by not choosing")
+
+        # Exactly one instance passes a user to common_params, and it is webui.
+        # [ \t] rather than \s: \s matches the newline, so the bare calls would
+        # each "match" with the next line's first word as their argument.
+        with_arg = re.findall(r"common_params[ \t]+(\S+)", init)
+        self.assertEqual(
+            len(with_arg), 1,
+            "more than one instance overrides the shared user: %s" % with_arg)
+        webui_body = re.search(r"^start_webui\(\)\s*\{(.*?)^\}", init,
+                               re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(webui_body, "no start_webui() in the init script")
+        self.assertIn("common_params \"$webui_user\"", webui_body.group(1),
+                      "the webui instance no longer selects its own user")
+
+        # And no server selects a user at all -- neither by passing one to
+        # common_params nor by setting it directly. Matched precisely rather
+        # than by searching for "root": start_udpfs legitimately contains
+        # `config_get root main root`, which is the share, not the account.
+        for func in ("start_udpfs", "start_smb", "start_udpbd"):
+            body = re.search(r"^" + func + r"\(\)\s*\{(.*?)^\}", init,
+                             re.MULTILINE | re.DOTALL)
+            self.assertIsNotNone(body, f"no {func}() in the init script")
+            with self.subTest(function=func):
+                self.assertNotRegex(
+                    body.group(1), r"common_params[ \t]+\S",
+                    f"{func} passes a user to common_params; only the web UI "
+                    "has a reason to differ")
+                self.assertNotRegex(
+                    body.group(1), r"procd_set_param[ \t]+user\b",
+                    f"{func} sets its own user, bypassing common_params")
+
+    def test_the_web_ui_password_does_not_go_on_a_command_line(self):
+        """argv is world-readable in /proc and in `ps` output."""
+        init = _read(os.path.join(_OPENWRT, "ps2servers-edge.init"))
+        self.assertNotRegex(
+            init, r"procd_append_param\s+command\s+--auth-pass",
+            "the password is passed as an argument, so every local account can "
+            "read it out of /proc; pass WEBUI_PASS through procd_set_param env")
+        self.assertIn("procd_set_param env WEBUI_PASS=", init,
+                      "the password should reach the binary through the "
+                      "environment, which runWebUI already reads")
 
     def test_systemd_template_covers_each_one(self):
         env_files = os.listdir(_SYSTEMD)

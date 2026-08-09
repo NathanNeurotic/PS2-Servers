@@ -1,0 +1,42 @@
+# Line endings, decided here rather than by each contributor's git config.
+#
+# Without this file the answer is core.autocrlf, which differs per machine. On
+# Windows the working tree gets CRLF and the committed blob is normalised back
+# to LF -- which happens to be right, and is right by accident. A contributor
+# with core.autocrlf=false, or an editor that writes CRLF into a new file,
+# commits CRLF and nothing notices.
+#
+# For most of the tree that is cosmetic. For these it is not:
+#
+#   * the OpenWrt init script runs under ash, where a trailing \r makes `do\r`
+#     not `do` -- the script fails to parse and the package starts nothing.
+#     `dash -n` rejects a CRLF copy of the current script today; the only
+#     reason it is not a bug is that git normalises on commit.
+#   * shell scripts with a shebang fail with "bad interpreter: no such file"
+#     when the shebang line ends \r.
+#   * systemd units and .env files take the \r as part of the value, so
+#     ExecStart points at a path that does not exist.
+#
+# The audit on 2026-08-09 noted this file was missing; it is here because the
+# init-script case turned out to be a live trap rather than a tidiness one.
+
+# Let git decide for anything not named below.
+* text=auto
+
+# Must be LF wherever they end up, because something executes them.
+*.sh            text eol=lf
+*.init          text eol=lf
+*.service       text eol=lf
+*.env           text eol=lf
+*.config        text eol=lf
+Makefile        text eol=lf
+packaging/**    text eol=lf
+
+# Must be CRLF: cmd.exe mis-parses a batch file with LF endings in some cases.
+*.bat           text eol=crlf
+*.ps1           text eol=crlf
+
+# Never touched.
+*.png           binary
+*.ico           binary
+*.zip           binary

@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
@@ -48,6 +50,54 @@ type ServiceManager interface {
 	// always the set asked for -- see openwrtManager.
 	Restart(service string) ([]string, error)
 	Status(ports map[string]int) (map[string]ServiceStatus, error)
+	// ServiceLogs returns the most recent lines the SERVERS wrote, which is a
+	// different thing from the web UI's own output.
+	//
+	// udpfs, smb and udpbd are separate processes under both procd and systemd,
+	// so their logs are in logread/journalctl and were never reachable from
+	// this process. The dashboard advertised "live logs" and showed an empty
+	// buffer, because the only thing it could see was itself.
+	//
+	// A snapshot rather than a follow: tailing would mean a long-lived child
+	// process per connected browser, and on a 32 MB router that is a cost with
+	// no ceiling. The dashboard re-fetches instead.
+	ServiceLogs(lines int) ([]string, error)
+}
+
+// maxServiceLogLines bounds one snapshot, and therefore the memory a request
+// can make this process hold.
+const maxServiceLogLines = 500
+
+// clampLogLines keeps a caller-supplied count sane.
+func clampLogLines(lines int) int {
+	if lines <= 0 {
+		return 100
+	}
+	if lines > maxServiceLogLines {
+		return maxServiceLogLines
+	}
+	return lines
+}
+
+// readLogCommand runs a log reader and returns its output as lines.
+//
+// A failure is not an error the dashboard should shout about: logread may not
+// exist, journalctl may refuse a unit pattern, and the service user may not be
+// allowed to read the journal at all. The caller shows what it got.
+func readLogCommand(name string, args ...string) ([]string, error) {
+	cmd := exec.Command(name, args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w%s", name, err, stderrSuffix(err))
+	}
+	var lines []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, nil
 }
 
 // ServiceStatus is returned by the /api/status endpoint and consumed by the
@@ -120,6 +170,12 @@ func (m *openwrtManager) Status(ports map[string]int) (map[string]ServiceStatus,
 	return queryAllStatus(ports), nil
 }
 
+func (m *openwrtManager) ServiceLogs(lines int) ([]string, error) {
+	// -e filters to our messages; procd tags each instance's stdout with the
+	// service name, so one call covers all four.
+	return readLogCommand("logread", "-e", "ps2servers-edge")
+}
+
 // --- systemd ---
 
 type systemdManager struct {
@@ -149,6 +205,13 @@ func (m *systemdManager) Status(ports map[string]int) (map[string]ServiceStatus,
 	return queryAllStatus(ports), nil
 }
 
+func (m *systemdManager) ServiceLogs(lines int) ([]string, error) {
+	// The glob covers every templated instance. --no-pager because journalctl
+	// pipes into less when it thinks it has a terminal.
+	return readLogCommand("journalctl", "-u", "ps2servers-edge@*",
+		"-n", strconv.Itoa(clampLogLines(lines)), "--no-pager", "--output", "short-iso")
+}
+
 // --- Generic fallback ---
 
 type genericManager struct {
@@ -164,6 +227,14 @@ func (m *genericManager) Restart(service string) ([]string, error) {
 
 func (m *genericManager) Status(ports map[string]int) (map[string]ServiceStatus, error) {
 	return queryAllStatus(ports), nil
+}
+
+// ServiceLogs has nothing to read on a generic host: the servers were started
+// by hand and their output went wherever the operator sent it. Saying so beats
+// an empty pane that looks broken.
+func (m *genericManager) ServiceLogs(lines int) ([]string, error) {
+	return nil, fmt.Errorf("no service log source on this platform " +
+		"(not OpenWrt procd or systemd); the servers' output is wherever you started them")
 }
 
 // --- Router status protocol query ---

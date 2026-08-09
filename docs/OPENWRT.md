@@ -189,8 +189,24 @@ board serves.
 > printed to the log on each start. There is no TLS — the password crosses the
 > LAN in the clear, so it stops casual access, not packet capture.
 
-The **Logs** view shows the web UI's own output. Each server runs as its own
-procd instance, so for their logs use `logread -e ps2servers-edge`.
+The **Logs** view reads `logread -e ps2servers-edge`, so it shows every
+instance's output, followed by the web UI's own live log.
+
+> [!IMPORTANT]
+> **Save and Restart need root on this platform** and are off by default. `uci
+> commit` rewrites a file in `/etc/config` and restarting goes through
+> `/etc/init.d`, neither of which an unprivileged service can do. Left alone,
+> the dashboard shows status, reads configuration and browses your shares, and
+> those two buttons report a permission error.
+>
+> `uci set ps2servers-edge.webui.run_as_root='1'` makes them work, by running
+> the dashboard as root. That is a network-facing HTTP server running as root —
+> password-protected and validating everything it writes, and still root. It is
+> a real trade, which is why it is a choice rather than a default.
+>
+> An earlier version tried to have both by chowning the config file to the
+> service user. That widened permissions *and* still could not commit, because
+> the rename needs the directory.
 
 ### A bad value restarts the service in a loop
 
