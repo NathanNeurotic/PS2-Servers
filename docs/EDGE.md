@@ -48,7 +48,7 @@ Observability & Web Management:
 Web UI:
 
 - `ps2servers-edge webui` — run embedded web dashboard on port `8082` (or OS assigned)
-- Options: `--webui-port 8082`, `--bind 0.0.0.0`, `--config-file /etc/ps2servers-edge/config.json`, `--no-browse`
+- Options: `--webui-port 8082`, `--bind 127.0.0.1`, `--auth-pass`, `--config-file /etc/ps2servers-edge/config.json`, `--no-browse`
 
 For an OpenWrt command reference and a packet-by-packet NHDDL-to-Neutrino
 diagnostic procedure, see
@@ -260,9 +260,14 @@ Options:
 > casual access, not as protection against someone already capturing traffic.
 
 > [!NOTE]
-> The **Logs** tab shows the web UI's own output only. `udpfs`, `smb` and
-> `udpbd` run as separate processes under both procd and systemd, so their logs
-> are in `logread` / `journalctl -u 'ps2servers-edge@*'`.
+> The **Logs** tab shows a snapshot of the servers' own output — read from
+> `logread` on OpenWrt and `journalctl` on systemd — followed by the web UI's
+> live log. The snapshot is taken when the page connects and refreshes when it
+> reconnects: following those would mean a child process per open browser tab,
+> which on a small router is a cost with no ceiling.
+>
+> On a host that is neither OpenWrt nor systemd there is nowhere to read from,
+> and the tab says so rather than looking empty.
 
 ## Writes
 

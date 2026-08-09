@@ -207,6 +207,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		browseRoots:   roots,
 		maxLogClients: s.cfg.MaxLogClients,
 		logClients:    make(chan struct{}, s.cfg.MaxLogClients),
+		logLines:      s.cfg.LogLines,
 	}
 
 	mux := http.NewServeMux()

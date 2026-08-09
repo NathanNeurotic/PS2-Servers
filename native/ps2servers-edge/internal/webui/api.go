@@ -28,6 +28,8 @@ type API struct {
 	// maxLogClients caps concurrent /api/logs streams.
 	maxLogClients int
 	logClients    chan struct{}
+	// logLines is how many service-log lines one connect fetches.
+	logLines int
 }
 
 func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
@@ -55,6 +57,17 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	}
 	jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	return false
+}
+
+// sanitizeSSE makes one log line safe to put in a server-sent event.
+//
+// The framing is line-based: a newline ends a field and a blank line ends the
+// event, so a log line containing either would let whatever produced it inject
+// extra events into the stream. Log lines here come from journalctl and
+// logread, which carry text the servers were given -- filenames and peer
+// addresses among it.
+func sanitizeSSE(line string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(line)
 }
 
 // maxRequestBody bounds a decoded JSON body.
@@ -260,8 +273,30 @@ func (a *API) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	ch, unsub := a.logBuffer.Subscribe()
 	defer unsub()
 
+	// The servers' own output first. udpfs, smb and udpbd are separate
+	// processes, so this is the part an operator actually came looking for --
+	// and until now the pane could not show it at all, because the only thing
+	// this process can see live is itself.
+	//
+	// A snapshot taken at connect. Following logread/journalctl would mean a
+	// child process per open browser tab, which on a 32 MB router is a cost
+	// with no ceiling; the page re-connects to refresh.
+	if serviceLines, err := a.manager.ServiceLogs(a.logLines); err != nil {
+		fmt.Fprintf(w, "data: [service logs unavailable: %s]\n\n",
+			sanitizeSSE(err.Error()))
+	} else if len(serviceLines) == 0 {
+		fmt.Fprint(w, "data: [no service log lines yet]\n\n")
+	} else {
+		fmt.Fprintf(w, "data: [%d line(s) from the servers' own log]\n\n",
+			len(serviceLines))
+		for _, line := range serviceLines {
+			fmt.Fprintf(w, "data: %s\n\n", sanitizeSSE(line))
+		}
+	}
+	fmt.Fprint(w, "data: [--- web UI log follows, live ---]\n\n")
+
 	for _, line := range a.logBuffer.Lines() {
-		fmt.Fprintf(w, "data: %s\n\n", line)
+		fmt.Fprintf(w, "data: %s\n\n", sanitizeSSE(line))
 	}
 	flusher.Flush()
 

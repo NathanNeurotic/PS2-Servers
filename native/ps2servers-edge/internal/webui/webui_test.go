@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -534,6 +535,78 @@ func TestAuthRejectsBadCredentials(t *testing.T) {
 	handler.ServeHTTP(rec, r)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 with the right password, got %d", rec.Code)
+	}
+}
+
+// fakeManager lets the log tests choose what the platform "returns".
+type fakeManager struct {
+	logs []string
+	err  error
+}
+
+func (m *fakeManager) Restart(string) ([]string, error) { return nil, nil }
+func (m *fakeManager) Status(map[string]int) (map[string]ServiceStatus, error) {
+	return map[string]ServiceStatus{}, nil
+}
+func (m *fakeManager) ServiceLogs(int) ([]string, error) { return m.logs, m.err }
+
+// The tab used to show an empty pane: the servers are separate processes, so
+// nothing this process could see was ever the thing the operator wanted.
+func TestLogsIncludeTheServersOwnOutput(t *testing.T) {
+	api := testAPI(t, func(a *API) {
+		a.manager = &fakeManager{logs: []string{"udpfs: listening", "smb: share games"}}
+		a.logBuffer.Write([]byte("webui: started\n"))
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/logs", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 200*time.Millisecond)
+	defer cancel()
+	api.HandleLogs(rec, req.WithContext(ctx))
+
+	body := rec.Body.String()
+	for _, want := range []string{"udpfs: listening", "smb: share games", "webui: started"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stream is missing %q:\n%s", want, body)
+		}
+	}
+	// And the two sources are distinguishable, or an operator cannot tell which
+	// process a line came from.
+	if !strings.Contains(body, "web UI log follows") {
+		t.Fatalf("no marker separating service logs from the web UI's own:\n%s", body)
+	}
+}
+
+func TestLogsSayWhyWhenThePlatformHasNoSource(t *testing.T) {
+	api := testAPI(t, func(a *API) {
+		a.manager = &fakeManager{err: errors.New("no service log source on this platform")}
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/logs", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 200*time.Millisecond)
+	defer cancel()
+	api.HandleLogs(rec, req.WithContext(ctx))
+
+	if !strings.Contains(rec.Body.String(), "service logs unavailable") {
+		t.Fatalf("an unreadable log source must say so rather than look empty:\n%s",
+			rec.Body.String())
+	}
+}
+
+// SSE is line-framed, so a log line containing a newline could otherwise inject
+// events of its own -- and these lines carry filenames and peer addresses.
+func TestLogLinesCannotInjectSSEEvents(t *testing.T) {
+	api := testAPI(t, func(a *API) {
+		a.manager = &fakeManager{logs: []string{"benign\n\ndata: injected"}}
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/logs", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 200*time.Millisecond)
+	defer cancel()
+	api.HandleLogs(rec, req.WithContext(ctx))
+
+	if strings.Contains(rec.Body.String(), "\ndata: injected") {
+		t.Fatalf("a log line injected its own SSE event:\n%q", rec.Body.String())
 	}
 }
 

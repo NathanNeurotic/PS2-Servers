@@ -235,6 +235,21 @@ SESSION_TIMEOUT = 3600.0         # default seconds of peer inactivity before rea
 SESSION_TIMEOUT_MIN = 60.0
 SESSION_TIMEOUT_MAX = 86400.0
 SESSION_SWEEP_INTERVAL = 5.0     # how often the demux loop checks for idle sessions
+# Ceiling on concurrent peers. A session is a worker thread, a queue and up to
+# MAX_HANDLES descriptors, and any unauthenticated datagram creates one, so
+# without a cap a single host walking its source port can allocate without
+# bound and hold it for --peer-timeout (an hour by default).
+#
+# 256 is far above any real deployment -- the count here is consoles on a LAN,
+# and the largest plausible number is single digits -- while staying small
+# enough that the worst case is survivable on the low-memory boards this also
+# runs on. Configurable with --max-sessions for anyone who disagrees.
+DEFAULT_MAX_SESSIONS = 256
+# Floor of 1: a cap of zero would refuse the first console to say hello, which
+# is a server that is running and useless.
+MIN_MAX_SESSIONS = 1
+# Seconds between eviction log lines. At the cap this path runs per packet.
+SESSION_EVICT_LOG_INTERVAL = 60.0
 HAS_PREAD = hasattr(os, 'pread')     # POSIX: lock-free positional block-device reads
 HAS_PWRITE = hasattr(os, 'pwrite')
 
@@ -295,6 +310,19 @@ def _clamp_max_transfer(value):
     if value <= 0:
         return DEFAULT_MAX_TRANSFER_BYTES
     return max(MIN_MAX_TRANSFER_BYTES, value)
+
+
+def _clamp_max_sessions(value):
+    """Bound --max-sessions. Never raises, like the other clamps here."""
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_SESSIONS
+    return max(MIN_MAX_SESSIONS, value)
+
+
+def _env_max_sessions():
+    return _clamp_max_sessions(os.environ.get('MAX_SESSIONS'))
 
 
 def _env_max_transfer():
@@ -548,7 +576,8 @@ class UdpfsServer:
                  modulo_compat: bool = False,
                  data_port: int = 0,
                  tx_delay_ms: float = 0.0,
-                 max_transfer_bytes: int = DEFAULT_MAX_TRANSFER_BYTES):
+                 max_transfer_bytes: int = DEFAULT_MAX_TRANSFER_BYTES,
+                 max_sessions: int = DEFAULT_MAX_SESSIONS):
         # Modulo's client only ever talked to Modulo's own bundled server, which is
         # single-socket, so the two always travel together.
         if modulo_compat:
@@ -569,6 +598,9 @@ class UdpfsServer:
         # other out-of-range value.
         self.session_timeout = _clamp_peer_timeout(peer_timeout)
         self.max_transfer_bytes = _clamp_max_transfer(max_transfer_bytes)
+        self.max_sessions = _clamp_max_sessions(max_sessions)
+        self._sessions_evicted = 0
+        self._last_evict_log = 0.0
         self.metrics = metrics
         self.metrics_period = metrics_period
         self.single_port = single_port
@@ -753,10 +785,53 @@ class UdpfsServer:
             return n
 
     # -- session lifecycle -------------------------------------------------
+    def _evict_oldest_session_locked(self):
+        """Drop the least recently active peer. Caller holds sessions_lock.
+
+        Least-recently-active rather than oldest-created: a console that has
+        been streaming for an hour must outlive one that said hello and went
+        quiet, and creation order says nothing about which is which.
+        """
+        victim = min(self.sessions.items(), key=lambda kv: kv[1].last_activity)
+        addr, sess = victim
+        self.sessions.pop(addr, None)
+        sess.shutdown()
+        return addr
+
     def _get_or_create_session(self, addr):
         with self.sessions_lock:
             sess = self.sessions.get(addr)
             if sess is None:
+                # Bounded. A session is a thread, a queue and up to MAX_HANDLES
+                # descriptors, and it is created by an unauthenticated datagram
+                # -- one DISCOVERY per source port, held for --peer-timeout,
+                # an hour by default. Nothing stopped a single host walking its
+                # source port from making thousands, which on the low-memory
+                # boards this also runs on is the whole machine.
+                #
+                # Evicting rather than refusing: a real console whose port
+                # shifted (which happens, and which the UDPBD server has
+                # explicit handling for) must still be able to get in. The
+                # least recently active peer is the one least likely to be mid
+                # game.
+                if len(self.sessions) >= self.max_sessions:
+                    dropped = self._evict_oldest_session_locked()
+                    # Not verbose-gated, and rate-limited to one line a minute.
+                    # At the cap this fires per packet from a new peer, which
+                    # would bury every other line in the log -- but silence
+                    # here means a console that mysteriously stops working with
+                    # nothing to explain it.
+                    now = time.monotonic()
+                    self._sessions_evicted += 1
+                    if now - self._last_evict_log >= SESSION_EVICT_LOG_INTERVAL:
+                        self._last_evict_log = now
+                        self._print_event(
+                            f"[{addr[0]}:{addr[1]}] session limit "
+                            f"{self.max_sessions} reached -- dropped "
+                            f"{dropped[0]}:{dropped[1]}, its open files closed "
+                            f"({self._sessions_evicted} evicted so far; raise "
+                            "--max-sessions, or lower --peer-timeout so idle "
+                            "peers are reaped sooner)")
                 sess = Session(self, addr)
                 self.sessions[addr] = sess
                 sess.start()
@@ -770,7 +845,13 @@ class UdpfsServer:
         hdr = Header.unpack(data)
         if hdr.packet_type != PacketType.DATA:
             return
-        self._get_or_create_session(addr).queue.put((data, addr))
+        # Three elements, always. The third is which local socket the datagram
+        # arrived on, which only ps2servers_core reads -- but the shape is fixed
+        # here so every consumer can unpack the same way. It used to be threaded
+        # through a side map keyed on id(data), which is only safe for as long as
+        # the object stays alive and silently returns another packet's value once
+        # an id is reused.
+        self._get_or_create_session(addr).queue.put((data, addr, None))
 
     def _sweep_idle_sessions(self):
         now = time.monotonic()
@@ -2253,7 +2334,7 @@ class UdpfsServer:
             # messages exist to save.
             if item is None:
                 return  # session shutting down
-            pkt, _recv_addr = item
+            pkt, _recv_addr, _ingress = item
             if len(pkt) < 6:
                 continue
             hdr = Header.unpack(pkt)
@@ -2293,7 +2374,7 @@ class UdpfsServer:
             # Before unpacking, as in _wait_for_window_ack above.
             if item is None:
                 return False  # session shutting down
-            pkt, _recv_addr = item
+            pkt, _recv_addr, _ingress = item
             if len(pkt) < 6:
                 continue
             hdr = Header.unpack(pkt)
@@ -2574,6 +2655,11 @@ class Session:
         # it: its client keeps a background DISCOVERY going while it streams, and
         # a live stream must not be resynced out from under itself.
         self.rx_streaming = False
+        # Which local socket the datagram currently being handled arrived on.
+        # Set by _run immediately before dispatch and read by
+        # ps2servers_core._handle_data. Safe as plain state because exactly one
+        # worker thread ever runs a handler for this session.
+        self.ingress = None
         # concurrency plumbing
         self.queue: "queue.Queue" = queue.Queue()
         self.last_activity = time.monotonic()
@@ -2599,14 +2685,29 @@ class Session:
                 continue
             if item is None:
                 break
-            data, addr = item
+            # Inside the try, not before it. An unpack out here is not covered
+            # by the handler's except, so a queued item of the wrong shape kills
+            # this worker thread outright: the session then still exists, still
+            # holds its handles, and never serves another packet, while the only
+            # trace is a thread traceback on stderr. That is a programming
+            # error rather than a network condition, so it is loud -- but it is
+            # loud through the same channel as everything else, and the session
+            # survives it.
             try:
+                data, addr, ingress = item
+                self.ingress = ingress
                 self.server._handle_data(data, addr)
             except Exception as e:  # keep the session alive on a handler error
                 # Always surface handler errors -- silent swallowing makes
                 # multi-client issues very hard to debug.
+                #
+                # self.addr, not the unpacked addr: if the unpack itself is what
+                # failed, that name is unbound and formatting the message would
+                # raise a NameError out of the except, killing the thread the
+                # handler was written to keep alive.
                 self.server._print_event(
-                    f"[{addr[0]}:{addr[1]}] session error: {type(e).__name__}: {e}")
+                    f"[{self.addr[0]}:{self.addr[1]}] session error: "
+                    f"{type(e).__name__}: {e}")
         # Close this session's own file handles (never the shared block device).
         for hid, fh in list(self.handles.items()):
             if hid == BLOCK_DEVICE_HANDLE:
@@ -2876,6 +2977,12 @@ def main():
              f'{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES)'
     )
 
+    parser.add_argument(
+        '--max-sessions', type=int, default=_env_max_sessions(),
+        help='Maximum concurrent peers. Past this the least recently active is '
+             f'dropped (default: {DEFAULT_MAX_SESSIONS}; env: MAX_SESSIONS)'
+    )
+
     args = parser.parse_args()
 
     # Compression: default on; CLI beats env; an explicit disable beats an enable.
@@ -2942,7 +3049,8 @@ def main():
         single_port=args.single_port,
         modulo_compat=args.modulo_mode,
         data_port=args.data_port,
-        max_transfer_bytes=args.max_transfer_bytes
+        max_transfer_bytes=args.max_transfer_bytes,
+        max_sessions=args.max_sessions
     )
     server.run()
 
