@@ -200,6 +200,11 @@ jobs:
           set -euo pipefail
           test -x packaging/openwrt/files/ps2servers-edge.init
           grep -q 'include ../../lang/golang/golang-package.mk' packaging/openwrt/Makefile
-          grep -q 'procd_set_param user ps2edge' packaging/openwrt/files/ps2servers-edge.init
+          # The unprivileged default, not the exact spelling. common_params
+          # takes the account as an argument now, because exactly one instance
+          # -- the web UI -- has a reason to differ and only when the operator
+          # asks. What must stay true is that passing nothing gets ps2edge.
+          grep -q 'as_user="${1:-ps2edge}"' packaging/openwrt/files/ps2servers-edge.init
+          grep -q "option run_as_root '0'" packaging/openwrt/files/ps2servers-edge.config
           grep -q "option protocol 'auto'" packaging/openwrt/files/ps2servers-edge.config
           ! grep -R --line-number -E 'Architecture: (mips|arm|amd64)' packaging/openwrt
