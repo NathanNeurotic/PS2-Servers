@@ -150,7 +150,10 @@ start_udpbd() {
 
         config_get image udpbd image
         config_get bind udpbd bind 0.0.0.0
-        config_get port udpbd port 48301
+        # 48573 = 0xBDBD, the port the PS2's udpbd client broadcasts to. Not a
+        # free choice, and not the same shape as udpfs's port: a section that
+        # omits `port` must still come up somewhere a console can find it.
+        config_get port udpbd port 48573
         config_get status_port udpbd status_port -1
         config_get log_format udpbd log_format text
 
@@ -180,14 +183,48 @@ start_webui() {
 
         config_get bind webui bind 0.0.0.0
         config_get port webui port 8082
+        config_get auth_user webui auth_user admin
+        config_get auth_pass webui auth_pass
 
-        # Ensure ps2edge service user has write permission for UCI commits
+        # The dashboard rewrites config and restarts services, so exposing it on
+        # the LAN is exposing the router. The binary refuses a non-loopback bind
+        # without a password; `insecure` accepts that and has it generate one,
+        # which it prints to the log on every start.
+        config_get_bool insecure webui insecure 0
+
+        if [ -z "$auth_pass" ] && [ "$insecure" -ne 1 ]; then
+                case "$bind" in
+                127.*|localhost) ;;
+                *)
+                        echo "ps2servers-edge: webui is enabled on $bind with no auth_pass;" \
+                             "set webui.auth_pass, or webui.insecure '1' to generate one" >&2
+                        return 0
+                        ;;
+                esac
+        fi
+
+        # The web UI runs as ps2edge like every other instance, so it needs
+        # ownership of the config file to commit a change to it.
+        #
+        # This is a real widening -- an unprivileged, network-facing service
+        # owns a file in /etc/config -- and it is only defensible because that
+        # service now requires a password and validates every value it writes.
+        # Before both of those it meant any host on the LAN could rewrite this
+        # file. If you would rather it could not, leave webui.enabled at 0; the
+        # dashboard's Save is the only thing this line exists for.
+        #
+        # Untested against a real uci commit, which also wants write access to
+        # /etc/config itself for its rename. If Save reports a permission error,
+        # that is why, and the error now says so rather than "exit status 1".
         [ -f /etc/config/ps2servers-edge ] && chown ps2edge:ps2edge /etc/config/ps2servers-edge 2>/dev/null
 
         procd_open_instance webui
         procd_set_param command "$PROG" webui \
                 --bind "$bind" \
-                --webui-port "$port"
+                --webui-port "$port" \
+                --auth-user "$auth_user"
+        [ -n "$auth_pass" ] && procd_append_param command --auth-pass "$auth_pass"
+        [ "$insecure" -eq 1 ] && procd_append_param command --insecure
         common_params
         procd_close_instance
 }

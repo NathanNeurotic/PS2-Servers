@@ -91,7 +91,11 @@ async function pollDashboard() {
         ['udpfs', 'smb', 'udpbd'].forEach(svc => {
             const s = data[svc];
             if (s) {
-                updateStatusBadge(`dash-${svc}-status`, s.status || 'unknown');
+                // `state`, not `status`: that is the JSON tag the server emits
+                // (webui/service.go ServiceStatus). Reading `status` yielded
+                // undefined on every poll, so the badge fell through to
+                // 'unknown' even with a healthy server answering.
+                updateStatusBadge(`dash-${svc}-status`, s.state || 'unknown');
                 document.getElementById(`dash-${svc}-sessions`).textContent = s.sessions || 0;
                 document.getElementById(`dash-${svc}-uptime`).textContent = formatUptime(s.uptime);
             }
@@ -283,9 +287,12 @@ async function openBrowser(formId, inputName, isDirOnly) {
     currentBrowserIsDirOnly = isDirOnly;
     
     const input = document.querySelector(`#${formId} [name="${inputName}"]`);
-    currentBrowserPath = input.value || '/';
+    // Empty means "ask the server where I may start". It used to mean "/",
+    // which is now refused: browsing is confined to the directories this box
+    // actually serves, and the filesystem root is not one of them.
+    currentBrowserPath = input.value || '';
     // If it's a file path, we want to browse its parent dir
-    if (!isDirOnly && currentBrowserPath !== '/') {
+    if (!isDirOnly && currentBrowserPath && currentBrowserPath !== '/') {
         const lastSlash = currentBrowserPath.lastIndexOf('/');
         const lastBackslash = currentBrowserPath.lastIndexOf('\\');
         const sep = lastSlash > lastBackslash ? lastSlash : lastBackslash;
@@ -324,9 +331,19 @@ async function loadBrowserPath(path) {
     list.innerHTML = '<div class="muted" style="padding:1rem;">Loading...</div>';
     
     try {
-        const res = await api(`/api/browse?path=${encodeURIComponent(path)}`);
+        const query = path ? `?path=${encodeURIComponent(path)}` : '';
+        const res = await api(`/api/browse${query}`);
+
+        // No path in the reply means the server offered a choice of roots
+        // instead of a listing: more than one directory is served and it will
+        // not guess which one was meant.
+        if (!res.path) {
+            renderBrowserRoots(res.roots || []);
+            return;
+        }
+
         currentBrowserPath = res.path; // server returns resolved canonical path
-        
+
         // Render Breadcrumbs
         const breadcrumbs = document.getElementById('browser-breadcrumbs');
         breadcrumbs.innerHTML = '';
@@ -373,15 +390,29 @@ async function loadBrowserPath(path) {
             const div = document.createElement('div');
             div.className = 'browser-item';
             
-            const icon = item.is_dir ? '📁' : '📄';
-            let sizeStr = '';
+            // Built as nodes, not as an HTML string. item.name is a filename
+            // off the served disk, and the shares are writable in the setups
+            // most people use, so a file called
+            // `<img src=x onerror=...>` used to run script in the
+            // operator's browser -- with the whole management API in reach.
+            const iconEl = document.createElement('span');
+            iconEl.className = 'browser-item-icon';
+            iconEl.textContent = item.is_dir ? '📁' : '📄';
+            div.appendChild(iconEl);
+
+            const nameEl = document.createElement('span');
+            nameEl.textContent = item.name;
+            div.appendChild(nameEl);
+
             if (!item.is_dir && item.size !== undefined) {
-                const mb = (item.size / (1024*1024)).toFixed(2);
-                sizeStr = `<span class="muted" style="margin-left:auto; font-size:0.8rem;">${mb} MB</span>`;
+                const sizeEl = document.createElement('span');
+                sizeEl.className = 'muted';
+                sizeEl.style.marginLeft = 'auto';
+                sizeEl.style.fontSize = '0.8rem';
+                sizeEl.textContent = (item.size / (1024*1024)).toFixed(2) + ' MB';
+                div.appendChild(sizeEl);
             }
-            
-            div.innerHTML = `<span class="browser-item-icon">${icon}</span><span>${item.name}</span>${sizeStr}`;
-            
+
             let fullPath = currentBrowserPath;
             if (!fullPath.endsWith('/') && !fullPath.endsWith('\\')) {
                 fullPath += currentBrowserPath.includes('\\') ? '\\' : '/';
@@ -397,8 +428,47 @@ async function loadBrowserPath(path) {
         });
         
     } catch(e) {
-        list.innerHTML = `<div class="toast error" style="position:static; margin:1rem;">${e.message}</div>`;
+        // textContent: e.message is whatever the server said, and the server
+        // says things derived from the request.
+        list.innerHTML = '';
+        const err = document.createElement('div');
+        err.className = 'toast error';
+        err.style.position = 'static';
+        err.style.margin = '1rem';
+        err.textContent = e.message;
+        list.appendChild(err);
     }
+}
+
+function renderBrowserRoots(roots) {
+    const list = document.getElementById('browser-list');
+    const breadcrumbs = document.getElementById('browser-breadcrumbs');
+    breadcrumbs.textContent = '';
+    list.textContent = '';
+
+    if (!roots.length) {
+        const empty = document.createElement('div');
+        empty.className = 'muted';
+        empty.style.padding = '1rem';
+        empty.textContent = 'No server directories are configured yet. '
+            + 'Set a UDPFS root or an SMB share first.';
+        list.appendChild(empty);
+        return;
+    }
+
+    roots.forEach(root => {
+        const div = document.createElement('div');
+        div.className = 'browser-item';
+        const icon = document.createElement('span');
+        icon.className = 'browser-item-icon';
+        icon.textContent = '📁';
+        div.appendChild(icon);
+        const label = document.createElement('span');
+        label.textContent = root;
+        div.appendChild(label);
+        div.onclick = () => loadBrowserPath(root);
+        list.appendChild(div);
+    });
 }
 
 function addBreadcrumb(label, path, index, parts) {

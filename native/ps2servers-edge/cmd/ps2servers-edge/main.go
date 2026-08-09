@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/signal"
@@ -411,11 +412,22 @@ func (s *shareList) Set(v string) error { *s = append(*s, v); return nil }
 func runWebUI() {
 	fs := flag.NewFlagSet("webui", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	bind := fs.String("bind", env("WEBUI_BIND", "0.0.0.0"), "IPv4 bind address")
-	port := fs.Int("webui-port", envInt("WEBUI_PORT", 8082), "HTTP port (0 uses 8082 or OS assigned)")
+	// Loopback, not 0.0.0.0. This serves a management API that rewrites
+	// configuration, restarts services and lists directories; reaching it from
+	// another machine should be something the operator asked for.
+	bind := fs.String("bind", env("WEBUI_BIND", "127.0.0.1"), "IPv4 bind address (non-loopback needs --auth-pass or --insecure)")
+	port := fs.Int("webui-port", envInt("WEBUI_PORT", webui.DefaultPort), "HTTP port (0 uses 8082 or OS assigned)")
 	configFile := fs.String("config-file", env("CONFIG_FILE", "/etc/ps2servers-edge/config.json"), "path to config file")
 	logLines := fs.Int("log-lines", envInt("LOG_LINES", 1000), "number of log lines to buffer")
 	noBrowse := fs.Bool("no-browse", envBool("NO_BROWSE", false), "disable file browser API endpoint")
+	browseAnywhere := fs.Bool("browse-anywhere", envBool("BROWSE_ANYWHERE", false),
+		"let the file browser leave the configured server directories")
+	authUser := fs.String("auth-user", env("WEBUI_USER", "admin"), "HTTP basic auth username")
+	authPass := fs.String("auth-pass", env("WEBUI_PASS", ""), "HTTP basic auth password (empty disables auth; only allowed on loopback)")
+	insecure := fs.Bool("insecure", envBool("WEBUI_INSECURE", false),
+		"allow a non-loopback bind without a password; one is generated and logged")
+	maxLogClients := fs.Int("max-log-clients", envInt("MAX_LOG_CLIENTS", webui.DefaultMaxLogClients),
+		"maximum concurrent /api/logs streams")
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
 	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose logging")
 	quiet := fs.Bool("quiet", false, "suppress informational logs")
@@ -424,18 +436,44 @@ func runWebUI() {
 		os.Exit(2)
 	}
 
-	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
+	// Whether --config-file was passed, not what it was set to. The shipped
+	// systemd env file passes the default path verbatim, and comparing the
+	// value against the default silently discarded it on any box with uci.
+	configFileSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "config-file" {
+			configFileSet = true
+		}
+	})
+	if os.Getenv("CONFIG_FILE") != "" {
+		configFileSet = true
+	}
+
 	logBuffer := webui.NewLogBuffer(*logLines)
+	// Tee into the ring buffer, or the dashboard's log view has no producer at
+	// all: LogBuffer.Write was constructed and handed over, and then nothing
+	// ever called it, so /api/logs streamed an empty buffer forever.
+	//
+	// This still only carries the web UI's own output. udpfs, smb and udpbd run
+	// as separate processes under both procd and systemd, so their logs are in
+	// logread/journalctl and are not ours to tee.
+	logger := edgelog.New(io.MultiWriter(os.Stdout, logBuffer), *logFormat, *quiet, *verbose)
 
 	srv, err := webui.New(webui.Config{
-		Port:       *port,
-		Bind:       *bind,
-		ConfigFile: *configFile,
-		LogLines:   *logLines,
-		NoBrowse:   *noBrowse,
-		Version:    version,
-		Log:        logger,
-		LogBuffer:  logBuffer,
+		Port:           *port,
+		Bind:           *bind,
+		ConfigFile:     *configFile,
+		ConfigFileSet:  configFileSet,
+		LogLines:       *logLines,
+		NoBrowse:       *noBrowse,
+		BrowseAnywhere: *browseAnywhere,
+		Username:       *authUser,
+		Password:       *authPass,
+		AllowInsecure:  *insecure,
+		MaxLogClients:  *maxLogClients,
+		Version:        version,
+		Log:            logger,
+		LogBuffer:      logBuffer,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -450,4 +488,3 @@ func runWebUI() {
 		os.Exit(1)
 	}
 }
-

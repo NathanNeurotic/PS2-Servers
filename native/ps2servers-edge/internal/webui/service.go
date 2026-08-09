@@ -1,23 +1,53 @@
 package webui
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 )
+
+// Services the dashboard knows about, in the order the cards appear.
+var dashboardServices = []string{"udpfs", "smb", "udpbd"}
+
+// defaultStatusPort is the UDPFS discovery port, which is also the standard
+// status port every subcommand resolves --status-port -1 to.
+const defaultStatusPort = 0xF5F6
+
+// serviceFlag maps a dashboard service to the capability bit a reply sets when
+// that service is the one answering.
+//
+// This is the discriminator, not the reply's name. Every subcommand reports the
+// same display name ("PS2 Servers Edge"), so the substring match this used to do
+// -- looking for "udpfs"/"smb"/"udpbd" inside "PS2 Servers Edge" -- could never
+// match, and the dashboard showed all three services as unknown in every
+// configuration, including with a healthy server answering on the same port.
+var serviceFlag = map[string]uint16{
+	"udpfs": protocol.FlagServesUDPFS,
+	"smb":   protocol.FlagServesSMB,
+	"udpbd": protocol.FlagServesUDPBD,
+}
+
+// restartTargets is the set HandleRestart accepts. An unvalidated value reaches
+// exec.Command as a systemd instance name, which lets a caller start units this
+// server never meant to offer.
+var restartTargets = map[string]bool{
+	"all": true, "udpfs": true, "smb": true, "udpbd": true,
+}
 
 // ServiceManager abstracts how the web UI restarts Edge services and queries
 // their status.  Three implementations are auto-detected: OpenWrt (procd),
 // systemd, and a generic fallback that logs instructions.
 type ServiceManager interface {
-	Restart(service string) error
-	Status() (map[string]ServiceStatus, error)
+	// Restart returns the set of services actually restarted, which is not
+	// always the set asked for -- see openwrtManager.
+	Restart(service string) ([]string, error)
+	Status(ports map[string]int) (map[string]ServiceStatus, error)
 }
 
 // ServiceStatus is returned by the /api/status endpoint and consumed by the
@@ -27,6 +57,10 @@ type ServiceStatus struct {
 	State    string `json:"state"`
 	Sessions int    `json:"sessions"`
 	Uptime   uint32 `json:"uptime"`
+}
+
+func unknownStatus() ServiceStatus {
+	return ServiceStatus{Running: false, State: "unknown"}
 }
 
 // DetectServiceManager checks the host environment and returns the most
@@ -41,20 +75,49 @@ func DetectServiceManager(log *logging.Logger) ServiceManager {
 	return &genericManager{log: log}
 }
 
+// runCmd reports a failed command with its stderr attached.
+//
+// exec.Cmd.Run alone yields "exit status 1", which is what the API used to
+// surface: enough to know something broke and nothing about what, which matters
+// most here because the likely cause is a permission the service user does not
+// have.
+func runCmd(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if len(out) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, string(out))
+}
+
 // --- OpenWrt (procd) ---
 
 type openwrtManager struct {
 	log *logging.Logger
 }
 
-func (m *openwrtManager) Restart(service string) error {
-	// The init script handles all three services; restarting it restarts
-	// whichever instances are enabled in UCI.
-	return exec.Command("/etc/init.d/ps2servers-edge", "restart").Run()
+// Restart restarts every enabled instance, whatever was asked for.
+//
+// The init script is the only per-package control procd exposes here, and it
+// covers all four instances. Restarting one is possible -- SIGTERM the instance
+// over ubus and let respawn bring it back -- but that has never run on a real
+// router, and a restart button that silently does nothing is worse than one
+// that does too much. So this reports what it actually did and the UI says so.
+func (m *openwrtManager) Restart(service string) ([]string, error) {
+	if err := runCmd("/etc/init.d/ps2servers-edge", "restart"); err != nil {
+		return nil, err
+	}
+	if m.log != nil {
+		m.log.Info("restarted all Edge services", map[string]any{"requested": service})
+	}
+	return append([]string(nil), dashboardServices...), nil
 }
 
-func (m *openwrtManager) Status() (map[string]ServiceStatus, error) {
-	return queryAllStatus()
+func (m *openwrtManager) Status(ports map[string]int) (map[string]ServiceStatus, error) {
+	return queryAllStatus(ports), nil
 }
 
 // --- systemd ---
@@ -63,21 +126,27 @@ type systemdManager struct {
 	log *logging.Logger
 }
 
-func (m *systemdManager) Restart(service string) error {
+func (m *systemdManager) Restart(service string) ([]string, error) {
+	targets := []string{service}
 	if service == "all" {
-		var firstErr error
-		for _, s := range []string{"udpfs", "smb", "udpbd"} {
-			if err := exec.Command("systemctl", "restart", "ps2servers-edge@"+s).Run(); err != nil && firstErr == nil {
+		targets = append([]string(nil), dashboardServices...)
+	}
+	var firstErr error
+	var done []string
+	for _, s := range targets {
+		if err := runCmd("systemctl", "restart", "ps2servers-edge@"+s); err != nil {
+			if firstErr == nil {
 				firstErr = err
 			}
+			continue
 		}
-		return firstErr
+		done = append(done, s)
 	}
-	return exec.Command("systemctl", "restart", "ps2servers-edge@"+service).Run()
+	return done, firstErr
 }
 
-func (m *systemdManager) Status() (map[string]ServiceStatus, error) {
-	return queryAllStatus()
+func (m *systemdManager) Status(ports map[string]int) (map[string]ServiceStatus, error) {
+	return queryAllStatus(ports), nil
 }
 
 // --- Generic fallback ---
@@ -86,120 +155,125 @@ type genericManager struct {
 	log *logging.Logger
 }
 
-func (m *genericManager) Restart(service string) error {
+func (m *genericManager) Restart(service string) ([]string, error) {
 	m.log.Info(fmt.Sprintf(
 		"Web UI received restart request for %s — running in generic mode, "+
 			"please restart the process manually", service), nil)
-	return nil
+	return nil, nil
 }
 
-func (m *genericManager) Status() (map[string]ServiceStatus, error) {
-	return queryAllStatus()
+func (m *genericManager) Status(ports map[string]int) (map[string]ServiceStatus, error) {
+	return queryAllStatus(ports), nil
 }
 
 // --- Router status protocol query ---
 
-// queryAllStatus sends a status query to the well-known discovery port on
-// localhost and parses the response.  UDPFS listens on port 62966 (0xF5F6) by
-// default; SMB and UDPBD use the same status listener port when configured.
-func queryAllStatus() (map[string]ServiceStatus, error) {
-	res := map[string]ServiceStatus{
-		"udpfs": queryStatus("udpfs", 62966),
-		"smb":   queryStatus("smb", 62966),
-		"udpbd": queryStatus("udpbd", 62966),
+// statusPorts resolves the UDP port to ask about each service.
+//
+// udpfs answers on its own discovery socket and so is always reachable. smb and
+// udpbd only answer if they were given a --status-port: 0 means off (nothing is
+// listening, so asking is a guaranteed timeout), and a negative value means the
+// standard port.
+func statusPorts(cfg *EdgeConfig) map[string]int {
+	ports := map[string]int{"udpfs": defaultStatusPort}
+	if cfg == nil {
+		return ports
 	}
-	return res, nil
+	if cfg.UDPFS.Port > 0 {
+		ports["udpfs"] = cfg.UDPFS.Port
+	}
+	for name, configured := range map[string]int{
+		"smb":   cfg.SMB.StatusPort,
+		"udpbd": cfg.UDPBD.StatusPort,
+	} {
+		switch {
+		case configured > 0:
+			ports[name] = configured
+		case configured < 0:
+			ports[name] = defaultStatusPort
+		}
+	}
+	return ports
 }
 
-// queryStatus sends a 10-byte UDPRDMA status query (service 0xF5F7) to
-// 127.0.0.1:port and decodes the reply per docs/ROUTER-STATUS.md.
-func queryStatus(targetService string, port int) ServiceStatus {
-	unknown := ServiceStatus{Running: false, State: "unknown", Sessions: 0, Uptime: 0}
-
-	// Build the 10-byte query:
-	//   [0:2] header — type 0 (DISCOVERY), sequence 0  → 0x0000 LE
-	//   [2:4] service ID — 0xF5F7 LE
-	//   [4:6] port — 0x0000 LE (unused; reply goes to query's UDP source)
-	//   [6:10] magic — "PS2S"
-	req := make([]byte, 10)
-	binary.LittleEndian.PutUint16(req[0:2], 0x0000)
-	binary.LittleEndian.PutUint16(req[2:4], 0xF5F7)
-	binary.LittleEndian.PutUint16(req[4:6], 0x0000)
-	copy(req[6:10], "PS2S")
-
-	conn, err := net.DialTimeout("udp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
-	if err != nil {
-		return unknown
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
-
-	if _, err := conn.Write(req); err != nil {
-		return unknown
+// queryAllStatus asks each distinct port once and attributes the reply by its
+// capability flags.
+//
+// One query per port, not one per service: the standard port is shared, so
+// asking it three times used to mean three round trips -- and, since only one
+// service can hold it, two guaranteed 200ms timeouts on every 2-second poll.
+func queryAllStatus(ports map[string]int) map[string]ServiceStatus {
+	result := make(map[string]ServiceStatus, len(dashboardServices))
+	for _, name := range dashboardServices {
+		result[name] = unknownStatus()
 	}
 
-	buf := make([]byte, 256)
-	n, err := conn.Read(buf)
-	if err != nil || n < 19 {
-		return unknown
-	}
-
-	// Reply layout (docs/ROUTER-STATUS.md):
-	//   [0:2]  header — type 1 (INFORM), sequence 0 → low nibble is 1
-	//   [2:4]  service ID — 0xF5F7  (echoed)
-	//   [4:8]  magic — "PS2S"       (echoed)
-	//   [8]    payload version — 1
-	//   [9]    state
-	//   [10:12] service flags
-	//   [12:14] active sessions
-	//   [14:18] uptime (seconds)
-	//   [18]   name length
-	//   [19:]  name (UTF-8)
-
-	// Validate service ID and magic.
-	if binary.LittleEndian.Uint16(buf[2:4]) != 0xF5F7 {
-		return unknown
-	}
-	if string(buf[4:8]) != "PS2S" {
-		return unknown
-	}
-	// Validate header type: low nibble must be 1 (INFORM).
-	if buf[0]&0x0F != 1 {
-		return unknown
-	}
-
-	nameLen := int(buf[18])
-	if n >= 19+nameLen && nameLen > 0 {
-		nameStr := strings.ToLower(string(buf[19 : 19+nameLen]))
-		if !strings.Contains(nameStr, strings.ToLower(targetService)) {
-			// Response came from a different service on that port
-			return unknown
+	byPort := map[int][]string{}
+	for name, port := range ports {
+		if _, known := serviceFlag[name]; known && port > 0 {
+			byPort[port] = append(byPort[port], name)
 		}
 	}
 
-	stateByte := buf[9]
-	stateStr := "unknown"
-	switch stateByte {
-	case 0:
-		stateStr = "starting"
-	case 1:
-		stateStr = "ready"
-	case 2:
-		stateStr = "busy"
-	case 3:
-		stateStr = "degraded"
-	case 4:
-		stateStr = "stopping"
+	// Deterministic order so a failure is reproducible.
+	distinct := make([]int, 0, len(byPort))
+	for port := range byPort {
+		distinct = append(distinct, port)
+	}
+	sort.Ints(distinct)
+
+	for _, port := range distinct {
+		reply, ok := queryStatus(port)
+		if !ok {
+			continue
+		}
+		for _, name := range byPort[port] {
+			if reply.Flags&serviceFlag[name] == 0 {
+				// Something answered, but not this service. Common and
+				// expected: udpfs owns the shared port, so a dashboard that
+				// also lists smb there gets udpfs's reply.
+				continue
+			}
+			result[name] = ServiceStatus{
+				Running:  true,
+				State:    reply.State.String(),
+				Sessions: int(reply.Sessions),
+				Uptime:   reply.Uptime,
+			}
+		}
+	}
+	return result
+}
+
+// queryStatus sends one status query to 127.0.0.1:port and decodes the reply.
+//
+// Both directions go through internal/protocol rather than through hand-written
+// offsets. The hand-written copy that used to live here had already drifted --
+// it never read the capability flags, which is the only field that says which
+// service answered.
+func queryStatus(port int) (protocol.StatusReply, bool) {
+	conn, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return protocol.StatusReply{}, false
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		return protocol.StatusReply{}, false
+	}
+	if _, err := conn.Write(protocol.MarshalStatusQuery()); err != nil {
+		return protocol.StatusReply{}, false
 	}
 
-	sessions := int(binary.LittleEndian.Uint16(buf[12:14]))
-	uptime := binary.LittleEndian.Uint32(buf[14:18])
-
-	return ServiceStatus{
-		Running:  true,
-		State:    stateStr,
-		Sessions: sessions,
-		Uptime:   uptime,
+	// A reply is StatusFixedLen plus a name of at most 255 bytes.
+	buf := make([]byte, protocol.StatusFixedLen+255)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return protocol.StatusReply{}, false
 	}
+	reply, err := protocol.ParseStatusReply(buf[:n])
+	if err != nil {
+		return protocol.StatusReply{}, false
+	}
+	return reply, true
 }

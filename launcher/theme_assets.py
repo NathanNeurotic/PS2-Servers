@@ -16,10 +16,6 @@ THEME_ASSET_FILES = {
 }
 
 
-def asset_names():
-    return tuple(THEME_ASSET_FILES.keys())
-
-
 def _candidate_asset_dirs():
     package_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = [

@@ -1,7 +1,7 @@
 package webui
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -13,10 +13,23 @@ type uciBackend struct{}
 func (b *uciBackend) Load() (*EdgeConfig, error) {
 	cfg := DefaultConfig()
 
-	out, err := exec.Command("/sbin/uci", "show", "ps2servers-edge").Output()
+	cmd := exec.Command("/sbin/uci", "show", "ps2servers-edge")
+	out, err := cmd.Output()
 	if err != nil {
-		// If the config doesn't exist yet, return defaults
-		return cfg, nil
+		// "Not found" is the one failure that legitimately means defaults: the
+		// package is installed but no config has been written yet.
+		//
+		// Everything else -- uci missing, permission denied, a corrupt file --
+		// used to land here too, so the UI displayed defaults as if they were
+		// live and the next Save wrote them over a working configuration. With
+		// the web UI running unprivileged, permission denied is a realistic
+		// trigger, not a theoretical one.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && isUCINotFound(exitErr.Stderr) {
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("uci show ps2servers-edge failed: %w%s",
+			err, stderrSuffix(err))
 	}
 
 	lines := strings.Split(string(out), "\n")
@@ -142,8 +155,35 @@ func (b *uciBackend) Load() (*EdgeConfig, error) {
 	return cfg, nil
 }
 
+// isUCINotFound distinguishes "no such config" from every other uci failure.
+func isUCINotFound(stderr []byte) bool {
+	s := strings.ToLower(string(stderr))
+	return strings.Contains(s, "not found") || strings.Contains(s, "entry not found")
+}
+
+// stderrSuffix appends a command's stderr to an error, when there is any.
+//
+// Without it the API reports "exit status 1", which says something broke and
+// nothing about what -- and the likely cause here is a permission the service
+// user does not have, which the message would name outright.
+func stderrSuffix(err error) string {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+		return ": " + strings.TrimSpace(string(exitErr.Stderr))
+	}
+	return ""
+}
+
 func (b *uciBackend) Save(cfg *EdgeConfig) error {
-	var cmds [][]string
+	// Defence in depth. The API validates before calling any backend, but this
+	// is the one backend where a bad value is more than a bad value, so it does
+	// not rely on being called correctly.
+	if err := ValidateConfig(cfg); err != nil {
+		return err
+	}
+
+	type uciSet struct{ key, value string }
+	var cmds []uciSet
 
 	addCmd := func(key string, val interface{}) {
 		var sval string
@@ -156,10 +196,16 @@ func (b *uciBackend) Save(cfg *EdgeConfig) error {
 			}
 		case string:
 			sval = v
-		case int, float64:
-			sval = fmt.Sprintf("%v", v)
+		case int:
+			sval = strconv.Itoa(v)
+		case float64:
+			sval = strconv.FormatFloat(v, 'g', -1, 64)
+		default:
+			// Silently writing an empty value for an unhandled type is how a
+			// setting becomes decorative without anyone noticing.
+			panic(fmt.Sprintf("uciBackend.Save: unhandled type %T for %s", val, key))
 		}
-		cmds = append(cmds, []string{"set", fmt.Sprintf("ps2servers-edge.%s=%s", key, sval)})
+		cmds = append(cmds, uciSet{key: key, value: sval})
 	}
 
 	// Set basic sections if they don't exist (assuming default init script creates them, but to be safe we'd just set values)
@@ -209,17 +255,26 @@ func (b *uciBackend) Save(cfg *EdgeConfig) error {
 	addCmd("webui.port", cfg.WebUI.Port)
 	addCmd("webui.bind", cfg.WebUI.Bind)
 
-	// Execute all set commands via batch or sequentially
-	var buf bytes.Buffer
+	// One exec per option, with the value as its own argv element.
+	//
+	// NOT `uci batch` over stdin. That is a line-oriented command stream, so a
+	// value containing a newline injected an arbitrary uci command -- against
+	// any package, not just this one -- and a value containing a space silently
+	// changed how the line parsed, which broke every share path with a space in
+	// it. Passing the value as a separate argument removes the text channel
+	// entirely: there is no line for it to break out of.
+	//
+	// The cost is one process per option instead of one for the lot. That is
+	// roughly forty short-lived execs on a save, which is not free on a router
+	// but happens only when someone clicks Save.
 	for _, c := range cmds {
-		buf.WriteString(strings.Join(c, " ") + "\n")
+		if err := runCmd("/sbin/uci", "set",
+			"ps2servers-edge."+c.key+"="+c.value); err != nil {
+			return fmt.Errorf("uci set %s failed: %w", c.key, err)
+		}
 	}
-	buf.WriteString("commit ps2servers-edge\n")
-
-	cmd := exec.Command("/sbin/uci", "batch")
-	cmd.Stdin = &buf
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("uci batch failed: %w", err)
+	if err := runCmd("/sbin/uci", "commit", "ps2servers-edge"); err != nil {
+		return fmt.Errorf("uci commit failed: %w", err)
 	}
 
 	return nil

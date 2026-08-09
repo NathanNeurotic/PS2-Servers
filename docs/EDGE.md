@@ -227,18 +227,42 @@ so users on phones, tablets, or remote computers can manage all Edge services wi
 touching a terminal:
 
 ```sh
+# Loopback only, no password needed:
 ps2servers-edge webui --webui-port 8082
+
+# Reachable from a phone on the LAN, which needs a password:
+ps2servers-edge webui --bind 0.0.0.0 --auth-user admin --auth-pass 'something long'
 ```
 
 Options:
 - `--webui-port 8082` — HTTP port for web dashboard (`0` uses `8082` with fallback to OS-assigned port)
-- `--bind 0.0.0.0` — bind address
+- `--bind 127.0.0.1` — bind address. **Loopback by default.** A non-loopback bind
+  requires `--auth-pass` or `--insecure`; without one of them the server refuses
+  to start rather than publishing a management API to the LAN.
+- `--auth-user admin` / `--auth-pass ''` — HTTP basic credentials. An empty
+  password means no authentication and is only accepted on loopback.
+- `--insecure` — accept a LAN bind with no password supplied. A random password
+  is generated and written to the log at startup; it changes on every restart.
 - `--config-file /etc/ps2servers-edge/config.json` — path to JSON config file (used on generic Linux/systemd/Docker)
-- `--no-browse` — disables the file browser modal/endpoint (`/api/browse`) for security
+- `--no-browse` — disables the file browser modal/endpoint (`/api/browse`) entirely
+- `--browse-anywhere` — lets the file browser leave the configured server
+  directories. Off by default: browsing is confined to the UDPFS root and the
+  SMB share paths, which is everywhere worth picking.
 - `--log-lines 1000` — SSE log streaming buffer capacity
+- `--max-log-clients 8` — concurrent `/api/logs` streams
 
 > [!IMPORTANT]
-> **Security & Scope**: The web dashboard is unauthenticated by default and intended for private trusted home LANs. Note that `--no-browse` disables directory browsing (`/api/browse`) specifically; to restrict dashboard access entirely to the host machine, use `--bind 127.0.0.1` or firewall rules.
+> **Security & scope.** The dashboard rewrites configuration, restarts services
+> and lists directories, so treat reaching it as equivalent to shell access on
+> the box. It binds loopback by default for that reason. Exposing it to the LAN
+> is supported, but requires a password (or `--insecure`, which generates one).
+> There is no TLS: the password crosses the LAN in the clear, so use it to stop
+> casual access, not as protection against someone already capturing traffic.
+
+> [!NOTE]
+> The **Logs** tab shows the web UI's own output only. `udpfs`, `smb` and
+> `udpbd` run as separate processes under both procd and systemd, so their logs
+> are in `logread` / `journalctl -u 'ps2servers-edge@*'`.
 
 ## Writes
 

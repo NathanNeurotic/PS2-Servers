@@ -203,12 +203,6 @@ def get_all_adapters_info():
     return [("Network Adapter", ip) for ip in all_ipv4()], []
 
 
-def get_adapter_ip_pairs():
-    """Returns [(adapter_name, ip_address), ...] for all active IPv4 interfaces."""
-    pairs, _ = get_all_adapters_info()
-    return pairs
-
-
 def detailed_ip_info():
     """Returns a formatted multi-line string listing current network adapters and IP addresses."""
     pairs, unconfigured = get_all_adapters_info()

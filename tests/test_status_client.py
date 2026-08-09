@@ -14,7 +14,6 @@ answer:
 import os
 import socket
 import sys
-import tempfile
 import threading
 import unittest
 

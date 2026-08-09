@@ -716,7 +716,7 @@ class RenameSafety(ServerFixture):
     def test_a_rename_out_of_the_share_is_refused(self):
         c = self.connected()
         _status, fid = c.create("game.iso")
-        self.assertNotEqual(self._rename(c, fid, "..\escaped.iso", replace=True), 0)
+        self.assertNotEqual(self._rename(c, fid, r"..\escaped.iso", replace=True), 0)
 
 
 class ParentEntry(ServerFixture):

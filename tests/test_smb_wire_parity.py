@@ -54,16 +54,32 @@ HEADER_CASES = [
 class SmbWireParity(unittest.TestCase):
     def setUp(self):
         if not shutil.which("go"):
+            # A skip nobody reads is the same as not having the test, and this
+            # is the only thing standing between a Go/Python wire divergence
+            # and a console that desynchronises mid-load. CI installs Go, so on
+            # CI a missing toolchain is a broken workflow, not an environment
+            # this test should quietly tolerate.
+            if os.environ.get("CI"):
+                self.fail("no Go toolchain on PATH, but this is CI -- the "
+                          "workflow must install Go for this test to mean "
+                          "anything")
             self.skipTest("no Go toolchain on PATH")
         if not os.path.isdir(_EDGE):
             self.skipTest("Edge source not present")
         self.ref = _load_reference()
 
-    def _run_go(self, body):
-        """Run a Go program inside the Edge module and return its stdout.
+    def _run_go(self, body, expected_lines):
+        """Run a Go program inside the Edge module and return its stdout lines.
 
         Inside the module because internal/ packages are importable only from
         within the module that declares them.
+
+        expected_lines is checked here rather than by the caller so a failure
+        can quote what the toolchain actually did. Asserting the count at the
+        call site reports `0 != 4`, which says only that something went wrong
+        and nothing about what -- observed once in the wild, with `go run`
+        exiting 0 and printing nothing, and the output already discarded by
+        the time the assertion ran.
         """
         program = (
             "package main\n\nimport (\n\t\"encoding/hex\"\n\t\"fmt\"\n\t\"bytes\"\n"
@@ -77,18 +93,31 @@ class SmbWireParity(unittest.TestCase):
                 handle.write(program)
             result = subprocess.run(["go", "run", src], cwd=_EDGE,
                                     capture_output=True, text=True, timeout=300)
+
+        def context():
+            return ("\n--- go exit code ---\n{}\n--- go stdout ---\n{}\n"
+                    "--- go stderr ---\n{}\n--- program ---\n{}".format(
+                        result.returncode, result.stdout[-2000:],
+                        result.stderr[-2000:], program))
+
         if result.returncode != 0:
             self.fail("go run failed, so the two implementations were never "
-                      "compared:\n" + result.stderr[-800:])
-        return result.stdout
+                      "compared:" + context())
+
+        lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+        self.assertEqual(
+            len(lines), expected_lines,
+            "expected {} line(s) from the Go probe, got {}. The two "
+            "implementations were NOT compared.{}".format(
+                expected_lines, len(lines), context()))
+        return lines
 
     def test_headers_match_byte_for_byte(self):
         body = "\n".join(
             'fmt.Printf("%x\\n", smb.PackHeader(smb.{}, smb.{}, {}, {}, {}, {}))'.format(
                 go_cmd, go_status, tid, pid, uid, mid)
             for go_cmd, _py_cmd, go_status, _py_status, tid, pid, uid, mid in HEADER_CASES)
-        lines = [l.strip() for l in self._run_go(body).splitlines() if l.strip()]
-        self.assertEqual(len(lines), len(HEADER_CASES))
+        lines = self._run_go(body, len(HEADER_CASES))
 
         for line, case in zip(lines, HEADER_CASES):
             _go_cmd, py_cmd, _go_status, py_status, tid, pid, uid, mid = case
@@ -110,8 +139,7 @@ class SmbWireParity(unittest.TestCase):
             'fmt.Printf("%%x\\n", b.Bytes()) }()' % (
                 ",".join(str(byte) for byte in payload),)
             for payload in payloads)
-        lines = [l.strip() for l in self._run_go(body).splitlines() if l.strip()]
-        self.assertEqual(len(lines), len(payloads))
+        lines = self._run_go(body, len(payloads))
 
         for line, payload in zip(lines, payloads):
             expected = (b"\x00" + len(payload).to_bytes(3, "big") + payload).hex()
@@ -144,8 +172,7 @@ class SmbWireParity(unittest.TestCase):
         body = "\n".join(
             'fmt.Printf("%d\\n", uint64(smb.{}))'.format(go_name)
             for go_name, _py in pairs)
-        values = [int(l) for l in self._run_go(body).splitlines() if l.strip()]
-        self.assertEqual(len(values), len(pairs))
+        values = [int(l) for l in self._run_go(body, len(pairs))]
 
         for value, (go_name, py_name) in zip(values, pairs):
             with self.subTest(constant=go_name):

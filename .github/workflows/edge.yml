@@ -55,6 +55,14 @@ jobs:
           # main for a week while CI stayed green. Costs about 8 seconds.
           go test -race ./... -count=2
           go vet ./...
+          # gofmt was never gated, so an unformatted file went in and stayed.
+          # -l lists offenders and prints nothing when clean.
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would change these files:"
+            echo "$unformatted"
+            exit 1
+          fi
       - name: Test Python protocol negotiation and launcher compatibility
         run: |
           python -m unittest tests.test_udpfs_protocol_negotiation -v

@@ -17,9 +17,11 @@ import time
 
 from udpfs_server import (
     BLOCK_DEVICE_HANDLE,
+    DEFAULT_MAX_TRANSFER_BYTES,
     LIBCHDR_AVAILABLE,
     LZ4_AVAILABLE,
     MAX_SEND_RETRIES,
+    MIN_MAX_TRANSFER_BYTES,
     SESSION_TIMEOUT,
     SESSION_TIMEOUT_MAX,
     SESSION_TIMEOUT_MIN,
@@ -418,6 +420,13 @@ def build_parser() -> argparse.ArgumentParser:
                         default=_env_float("TX_DELAY_MS", 0.0),
                         help="Optional delay between UDP transmissions in milliseconds "
                              "(env: TX_DELAY_MS)")
+    parser.add_argument("--max-transfer-bytes", type=int,
+                        default=int(_env_float("MAX_TRANSFER_BYTES",
+                                               DEFAULT_MAX_TRANSFER_BYTES)),
+                        help="Ceiling on one BREAD and on one assembled write "
+                             f"(default {DEFAULT_MAX_TRANSFER_BYTES}, floor "
+                             f"{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES). "
+                             "READ is separately capped at 64 KiB, matching Edge.")
     return parser
 
 
@@ -485,6 +494,7 @@ def main():
         single_port=args.single_port,
         data_port=data_port,
         tx_delay_ms=args.tx_delay_ms,
+        max_transfer_bytes=args.max_transfer_bytes,
         protocol_mode=args.protocol_mode,
         fallback_interval=args.compat_fallback,
     )
