@@ -273,18 +273,41 @@ MIN_MAX_TRANSFER_BYTES = 256 * 1024
 def _clamp_max_transfer(value):
     """Bound --max-transfer-bytes, the same way _clamp_peer_timeout does.
 
-    Clamped rather than rejected: a bad number should not stop someone serving
-    their games. The floor matters more than the ceiling -- a mistyped 100 would
-    otherwise produce a server that refuses every real request while looking
-    perfectly healthy.
+    Clamped rather than rejected, and it never raises: a bad number should not
+    stop someone serving their games. The floor matters more than the ceiling --
+    a mistyped 100 would otherwise produce a server that refuses every real
+    request while looking perfectly healthy.
+
+    Accepts anything int() or float() will take, so "8388608", "8388608.0" and
+    8e6 all work, and rejects the rest -- including inf and nan, which float()
+    accepts happily and int() then raises on.
     """
     try:
         value = int(value)
     except (TypeError, ValueError):
-        return DEFAULT_MAX_TRANSFER_BYTES
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return DEFAULT_MAX_TRANSFER_BYTES
+        if value != value or value in (float('inf'), float('-inf')):
+            return DEFAULT_MAX_TRANSFER_BYTES
+        value = int(value)
     if value <= 0:
         return DEFAULT_MAX_TRANSFER_BYTES
     return max(MIN_MAX_TRANSFER_BYTES, value)
+
+
+def _env_max_transfer():
+    """MAX_TRANSFER_BYTES from the environment, never raising.
+
+    _env_float raises on a non-numeric value, and int() raises on inf and nan,
+    so reading this the obvious way meant MAX_TRANSFER_BYTES=oops aborted the
+    server while the argument parser was still being built -- before argparse,
+    so the user got a bare traceback instead of a message and --help did not
+    work either. A malformed tuning knob must fall back to the documented
+    default.
+    """
+    return _clamp_max_transfer(os.environ.get('MAX_TRANSFER_BYTES'))
 
 # Fixed handle for block device
 BLOCK_DEVICE_HANDLE = 0
@@ -2834,7 +2857,7 @@ def main():
     )
     parser.add_argument(
         '--max-transfer-bytes', type=int,
-        default=int(_env_float('MAX_TRANSFER_BYTES', DEFAULT_MAX_TRANSFER_BYTES)),
+        default=_env_max_transfer(),
         help='Ceiling on one READ, one BREAD and one assembled write '
              f'(default: {DEFAULT_MAX_TRANSFER_BYTES}, floor '
              f'{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES)'

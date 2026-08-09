@@ -312,12 +312,63 @@ func TestBrowseOffersNoParentOutOfTheRoot(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	api.HandleBrowse(rec, browseRequest(root))
+	// Checked before decoding: an error body also decodes into browseResponse
+	// with an empty Parent, so without this the test would report "Up is
+	// correctly suppressed" when browsing was in fact refused outright.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing the root, got %d (%s)", rec.Code, rec.Body)
+	}
 	var resp browseResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
 	if resp.Parent != "" {
 		t.Fatalf("the root must offer no parent, got %q -- Up would walk out of the share", resp.Parent)
+	}
+}
+
+// The lexical containment test approved this: filepath.Rel does not follow
+// links, so a symlink inside the root produced a name under the root while
+// os.ReadDir opened a directory outside it.
+func TestBrowseRefusesASymlinkOutOfTheRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("no"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "elsewhere")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	api := testAPI(t, func(a *API) { a.browseRoots = []string{root} })
+	rec := httptest.NewRecorder()
+	api.HandleBrowse(rec, browseRequest(link))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a symlink out of the share listed a directory outside it: "+
+			"got %d (%s)", rec.Code, rec.Body)
+	}
+}
+
+// The other half: a root reached through a symlink is ordinary
+// (/srv/ps2 -> /mnt/disk2/ps2), and resolving the path without also resolving
+// the root would make every such share fail its own containment test.
+func TestBrowseServesASymlinkedRoot(t *testing.T) {
+	real := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(real, "games"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkRoot := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(real, linkRoot); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	api := testAPI(t, func(a *API) { a.browseRoots = []string{linkRoot} })
+	rec := httptest.NewRecorder()
+	api.HandleBrowse(rec, browseRequest(filepath.Join(linkRoot, "games")))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a share reached through a symlink must serve its own files: "+
+			"got %d (%s)", rec.Code, rec.Body)
 	}
 }
 

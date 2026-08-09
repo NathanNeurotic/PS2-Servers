@@ -263,6 +263,32 @@ class WritesAreCapped(unittest.TestCase):
         self.assertEqual(small.write_handle, -1,
                          "a refused write must not leave its state armed")
 
+    def test_a_malformed_env_var_does_not_abort_startup(self):
+        """MAX_TRANSFER_BYTES=oops must not stop the server from launching.
+
+        Read through _env_float, this raised while the argument parser was
+        still being constructed -- before argparse, so the operator got a bare
+        traceback rather than a message, and --help did not work either. On a
+        headless box a crash on launch is the worst failure mode there is: the
+        server simply is not there and nothing says why.
+        """
+        saved = os.environ.get("MAX_TRANSFER_BYTES")
+        self.addCleanup(
+            lambda: os.environ.__setitem__("MAX_TRANSFER_BYTES", saved)
+            if saved is not None else os.environ.pop("MAX_TRANSFER_BYTES", None))
+
+        for bad in ("invalid", "inf", "-inf", "nan", "", "1e999", "0x10"):
+            with self.subTest(value=bad):
+                os.environ["MAX_TRANSFER_BYTES"] = bad
+                self.assertEqual(srv._env_max_transfer(),
+                                 srv.DEFAULT_MAX_TRANSFER_BYTES,
+                                 "a malformed value must fall back to the "
+                                 "documented default, not raise")
+
+        # And a good one still gets through.
+        os.environ["MAX_TRANSFER_BYTES"] = str(4 << 20)
+        self.assertEqual(srv._env_max_transfer(), 4 << 20)
+
     def test_the_floor_stops_a_typo_from_refusing_everything(self):
         # A mistyped 100 would otherwise make every real request fail while the
         # server looked healthy.
@@ -351,8 +377,13 @@ class SmbV1ShareBoundaryIsReal(unittest.TestCase):
 
         share = self.mod.Share("games", link_root)
         resolved = share.resolve("\\game.iso")
-        self.assertIsNotNone(
-            resolved, "a share reached through a symlink must serve its files")
+        # The canonical path, not merely "not None". The old abspath resolver
+        # also returned non-None here -- it returned the path *through* the
+        # symlink -- so a non-None assertion would have passed against the bug
+        # this test claims to guard.
+        self.assertEqual(
+            resolved, os.path.join(self.share_root, "game.iso"),
+            "a share root must resolve to its canonical target path")
 
 
 if __name__ == "__main__":

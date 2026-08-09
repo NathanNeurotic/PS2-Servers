@@ -68,8 +68,9 @@ these generic binaries — see
 The OpenWrt package starts read-only; set `option read_only '0'` in
 `/etc/config/ps2servers-edge` to let the console save. Every Edge option is a
 UCI option there, including `block_device`. Each subcommand is its own procd
-instance, so a board can serve UDPFS and SMB at once and restart them
-independently. There are systemd units for the same thing on ordinary Linux.
+instance, so a board can serve UDPFS and SMB at once. There are systemd units
+for the same thing on ordinary Linux, where `systemctl restart
+ps2servers-edge@smb` does restart just that one.
 
 > **Edge has not been verified on a physical PlayStation 2 or an emulator.** Its
 > wire behaviour is checked in CI against the hardware-validated Python servers,

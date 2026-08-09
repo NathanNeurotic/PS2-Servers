@@ -3,6 +3,7 @@ package webui
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -267,13 +268,33 @@ func (b *uciBackend) Save(cfg *EdgeConfig) error {
 	// The cost is one process per option instead of one for the lot. That is
 	// roughly forty short-lived execs on a save, which is not free on a router
 	// but happens only when someone clicks Save.
+	// A failed set must not leave the earlier ones staged.
+	//
+	// uci set writes to the staging area under /tmp/.uci and only lands on a
+	// commit. Returning on the first failure without discarding the rest means
+	// the operator sees an error, assumes nothing changed, and then the staged
+	// half is applied by the NEXT successful save's commit -- a partial
+	// configuration arriving later, with nothing to connect it to the error.
+	// Permission denied part-way through is the realistic trigger; the web UI
+	// runs unprivileged and the init script's own comment says so.
+	revert := func() {
+		if err := runCmd("/sbin/uci", "revert", "ps2servers-edge"); err != nil {
+			// Nothing better to do than say so: the caller is already
+			// returning a failure, and this is the cleanup for it.
+			fmt.Fprintf(os.Stderr,
+				"webui: uci revert after a failed save also failed: %v\n", err)
+		}
+	}
+
 	for _, c := range cmds {
 		if err := runCmd("/sbin/uci", "set",
 			"ps2servers-edge."+c.key+"="+c.value); err != nil {
+			revert()
 			return fmt.Errorf("uci set %s failed: %w", c.key, err)
 		}
 	}
 	if err := runCmd("/sbin/uci", "commit", "ps2servers-edge"); err != nil {
+		revert()
 		return fmt.Errorf("uci commit failed: %w", err)
 	}
 
