@@ -20,9 +20,9 @@ source of truth**, not whatever a worktree has checked out.
 
 ## State right now
 
-> Updated 2026-08-09 for the v0.5.0 cut. Everything below this block is from the
-> 2026-07-29 session and is kept for its reasoning, not its facts — the state
-> lines in it are stale by ~20 PRs.
+> Updated 2026-08-09 for the v0.5.0 cut. The facts in *this* section are current;
+> the "Older state" subsection below it, and every section after it, are from the
+> 2026-07-29 session and are kept for their reasoning, not their numbers.
 
 - **Version is `0.5.0`** in `launcher/release_metadata.py`, bumped for the
   release. That file is the single source; `tools/version_source.py` reads it and

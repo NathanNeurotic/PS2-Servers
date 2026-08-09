@@ -35,6 +35,7 @@ from udpfs_server import (
     _duration_arg,
     _env_bool,
     _env_float,
+    _env_max_transfer,
     _env_duration,
     _env_int,
     _parse_port,
@@ -421,8 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Optional delay between UDP transmissions in milliseconds "
                              "(env: TX_DELAY_MS)")
     parser.add_argument("--max-transfer-bytes", type=int,
-                        default=int(_env_float("MAX_TRANSFER_BYTES",
-                                               DEFAULT_MAX_TRANSFER_BYTES)),
+                        default=_env_max_transfer(),
                         help="Ceiling on one READ, one BREAD and one assembled "
                              f"write (default {DEFAULT_MAX_TRANSFER_BYTES}, floor "
                              f"{MIN_MAX_TRANSFER_BYTES}; env: MAX_TRANSFER_BYTES)")

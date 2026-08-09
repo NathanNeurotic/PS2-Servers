@@ -57,6 +57,15 @@ func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	return false
 }
 
+// maxRequestBody bounds a decoded JSON body.
+//
+// json.Decoder reads until EOF, so a single string field of arbitrary length is
+// allocated whole -- on a 32 MB router that is a denial of service costing one
+// POST, and on a loopback bind there is no password in front of it. 64 KiB is
+// comfortably above a full EdgeConfig (the shipped defaults encode to well under
+// 2 KiB) and far below anything that hurts.
+const maxRequestBody = 64 << 10
+
 // requireJSONWrite guards every state-changing handler.
 //
 // Two separate things, both needed:
@@ -142,7 +151,7 @@ func (a *API) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cfg EdgeConfig
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&cfg); err != nil {
 		jsonError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
@@ -187,7 +196,7 @@ func (a *API) HandleRestart(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Service string `json:"service"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
 		jsonError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
@@ -294,11 +303,33 @@ type browseResponse struct {
 //
 // Component-wise, via filepath.Rel, rather than a string prefix: "/srv/ps2" is
 // a prefix of "/srv/ps2-private" but not a parent of it.
+//
+// And on the REAL path, not the lexical one. filepath.Rel does not follow
+// symbolic links, so with a games folder containing `elsewhere -> /etc`, the
+// lexical test approved /mnt/games/elsewhere and os.ReadDir then listed /etc --
+// one click at a time, all the way down. That is precisely the defect this same
+// change fixed in smbv1_server, whose resolver now says "the Edge server and the
+// UDPFS path guard already refuse symlink escapes"; for /api/browse it did not.
+//
+// The returned root is the one the path is under, so a caller can tell "this is
+// the root itself" from "this is below it".
 func withinBrowseRoots(roots []string, path string) (string, bool) {
 	if len(roots) == 0 {
 		return "", true // --browse-anywhere
 	}
+	// EvalSymlinks fails on a path that does not exist; fall back to the
+	// lexical name so a missing directory is refused by the containment test
+	// rather than by an error that says nothing about why.
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
 	for _, root := range roots {
+		// The root itself may legitimately be reached through a symlink
+		// (/srv/ps2 -> /mnt/disk2/ps2 is ordinary). Resolve it too, or every
+		// path under such a root fails containment against an unresolved name.
+		if realRoot, err := filepath.EvalSymlinks(root); err == nil {
+			root = realRoot
+		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			continue
