@@ -151,18 +151,14 @@ class ReadIsCapped(unittest.TestCase):
         self.assertEqual(result, -errno.EINVAL)
         self.assertEqual(data, b"")
 
-    def test_the_limit_matches_edge(self):
-        # Edge refuses above 64 KiB (internal/udpfs/operations.go). A client
-        # must not be able to tell the two servers apart by probing this.
-        self.assertEqual(srv.MAX_READ_BYTES, 64 * 1024)
-
     def test_a_read_at_the_limit_still_works(self):
-        self.server.handles[5] = _handle(_Blob(b"y" * srv.MAX_READ_BYTES))
-        self.server._handle_read(ADDR, read_payload(5, srv.MAX_READ_BYTES))
+        cap = self.server.max_transfer_bytes
+        self.server.handles[5] = _handle(_Blob(b"y" * cap))
+        self.server._handle_read(ADDR, read_payload(5, cap))
         kind, result, data = self.server.replies[-1]
         self.assertEqual(kind, "read")
-        self.assertEqual(result, srv.MAX_READ_BYTES)
-        self.assertEqual(len(data), srv.MAX_READ_BYTES)
+        self.assertEqual(result, cap)
+        self.assertEqual(len(data), cap)
 
     def test_an_ordinary_console_read_is_untouched(self):
         # OPL reads in sector-sized chunks; nothing real comes near the cap.
@@ -170,6 +166,31 @@ class ReadIsCapped(unittest.TestCase):
         _kind, result, data = self.server.replies[-1]
         self.assertEqual(result, 2048)
         self.assertEqual(len(data), 2048)
+
+    def test_the_selftest_sized_read_is_served(self):
+        """A 200,000-byte single READ must work.
+
+        This is not hypothetical: udpfs_server/multiclient_selftest.py reads
+        exactly this in one call, and an earlier version of this cap copied
+        Edge's 64 KiB ceiling and broke it. The cap exists to stop a 4 GiB
+        allocation, not to reshape how clients read -- and this server is the
+        one validated against real consoles, so a limit that refuses a request
+        an in-tree client makes is wrong however defensible the number looks.
+        """
+        size = 200000
+        self.server.handles[5] = _handle(_Blob(b"q" * size))
+        self.server._handle_read(ADDR, read_payload(5, size))
+        _kind, result, data = self.server.replies[-1]
+        self.assertEqual(result, size,
+                         "a 200,000-byte READ was refused; multiclient_selftest "
+                         "makes exactly this request")
+        self.assertEqual(len(data), size)
+
+    def test_the_default_cap_clears_every_in_tree_client(self):
+        # Guards the number itself: shrinking it below what the selftests do
+        # would break them, and the failure there is a timeout rather than a
+        # sentence naming the cap.
+        self.assertGreaterEqual(srv.DEFAULT_MAX_TRANSFER_BYTES, 200000)
 
     def test_the_cap_is_checked_before_the_handle(self):
         # Order matters: refusing on the handle first would still have

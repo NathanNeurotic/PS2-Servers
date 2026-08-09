@@ -804,7 +804,15 @@ class LauncherLifecycleTests(unittest.TestCase):
         app._direct_proc.lines = []  # no REHOME line -> normal exit path
         app._rollback_failed_direct_responder = mock.Mock()
         app.root = mock.Mock()
-        LauncherApp._poll_status(app)
+        # The rollback branch of _finish_direct_exit is Windows-only: Windows
+        # configures the NIC statically, so a helper exit leaves a static port
+        # that has to be handed back to DHCP. Unix takes a different branch
+        # entirely. Pin the platform rather than skipping off Windows -- the
+        # logic being tested is ordinary Python and worth running everywhere,
+        # and this test silently did not run in CI at all until the suite was
+        # discovered rather than hand-listed.
+        with mock.patch.object(windows_setup, "is_windows", return_value=True):
+            LauncherApp._poll_status(app)
         app._rollback_failed_direct_responder.assert_called_once_with(
             app.saved["direct_link"])
         app.root.after.assert_called_once_with(600, app._poll_status)
@@ -835,7 +843,12 @@ class LauncherLifecycleTests(unittest.TestCase):
         app._direct_link_rehome = mock.Mock()
         app._rollback_failed_direct_responder = mock.Mock()
         app.root = mock.Mock()
-        LauncherApp._poll_status(app)
+        # Auto-coexist re-home is gated on Windows in _poll_status, because it
+        # reconfigures the NIC through PowerShell. See the note in
+        # test_unexpected_helper_exit_restores_adapter for why this pins the
+        # platform instead of skipping.
+        with mock.patch.object(windows_setup, "is_windows", return_value=True):
+            LauncherApp._poll_status(app)
         app._direct_link_rehome.assert_called_once_with(
             ("192.168.1.1", "192.168.1.10", 24))
         app._rollback_failed_direct_responder.assert_not_called()
