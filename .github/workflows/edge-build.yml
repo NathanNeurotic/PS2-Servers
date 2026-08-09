@@ -280,6 +280,41 @@ jobs:
           go build -trimpath -buildvcs=true \
             -ldflags="-s -w -buildid= -X main.version=${VERSION}" \
             -o "$GITHUB_WORKSPACE/out/stage/ps2servers-edge${{ matrix.ext }}" ./cmd/ps2servers-edge
+
+      - name: Check the binary still fits a router
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          EXT: ${{ matrix.ext }}
+        # Edge exists to run on boards with single-digit megabytes of flash, and
+        # nothing was watching this number. The embedded web GUI took the mipsle
+        # build from 3.31 MiB to 7.19 MiB in one merge -- net/http,
+        # encoding/json and the embedded assets -- and it shipped, because the
+        # only way to notice was to build the binary and look at it.
+        #
+        # 9 MiB is deliberately loose: it is a regression alarm, not a target.
+        # Measured at the time of writing, the mips family is largest at
+        # ~7.3 MiB and riscv64 smallest at ~5.9 MiB, so this leaves room for
+        # ordinary growth while still catching another jump on the scale of the
+        # one above. Raising it should be a decision someone writes down, which
+        # is what editing this line makes it.
+        #
+        # If this fails, the options are: put a feature behind a build tag (the
+        # web GUI is the obvious candidate -- it is the only thing pulling in
+        # net/http), find the growth with `go tool nm -size`, or raise the
+        # ceiling on purpose.
+        run: |
+          set -euo pipefail
+          limit=$((9 * 1024 * 1024))
+          binary="$GITHUB_WORKSPACE/out/stage/ps2servers-edge${EXT}"
+          size=$(wc -c < "$binary")
+          awk -v t="$TARGET" -v s="$size" -v l="$limit" \
+            'BEGIN { printf "%s: %d bytes (%.2f MiB), ceiling %.2f MiB\n", t, s, s/1048576, l/1048576 }'
+          if [ "$size" -gt "$limit" ]; then
+            echo "::error::ps2servers-edge for ${TARGET} is ${size} bytes, over the ${limit}-byte ceiling. See the comment in edge-build.yml before raising it."
+            exit 1
+          fi
+
       - name: Inspect and package artifact
         shell: bash
         # Matrix values come through env rather than direct ${{ }} interpolation:
