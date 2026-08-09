@@ -293,11 +293,16 @@ jobs:
         # only way to notice was to build the binary and look at it.
         #
         # 9 MiB is deliberately loose: it is a regression alarm, not a target.
-        # Measured at the time of writing, the mips family is largest at
-        # ~7.3 MiB and riscv64 smallest at ~5.9 MiB, so this leaves room for
-        # ordinary growth while still catching another jump on the scale of the
-        # one above. Raising it should be a decision someone writes down, which
-        # is what editing this line makes it.
+        #
+        # Measured on this workflow at the time of writing, the largest target
+        # is linux-mipsle at 6.19 MiB and the smallest linux-riscv64 at
+        # 5.31 MiB. The same source built with Go 1.26 locally comes out about
+        # a megabyte larger per target, so the ceiling has to clear the
+        # toolchain this repo might move to, not only the one go.mod pins
+        # today -- which is most of the gap between 6.19 and 9.
+        #
+        # Raising it should be a decision someone writes down, which is what
+        # editing this line makes it.
         #
         # If this fails, the options are: put a feature behind a build tag (the
         # web GUI is the obvious candidate -- it is the only thing pulling in
