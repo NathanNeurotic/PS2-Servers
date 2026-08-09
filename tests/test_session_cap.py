@@ -40,7 +40,7 @@ class _Server(srv.UdpfsServer):
         self.sessions_lock = threading.Lock()
         self.max_sessions = srv._clamp_max_sessions(max_sessions)
         self._sessions_evicted = 0
-        self._last_evict_log = 0.0
+        self._last_evict_log = None
         self.events = []
         self.started = []
         self.stopped = []
@@ -122,6 +122,25 @@ class TheSessionTableIsBounded(unittest.TestCase):
         self.assertEqual(server.stopped, [],
                          "traffic from known peers caused an eviction")
         self.assertEqual(len(server.sessions), 2)
+
+    def test_the_first_eviction_is_reported_on_a_freshly_booted_machine(self):
+        """time.monotonic() is time since boot, so the sentinel cannot be 0.0.
+
+        With `_last_evict_log = 0.0`, `now - 0.0 >= 60` is false for the first
+        minute of uptime and the first notice is swallowed -- which is exactly
+        the router that boots and is immediately flooded. CI runners are
+        seconds old, which is how this surfaced.
+        """
+        server = _Server(max_sessions=2)
+        self.assertIsNone(server._last_evict_log,
+                          "the sentinel must mean 'never logged', not 'logged "
+                          "at monotonic time zero'")
+        for i in range(10):
+            server._get_or_create_session(_peer(i))
+        self.assertTrue(
+            [e for e in server.events if "session limit" in e],
+            "the first eviction said nothing; on a machine up for less than "
+            "the rate-limit interval the notice must still appear")
 
     def test_the_eviction_is_reported_but_not_once_per_packet(self):
         server = _Server(max_sessions=2)
