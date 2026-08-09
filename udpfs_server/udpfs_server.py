@@ -2236,13 +2236,24 @@ class UdpfsServer:
         sess = self._local.session
         while True:
             try:
-                pkt, _recv_addr = sess.queue.get(timeout=WINDOW_ACK_TIMEOUT)
+                item = sess.queue.get(timeout=WINDOW_ACK_TIMEOUT)
             except queue.Empty:
                 if self.tx_buffer:
                     self._retransmit_from(addr, self.tx_buffer[0][0])
                 return
-            if pkt is None:
+            # Checked BEFORE unpacking. Session.shutdown() enqueues a bare None
+            # to wake a blocked worker, so `pkt, _ = item` raises TypeError on
+            # it -- which meant the guard below could never run and every reap
+            # with a transfer in flight logged
+            #   session error: TypeError: cannot unpack non-iterable NoneType
+            # instead of shutting down quietly. The session still ended (_run
+            # exits on _closing), so this was a misleading error rather than a
+            # hang -- but a log line that looks like a fault, on a path that is
+            # working as intended, costs exactly the debugging time these
+            # messages exist to save.
+            if item is None:
                 return  # session shutting down
+            pkt, _recv_addr = item
             if len(pkt) < 6:
                 continue
             hdr = Header.unpack(pkt)
@@ -2276,11 +2287,13 @@ class UdpfsServer:
         fin_seq = (self.tx_seq_nr - 1) & 0xFFF
         while True:
             try:
-                pkt, _recv_addr = sess.queue.get(timeout=timeout)
+                item = sess.queue.get(timeout=timeout)
             except queue.Empty:
                 return False
-            if pkt is None:
+            # Before unpacking, as in _wait_for_window_ack above.
+            if item is None:
                 return False  # session shutting down
+            pkt, _recv_addr = item
             if len(pkt) < 6:
                 continue
             hdr = Header.unpack(pkt)
