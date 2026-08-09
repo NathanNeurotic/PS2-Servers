@@ -600,7 +600,12 @@ class UdpfsServer:
         self.max_transfer_bytes = _clamp_max_transfer(max_transfer_bytes)
         self.max_sessions = _clamp_max_sessions(max_sessions)
         self._sessions_evicted = 0
-        self._last_evict_log = 0.0
+        # None, not 0.0. time.monotonic() is time since boot on Linux, so on a
+        # machine that has been up less than SESSION_EVICT_LOG_INTERVAL the
+        # comparison against 0.0 suppresses the FIRST notice -- exactly the
+        # case of a router that boots and is immediately flooded, which is when
+        # the line matters most. Caught by CI, whose runners are seconds old.
+        self._last_evict_log = None
         self.metrics = metrics
         self.metrics_period = metrics_period
         self.single_port = single_port
@@ -823,7 +828,8 @@ class UdpfsServer:
                     # nothing to explain it.
                     now = time.monotonic()
                     self._sessions_evicted += 1
-                    if now - self._last_evict_log >= SESSION_EVICT_LOG_INTERVAL:
+                    if (self._last_evict_log is None
+                            or now - self._last_evict_log >= SESSION_EVICT_LOG_INTERVAL):
                         self._last_evict_log = now
                         self._print_event(
                             f"[{addr[0]}:{addr[1]}] session limit "
