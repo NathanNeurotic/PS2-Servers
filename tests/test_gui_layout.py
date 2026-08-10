@@ -225,6 +225,20 @@ class LauncherLayout(unittest.TestCase):
             states.append(bool(self.app._scrollbar.winfo_ismapped()))
         self.assertEqual(len(set(states)), 1, "scrollbar flip-flopped: %s" % states)
 
+    # -- fields ------------------------------------------------------------ #
+    def test_take_445_greys_out_the_port_field_it_overrides(self):
+        """A saved take-445 silently wins over the port field -- the field must
+        show that, or the user edits a port the server will never use."""
+        card = self.app.cards["smbv1"]
+        if "take_445" not in card.vars:
+            self.skipTest("the take-445 field is Windows-only")
+        take = card.vars["take_445"]
+        port_entry = card.field_widgets["port"]
+        take.set(True)
+        self.assertEqual(str(port_entry.cget("state")), "disabled")
+        take.set(False)
+        self.assertEqual(str(port_entry.cget("state")), "normal")
+
 
 if __name__ == "__main__":
     unittest.main()

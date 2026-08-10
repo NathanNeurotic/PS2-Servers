@@ -278,6 +278,7 @@ class ServerCard(ttk.LabelFrame):
         self.app = app
         self.server = server
         self.vars = {}
+        self.field_widgets = {}
         self._active_values = None
         self._advanced_shown = False
         self._build()
@@ -350,6 +351,17 @@ class ServerCard(ttk.LabelFrame):
                 arow = self._add_field(self.adv_frame, f, arow)
             row += 1
 
+        # take-445 overrides the port field outright; grey the entry while the
+        # box is ticked, so the relationship is visible rather than a saved
+        # setting silently winning over what the field shows.
+        take = self.vars.get("take_445")
+        port_entry = self.field_widgets.get("port")
+        if take is not None and port_entry is not None:
+            def _sync_port_entry(*_):
+                port_entry.config(state="disabled" if take.get() else "normal")
+            take.trace_add("write", _sync_port_entry)
+            _sync_port_entry()
+
         self.hint = ttk.Label(self, text="", style="CardHint.TLabel")
         self.hint.grid(row=row, column=0, columnspan=3, sticky="w",
                        padx=4, pady=(4, 0))
@@ -413,8 +425,9 @@ class ServerCard(ttk.LabelFrame):
             else:
                 default_val = ""
             var = tk.StringVar(value=default_val)
-            ttk.Entry(parent, textvariable=var, width=12).grid(
-                row=row, column=1, sticky="w", padx=6, pady=2)
+            entry = ttk.Entry(parent, textvariable=var, width=12)
+            entry.grid(row=row, column=1, sticky="w", padx=6, pady=2)
+            self.field_widgets[f.key] = entry
         elif f.kind == "choice":
             # readonly, so the box can be opened and read but not typed into:
             # an editable combobox would let a typo reach the server as an
@@ -1962,6 +1975,11 @@ class LauncherApp:
             return
 
         self._append_log(key, "[launcher] starting: {}\n".format(" ".join(command)))
+        if key.startswith("smb") and values.get("take_445") \
+                and str(values.get("port") or "").strip():
+            self._append_log(
+                key, "[launcher] note: take-445 is set, so the port field ({}) "
+                     "is ignored and the server binds 445\n".format(values.get("port")))
         proc = ServerProcess(key, command, cwd=REPO_ROOT, on_output=self._on_output)
         try:
             proc.start()

@@ -193,6 +193,7 @@ class LegacyKeySurvivesTheRealLoadPath(unittest.TestCase):
         card = gui.ServerCard.__new__(gui.ServerCard)
         card.server = UDPFS
         card.vars = {}
+        card.field_widgets = {}
         frame = gui.ttk.Frame(root)
         row = 0
         for field in UDPFS.fields:
