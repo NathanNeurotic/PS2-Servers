@@ -264,5 +264,35 @@ class NeedsAdminSeesPastTheFirewallCache(unittest.TestCase):
         self.assertTrue(gui._needs_admin("udpfs", {"port": "11939"}, True))
 
 
+class ThePortProbeTellsTheTruth(unittest.TestCase):
+    """_port_free is what decides between serving 445 and refusing: a wrong
+    answer either way is a bad start or an unnecessary refusal."""
+
+    def test_a_free_port_reports_free(self):
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        self.assertTrue(smb1._port_free("127.0.0.1", port))
+
+    def test_a_held_port_reports_taken(self):
+        holder = socket.socket()
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        self.addCleanup(holder.close)
+        port = holder.getsockname()[1]
+        self.assertFalse(smb1._port_free("127.0.0.1", port))
+
+    def test_the_probe_leaves_a_free_port_bindable(self):
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        self.assertTrue(smb1._port_free("127.0.0.1", port))
+        lsock = socket.socket()
+        self.addCleanup(lsock.close)
+        lsock.bind(("127.0.0.1", port))   # would raise if the probe had leaked
+
+
 if __name__ == "__main__":
     unittest.main()

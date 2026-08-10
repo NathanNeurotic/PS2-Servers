@@ -1061,10 +1061,25 @@ class SmbServer:
         self.users = {u.casefold(): p for u, p in (users or {}).items()}
 
 
-def _take_445():
-    """Stop Windows' LanmanServer so we can bind 445. Returns a restore() callable,
-    or None if the service would not stop. Reversible: we only Stop (never Disable),
-    so a reboot self-heals even on a hard kill."""
+def _port_free(bind_addr, port):
+    """True if a TCP bind on (bind_addr, port) succeeds right now -- the direct
+    test for whether Windows has actually released a port, rather than trusting
+    service states."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind((bind_addr, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
+def _take_445(bind_addr="0.0.0.0"):
+    """Stop Windows' LanmanServer so we can bind 445. Returns a restore()
+    callable, or None if the service would not stop or the port stays bound.
+    Reversible: we only Stop (never Disable), so a reboot self-heals even on a
+    hard kill."""
     import subprocess
 
     # Resolve PowerShell by absolute path so a stray powershell.* on PATH or in
@@ -1080,26 +1095,51 @@ def _take_445():
         return subprocess.run([powershell, "-NoProfile", "-Command", cmd],
                               capture_output=True, text=True)
 
-    status = ps("(Get-Service LanmanServer).Status").stdout.strip()
-    browser = ps("(Get-Service Browser -ErrorAction SilentlyContinue).Status").stdout.strip()
-    print("  [445] stopping LanmanServer (was: %s) ..." % (status or "?"))
+    def status(name):
+        return ps("(Get-Service %s -ErrorAction SilentlyContinue).Status" % name).stdout.strip()
+
+    def wait_stopped(name):
+        # Trust the service's actual state, not the command's exit code: a
+        # denied stop (run without admin) and a slow stop both show up here.
+        deadline = time.time() + 10
+        while status(name) != "Stopped":
+            if time.time() >= deadline:
+                return False
+            time.sleep(0.25)
+        return True
+
+    was = status("LanmanServer")
+    browser = status("Browser")
+    print("  [445] stopping LanmanServer (was: %s) ..." % (was or "?"))
     res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction SilentlyContinue")
-    # Trust the service's actual state, not the command's exit code: a denied
-    # stop (run without admin) and a slow stop both show up here, and binding
-    # 445 while LanmanServer lives is hopeless either way.
-    deadline = time.time() + 10
-    while ps("(Get-Service LanmanServer).Status").stdout.strip() != "Stopped":
-        if time.time() >= deadline:
-            print("  [445] could not stop LanmanServer -- run as Administrator."
-                  + (" stderr: " + res.stderr.strip() if res.stderr.strip() else ""))
-            return None
-        time.sleep(0.25)
+    if not wait_stopped("LanmanServer"):
+        # Binding 445 while LanmanServer lives is hopeless, and nothing was
+        # stopped, so there is nothing to restore.
+        print("  [445] could not stop LanmanServer -- run as Administrator."
+              + (" stderr: " + res.stderr.strip() if res.stderr.strip() else ""))
+        return None
 
     def restore():
         print("  [445] restoring LanmanServer ...")
         ps("Start-Service LanmanServer -ErrorAction SilentlyContinue")
         if browser == "Running":
             ps("Start-Service Browser -ErrorAction SilentlyContinue")
+
+    # Stopping LanmanServer frees 445 only when nothing else keeps the kernel
+    # driver srvnet.sys -- the socket's real owner -- loaded. Docker Desktop's
+    # service depends on it, and on such a machine the port stays bound. We do
+    # not pause other people's software to win the port: name what holds it,
+    # put LanmanServer back, and bail.
+    if not _port_free(bind_addr, 445):
+        deps = ps("(Get-Service srvnet -ErrorAction SilentlyContinue)"
+                  ".DependentServices.Name").stdout.split()
+        pinned = [n for n in deps if status(n) == "Running"]
+        print("  [445] port 445 is still bound by the srvnet driver"
+              + (" -- pinned by %s." % ", ".join(pinned) if pinned else ".")
+              + " Not pausing other software: use --port N (e.g. 1111) instead "
+              + "of --take-445.")
+        restore()
+        return None
 
     return restore
 
@@ -1213,7 +1253,7 @@ def main(argv=None):
     port = args.port
     if args.take_445:
         port = 445
-        restore = _take_445()
+        restore = _take_445(args.bind)
         if restore is None:
             return 2
     elif port < 1 or port > 65535:
@@ -1233,9 +1273,8 @@ def main(argv=None):
     bound = _bind_listener(lsock, args.bind, port, args.take_445)
     if bound is None:
         if args.take_445:
-            print("ERROR: could not bind port 445 -- LanmanServer stopped but Windows "
-                  "has not released the port. Reboot, or use --port N instead of "
-                  "--take-445.", file=sys.stderr)
+            print("ERROR: could not bind port 445 -- another process took it in "
+                  "the meantime. Use --port N instead of --take-445.", file=sys.stderr)
         else:
             print("ERROR: could not bind a port near %d (try --port N)." % port, file=sys.stderr)
         if restore:

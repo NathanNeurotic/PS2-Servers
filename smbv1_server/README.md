@@ -91,6 +91,12 @@ It only *stops* the service (never disables it), so even a hard kill self-heals 
 reboot. Still — the plain `--port 1111` default is simpler and touches nothing; prefer it unless
 you specifically need 445.
 
+One machine setup it cannot beat: the 445 listener belongs to the kernel driver **srvnet.sys**,
+and anything depending on that driver keeps the port bound after LanmanServer stops — Docker
+Desktop's service is the usual one. The server probes for this and **refuses rather than pause
+other software**, naming what holds the port (e.g. `com.docker.service`). On such a machine use
+a custom port instead; take-445 works again once the pin is gone (e.g. Docker uninstalled).
+
 ## Status / testing
 
 This SMBv1 server is validated by use against Open PS2 Loader. **Final validation is on
