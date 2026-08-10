@@ -13,6 +13,8 @@ import socket
 import struct
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -183,6 +185,83 @@ class TheShareNameIsHonoured(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         server = smb1.SmbServer({"roms": smb1.Share("roms", d)}, read_only=False)
         self.assertIn("roms", server.shares)
+
+
+class TheBindListenerWaitsForSrvnet(unittest.TestCase):
+    """The --take-445 failure this guards: LanmanServer reports Stopped while
+    srvnet.sys still holds 445, so a single bind attempt always loses."""
+
+    def _held_port(self):
+        holder = socket.socket()
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        self.addCleanup(holder.close)
+        return holder, holder.getsockname()[1]
+
+    def test_a_free_port_binds_immediately(self):
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        lsock = socket.socket()
+        self.addCleanup(lsock.close)
+        self.assertEqual(
+            smb1._bind_listener(lsock, "127.0.0.1", port, take_445=True,
+                                timeout=2.0, interval=0.05), port)
+
+    def test_normal_mode_walks_forward_past_a_held_port(self):
+        holder, port = self._held_port()
+        lsock = socket.socket()
+        self.addCleanup(lsock.close)
+        self.assertEqual(
+            smb1._bind_listener(lsock, "127.0.0.1", port, take_445=False), port + 1)
+
+    def test_445_mode_never_walks_forward(self):
+        """Exactly 445 or nothing -- landing on 446 would leave OPL's
+        hard-coded 445 pointed at nothing."""
+        holder, port = self._held_port()
+        lsock = socket.socket()
+        self.addCleanup(lsock.close)
+        start = time.time()
+        self.assertIsNone(
+            smb1._bind_listener(lsock, "127.0.0.1", port, take_445=True,
+                                timeout=0.5, interval=0.05))
+        self.assertLess(time.time() - start, 5,
+                        "giving up should still take the timeout, not hang")
+
+    def test_445_mode_retries_until_windows_lets_go(self):
+        holder, port = self._held_port()
+        lsock = socket.socket()
+        self.addCleanup(lsock.close)
+        releaser = threading.Timer(0.3, holder.close)
+        releaser.start()
+        self.addCleanup(releaser.cancel)
+        self.assertEqual(
+            smb1._bind_listener(lsock, "127.0.0.1", port, take_445=True,
+                                timeout=5.0, interval=0.05), port)
+
+
+class NeedsAdminSeesPastTheFirewallCache(unittest.TestCase):
+    """A cached 'firewall already allowed' answer must not skip the elevation
+    requirement -- that bypass is what started a non-elevated take-445 server
+    with no UAC prompt and a guaranteed bind failure."""
+
+    def test_take_445_needs_admin_on_every_smb_mode(self):
+        for key in ("smbv1", "smbv2", "smbv3"):
+            with self.subTest(key=key):
+                self.assertTrue(gui._needs_admin(key, {"take_445": True}, False))
+
+    def test_take_445_means_nothing_to_non_smb_servers(self):
+        self.assertFalse(gui._needs_admin("udpfs", {"take_445": True}, False))
+
+    def test_a_port_below_1025_needs_admin(self):
+        self.assertTrue(gui._needs_admin("smbv1", {"port": "1024"}, False))
+
+    def test_a_plain_high_port_does_not(self):
+        self.assertFalse(gui._needs_admin("smbv1", {"port": "1111"}, False))
+
+    def test_pending_firewall_setup_needs_admin(self):
+        self.assertTrue(gui._needs_admin("udpfs", {"port": "11939"}, True))
 
 
 if __name__ == "__main__":

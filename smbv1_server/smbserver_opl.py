@@ -1062,8 +1062,9 @@ class SmbServer:
 
 
 def _take_445():
-    """Stop Windows' LanmanServer so we can bind 445. Returns a restore() callable.
-    Reversible: we only Stop (never Disable), so a reboot self-heals even on a hard kill."""
+    """Stop Windows' LanmanServer so we can bind 445. Returns a restore() callable,
+    or None if the service would not stop. Reversible: we only Stop (never Disable),
+    so a reboot self-heals even on a hard kill."""
     import subprocess
 
     # Resolve PowerShell by absolute path so a stray powershell.* on PATH or in
@@ -1083,8 +1084,16 @@ def _take_445():
     browser = ps("(Get-Service Browser -ErrorAction SilentlyContinue).Status").stdout.strip()
     print("  [445] stopping LanmanServer (was: %s) ..." % (status or "?"))
     res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction SilentlyContinue")
-    if res.returncode != 0:
-        print("  [445] could not stop LanmanServer -- run as Administrator. stderr:", res.stderr.strip())
+    # Trust the service's actual state, not the command's exit code: a denied
+    # stop (run without admin) and a slow stop both show up here, and binding
+    # 445 while LanmanServer lives is hopeless either way.
+    deadline = time.time() + 10
+    while ps("(Get-Service LanmanServer).Status").stdout.strip() != "Stopped":
+        if time.time() >= deadline:
+            print("  [445] could not stop LanmanServer -- run as Administrator."
+                  + (" stderr: " + res.stderr.strip() if res.stderr.strip() else ""))
+            return None
+        time.sleep(0.25)
 
     def restore():
         print("  [445] restoring LanmanServer ...")
@@ -1114,6 +1123,30 @@ def _lan_ips():
     except OSError:
         pass
     return ips or ["127.0.0.1"]
+
+
+def _bind_listener(lsock, bind_addr, port, take_445, timeout=10.0, interval=0.25):
+    """Bind lsock; return the bound port or None. Normal mode walks forward from
+    the requested port and reports the real one; --take-445 must have exactly 445,
+    so it retries the same port for a few seconds -- Windows' srvnet driver does
+    not release 445 the moment LanmanServer reports Stopped."""
+    if take_445:
+        deadline = time.time() + timeout
+        while True:
+            try:
+                lsock.bind((bind_addr, port))
+                return port
+            except OSError:
+                if time.time() >= deadline:
+                    return None
+                time.sleep(interval)
+    for cand in range(port, port + 12):
+        try:
+            lsock.bind((bind_addr, cand))
+            return cand
+        except OSError:
+            continue
+    return None
 
 
 def main(argv=None):
@@ -1181,6 +1214,8 @@ def main(argv=None):
     if args.take_445:
         port = 445
         restore = _take_445()
+        if restore is None:
+            return 2
     elif port < 1 or port > 65535:
         print("ERROR: port %d is out of the valid range (1-65535)." % port, file=sys.stderr)
         return 2
@@ -1195,17 +1230,14 @@ def main(argv=None):
     # Bind; if the chosen port is taken/reserved, walk forward and report the real one.
     lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    bound = None
-    tries = 1 if args.take_445 else 12
-    for cand in range(port, port + tries):
-        try:
-            lsock.bind((args.bind, cand))
-            bound = cand
-            break
-        except OSError:
-            continue
+    bound = _bind_listener(lsock, args.bind, port, args.take_445)
     if bound is None:
-        print("ERROR: could not bind a port near %d (try --port N)." % port, file=sys.stderr)
+        if args.take_445:
+            print("ERROR: could not bind port 445 -- LanmanServer stopped but Windows "
+                  "has not released the port. Reboot, or use --port N instead of "
+                  "--take-445.", file=sys.stderr)
+        else:
+            print("ERROR: could not bind a port near %d (try --port N)." % port, file=sys.stderr)
         if restore:
             restore()
         return 2

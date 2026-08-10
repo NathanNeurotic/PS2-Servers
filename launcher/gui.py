@@ -227,6 +227,24 @@ def tab_text(label):
     return "  {}  ".format(label.strip())
 
 
+def _port_number(values):
+    """The configured port as an int, or 0 when unset/unparseable."""
+    raw = values.get("port")
+    if not raw:
+        return 0
+    try:
+        return int(str(raw).strip(), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _needs_admin(key, values, setup_needed):
+    """Whether starting this server needs an elevated launcher: firewall setup
+    pending, the take-445 port takeover, or a port below 1025."""
+    take_445 = key.startswith("smb") and bool(values.get("take_445"))
+    return setup_needed or take_445 or 0 < _port_number(values) < 1025
+
+
 def opl_hint(key, ip, values):
     if key in ("smbv1", "smbv2", "smbv3"):
         port = "445" if values.get("take_445") else str(values.get("port") or 1025)
@@ -1783,7 +1801,13 @@ class LauncherApp:
         if fingerprint and fingerprint in self._firewall_ok:
             self._append_log(
                 key, "[setup] firewall already allowed for this app and ports\n")
-            self._launch_server(key, values)
+            # The cache only speaks for the firewall rules: take-445 / a low
+            # port still needs this launcher elevated on every start.
+            if _needs_admin(key, values, setup_needed=False):
+                self._handle_windows_setup_check(
+                    key, values, setup_needed=False, fingerprint=fingerprint)
+            else:
+                self._launch_server(key, values)
             return
 
         self._set_card_busy(key, True, "Checking")
@@ -1817,15 +1841,9 @@ class LauncherApp:
             self._remember_firewall_ok(fingerprint)
 
         take_445 = key.startswith("smb") and bool(values.get("take_445"))
-        raw_port = values.get("port")
-        port_num = 0
-        if raw_port:
-            try:
-                port_num = int(str(raw_port).strip(), 0)
-            except (TypeError, ValueError):
-                port_num = 0
+        port_num = _port_number(values)
         low_port_required = (0 < port_num < 1025)
-        admin_required = setup_needed or take_445 or low_port_required
+        admin_required = _needs_admin(key, values, setup_needed)
 
         if self.ignore_firewall_var.get() and not take_445 and not low_port_required:
             self._append_log(key, "[setup] firewall setup prompt ignored per user setting; starting anyway\n")
