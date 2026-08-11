@@ -73,11 +73,13 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" > /dev/null 2>&1; then
+          # --repo, not a checkout: gh resolves the repo from the working
+          # directory otherwise, and this job has nothing checked out.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "release for $TAG already exists; nothing to create"
             exit 0
           fi
-          gh release create "$TAG" --draft --title "$TAG" \
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "$TAG" \
             --notes "The binaries for this release are still being built: the download table and the files land here when the build finishes (about ten minutes). If this text is still here later, the build failed -- see the Actions tab."
 
   build:
