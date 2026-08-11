@@ -469,6 +469,14 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
+          # Legs attach files and nothing more. draft: true makes the action's
+          # finalize step a no-op, so a leg can never publish the release
+          # mid-build with an empty body (the first leg used to do exactly
+          # that), and its empty name/body inputs leave the release's metadata
+          # alone. release.yml owns the release: its create-release job makes
+          # the draft every leg finds, and its publish job is the only step
+          # that sets the notes and flips draft -> published.
+          draft: true
           files: |
             out/*.tar.gz
             out/*.tar.gz.sha256

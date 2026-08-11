@@ -48,6 +48,38 @@ jobs:
             echo "not a tag build; source version is $(python3 tools/version_source.py --print-display)"
           fi
 
+  # One release per tag, created exactly once, before anything builds.
+  #
+  # Edge's legs attach straight to the tag's release (this workflow does not
+  # build Edge), and softprops/action-gh-release is find-or-create: eleven
+  # Edge legs plus this workflow's own attachers each looked for a release
+  # that did not exist yet and created their own, and the action's create
+  # path hardcodes draft -- so the losers of that race were left behind as
+  # empty draft releases (v0.5.3 shipped one). With the release already here,
+  # every attacher takes the find path, and only the publish job below sets
+  # the name, the notes, and the draft -> published flip.
+  create-release:
+    name: Create the release up front
+    needs: verify-version
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create the draft release if it is not there yet
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "release for $TAG already exists; nothing to create"
+            exit 0
+          fi
+          gh release create "$TAG" --draft --title "$TAG" \
+            --notes "The binaries for this release are still being built: the download table and the files land here when the build finishes (about ten minutes). If this text is still here later, the build failed -- see the Actions tab."
+
   build:
     name: Build ${{ matrix.asset }}
     needs: verify-version
@@ -431,6 +463,7 @@ jobs:
     needs:
       - build
       - source
+      - create-release
     # Tags publish; the manual "Run workflow" button still builds and uploads
     # artifacts without creating a release.
     #
