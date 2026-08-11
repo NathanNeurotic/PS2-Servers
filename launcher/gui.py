@@ -31,7 +31,7 @@ def _direct_link_experimental():
 
 from . import config, directlink, elevate, netinfo, posix_firewall, servers, status_client, theme, tray, windows_setup
 from .process import ServerProcess
-from .release_metadata import DISPLAY_VERSION
+from .release_metadata import DISPLAY_VERSION, version_label
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
 
 APP_VERSION_LABEL = "v" + DISPLAY_VERSION
@@ -123,25 +123,26 @@ SECURITY_URL = "https://github.com/NathanNeurotic/PS2-Servers/blob/main/SECURITY
 
 ABOUT_TEXT = r"""PS2 Servers
 
-PS2 Servers is a no-terminal launcher for PlayStation 2 network-loading servers. It gives normal users a simple GUI for starting the server mode they need, choosing folders or files, seeing live logs, and copying the exact settings they need to enter in OPL.
+PS2 Servers is a no-terminal launcher for PlayStation 2 network-loading servers. It gives normal users a simple GUI for starting the server mode they need, choosing folders or files, seeing live logs, and copying the exact settings to enter in OPL or another PS2 homebrew application.
 
 What it runs
 
-- SMBv1 mode: runs PS2 Servers' own small OPL-compatible SMB/CIFS server. This is not Windows File Sharing and does not require Windows' built-in SMB1 optional feature tree.
-- UDPFS mode: runs a UDPFS server for OPL's UDPFS device support.
-- UDPBD mode: runs a UDPBD block-device server for compatible clients.
+- SMBv1 mode: runs PS2 Servers' own small OPL-compatible SMB/CIFS server. This is not Windows File Sharing and does not require Windows' built-in SMB1 optional feature tree. It accepts a guest logon with a blank password, which is what a console sends.
+- SMBv2 / SMBv3 mode: runs a modern SMB server for clients that speak SMB2 or newer -- a PC, a phone, or SMB2-capable homebrew. SMBv3 is the same server negotiating up to SMB 3.0.2; pick it unless a client refuses it and needs SMB2. Modern clients, Windows included, speak these modes natively, with no re-enabling SMB1. There is no guest mode here: set a username and password, or tick "No password" only on a network you trust.
+- UDPFS mode: serves a folder and/or a disk image over UDP for OPL's UDPFS device support, and is recommended for most setups. Its Auto protocol mode detects Standard and Modulo clients at the same time; choose a mode yourself only if a console will not connect on Auto.
+- UDPBD mode: serves a single disk image as a block device over UDP. Largely superseded by UDPFS; kept for compatible clients.
 
-How SMB mode works
+How SMBv1 mode works
 
-Normal SMB mode listens on a custom TCP port, by default 1111. OPL connects directly to PS2 Servers at that port and share name. PS2 Servers speaks the small SMB/CIFS subset that OPL expects. Avoid ports below 1033 -- Windows can reserve or block low ports.
+SMBv1 mode listens on a custom TCP port, 1025 by default. OPL connects directly to PS2 Servers at that port and share name. PS2 Servers speaks the small SMB/CIFS subset that OPL expects. Ports below 1025 require administrator rights.
 
-That means normal SMB mode does not need Windows File Sharing, does not need Windows SMB1 enabled, and does not expose your normal Windows shares through SMB1.
+That means SMBv1 mode does not need Windows File Sharing, does not need Windows SMB1 enabled, and does not expose your normal Windows shares through SMB1. SMBv2/SMBv3 mode works the same way on its own port (1445 by default), just with a modern dialect and a required login.
 
 Advanced port 445 mode
 
-Port 445 is the standard Windows SMB/File Sharing port. If you choose the advanced port 445 option, PS2 Servers may need administrator rights because Windows normally owns that port.
+Port 445 is the standard Windows SMB/File Sharing port, and the only one Windows' own SMB client (Explorer) can connect to. If you choose the advanced port 445 option, PS2 Servers needs administrator rights because Windows normally owns that port.
 
-In that mode, PS2 Servers temporarily pauses Windows File Sharing / LanmanServer while the PS2 Servers SMB server is running, then returns control when the server stops. This is only for the advanced 445 path. Normal custom-port mode does not need it.
+In that mode, PS2 Servers temporarily pauses Windows File Sharing / LanmanServer while the SMB server is running, then returns control when the server stops. It stops the service, never disables it, so even a hard kill self-heals on the next boot. SMBv1 mode first checks that nothing else pins the port (Docker Desktop's service is the usual one) and refuses, naming what holds it, rather than pause software that depends on it. This is only for the advanced 445 path. Normal custom-port mode does not need it.
 
 Windows Firewall changes
 
@@ -1051,13 +1052,13 @@ class LauncherApp:
             title_box.pack(side="left", padx=(10, 0))
             ttk.Label(title_box, text="PS2 Servers", font=("", 14, "bold")).pack(
                 anchor="w")
-            ttk.Label(title_box, text=APP_VERSION_LABEL,
+            ttk.Label(title_box, text=version_label(),
                       style="Muted.TLabel").pack(anchor="w")
             row += 1
         else:
             # No logo asset (e.g. source runs without theme assets): still show
             # the version so it is never hidden behind an optional image.
-            ttk.Label(about, text="PS2 Servers " + APP_VERSION_LABEL,
+            ttk.Label(about, text="PS2 Servers " + version_label(),
                       font=("", 12, "bold")).grid(row=row, column=0, sticky="w",
                                                   padx=8, pady=(8, 0))
             row += 1
