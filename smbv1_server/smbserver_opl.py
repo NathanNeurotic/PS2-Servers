@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RiptOPL SMBv1 server -- a tiny, dependency-free SMB1/CIFS server that Open-PS2-Loader
+# PS2 Servers SMBv1 server -- a tiny, dependency-free SMB1/CIFS server that Open-PS2-Loader
 # (and forks) can browse + read games from, so SMB keeps working on hosts where the OS has
 # disabled SMBv1 / removed NTLMv1 (Windows 11 24H2/25H2). It speaks "NT LM 0.12" itself and
 # accepts GUEST logons, so it bypasses the host's SMB stack entirely: OPL connects to THIS
@@ -13,7 +13,7 @@
 #   then in OPL: SMB IP = this PC's LAN IP, SMB Port = 1111 (the printed port), Share = games,
 #   User = guest, Password = blank. Writable by default (OPL saves + VMC-on-SMB); pass --read-only to lock.
 #
-# License: same as the surrounding RiptOPL project.
+# License: same as the surrounding PS2 Servers project.
 
 import argparse
 import hmac
@@ -1284,7 +1284,7 @@ def main(argv=None):
 
     ips = _lan_ips()
     print("=" * 64)
-    print(" RiptOPL SMBv1 server -- listening on %s:%d" % (args.bind, bound))
+    print(" PS2 Servers SMBv1 server -- listening on %s:%d" % (args.bind, bound))
     if users:
         first = sorted(users)[0]
         creds = "User: %s   Password: %s" % (

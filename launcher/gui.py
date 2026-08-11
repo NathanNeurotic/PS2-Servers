@@ -127,7 +127,7 @@ PS2 Servers is a no-terminal launcher for PlayStation 2 network-loading servers.
 
 What it runs
 
-- SMBv1 / RiptOPL mode: runs PS2 Servers' own small OPL-compatible SMB/CIFS server. This is not Windows File Sharing and does not require Windows' built-in SMB1 optional feature tree.
+- SMBv1 mode: runs PS2 Servers' own small OPL-compatible SMB/CIFS server. This is not Windows File Sharing and does not require Windows' built-in SMB1 optional feature tree.
 - UDPFS mode: runs a UDPFS server for OPL's UDPFS device support.
 - UDPBD mode: runs a UDPBD block-device server for compatible clients.
 
@@ -462,6 +462,12 @@ class ServerCard(ttk.LabelFrame):
         else:
             self.adv_frame.grid_remove()
             self.adv_btn.config(text="Advanced ▸")
+        # The card just changed height; refresh the page scrollregion now rather
+        # than waiting out the 400 ms watcher, so the bottom is reachable
+        # immediately. Guarded: a bare card built in a test has no app.
+        refresh = getattr(getattr(self, "app", None), "_refresh_scroll_body", None)
+        if refresh is not None:
+            self.after_idle(refresh)
 
     def _browse(self, var, kind):
         path = (filedialog.askdirectory(parent=self) if kind == "folder"
@@ -570,6 +576,13 @@ class LauncherApp:
         self.out_queue = queue.Queue()
         self.logs = {}
         self.saved = config.load()
+        # Set by reset_settings once the config file is deleted: _save becomes a
+        # no-op so the shutdown path cannot resurrect the old settings.
+        self._config_reset = False
+        # Armed _flash_label timers, keyed by widget path, so _shutdown_app can
+        # disarm them: a flash that outlives the window fires into a dead
+        # interpreter and Tcl complains about it on the way out.
+        self._flash_jobs = {}
         self._firewall_ok = set()   # _restore fills it; never read before it exists
         self._direct_proc = None            # the DHCP helper child, when running
         self._direct_expected = False       # we started it and expect it alive
@@ -770,6 +783,29 @@ class LauncherApp:
 
         body.bind("<Configure>", refresh_scroll_region)
         canvas.bind("<Configure>", refresh_scroll_region)
+
+        # The body's height is pinned to max(content, view), so a content
+        # reqheight change -- Advanced opening, the OPL hint appearing on start,
+        # a label rewrapping -- fires no <Configure> on either widget above, and
+        # the scrollregion goes stale: the bottom of the page becomes impossible
+        # to scroll to (yview never reaches 1.0). Nothing else notices those
+        # changes, so poll cheaply and refresh when the number moves.
+        seen_reqheight = [None]
+
+        def watch_reqheight():
+            if getattr(self, "_shutting_down", False):
+                return
+            try:
+                req = body.winfo_reqheight()
+                if req != seen_reqheight[0]:
+                    seen_reqheight[0] = req
+                    refresh_scroll_region()
+                canvas.after(400, watch_reqheight)
+            except tk.TclError:
+                # The window is being destroyed; stop rescheduling.
+                return
+
+        canvas.after(400, watch_reqheight)
         self._scroll_shell = shell
         self._scroll_canvas = canvas
         self._scrollbar = scrollbar
@@ -868,6 +904,10 @@ class LauncherApp:
             row=0, column=2, sticky="w")
         ttk.Button(header, text="What's my IP?", command=self._show_whats_my_ip).grid(
             row=0, column=3, sticky="w", padx=(4, 0))
+        # Transient "Saved ✓" after a typed address commits -- the stretch
+        # column absorbs it, so showing it never moves the other controls.
+        self._ip_feedback = ttk.Label(header, text="", style="TopStripHint.TLabel")
+        self._ip_feedback.grid(row=0, column=4, sticky="w", padx=(8, 0))
         # Its own full-width row rather than a fifth column on the controls row:
         # four controls plus a paragraph cannot share one row at every window
         # width, and a row of its own reflows to any width without squeezing them.
@@ -1029,7 +1069,7 @@ class LauncherApp:
                    command=lambda: self._open_url(PROJECT_URL)).pack(side="left", padx=(6, 0), pady=6)
         ttk.Button(links, text="GitHub repo",
                    command=lambda: self._open_url(REPO_URL)).pack(side="left", padx=(6, 0), pady=6)
-        ttk.Button(links, text="Releases",
+        ttk.Button(links, text="Check for updates",
                    command=lambda: self._open_url(RELEASES_URL)).pack(side="left", padx=(6, 0), pady=6)
         ttk.Button(links, text="Security notes",
                    command=lambda: self._open_url(SECURITY_URL)).pack(side="left", padx=(6, 0), pady=6)
@@ -1043,24 +1083,26 @@ class LauncherApp:
         behavior.grid(row=row, column=0, sticky="ew", padx=8, pady=(8, 0))
         behavior.columnconfigure(3, weight=1)
         row += 1
+        # Kept for _save_with_feedback, which flashes "Saved" on the frame title.
+        self._options_frame = behavior
         b_col = 0
         b_row = 0
         if tray.AVAILABLE:
             close_to_tray = ttk.Checkbutton(
                 behavior, text="Close to tray", variable=self.close_to_tray_var,
-                command=self._save, style="Card.TCheckbutton")
+                command=self._save_with_feedback, style="Card.TCheckbutton")
             close_to_tray.grid(row=b_row, column=b_col, sticky="w", padx=(6, 12), pady=6)
             b_col += 1
             minimize_to_tray = ttk.Checkbutton(
                 behavior, text="Minimize to tray", variable=self.minimize_to_tray_var,
-                command=self._save, style="Card.TCheckbutton")
+                command=self._save_with_feedback, style="Card.TCheckbutton")
             minimize_to_tray.grid(row=b_row, column=b_col, sticky="w", padx=(0, 12), pady=6)
             b_col += 1
             self._tray_option_widgets.extend([close_to_tray, minimize_to_tray])
 
         autostart_chk = ttk.Checkbutton(
             behavior, text="Auto-start servers on launch", variable=self.autostart_var,
-            command=self._save, style="Card.TCheckbutton")
+            command=self._save_with_feedback, style="Card.TCheckbutton")
         autostart_chk.grid(row=b_row, column=b_col, sticky="w", padx=(6 if b_col == 0 else 0, 12), pady=6)
         b_col += 1
 
@@ -1070,8 +1112,20 @@ class LauncherApp:
                 b_col = 0
             ignore_fw_chk = ttk.Checkbutton(
                 behavior, text="Ignore Windows Firewall prompts", variable=self.ignore_firewall_var,
-                command=self._save, style="Card.TCheckbutton")
+                command=self._save_with_feedback, style="Card.TCheckbutton")
             ignore_fw_chk.grid(row=b_row, column=b_col, sticky="w", padx=(6 if b_col == 0 else 0, 12), pady=6)
+            b_col += 1
+
+        # Reset goes on the Options grid's last row: no new frame, so the About
+        # tab asks for no more width or height than it already did (the layout
+        # tests in tests/test_gui_layout.py measure exactly that).
+        if b_col >= 3:
+            b_row += 1
+            b_col = 0
+        reset_btn = ttk.Button(behavior, text="Reset all settings…",
+                               command=self.reset_settings)
+        reset_btn.grid(row=b_row, column=b_col, sticky="w",
+                       padx=(6 if b_col == 0 else 0, 12), pady=6)
 
         text_frame = ttk.Frame(about)
         about.rowconfigure(row, weight=1)
@@ -1160,7 +1214,8 @@ class LauncherApp:
         for key, card in self.cards.items():
             if self.is_running(key):
                 card.refresh_status(running=True)
-        self._save()
+        if self._save():
+            self._flash_label(self._ip_feedback, "Saved ✓")
 
     def _on_ip_combobox_select(self, event=None):
         if self.ip_var.get() == "Custom IP...":
@@ -2557,6 +2612,47 @@ class LauncherApp:
         self._set_direct_status(self._direct_ready_status(cfg))
 
     # -- config ----------------------------------------------------------- #
+    def _flash_label(self, widget, text, ms=2500, restore=""):
+        """Transient confirmation where the click happened, not only in a log
+        nobody is watching. A second flash before the first clears restarts
+        the timer rather than stacking clears that would blank it early."""
+        key = str(widget)
+        job = self._flash_jobs.get(key)
+        if job is not None:
+            try:
+                widget.after_cancel(job)
+            except tk.TclError:
+                pass
+        widget.config(text=text)
+
+        def clear(key=key, widget=widget):
+            self._flash_jobs.pop(key, None)
+            try:
+                widget.config(text=restore)
+            except tk.TclError:
+                pass
+
+        job = widget.after(ms, clear)
+        self._flash_jobs[key] = job
+        widget._flash_job = job
+
+    def _cancel_flashes(self):
+        for key, job in self._flash_jobs.items():
+            try:
+                self.root.nametowidget(key).after_cancel(job)
+            except tk.TclError:
+                pass
+        self._flash_jobs.clear()
+
+    def _save_with_feedback(self):
+        """The About page checkboxes save on click; say so on the frame title
+        (a separate label would have to live somewhere and shift the layout)."""
+        if self._save():
+            frame = getattr(self, "_options_frame", None)
+            if frame is not None:
+                self._flash_label(frame, " Options — Saved ✓ ",
+                                  restore=" Options ")
+
     def _saved_bool(self, key, default=False):
         value = self.saved.get(key, default)
         return bool(value) if isinstance(value, bool) else bool(default)
@@ -2606,6 +2702,10 @@ class LauncherApp:
     def _save(self, pending_start=None, pending_cleanup=False,
               pending_firewall_allow=False, pending_direct_link=False,
               pending_direct_link_off=False) -> bool:
+        if getattr(self, "_config_reset", False):
+            # reset_settings deleted the config and owns the restart: nothing
+            # (stop_server, _shutdown_app) may write the old state back.
+            return True
         active = [k for k in self.cards if self.is_running(k)]
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get(),
@@ -2661,6 +2761,50 @@ class LauncherApp:
             return [frozen_self_exe()]
         return [sys.executable, "-m", "launcher"]
 
+    def reset_settings(self):
+        """Factory reset: delete the saved settings and restart into defaults.
+
+        Restarting (rather than resetting widgets in place) is the only way to
+        be sure no in-memory residue of the old configuration survives.
+        """
+        direct_cfg = self.saved.get("direct_link") or {}
+        direct_on = (direct_cfg.get("enabled")
+                     or self.saved.get("pending_direct_link_restore")
+                     or (self.direct_link_var is not None
+                         and self.direct_link_var.get()))
+        if direct_on:
+            # The NIC is statically configured and the saved config is what
+            # restores it -- wiping it now would strand the adapter.
+            messagebox.showwarning(
+                "Reset settings",
+                "Turn Direct Link off before resetting settings, so your "
+                "network port is restored to its normal settings.")
+            return
+        if not messagebox.askyesno(
+                "Reset all settings?",
+                "Every server page, saved folder and port, the IP choice and "
+                "all options return to their defaults, and the launcher "
+                "restarts.\n\nWindows Firewall rules are not removed (use "
+                "\"Remove PS2 Servers firewall rules\" for that).\n\n"
+                "Reset everything?"):
+            return
+        if not self._confirm_app_shutdown("Reset settings?"):
+            return
+        config.reset()
+        self.saved = {}
+        self._config_reset = True
+        try:
+            subprocess.Popen(self._restart_command(),
+                             cwd=None if is_frozen() else REPO_ROOT)
+        except OSError as e:
+            # The restart never happened, so give the settings back: _save
+            # re-persists the in-memory state the reset just disowned.
+            self._config_reset = False
+            self._save()
+            messagebox.showerror("Restart failed", str(e))
+            return
+        self._shutdown_app()
+
     def _confirm_app_shutdown(self, title):
         running = [TAB_TITLES.get(key, key.upper())
                    for key in self.procs if self.is_running(key)]
@@ -2701,6 +2845,7 @@ class LauncherApp:
         # not just at destroy time, so nothing reschedules during stop_all.
         self._shutting_down = True
         self._save()
+        self._cancel_flashes()
         # hide first so the (up to a few seconds of) child termination doesn't
         # look like a frozen window
         self.root.withdraw()

@@ -225,6 +225,49 @@ class LauncherLayout(unittest.TestCase):
             states.append(bool(self.app._scrollbar.winfo_ismapped()))
         self.assertEqual(len(set(states)), 1, "scrollbar flip-flopped: %s" % states)
 
+    def test_the_bottom_of_a_grown_page_can_always_be_scrolled_to(self):
+        """Opening Advanced grew the page but not the scrollregion: the body's
+        height is pinned, so no <Configure> fired, the region stayed short, and
+        the last advanced fields could never be scrolled into view.
+        """
+        self.resize(self.min_width, 640)
+        self.app.nb.select(self.app.server_tabs["smbv1"])
+        card = self.app.cards["smbv1"]
+        opened = not card._advanced_shown
+        try:
+            if opened:
+                card._toggle_advanced()
+            self._settle()
+            canvas = self.app._scroll_canvas
+            # The 400 ms reqheight watcher needs real time to notice the growth;
+            # give it a bounded window before declaring the bug still present.
+            import time
+            deadline = time.time() + 2.5
+            while time.time() < deadline:
+                self._settle(2)
+                region = str(canvas.cget("scrollregion") or "0 0 0 0").split()
+                if float(region[3]) >= self.app.content.winfo_reqheight():
+                    break
+                time.sleep(0.1)
+            self.assertGreaterEqual(float(region[3]),
+                                    self.app.content.winfo_reqheight(),
+                                    "scrollregion is shorter than the page: "
+                                    "its bottom can never scroll into view")
+            # And with the region right, the bottom really is reachable.
+            canvas.yview_moveto(1.0)
+            self._settle(1)
+            self.assertGreaterEqual(canvas.yview()[1], 0.999)
+        finally:
+            if opened and card._advanced_shown:
+                card._toggle_advanced()
+            # Settle clean for the tests that follow: at a height the page fits
+            # even with the bar out, the scrollbar releases and the wrap labels
+            # widen back (a bar left mapped would keep them narrow -- and tall).
+            self.resize(1024, 1000)
+            import time
+            time.sleep(0.5)   # let the reqheight watcher run once for real
+            self._settle()
+
     # -- fields ------------------------------------------------------------ #
     def test_take_445_greys_out_the_port_field_it_overrides(self):
         """A saved take-445 silently wins over the port field -- the field must

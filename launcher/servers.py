@@ -222,25 +222,27 @@ _SMB2_FIELDS = [
 
 # How the protocol mode is offered, and what each choice puts on the wire.
 #
-# "Proper" rather than "Standard" because the choice a user is making is between
-# the protocol as specified and a client that counts sequences differently --
-# "standard" reads like a recommendation, and the recommended setting is Auto.
-# The wire value stays "standard": it is what both the Python server and Edge
-# accept, and renaming it would break every saved configuration and command line.
+# The labels match the wire values, so the dropdown, the docs, and the logged
+# command line all say the same word. (The middle label was "Proper" once --
+# the thinking was that "standard" reads like a recommendation when the
+# recommended setting is Auto -- but one name everywhere beats that nuance.)
 PROTOCOL_MODE_CHOICES = (
     ("Auto", "auto"),
-    ("Proper", "standard"),
+    ("Standard", "standard"),
     ("Modulo", "modulo"),
 )
 
 # Accepts the label, the wire value, or any casing of either. A saved settings
-# file predating the dropdown holds "standard"; a new one holds "Proper"; and a
+# file predating the dropdown holds "standard"; a new one holds "Standard"; and a
 # user editing the file by hand may write either. All three should work rather
 # than silently falling back to auto.
 _PROTOCOL_MODE_BY_NAME = {}
 for _label, _value in PROTOCOL_MODE_CHOICES:
     _PROTOCOL_MODE_BY_NAME[_label.lower()] = _value
     _PROTOCOL_MODE_BY_NAME[_value.lower()] = _value
+# Settings files written before the "Proper" label was renamed hold the old
+# word. Keep accepting it forever rather than silently moving someone to auto.
+_PROTOCOL_MODE_BY_NAME["proper"] = "standard"
 
 
 def migrate_saved(server_key, saved):
@@ -315,7 +317,7 @@ def _udpfs_argv(v):
         args.append("--no-compression")
     # The old global "Modulo mode" checkbox was removed because it applied one
     # client's quirk to every client at once. Auto classifies each session on its
-    # own, so a Proper client and several Modulo clients transfer side by side.
+    # own, so a Standard client and several Modulo clients transfer side by side.
     #
     # The selector is back as a visible three-way choice, not because Auto is
     # unreliable, but because when it does misjudge a client there has to be a
@@ -348,7 +350,7 @@ def _udpbd_argv(v):
 
 SMBV1 = ServerDef(
     key="smbv1",
-    label="SMBv1 server (RiptOPL)",
+    label="SMBv1 server",
     blurb="Share a games folder over SMB. Works even on Windows 11 where the OS removed SMB1.",
     runtime="python",
     default_port=1025,
@@ -434,7 +436,7 @@ UDPFS = ServerDef(
         # use to the person who needs it.
         Field("protocol_mode", "Protocol mode", "choice", default="Auto",
               choices=PROTOCOL_MODE_CHOICES,
-              help="Auto handles Proper and Modulo clients at the same time and "
+              help="Auto detects Standard and Modulo clients at the same time and "
                    "suits almost everyone. Pick one explicitly only if a console "
                    "will not connect on Auto."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),

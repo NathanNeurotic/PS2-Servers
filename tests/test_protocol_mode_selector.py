@@ -5,11 +5,12 @@ quirk to every client at once. It was replaced by per-session negotiation, and
 the checkbox was removed -- correctly, but that left no way to override a
 misjudgement except by hand-editing a settings file.
 
-It is a visible three-way choice again: Auto, Proper, Modulo. What makes that
-worth testing is that the label and the wire value deliberately differ. The user
-picks "Proper"; the servers only accept "standard". A mapping that silently
-returned "Proper" would be rejected by the server at startup, and under procd or
-the launcher's respawn that is a mode that simply never comes up.
+It is a visible three-way choice again: Auto, Standard, Modulo. The middle
+label was "Proper" until it was renamed to match the wire value; settings files
+written before the rename still hold "Proper", so it stays an accepted alias.
+What makes the mapping worth testing is that a label or typo reaching the server
+unchanged would be rejected at startup, and under procd or the launcher's
+respawn that is a mode that simply never comes up.
 
 Run:  python -m unittest tests.test_protocol_mode_selector -v
 """
@@ -49,7 +50,7 @@ class ChoicesAreServable(unittest.TestCase):
 
     def test_the_labels_are_the_ones_asked_for(self):
         self.assertEqual([label for label, _ in PROTOCOL_MODE_CHOICES],
-                         ["Auto", "Proper", "Modulo"])
+                         ["Auto", "Standard", "Modulo"])
 
     def test_auto_is_first_so_it_is_what_an_empty_selection_lands_on(self):
         self.assertEqual(PROTOCOL_MODE_CHOICES[0], ("Auto", "auto"))
@@ -66,8 +67,12 @@ class ChoicesAreServable(unittest.TestCase):
 class ValueMapping(unittest.TestCase):
     def test_labels_map_to_wire_values(self):
         self.assertEqual(protocol_mode_value("Auto"), "auto")
-        self.assertEqual(protocol_mode_value("Proper"), "standard")
+        self.assertEqual(protocol_mode_value("Standard"), "standard")
         self.assertEqual(protocol_mode_value("Modulo"), "modulo")
+
+    def test_the_retired_proper_label_still_maps(self):
+        """Settings files from before the rename hold "Proper"; never lose them."""
+        self.assertEqual(protocol_mode_value("Proper"), "standard")
 
     def test_wire_values_map_to_themselves(self):
         """A settings file written before the dropdown holds the wire value."""
@@ -76,7 +81,7 @@ class ValueMapping(unittest.TestCase):
                 self.assertEqual(protocol_mode_value(value), value)
 
     def test_casing_and_padding_are_tolerated(self):
-        for raw in ("proper", "PROPER", "  Proper  ", "sTaNdArD"):
+        for raw in ("proper", "PROPER", "  Proper  ", "sTaNdArD", "  Standard  "):
             with self.subTest(raw=raw):
                 self.assertEqual(protocol_mode_value(raw), "standard")
 
@@ -93,7 +98,10 @@ class ValueMapping(unittest.TestCase):
 
 
 class ArgvContract(unittest.TestCase):
-    def test_proper_is_sent_as_standard(self):
+    def test_standard_is_sent_as_standard(self):
+        self.assertEqual(_mode_in(_argv(protocol_mode="Standard")), "standard")
+
+    def test_the_proper_alias_is_sent_as_standard(self):
         self.assertEqual(_mode_in(_argv(protocol_mode="Proper")), "standard")
 
     def test_modulo_is_sent(self):
@@ -120,8 +128,8 @@ class ArgvContract(unittest.TestCase):
                          "modulo")
 
     def test_every_emitted_value_is_one_the_servers_accept(self):
-        for raw in ("Auto", "Proper", "Modulo", "standard", "modulo", "auto",
-                    "nonsense", None):
+        for raw in ("Auto", "Standard", "Proper", "Modulo", "standard", "modulo",
+                    "auto", "nonsense", None):
             with self.subTest(raw=raw):
                 mode = _mode_in(_argv(protocol_mode=raw))
                 if mode is not None:

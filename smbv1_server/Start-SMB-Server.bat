@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableExtensions
-title RiptOPL SMB Server
+title PS2 SMB Server
 cd /d "%~dp0"
 
 REM ============================================================================
-REM  RiptOPL SMBv1 server -- double-click launcher for Windows.
+REM  PS2 Servers SMBv1 server -- double-click launcher for Windows.
 REM
 REM  EASIEST: drag your PS2 games folder onto this .bat file.
 REM  OR: set GAMES below to your games folder, then just double-click.
@@ -25,7 +25,7 @@ if not "%~1"=="" set "GAMES=%~1"
 
 echo.
 echo   ============================================================
-echo     RiptOPL SMB Server
+echo     PS2 SMB Server
 echo   ============================================================
 echo.
 
@@ -56,8 +56,10 @@ goto askfolder
 
 :run
 REM --- one-time: allow the port through Windows Firewall (you'll see a single admin prompt) ---
+REM NOTE: the rule was once named 'RiptOPL SMB Server'; a machine that ran the old script
+REM keeps that (harmless duplicate) allow-rule -- this script only adds the new one.
 echo   Checking Windows Firewall (a one-time "Yes" admin prompt may appear)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "if (-not (Get-NetFirewallRule -DisplayName 'RiptOPL SMB Server' -EA SilentlyContinue)) { try { Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-Command','New-NetFirewallRule -DisplayName ''RiptOPL SMB Server'' -Direction Inbound -Protocol TCP -LocalPort %PORT% -Action Allow -Profile Private,Domain' -Wait } catch { Write-Host '  (skipped -- if OPL cannot connect, allow TCP %PORT% inbound manually)' } }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if (-not (Get-NetFirewallRule -DisplayName 'PS2 Servers SMB Server' -EA SilentlyContinue)) { try { Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-Command','New-NetFirewallRule -DisplayName ''PS2 Servers SMB Server'' -Direction Inbound -Protocol TCP -LocalPort %PORT% -Action Allow -Profile Private,Domain' -Wait } catch { Write-Host '  (skipped -- if OPL cannot connect, allow TCP %PORT% inbound manually)' } }"
 echo.
 echo   Games folder : %GAMES%
 echo   Port         : %PORT%

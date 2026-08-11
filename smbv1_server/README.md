@@ -1,4 +1,4 @@
-# RiptOPL SMBv1 server
+# PS2 Servers SMBv1 server
 
 A tiny, dependency-free **SMBv1/CIFS server** that Open-PS2-Loader (and forks) can browse and
 load games from — so SMB keeps working even on hosts where the OS has killed SMBv1.
@@ -40,7 +40,7 @@ python smbserver_opl.py --share games=D:/PS2Games
 It prints something like:
 
 ```
- RiptOPL SMBv1 server -- listening on 0.0.0.0:1111
+ PS2 Servers SMBv1 server -- listening on 0.0.0.0:1111
  In OPL  ->  SMB Server IP: 192.168.1.50   Port: 1111   User: guest   Password: blank
             Share: games   ->   D:\PS2Games   (writable)
  (writable -- OPL can save settings + VMC-on-SMB here; pass --read-only to lock it)

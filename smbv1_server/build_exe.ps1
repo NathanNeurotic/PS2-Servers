@@ -1,4 +1,4 @@
-# Optional: build a single-file Windows .exe of the RiptOPL SMBv1 server.
+# Optional: build a single-file Windows .exe of the PS2 Servers SMBv1 server.
 #
 # Power users should just run `python smbserver_opl.py` -- it's pure stdlib, zero deps, and a bare
 # .py has no antivirus false-positives. This script is only for shipping a double-clickable binary.
@@ -19,13 +19,13 @@ python -m nuitka `
     --onefile `
     --standalone `
     --assume-yes-for-downloads `
-    --output-filename=riptopl-smbserver.exe `
-    --company-name=RiptOPL `
-    --product-name="RiptOPL SMBv1 Server" `
+    --output-filename=ps2-smbserver.exe `
+    --company-name=NathanNeurotic `
+    --product-name="PS2 Servers SMBv1 Server" `
     --file-description="Minimal SMBv1 server for Open-PS2-Loader" `
     smbserver_opl.py
 
 Write-Host ""
-Write-Host "Built riptopl-smbserver.exe" -ForegroundColor Green
+Write-Host "Built ps2-smbserver.exe" -ForegroundColor Green
 Write-Host "STRONGLY recommended: sign it to avoid antivirus false-positives, e.g." -ForegroundColor Yellow
-Write-Host '  signtool sign /fd SHA256 /a /tr http://timestamp.digicert.com /td SHA256 riptopl-smbserver.exe'
+Write-Host '  signtool sign /fd SHA256 /a /tr http://timestamp.digicert.com /td SHA256 ps2-smbserver.exe'

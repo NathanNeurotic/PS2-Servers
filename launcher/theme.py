@@ -11,30 +11,30 @@ Keeping this module pure data -- no imports from the rest of ``launcher`` -- mak
 it safe to import from anywhere in the package (``main``, ``asset_skin``,
 ``gui``) without risking an import cycle.
 
-The palette is a calm, modern dark theme. It keeps the PS2 blue identity but
-trades the old near-black + neon look for lifted slate surfaces, a clear
-elevation scale (bg -> panel -> panel2 -> panel3), subtle slate hairlines
-instead of glowing borders, and one confident accent used sparingly.
+The palette is a true-black PS2 theme: the window sits on near-black, surfaces
+rise through midnight-blue elevations (bg -> panel -> panel2 -> panel3), the
+hairlines are blue rather than grey, and the accent is the deep PlayStation
+blue with an icy lighter blue for text that has to glow on black.
 """
 
 PALETTE = {
-    "bg":       "#0d1420",   # window background (deep slate-navy)
-    "panel":    "#161f2e",   # card / strip surface
-    "panel2":   "#1f2a3d",   # hover / slightly elevated surface
-    "panel3":   "#293850",   # selected tab / pressed surface
-    "edge":     "#31415d",   # subtle hairline border (was a neon blue)
+    "bg":       "#05080f",   # window background (true black, blue undertone)
+    "panel":    "#0a0f1c",   # card / strip surface (near-black midnight)
+    "panel2":   "#10182b",   # hover / slightly elevated surface
+    "panel3":   "#182446",   # selected tab / pressed surface (clear midnight blue)
+    "edge":     "#223258",   # subtle midnight-blue hairline border
     "text":     "#e9eef7",   # primary text
-    "muted":    "#93a3bd",   # secondary / helper text
-    "accent":   "#2563eb",   # primary blue -- button fill; dark enough that
-                             # white text clears WCAG AA (~4.5:1) on it
-    "accent_hover": "#1b57d1",  # darker primary for button hover/press (keeps
+    "muted":    "#8d9db8",   # secondary / helper text
+    "accent":   "#1d4ed8",   # deep PlayStation blue -- button fill; dark enough
+                             # that white text clears WCAG AA (~6:1) on it
+    "accent_hover": "#1e40af",  # darker blue for button hover/press (keeps
                                 # white text well above AA on the active state)
-    "accent2":  "#74b6ff",   # lighter blue -- used as TEXT on dark surfaces
+    "accent2":  "#7cc4ff",   # icy lighter blue -- used as TEXT on dark surfaces
                              # (hints, selected-tab label), never as a fill under
-                             # white text, so it stays bright
+                             # white text, so it stays bright on black
     "ok":       "#43d597",   # running / recommended (green)
     "warn":     "#e7b750",   # warning (amber)
     "error":    "#f16d7f",   # error / stopped-in-error (red)
-    "entry":    "#0f1826",   # input fields + terminal background
-    "disabled": "#5c6c88",   # disabled text
+    "entry":    "#060a12",   # input fields + terminal background (near-black)
+    "disabled": "#55637d",   # disabled text
 }

@@ -67,7 +67,7 @@ published per platform for convenience. macOS already ships as a standalone
 PS2 Servers only exposes local server behavior that the user chooses from the
 GUI:
 
-- SMBv1/RiptOPL: built-in SMB/CIFS subset, normally TCP port 1111. (Ports below 1033 are discouraged — Windows can reserve or block low ports.)
+- SMBv1: built-in SMB/CIFS subset, normally TCP port 1111. (Ports below 1033 are discouraged — Windows can reserve or block low ports.)
 - UDPFS: UDP file/block serving, normally UDP port 0xF5F6 for discovery. Each console is then served on a second UDP port, which the OS assigns on startup unless the user pins it ("Data port"); single-port and Modulo modes serve everything on the discovery port instead. All of it is inbound LAN serving — the server never initiates a connection.
 - UDPBD: UDP block-device serving, normally UDP port 0xBDBD.
 

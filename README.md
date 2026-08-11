@@ -5,7 +5,7 @@
 
 # PS2-Servers
 
-Standard PS2 network servers — **SMBv1 (RiptOPL)**, **UDPFS**, and **UDPBD** — for
+Standard PS2 network servers — **SMBv1**, **UDPFS**, and **UDPBD** — for
 loading PlayStation 2 games, apps, and media over a LAN. These are the protocols
 PS2 homebrew uses to load over a network, so they are not OPL-only. Loaders
 confirmed working include [Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)
@@ -49,7 +49,7 @@ PS2 Servers is an unsigned open-source network tool. Because it runs local serve
 processes and may ask Windows Firewall to allow inbound LAN traffic, some
 antivirus products may flag the packaged Windows EXE heuristically.
 
-The SMBv1/RiptOPL server does **not** enable Windows' built-in SMB1 optional
+The SMBv1 server does **not** enable Windows' built-in SMB1 optional
 feature tree. It speaks the OPL-compatible SMB1/CIFS subset itself and normally
 listens on custom TCP port `1111`; OPL connects to this program directly. (Avoid
 ports below 1033 — Windows can reserve or block low ports.)
@@ -87,7 +87,7 @@ All three servers are pure-Python (standard library) and run on Windows, Linux a
 
 | Folder | Server | What it does |
 |--------|--------|--------------|
-| [`smbv1_server/`](smbv1_server/) | **SMBv1 (RiptOPL)** | Shares a games folder over SMB — works even on Windows 11 where the OS removed SMB1. |
+| [`smbv1_server/`](smbv1_server/) | **SMBv1** | Shares a games folder over SMB — works even on Windows 11 where the OS removed SMB1. |
 | [`udpfs_server/`](udpfs_server/) | **UDPFS** | Serves a folder and/or disk image over UDP; can transparently decompress CHD/CSO/ZSO. |
 | [`udpbd_server/`](udpbd_server/) | **UDPBD** | Serves a disk image as a block device over UDP; the PS2 auto-discovers it. |
 
@@ -384,7 +384,7 @@ work in something click‑and‑go. With genuine gratitude:
 
 ### What's original here
 
-The **GUI launcher**, the **RiptOPL** SMBv1 server, and the **pure‑Python UDPBD port**
+The **GUI launcher**, the **SMBv1** server, and the **pure‑Python UDPBD port**
 were written for this repo. Everything at the protocol level is the community's —
 we reimplemented from public protocols/source (rather than copying code) where we
 could, and tried to attribute accurately.
