@@ -38,21 +38,39 @@ class AboutTextTest(unittest.TestCase):
 
 
 class VersionLabelTest(unittest.TestCase):
-    def test_baked_commit_is_shown(self):
+    def test_git_wins_over_a_stale_bake(self):
+        # build.py leaves _build_id.py in the tree; once HEAD moves, the bake
+        # is stale and a source run must show the checkout's real commit.
         from launcher import release_metadata
         fake = types.ModuleType("launcher._build_id")
         fake.COMMIT = "abc1234"
-        with mock.patch.dict(sys.modules, {"launcher._build_id": fake}):
-            self.assertEqual(release_metadata.build_commit(), "abc1234")
-            self.assertEqual(
-                release_metadata.version_label(),
-                "v" + release_metadata.DISPLAY_VERSION + " (abc1234)")
-
-    def test_source_checkout_asks_git(self):
-        from launcher import release_metadata
-        with (mock.patch.dict(sys.modules, {"launcher._build_id": None}),
+        with (mock.patch.dict(sys.modules, {"launcher._build_id": fake}),
               mock.patch("subprocess.check_output", return_value=b"deadbee\n")):
             self.assertEqual(release_metadata.build_commit(), "deadbee")
+            self.assertEqual(
+                release_metadata.version_label(),
+                "v" + release_metadata.DISPLAY_VERSION + " (deadbee)")
+
+    def test_packaged_build_uses_the_bake_and_never_asks_git(self):
+        # An exe has no checkout; worse, git run from wherever it sits could
+        # answer for an unrelated surrounding repo. The bake is the truth.
+        from launcher import release_metadata
+        fake = types.ModuleType("launcher._build_id")
+        fake.COMMIT = "abc1234"
+        with (mock.patch.dict(sys.modules, {"launcher._build_id": fake}),
+              mock.patch.object(release_metadata.sys, "frozen", True,
+                                create=True),
+              mock.patch("subprocess.check_output") as git_mock):
+            self.assertEqual(release_metadata.build_commit(), "abc1234")
+            git_mock.assert_not_called()
+
+    def test_source_falls_back_to_the_bake_when_git_is_unavailable(self):
+        from launcher import release_metadata
+        fake = types.ModuleType("launcher._build_id")
+        fake.COMMIT = "abc1234"
+        with (mock.patch.dict(sys.modules, {"launcher._build_id": fake}),
+              mock.patch("subprocess.check_output", side_effect=OSError)):
+            self.assertEqual(release_metadata.build_commit(), "abc1234")
 
     def test_unknown_commit_shows_the_bare_version(self):
         from launcher import release_metadata
