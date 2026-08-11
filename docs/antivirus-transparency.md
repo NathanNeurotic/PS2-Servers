@@ -85,7 +85,11 @@ The Windows SMB server uses PS2 Servers' own SMB/CIFS implementation. It does no
   created by the app use the prefix `PS2 Servers - ...` and can be removed from
   the GUI or with the command below. The firewall logic runs as inline
   PowerShell (`-Command`, not a `.ps1` script file) and does **not** pass
-  `-ExecutionPolicy Bypass`.
+  `-ExecutionPolicy Bypass`. The one exception is the standalone
+  `smbv1_server/Start-SMB-Server.bat`: it creates its single
+  `PS2 Servers - SMB Server` rule through an elevated inline PowerShell that
+  **does** pass `-ExecutionPolicy Bypass` (the batch file cannot otherwise run
+  PowerShell on machines with a restrictive policy).
 - **Windows file-sharing service:** the optional, off-by-default "Take port 445"
   SMB mode temporarily **stops** the Windows `LanmanServer` service while that
   server runs and **restarts it on exit**. It only stops the service (never

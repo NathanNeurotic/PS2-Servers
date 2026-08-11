@@ -57,9 +57,11 @@ goto askfolder
 :run
 REM --- one-time: allow the port through Windows Firewall (you'll see a single admin prompt) ---
 REM NOTE: the rule was once named 'RiptOPL SMB Server'; a machine that ran the old script
-REM keeps that (harmless duplicate) allow-rule -- this script only adds the new one.
+REM keeps that (harmless duplicate) allow-rule, which the cleanup tools do not match.
+REM Remove it once from an elevated prompt:
+REM   powershell -Command "Get-NetFirewallRule -DisplayName 'RiptOPL SMB Server' | Remove-NetFirewallRule"
 echo   Checking Windows Firewall (a one-time "Yes" admin prompt may appear)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "if (-not (Get-NetFirewallRule -DisplayName 'PS2 Servers SMB Server' -EA SilentlyContinue)) { try { Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-Command','New-NetFirewallRule -DisplayName ''PS2 Servers SMB Server'' -Direction Inbound -Protocol TCP -LocalPort %PORT% -Action Allow -Profile Private,Domain' -Wait } catch { Write-Host '  (skipped -- if OPL cannot connect, allow TCP %PORT% inbound manually)' } }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if (-not (Get-NetFirewallRule -DisplayName 'PS2 Servers - SMB Server' -EA SilentlyContinue)) { try { Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-Command','New-NetFirewallRule -DisplayName ''PS2 Servers - SMB Server'' -Direction Inbound -Protocol TCP -LocalPort %PORT% -Action Allow -Profile Private,Domain' -Wait } catch { Write-Host '  (skipped -- if OPL cannot connect, allow TCP %PORT% inbound manually)' } }"
 echo.
 echo   Games folder : %GAMES%
 echo   Port         : %PORT%

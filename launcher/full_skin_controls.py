@@ -139,9 +139,9 @@ def install(app, gui):
         card = app_obj.cards.get(key)
         if not card:
             return
-        app_obj._save()
+        saved = app_obj._save()
         flash = getattr(card, "_saved_flash", None)
-        if flash is not None:
+        if saved and flash is not None:
             app_obj._flash_label(flash, "Saved ✓")
         card.refresh_status(app_obj.is_running(key))
         label = gui.TAB_TITLES.get(key, key.upper())
@@ -180,11 +180,11 @@ def install(app, gui):
         app_obj.start_server(key)
 
     def revert_server_defaults(app_obj, key):
-        app_obj._save()
+        saved = app_obj._save()
         card = app_obj.cards.get(key)
         if card:
             flash = getattr(card, "_saved_flash", None)
-            if flash is not None:
+            if saved and flash is not None:
                 app_obj._flash_label(flash, "Defaults restored ✓")
             card.refresh_status(app_obj.is_running(key))
         label = gui.TAB_TITLES.get(key, key.upper())

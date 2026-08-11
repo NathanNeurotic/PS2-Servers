@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -83,6 +84,22 @@ class SettingsFeedbackTest(unittest.TestCase):
         card = app.cards["udpfs"]
         card.revert_to_defaults()
         self.assertEqual(card._saved_flash.cget("text"), "Defaults restored ✓")
+
+    def test_apply_does_not_flash_when_the_save_fails(self):
+        # _save() returns False when the config cannot be written; claiming
+        # "Saved" then would be a lie the user acts on at the next launch.
+        gui, app = self._make_app()
+        card = app.cards["udpfs"]
+        with mock.patch.object(app, "_save", return_value=False):
+            card.apply_page_settings()
+        self.assertEqual(card._saved_flash.cget("text"), "")
+
+    def test_revert_does_not_flash_when_the_save_fails(self):
+        gui, app = self._make_app()
+        card = app.cards["udpfs"]
+        with mock.patch.object(app, "_save", return_value=False):
+            card.revert_to_defaults()
+        self.assertEqual(card._saved_flash.cget("text"), "")
 
     def test_ip_commit_flashes_saved(self):
         gui, app = self._make_app()

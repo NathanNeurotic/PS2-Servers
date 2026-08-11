@@ -59,6 +59,21 @@ Then in OPL → **Settings → Network**:
 
 Save, and your network games should populate from the share.
 
+## Windows Firewall
+
+On first run the `.bat` offers to add a single inbound allow-rule named
+`PS2 Servers - SMB Server` (for the printed port). It uses the same `PS2 Servers - `
+prefix as the main launcher, so the launcher's **Remove PS2 Servers firewall rules**
+button and `tools/remove-windows-firewall-rules.ps1` both remove it.
+
+Releases from before the rebrand named that rule `RiptOPL SMB Server`. Such a leftover
+rule is harmless (a duplicate allow), but the cleanup tools do **not** match it — remove
+it once from an elevated PowerShell:
+
+```powershell
+Get-NetFirewallRule -DisplayName 'RiptOPL SMB Server' | Remove-NetFirewallRule
+```
+
 ## Options
 
 ```

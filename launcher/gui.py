@@ -2780,6 +2780,19 @@ class LauncherApp:
                 "Turn Direct Link off before resetting settings, so your "
                 "network port is restored to its normal settings.")
             return
+        if direct_cfg.get("server_ip"):
+            # Off, but the user chose to keep the fixed address: the port is
+            # still static and this config is the only record of it (the
+            # firewall-cleanup path makes the same call on server_ip, not
+            # enabled). Wiping it strands the adapter exactly the same way.
+            messagebox.showwarning(
+                "Reset settings",
+                "The direct-link port '{}' still uses the fixed address {}. "
+                "Tick Direct Link on, then untick it and choose \"Yes\" to "
+                "return the port to automatic (DHCP) before resetting "
+                "settings.".format(direct_cfg.get("adapter", "?"),
+                                   direct_cfg.get("server_ip")))
+            return
         if not messagebox.askyesno(
                 "Reset all settings?",
                 "Every server page, saved folder and port, the IP choice and "
@@ -2790,7 +2803,12 @@ class LauncherApp:
             return
         if not self._confirm_app_shutdown("Reset settings?"):
             return
-        config.reset()
+        try:
+            config.reset()
+        except OSError as e:
+            # Nothing was deleted and nothing disowned -- stay put and say so.
+            messagebox.showerror("Reset failed", str(e))
+            return
         self.saved = {}
         self._config_reset = True
         try:

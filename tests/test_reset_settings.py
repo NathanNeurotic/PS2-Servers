@@ -141,6 +141,48 @@ class ResetSettingsGUITest(unittest.TestCase):
         self.assertTrue(os.path.exists(config.config_path()))
         self.assertFalse(app._config_reset)
 
+    def test_reset_refused_with_retained_static_address(self):
+        # "Turn off Direct Link but keep the fixed address" saves enabled=False
+        # with the adapter metadata still attached: the port is still static,
+        # and this config is the only thing that knows how to undo that.
+        gui, app = self._make_app()
+        from launcher import config
+        stale = {"enabled": False, "adapter": "Ethernet", "server_ip": "10.0.0.1"}
+        config.save({"direct_link": dict(stale)})
+        app.saved["direct_link"] = dict(stale)
+
+        with (mock.patch.object(gui.messagebox, "askyesno") as ask_mock,
+              mock.patch.object(gui.messagebox, "showwarning") as warn_mock,
+              mock.patch.object(gui.subprocess, "Popen") as popen_mock):
+            app.reset_settings()
+
+        warn_mock.assert_called_once()
+        ask_mock.assert_not_called()  # refused before the confirm prompt
+        popen_mock.assert_not_called()
+        self.assertTrue(os.path.exists(config.config_path()))
+        self.assertFalse(app._config_reset)
+
+    def test_reset_delete_failure_keeps_everything(self):
+        # A config that cannot be deleted (permissions, another process holding
+        # it) must surface as an error, not escape the Tk callback -- and the
+        # restart must not happen, or the app would come back on defaults while
+        # the old config still sits on disk.
+        gui, app = self._make_app()
+        from launcher import config
+        config.save({"servers": {"udpfs": {"root": "/keep"}}})
+
+        with (mock.patch.object(gui.messagebox, "askyesno", return_value=True),
+              mock.patch.object(gui.messagebox, "showerror") as err_mock,
+              mock.patch.object(gui.config, "reset",
+                                side_effect=PermissionError("locked")),
+              mock.patch.object(gui.subprocess, "Popen") as popen_mock):
+            app.reset_settings()
+
+        err_mock.assert_called_once()
+        popen_mock.assert_not_called()
+        self.assertTrue(os.path.exists(config.config_path()))
+        self.assertFalse(app._config_reset)
+
     def test_reset_restart_failure_restores_settings(self):
         gui, app = self._make_app()
         from launcher import config
