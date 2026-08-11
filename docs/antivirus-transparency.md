@@ -67,7 +67,7 @@ published per platform for convenience. macOS already ships as a standalone
 PS2 Servers only exposes local server behavior that the user chooses from the
 GUI:
 
-- SMBv1/RiptOPL: built-in SMB/CIFS subset, normally TCP port 1111. (Ports below 1033 are discouraged — Windows can reserve or block low ports.)
+- SMBv1: built-in SMB/CIFS subset, normally TCP port 1111. (Ports below 1033 are discouraged — Windows can reserve or block low ports.)
 - UDPFS: UDP file/block serving, normally UDP port 0xF5F6 for discovery. Each console is then served on a second UDP port, which the OS assigns on startup unless the user pins it ("Data port"); single-port and Modulo modes serve everything on the discovery port instead. All of it is inbound LAN serving — the server never initiates a connection.
 - UDPBD: UDP block-device serving, normally UDP port 0xBDBD.
 
@@ -85,7 +85,11 @@ The Windows SMB server uses PS2 Servers' own SMB/CIFS implementation. It does no
   created by the app use the prefix `PS2 Servers - ...` and can be removed from
   the GUI or with the command below. The firewall logic runs as inline
   PowerShell (`-Command`, not a `.ps1` script file) and does **not** pass
-  `-ExecutionPolicy Bypass`.
+  `-ExecutionPolicy Bypass`. The one exception is the standalone
+  `smbv1_server/Start-SMB-Server.bat`: it creates its single
+  `PS2 Servers - SMB Server` rule through an elevated inline PowerShell that
+  **does** pass `-ExecutionPolicy Bypass` (the batch file cannot otherwise run
+  PowerShell on machines with a restrictive policy).
 - **Windows file-sharing service:** the optional, off-by-default "Take port 445"
   SMB mode temporarily **stops** the Windows `LanmanServer` service while that
   server runs and **restarts it on exit**. It only stops the service (never

@@ -59,18 +59,24 @@ def install(app, gui):
             font=("", 9, "bold"),
         ).grid(row=0, column=0, sticky="w", pady=(6, 0))
 
+        # Transient "Saved ✓" / "Defaults restored ✓" next to the buttons that
+        # caused it: an Apply that only logs a line reads as "nothing happened".
+        flash = gui.ttk.Label(actions, text="", style="PageActions.TLabel")
+        flash.grid(row=0, column=1, sticky="e", padx=(8, 0), pady=(6, 0))
+        card._saved_flash = flash
+
         gui.ttk.Button(
             actions,
             text="Revert to Default",
             command=lambda c=card: c.revert_to_defaults(),
-        ).grid(row=0, column=1, sticky="e", padx=(8, 0), pady=(6, 0))
+        ).grid(row=0, column=2, sticky="e", padx=(8, 0), pady=(6, 0))
 
         gui.ttk.Button(
             actions,
             text="Apply",
             style="Accent.TButton",
             command=lambda c=card: c.apply_page_settings(),
-        ).grid(row=0, column=2, sticky="e", padx=(8, 0), pady=(6, 0))
+        ).grid(row=0, column=3, sticky="e", padx=(8, 0), pady=(6, 0))
 
     def build_with_page_actions(card):
         original_build(card)
@@ -133,7 +139,10 @@ def install(app, gui):
         card = app_obj.cards.get(key)
         if not card:
             return
-        app_obj._save()
+        saved = app_obj._save()
+        flash = getattr(card, "_saved_flash", None)
+        if saved and flash is not None:
+            app_obj._flash_label(flash, "Saved ✓")
         card.refresh_status(app_obj.is_running(key))
         label = gui.TAB_TITLES.get(key, key.upper())
         app_obj._append_log("setup", "[settings] applied {} page settings\n".format(label))
@@ -171,9 +180,12 @@ def install(app, gui):
         app_obj.start_server(key)
 
     def revert_server_defaults(app_obj, key):
-        app_obj._save()
+        saved = app_obj._save()
         card = app_obj.cards.get(key)
         if card:
+            flash = getattr(card, "_saved_flash", None)
+            if saved and flash is not None:
+                app_obj._flash_label(flash, "Defaults restored ✓")
             card.refresh_status(app_obj.is_running(key))
         label = gui.TAB_TITLES.get(key, key.upper())
         app_obj._append_log("setup", "[settings] reverted {} page to defaults\n".format(label))

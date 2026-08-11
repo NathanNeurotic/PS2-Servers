@@ -170,7 +170,7 @@ def main():
         "Windows executable: PS2Servers.exe",
         "Windows release package: PS2Servers-windows-x64.zip",
         "32-bit Windows release package: PS2Servers-windows-x86.zip",
-        "SMBv1/RiptOPL",
+        "SMBv1: built-in SMB/CIFS subset",
         "TCP port 1111",
         "UDP port 0xF5F6",
         "UDP port 0xBDBD",

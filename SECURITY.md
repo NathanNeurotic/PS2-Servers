@@ -38,7 +38,7 @@ risk and makes antivirus heuristics more suspicious.
 
 ## Windows SMB behavior
 
-The SMBv1/RiptOPL server does **not** enable or depend on Windows' built-in SMB1
+The SMBv1 server does **not** enable or depend on Windows' built-in SMB1
 optional feature tree.
 
 Normal SMB mode uses PS2 Servers' own small SMB/CIFS implementation and listens

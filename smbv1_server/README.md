@@ -1,4 +1,4 @@
-# RiptOPL SMBv1 server
+# PS2 Servers SMBv1 server
 
 A tiny, dependency-free **SMBv1/CIFS server** that Open-PS2-Loader (and forks) can browse and
 load games from — so SMB keeps working even on hosts where the OS has killed SMBv1.
@@ -40,7 +40,7 @@ python smbserver_opl.py --share games=D:/PS2Games
 It prints something like:
 
 ```
- RiptOPL SMBv1 server -- listening on 0.0.0.0:1111
+ PS2 Servers SMBv1 server -- listening on 0.0.0.0:1111
  In OPL  ->  SMB Server IP: 192.168.1.50   Port: 1111   User: guest   Password: blank
             Share: games   ->   D:\PS2Games   (writable)
  (writable -- OPL can save settings + VMC-on-SMB here; pass --read-only to lock it)
@@ -58,6 +58,21 @@ Then in OPL → **Settings → Network**:
 | Password         | **blank** (leave empty)                |
 
 Save, and your network games should populate from the share.
+
+## Windows Firewall
+
+On first run the `.bat` offers to add a single inbound allow-rule named
+`PS2 Servers - SMB Server` (for the printed port). It uses the same `PS2 Servers - `
+prefix as the main launcher, so the launcher's **Remove PS2 Servers firewall rules**
+button and `tools/remove-windows-firewall-rules.ps1` both remove it.
+
+Releases from before the rebrand named that rule `RiptOPL SMB Server`. Such a leftover
+rule is harmless (a duplicate allow), but the cleanup tools do **not** match it — remove
+it once from an elevated PowerShell:
+
+```powershell
+Get-NetFirewallRule -DisplayName 'RiptOPL SMB Server' | Remove-NetFirewallRule
+```
 
 ## Options
 

@@ -89,7 +89,7 @@ runs the dashboard as root; that is a real trade, which is why it is a choice.
 PS2 Servers is an open-source PS2 homebrew utility for user-controlled local
 server setup. It runs local LAN servers for Open PS2 Loader:
 
-- **SMBv1/RiptOPL** — built-in SMB/CIFS subset, normally TCP port `1111`
+- **SMBv1** — built-in SMB/CIFS subset, normally TCP port `1111`
   (below 1033 discouraged).
 - **SMB2/SMB3** — a separate, newer server for clients that speak them,
   off by default and with NTLMv2 authentication when credentials are set.

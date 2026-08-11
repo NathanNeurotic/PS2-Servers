@@ -17,11 +17,11 @@ from Rick Gaiser's Neutrino project, which is licensed under AFL-3.0.
 The following parts are original to this repository unless otherwise noted:
 
 - the Tkinter GUI launcher and tray/Windows setup glue;
-- the RiptOPL SMBv1/CIFS server implementation in `smbv1_server/`;
+- the SMBv1/CIFS server implementation in `smbv1_server/`;
 - the pure-Python UDPBD server in `udpbd_server/udpbd_server.py`;
 - release/build workflow glue and project documentation.
 
-The RiptOPL SMBv1 server was authored from public protocol documentation and
+The SMBv1 server was authored from public protocol documentation and
 Open PS2 Loader protocol/header behavior. No third-party SMB server source code
 was copied into that implementation.
 

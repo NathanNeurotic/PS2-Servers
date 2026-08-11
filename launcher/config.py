@@ -53,3 +53,12 @@ def save(data):
         except OSError:
             pass
         raise
+
+
+def reset():
+    """Delete the persisted settings file. A missing file is already 'reset',
+    so it is not an error."""
+    try:
+        os.remove(config_path())
+    except FileNotFoundError:
+        pass
