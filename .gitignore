@@ -14,6 +14,9 @@ env/
 # Icon generated at build time by build/build.py (app_icon.write_ico)
 build/PS2Servers.ico
 
+# Commit hash baked at build time by build/build.py (About tab version label)
+launcher/_build_id.py
+
 # OS cruft
 Thumbs.db
 .DS_Store
