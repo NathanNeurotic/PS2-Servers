@@ -12,7 +12,7 @@ PRODUCT_NAME = APP_NAME
 # reject anything that is not a dotted number. A pre-release qualifier like
 # "-rc1" lives in VERSION_QUALIFIER instead and is shown to the user via
 # DISPLAY_VERSION, never handed to the build.
-PRODUCT_VERSION = "0.5.3"
+PRODUCT_VERSION = "0.6.0"
 FILE_VERSION = PRODUCT_VERSION
 # "" for a normal release; "-rc1" / "-beta1" while a version is under test.
 VERSION_QUALIFIER = ""
