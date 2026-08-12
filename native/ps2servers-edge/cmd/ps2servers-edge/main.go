@@ -33,7 +33,8 @@ func usage() {
 		"  ps2servers-edge udpbd --image /path/ps2.img [options]\n"+
 		"  ps2servers-edge smb --share games=/games [options]\n"+
 		"  ps2servers-edge webui [options]\n"+
-		"  ps2servers-edge --version\n\n"+
+		"  ps2servers-edge --version\n"+
+		"  ps2servers-edge --dump-schema\n\n"+
 		"  udpfs serves a folder as a network file share.\n"+
 		"  udpbd serves one disk image as a network hard drive.\n"+
 		"  smb   serves folders over SMBv1, for OPL's game list and POPSTARTER.\n"+
@@ -72,6 +73,15 @@ func applyMemoryLimit() {
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "version") {
 		fmt.Printf("ps2servers-edge %s\n", version)
+		return
+	}
+	// The UCI/JSON config contract as JSON, for firmware and tooling that
+	// generates the config and needs to validate against this exact binary.
+	if len(os.Args) == 2 && (os.Args[1] == "--dump-schema" || os.Args[1] == "dump-schema") {
+		if err := webui.WriteSchema(os.Stdout, version); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
 		return
 	}
 	// Before either server starts, so both are covered.
