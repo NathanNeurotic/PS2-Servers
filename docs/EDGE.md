@@ -43,7 +43,16 @@ Compressed images:
 Observability & Web Management:
 
 - `--metrics` — log periodic transfer counters
-- `--metrics-period 1m` — how often, from `1s` to `24h`
+- `--metrics-period 1m` — how often, from `1s` to `24h`; parsed (and validated) only when `--metrics` is on
+
+Tooling & automation:
+
+- `--version` — print the version and exit
+- `--dump-schema` — print the whole configuration contract as JSON: every
+  section and option of `/etc/config/ps2servers-edge` with its type, default,
+  range, and which layer rejects a bad value. Firmware and provisioning tools
+  that generate the config should validate against this output from the exact
+  binary they ship; section and option names are additive-only across updates.
 
 Web UI:
 

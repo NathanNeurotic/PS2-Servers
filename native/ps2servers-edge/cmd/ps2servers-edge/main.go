@@ -33,7 +33,8 @@ func usage() {
 		"  ps2servers-edge udpbd --image /path/ps2.img [options]\n"+
 		"  ps2servers-edge smb --share games=/games [options]\n"+
 		"  ps2servers-edge webui [options]\n"+
-		"  ps2servers-edge --version\n\n"+
+		"  ps2servers-edge --version\n"+
+		"  ps2servers-edge --dump-schema\n\n"+
 		"  udpfs serves a folder as a network file share.\n"+
 		"  udpbd serves one disk image as a network hard drive.\n"+
 		"  smb   serves folders over SMBv1, for OPL's game list and POPSTARTER.\n"+
@@ -51,6 +52,22 @@ func duration(v string) (time.Duration, error) {
 		return 0, fmt.Errorf("expected Go duration (1h, 30m) or seconds")
 	}
 	return time.Duration(seconds * float64(time.Second)), nil
+}
+
+// parseMetricsPeriod reads --metrics-period, but only when metrics are on:
+// with them off the value is never parsed, so anything (even garbage) is
+// accepted. --dump-schema states the same condition via applies_when, so a
+// provisioning tool does not reject a disabled-metrics config the binary
+// would happily run.
+func parseMetricsPeriod(enabled bool, period string) (time.Duration, error) {
+	if !enabled {
+		return 0, nil
+	}
+	every, err := duration(period)
+	if err != nil || every < time.Second || every > 24*time.Hour {
+		return 0, fmt.Errorf("--metrics-period must be between 1s and 24h")
+	}
+	return every, nil
 }
 
 // applyMemoryLimit gives the collector a ceiling on machines small enough for
@@ -72,6 +89,15 @@ func applyMemoryLimit() {
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "version") {
 		fmt.Printf("ps2servers-edge %s\n", version)
+		return
+	}
+	// The UCI/JSON config contract as JSON, for firmware and tooling that
+	// generates the config and needs to validate against this exact binary.
+	if len(os.Args) == 2 && (os.Args[1] == "--dump-schema" || os.Args[1] == "dump-schema") {
+		if err := webui.WriteSchema(os.Stdout, version); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
 		return
 	}
 	// Before either server starts, so both are covered.
@@ -196,13 +222,10 @@ func main() {
 	if *txDelayMs > 0 {
 		txDelay = time.Duration(*txDelayMs * float64(time.Millisecond))
 	}
-	var metricsEvery time.Duration
-	if *metrics {
-		metricsEvery, err = duration(*metricsPeriod)
-		if err != nil || metricsEvery < time.Second || metricsEvery > 24*time.Hour {
-			fmt.Fprintln(os.Stderr, "error: --metrics-period must be between 1s and 24h")
-			os.Exit(2)
-		}
+	metricsEvery, err := parseMetricsPeriod(*metrics, *metricsPeriod)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(2)
 	}
 	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
 	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, MetricsPeriod: metricsEvery, BlockDevice: *blockDevice, SectorSize: *sectorSize, NoCompression: *noCompression, CompressionCache: *compressionCache, Log: logger, ServerName: "PS2 Servers Edge"})
