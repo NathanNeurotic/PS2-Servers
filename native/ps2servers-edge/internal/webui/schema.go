@@ -39,6 +39,17 @@ const (
 	EnforcedByServer = "server"
 )
 
+// schema_version history (the additive-only rule: consumers must keep working
+// when a new version appears):
+//
+//	1 -- initial
+//	2 -- FieldSpec gained "applies_when": the name of a sibling bool option
+//	     that must be enabled before the field's constraints (and value)
+//	     matter at all. metrics_period is the first user: the server parses
+//	     it only when metrics is on, so an unconditional range would have a
+//	     validator reject disabled-metrics configs the binary accepts.
+const schemaVersion = 2
+
 type FieldSpec struct {
 	Name       string   `json:"name"`
 	Type       string   `json:"type"`
@@ -51,6 +62,9 @@ type FieldSpec struct {
 	MinValue   string   `json:"min_value,omitempty"`   // duration lower bound
 	MaxValue   string   `json:"max_value,omitempty"`   // duration upper bound
 	EnforcedBy string   `json:"enforced_by,omitempty"`
+	// A sibling bool option that gates this field's constraints. Empty means
+	// unconditional.
+	AppliesWhen string `json:"applies_when,omitempty"`
 }
 
 type SectionSpec struct {
@@ -77,7 +91,7 @@ func inum(v int) *int         { return &v }
 // must equal DefaultConfig() -- the test walks both.
 func schema(version string) *Schema {
 	return &Schema{
-		SchemaVersion: 1,
+		SchemaVersion: schemaVersion,
 		Binary:        "ps2servers-edge",
 		Version:       version,
 		ConfigFile:    "/etc/config/ps2servers-edge",
@@ -105,7 +119,7 @@ func schema(version string) *Schema {
 					{Name: "no_compression", Type: TypeBool, Default: false, Doc: "serve CSO/ZSO as raw bytes. Diagnostic only -- games do not load this way"},
 					{Name: "compression_cache_size", Type: TypeInt, Default: 32, Min: fnum(0), Max: fnum(4096), EnforcedBy: EnforcedByServer, Doc: "decompressed blocks cached per open image; 0 disables"},
 					{Name: "metrics", Type: TypeBool, Default: false, Doc: "log periodic transfer counters to syslog"},
-					{Name: "metrics_period", Type: TypeDuration, Default: "1m", MinValue: "1s", MaxValue: "24h", EnforcedBy: EnforcedByServer, Doc: "how often metrics are logged; only used when metrics is 1"},
+					{Name: "metrics_period", Type: TypeDuration, Default: "1m", MinValue: "1s", MaxValue: "24h", EnforcedBy: EnforcedByServer, AppliesWhen: "metrics", Doc: "how often metrics are logged; only used when metrics is 1"},
 				},
 			},
 			{

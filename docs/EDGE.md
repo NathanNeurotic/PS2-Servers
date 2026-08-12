@@ -43,7 +43,7 @@ Compressed images:
 Observability & Web Management:
 
 - `--metrics` — log periodic transfer counters
-- `--metrics-period 1m` — how often, from `1s` to `24h`
+- `--metrics-period 1m` — how often, from `1s` to `24h`; parsed (and validated) only when `--metrics` is on
 
 Tooling & automation:
 

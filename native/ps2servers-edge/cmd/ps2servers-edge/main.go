@@ -54,6 +54,22 @@ func duration(v string) (time.Duration, error) {
 	return time.Duration(seconds * float64(time.Second)), nil
 }
 
+// parseMetricsPeriod reads --metrics-period, but only when metrics are on:
+// with them off the value is never parsed, so anything (even garbage) is
+// accepted. --dump-schema states the same condition via applies_when, so a
+// provisioning tool does not reject a disabled-metrics config the binary
+// would happily run.
+func parseMetricsPeriod(enabled bool, period string) (time.Duration, error) {
+	if !enabled {
+		return 0, nil
+	}
+	every, err := duration(period)
+	if err != nil || every < time.Second || every > 24*time.Hour {
+		return 0, fmt.Errorf("--metrics-period must be between 1s and 24h")
+	}
+	return every, nil
+}
+
 // applyMemoryLimit gives the collector a ceiling on machines small enough for
 // it to matter.
 //
@@ -206,13 +222,10 @@ func main() {
 	if *txDelayMs > 0 {
 		txDelay = time.Duration(*txDelayMs * float64(time.Millisecond))
 	}
-	var metricsEvery time.Duration
-	if *metrics {
-		metricsEvery, err = duration(*metricsPeriod)
-		if err != nil || metricsEvery < time.Second || metricsEvery > 24*time.Hour {
-			fmt.Fprintln(os.Stderr, "error: --metrics-period must be between 1s and 24h")
-			os.Exit(2)
-		}
+	metricsEvery, err := parseMetricsPeriod(*metrics, *metricsPeriod)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(2)
 	}
 	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
 	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, MetricsPeriod: metricsEvery, BlockDevice: *blockDevice, SectorSize: *sectorSize, NoCompression: *noCompression, CompressionCache: *compressionCache, Log: logger, ServerName: "PS2 Servers Edge"})

@@ -189,6 +189,43 @@ func TestSchemaConstraintsAreEnforcedByTheAPI(t *testing.T) {
 	}
 }
 
+func TestMetricsPeriodIsConditionalOnMetrics(t *testing.T) {
+	// The binary parses metrics_period only when metrics is on; an
+	// unconditional range in the schema would have a validator reject
+	// disabled-metrics configs the binary accepts.
+	for _, sec := range schema("test").Sections {
+		if sec.Name != "udpfs" {
+			continue
+		}
+		for _, f := range sec.Fields {
+			if f.Name == "metrics_period" {
+				if f.AppliesWhen != "metrics" {
+					t.Errorf("metrics_period applies_when: got %q, want %q", f.AppliesWhen, "metrics")
+				}
+				return
+			}
+		}
+	}
+	t.Error("udpfs.metrics_period is missing from the schema")
+}
+
+func TestSchemaAppliesWhenReferencesARealBoolSibling(t *testing.T) {
+	for _, sec := range schema("test").Sections {
+		bools := map[string]bool{}
+		for _, f := range sec.Fields {
+			if f.Type == TypeBool {
+				bools[f.Name] = true
+			}
+		}
+		for _, f := range sec.Fields {
+			if f.AppliesWhen != "" && !bools[f.AppliesWhen] {
+				t.Errorf("%s.%s: applies_when %q is not a bool option in this section",
+					sec.Name, f.Name, f.AppliesWhen)
+			}
+		}
+	}
+}
+
 func TestWriteSchemaProducesValidJSON(t *testing.T) {
 	var buf bytes.Buffer
 	if err := WriteSchema(&buf, "v9.9.9-test"); err != nil {
@@ -198,7 +235,7 @@ func TestWriteSchemaProducesValidJSON(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("--dump-schema produced invalid JSON: %v", err)
 	}
-	if doc["schema_version"] != float64(1) {
+	if doc["schema_version"] != float64(schemaVersion) {
 		t.Errorf("schema_version: got %v", doc["schema_version"])
 	}
 	if doc["binary"] != "ps2servers-edge" {
