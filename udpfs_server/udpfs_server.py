@@ -2353,6 +2353,10 @@ class UdpfsServer:
             if len(pkt) < 6:
                 continue
             hdr = Header.unpack(pkt)
+            if hdr.packet_type == PacketType.DISCOVERY:
+                self.tx_buffer = []
+                self._queue_pushback(sess, item)
+                return
             if hdr.packet_type != PacketType.DATA:
                 continue
             data_hdr = DataHeader.unpack(pkt[2:6])
@@ -2398,6 +2402,10 @@ class UdpfsServer:
             if len(pkt) < 6:
                 continue
             hdr = Header.unpack(pkt)
+            if hdr.packet_type == PacketType.DISCOVERY:
+                self.tx_buffer = []
+                self._queue_pushback(sess, item)
+                return False
             if hdr.packet_type != PacketType.DATA:
                 continue
             data_hdr = DataHeader.unpack(pkt[2:6])

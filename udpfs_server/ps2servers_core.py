@@ -248,6 +248,17 @@ class AutoUdpfsServer(UdpfsServer):
 
         if self.protocol_mode == PROFILE_MODULO:
             with sess.compat_lock:
+                now = time.monotonic()
+                last = getattr(sess, '_last_disc', None)
+                if (last is not None and last[0] == hdr.seq_nr and now - last[1] < 2.0):
+                    # Duplicate discovery probe (broadcast + unicast) -- repeat previous INFORM without advancing tx_seq_nr
+                    pkt = (Header(packet_type=PacketType.INFORM,
+                                  seq_nr=(sess.tx_seq_nr - 1) & 0xFFF).pack()
+                           + DiscHeader(service_id=UDPRDMA_SVC_UDPFS, port=0).pack()
+                           + self._info_payload())
+                    self._send_specific(self.sock, pkt, sess.addr)
+                    return
+                sess._last_disc = (hdr.seq_nr, now)
                 sess.rx_seq_nr_expected = (hdr.seq_nr + 1) & 0xFFF
                 sess.response_socket = SOCKET_DISCOVERY
                 self._compatibility_inform(sess)
