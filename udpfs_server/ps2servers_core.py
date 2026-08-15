@@ -491,6 +491,30 @@ def main():
     if enable_compression and not LIBCHDR_AVAILABLE:
         print("Warning: libchdr is unavailable; CHD files stay unadvertised.")
 
+    if args.protocol_mode == PROFILE_MODULO:
+        server = UdpfsServer(
+            root_dir=args.root_dir,
+            block_device=args.block_device,
+            port=args.port,
+            bind_ip=bind_ip,
+            sector_size=args.sector_size,
+            read_only=args.read_only,
+            verbose=args.verbose,
+            enable_compression=enable_compression,
+            compression_cache_size=args.compression_cache_size,
+            peer_timeout=args.peer_timeout,
+            metrics=args.metrics,
+            metrics_period=args.metrics_period,
+            single_port=True,
+            modulo_compat=True,
+            data_port=data_port,
+            tx_delay_ms=args.tx_delay_ms,
+            max_transfer_bytes=args.max_transfer_bytes,
+            max_sessions=args.max_sessions,
+        )
+        server.run()
+        return
+
     server = AutoUdpfsServer(
         root_dir=args.root_dir,
         block_device=args.block_device,

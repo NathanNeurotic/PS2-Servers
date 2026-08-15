@@ -1382,36 +1382,18 @@ class UdpfsServer:
         elif self.verbose:
             self._print_event(
                 f"[{addr[0]}:{addr[1]}] DISCOVERY seq={hdr.seq_nr}")
-        if self.modulo_compat and (not sess.rx_streaming or hdr.seq_nr != 0):
-            # Modulo's client keeps one monotonic sequence for its whole life -- it
-            # never restarts at 0, not even across a server restart -- so the
-            # reset-on-seq-0 path below never fires for it and every packet is NACKed
-            # forever. Its own server resyncs off the DISCOVERY instead, so do that.
-            #
-            # But not out from under a running stream. Modulo keeps a background
-            # DISCOVERY going while it reads: on hardware one carrying seq=0 arrived
-            # mid-transfer while the data stream was at 77, and resyncing on it left
-            # us demanding 1 forever -- the transfer desynced, exhausted its retries
-            # and stalled, over and over. The client carries straight on after those
-            # discoveries, which is what proves they re-establish nothing.
-            #
-            # seq != 0 is the exception, and it has to be: a console that soft-reboots
-            # mid-session comes back streaming with a non-zero counter, which the
-            # reset-on-seq-0 path cannot catch either -- so keying only on
-            # rx_streaming would strand it until the peer timeout reaped it, an hour
-            # by default. That is the very lockout this mode exists to fix. Every
-            # background discovery observed on hardware carried seq=0, so the two
-            # cases separate cleanly -- on one sample, which is worth knowing if a
-            # stall ever reappears at a non-zero discovery.
-            #
-            # Assigned on the session, not through the _session_prop proxies: we are
-            # on the demux thread, where _local.session is unset.
+        if self.modulo_compat:
+            now = time.monotonic()
+            last = getattr(sess, '_last_disc', None)
+            if (last is not None and last[0] == hdr.seq_nr and now - last[1] < 2.0):
+                # Duplicate discovery probe (broadcast + unicast) -- repeat previous INFORM without advancing tx_seq_nr
+                hdr_inform = Header(packet_type=PacketType.INFORM, seq_nr=(sess.tx_seq_nr - 1) & 0xFFF)
+                disc = DiscHeader(service_id=UDPRDMA_SVC_UDPFS, port=0)
+                self._sendto(hdr_inform.pack() + disc.pack() + self._info_payload(), addr)
+                return
+            sess._last_disc = (hdr.seq_nr, now)
             sess.rx_seq_nr_expected = (hdr.seq_nr + 1) & 0xFFF
-        # Verbose-only: this fires for every broadcast, and both client families
-        # keep discovery running for the life of a transfer, so at default
-        # verbosity it buries the transfer log. The first-contact line above
-        # already gives the default visibility that matters -- proof a console
-        # reached us, and from which address.
+
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY -> INFORM")
         self._send_inform(addr, sess)
