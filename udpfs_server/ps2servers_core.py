@@ -253,7 +253,7 @@ class AutoUdpfsServer(UdpfsServer):
                 self._compatibility_inform(sess)
             return
 
-        quiet = time.monotonic() - sess.last_rx
+        quiet = time.monotonic() - getattr(sess, "last_activity", 0.0)
         with sess.compat_lock:
             # Active clients can keep discovery traffic running in parallel with
             # reads. Never reset or interfere with an active stream. After a quiet
