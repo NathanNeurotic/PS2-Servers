@@ -178,8 +178,6 @@ class AutoUdpfsServer(UdpfsServer):
         self._send_specific(self.dsock, hdr.pack() + disc.pack(), addr)
 
     def _compatibility_inform(self, sess):
-        if sess.fallback_sent:
-            return
         hdr = Header(packet_type=PacketType.INFORM, seq_nr=sess.tx_seq_nr)
         disc = DiscHeader(service_id=UDPRDMA_SVC_UDPFS, port=0)
         packet = hdr.pack() + disc.pack() + self._info_payload()
@@ -198,13 +196,14 @@ class AutoUdpfsServer(UdpfsServer):
             with sess.compat_lock:
                 if (sess.protocol_profile != PROFILE_PENDING
                         or sess.first_data_seen
-                        or sess.rx_streaming):
+                        or sess.rx_streaming
+                        or sess.fallback_sent):
                     return
                 self._compatibility_inform(sess)
 
         threading.Thread(
             target=send_later,
-            name=f"udpfs-fallback-{sess.addr[0]}:{sess.addr[1]}",
+            name=f"fallback-{sess.addr[0]}:{sess.addr[1]}-{generation}",
             daemon=True,
         ).start()
 
@@ -221,14 +220,11 @@ class AutoUdpfsServer(UdpfsServer):
             disc = DiscHeader.unpack(data[2:6])
         except (struct.error, ValueError):
             return
-        if (hdr.packet_type != PacketType.DISCOVERY
-                or disc.service_id != UDPRDMA_SVC_UDPFS):
+        if disc.service_id != UDPRDMA_SVC_UDPFS:
             return
 
         with self.sessions_lock:
             existing = self.sessions.get(addr)
-            quiet = (time.monotonic() - existing.last_activity
-                     if existing is not None else float("inf"))
         self.stats["discovery"] += 1
 
         # First contact from a console is the most useful line this server can
@@ -242,15 +238,22 @@ class AutoUdpfsServer(UdpfsServer):
         # Only first contact is announced: both client families keep
         # broadcasting discovery for the life of a transfer, so logging every one
         # would bury the transfer log. --verbose shows them all.
-        first_contact = existing is None
-
         sess = self._get_or_create_session(addr)
 
-        if first_contact:
+        if existing is None:
             self._print_event(
                 f"[{addr[0]}:{addr[1]}] DISCOVERY received -- console found this server")
         elif self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY seq={hdr.seq_nr}")
+
+        if self.protocol_mode == PROFILE_MODULO:
+            with sess.compat_lock:
+                sess.rx_seq_nr_expected = (hdr.seq_nr + 1) & 0xFFF
+                sess.response_socket = SOCKET_DISCOVERY
+                self._compatibility_inform(sess)
+            return
+
+        quiet = time.monotonic() - sess.last_rx
         with sess.compat_lock:
             # Active clients can keep discovery traffic running in parallel with
             # reads. Never reset or interfere with an active stream. After a quiet
@@ -270,12 +273,6 @@ class AutoUdpfsServer(UdpfsServer):
             if self.protocol_mode == PROFILE_STANDARD:
                 sess.rx_seq_nr_expected = 0
                 self._canonical_inform(addr)
-                return
-
-            if self.protocol_mode == PROFILE_MODULO:
-                sess.rx_seq_nr_expected = (hdr.seq_nr + 1) & 0xFFF
-                sess.response_socket = SOCKET_DISCOVERY
-                self._compatibility_inform(sess)
                 return
 
             self._canonical_inform(addr)
