@@ -103,6 +103,8 @@ class AutoUdpfsServer(UdpfsServer):
         # Never activate the legacy global mode. Single-port remains an independent
         # topology choice and per-session response sockets are selected below.
         kwargs["modulo_compat"] = False
+        if mode == PROFILE_MODULO:
+            kwargs["single_port"] = True
         super().__init__(*args, **kwargs)
 
     def _init_compat(self, sess: Session) -> Session:
@@ -194,8 +196,7 @@ class AutoUdpfsServer(UdpfsServer):
             if current is not sess:
                 return
             with sess.compat_lock:
-                if (sess.handshake_generation != generation
-                        or sess.protocol_profile != PROFILE_PENDING
+                if (sess.protocol_profile != PROFILE_PENDING
                         or sess.first_data_seen
                         or sess.rx_streaming):
                     return
@@ -251,12 +252,16 @@ class AutoUdpfsServer(UdpfsServer):
         elif self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY seq={hdr.seq_nr}")
         with sess.compat_lock:
-            # Active clients can keep sequence-zero discovery traffic running in
-            # parallel with reads. Reply to it, but never reset that live stream.
-            # After a quiet interval the same endpoint is treated as a replacement.
-            if sess.rx_streaming and hdr.seq_nr == 0 and quiet < 2.0:
-                self._canonical_inform(addr)
-                return
+            # Active clients can keep discovery traffic running in parallel with
+            # reads. Reply to it, but never reset a live stream. After a quiet
+            # interval the same endpoint is treated as a replacement.
+            if sess.rx_streaming and quiet < 2.0:
+                if sess.protocol_profile == PROFILE_MODULO or self.protocol_mode == PROFILE_MODULO:
+                    self._compatibility_inform(sess)
+                    return
+                elif hdr.seq_nr == 0:
+                    self._canonical_inform(addr)
+                    return
 
             initial_profile = (
                 self.protocol_mode if self.protocol_mode != "auto"

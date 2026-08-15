@@ -589,16 +589,36 @@ def classify_adapter(adapter, allow_down=False):
     return True, ""
 
 
-def find_candidates(enumerated):
-    """(candidates, rejected) where rejected is [(adapter, reason), ...]."""
-    candidates, rejected = [], []
+def find_candidates(enumerated, allow_down=True):
+    """(candidates, rejected) where rejected is [(adapter, reason), ...].
+
+    Prioritizes actively-linked ('up') candidates first. If no 'up' adapter
+    qualifies and allow_down is True, falls back to physical wired adapters
+    that are merely not linked yet (e.g. cable unplugged or console switched off),
+    so direct link mode can be enabled ahead of powering on the PS2.
+    """
+    up_candidates, down_candidates, rejected = [], [], []
     for adapter in enumerated["adapters"]:
-        ok, reason = classify_adapter(adapter)
-        if ok:
-            candidates.append(adapter)
+        ok_up, reason_up = classify_adapter(adapter, allow_down=False)
+        if ok_up:
+            up_candidates.append(adapter)
+            continue
+        if allow_down:
+            ok_down, reason_down = classify_adapter(adapter, allow_down=True)
+            if ok_down:
+                down_candidates.append(adapter)
+                continue
+            rejected.append((adapter, reason_down))
         else:
-            rejected.append((adapter, reason))
-    return candidates, rejected
+            rejected.append((adapter, reason_up))
+
+    if up_candidates:
+        for a in down_candidates:
+            rejected.append((a, "no link (cable unplugged, or the console is off)"))
+        return up_candidates, rejected
+    elif down_candidates:
+        return down_candidates, rejected
+    return [], rejected
 
 
 def taken_networks(enumerated, exclude_id=None):
