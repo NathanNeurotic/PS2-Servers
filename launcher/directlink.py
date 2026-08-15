@@ -233,12 +233,16 @@ $addrs = @{}
 foreach ($ip in @(Get-NetIPAddress -AddressFamily IPv4)) {
   $k = [int]$ip.InterfaceIndex
   $state = [string]$ip.AddressState
-  if ($state -eq 'Deprecated' -or $state -eq 'Tentative' -or $state -eq 'Invalid') {
+  $origin = [string]$ip.PrefixOrigin
+  if ($origin -eq 'WellKnown' -or $state -eq 'Invalid') {
+    continue
+  }
+  if ($origin -eq 'Dhcp' -and ($state -eq 'Deprecated' -or ($statuses.ContainsKey($k) -and $statuses[$k] -ne 'Up'))) {
     continue
   }
   if (-not $addrs.ContainsKey($k)) { $addrs[$k] = @() }
   $addrs[$k] += ,@{ ip = [string]$ip.IPAddress; prefix = [int]$ip.PrefixLength;
-                    origin = [string]$ip.PrefixOrigin }
+                    origin = $origin }
 }
 $adapters = @()
 foreach ($a in @(Get-NetAdapter)) {
