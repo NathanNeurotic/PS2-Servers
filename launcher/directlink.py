@@ -972,9 +972,13 @@ def apply_adapter_config(if_index, server_ip, client_ip,
         "$name = $adapter.Name",
         "$mutationStarted = $false",
         "try {",
-        "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Disabled",
+        "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Disabled -ErrorAction SilentlyContinue",
+        "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Disabled -PolicyStore PersistentStore -ErrorAction SilentlyContinue",
         "$mutationStarted = $true",
         "Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
+        "-ErrorAction SilentlyContinue | "
+        "Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
+        "Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PolicyStore PersistentStore "
         "-ErrorAction SilentlyContinue | "
         "Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
         "New-NetIPAddress -InterfaceIndex $idx -IPAddress '{}' -PrefixLength {} "
@@ -988,8 +992,13 @@ def apply_adapter_config(if_index, server_ip, client_ip,
         "    Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
         "-ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false "
         "-ErrorAction SilentlyContinue",
+        "    Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PolicyStore PersistentStore "
+        "-ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false "
+        "-ErrorAction SilentlyContinue",
         "    Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 "
         "-Dhcp Enabled -ErrorAction SilentlyContinue",
+        "    Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 "
+        "-Dhcp Enabled -PolicyStore PersistentStore -ErrorAction SilentlyContinue",
         "    Set-DnsClientServerAddress -InterfaceIndex $idx "
         "-ResetServerAddresses -ErrorAction SilentlyContinue",
         "  }",
@@ -1031,7 +1040,11 @@ def restore_adapter_dhcp(if_index, expect_ip=None):
         "Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
         "-ErrorAction SilentlyContinue | "
         "Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
-        "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Enabled",
+        "Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PolicyStore PersistentStore "
+        "-ErrorAction SilentlyContinue | "
+        "Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
+        "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue",
+        "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Enabled -PolicyStore PersistentStore -ErrorAction SilentlyContinue",
         "Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses "
         "-ErrorAction SilentlyContinue",
         "Write-Output 'RESTORED=automatic (DHCP)'",
