@@ -127,6 +127,12 @@ class ArgvContract(unittest.TestCase):
         self.assertEqual(_mode_in(_argv(protocol_mode="Auto", modulo_mode=True)),
                          "modulo")
 
+    def test_enforce_modulo_checkbox_wins(self):
+        """The visible Enforce Modulo mode checkbox forces modulo mode."""
+        self.assertEqual(_mode_in(_argv(enforce_modulo=True)), "modulo")
+        self.assertEqual(_mode_in(_argv(protocol_mode="Standard", enforce_modulo=True)), "modulo")
+        self.assertIsNone(_mode_in(_argv(enforce_modulo=False)))
+
     def test_every_emitted_value_is_one_the_servers_accept(self):
         for raw in ("Auto", "Standard", "Proper", "Modulo", "standard", "modulo",
                     "auto", "nonsense", None):
