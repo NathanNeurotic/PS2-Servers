@@ -239,6 +239,12 @@ the port afterwards and, if the temporary address is still there, tells you so
 rather than reporting a clean stop; a reboot or a manual removal clears it. If
 anything looks off, untick the box and send the TERMINAL output.
 
+### Troubleshooting IP Conflicts (wLaunchELF & Static IPs)
+
+If server logs show repeated `DISCOVERY received -- console found this server` without connecting, check for a subnet mismatch or static IP conflict on the PS2:
+- **wLaunchELF**: Network settings are stored in `mc0:/SYS-CONF/IPCONFIG.DAT`. If set to a static IP on the wrong subnet (e.g. `192.168.1.10` while on a `192.168.137.x` Direct Link), or if it conflicts with another device, return packets will be dropped by Windows.
+- Update `IPCONFIG.DAT` (or configure network settings in wLaunchELF) to match your subnet or use DHCP.
+
 ## Run a server on its own (terminal)
 
 Each server still runs standalone, and the launcher can run them too:

@@ -174,6 +174,12 @@ You normally do not configure anything on the PS2. On Windows, if the console al
 
 The helper is deliberately paranoid, because a DHCP server answering on a real network could disrupt every device on it. It binds to the direct-link port alone, refuses to run if that port reaches a router or holds a DHCP lease, hands out exactly one address to one console, and stops itself if several devices start asking. Unticking the box stops the helper; on Windows it returns the port to automatic (DHCP) and "Remove PS2 Servers firewall rules" also undoes it, while on Linux and macOS it simply removes the temporary address it added and leaves your existing configuration as it was. Direct link mode works on Windows, and is experimental on Linux and macOS (there it runs the helper as administrator to configure the port and set it back when it stops; if anything looks wrong, untick it and send the TERMINAL output).
 
+Troubleshooting IP conflicts & wLaunchELF
+
+If the server logs show repeated "DISCOVERY received -- console found this server" without completing the connection, check for an IP conflict or stale static IP on your PS2:
+- wLaunchELF saves its network configuration in mc0:/SYS-CONF/IPCONFIG.DAT (and in Configure Network). If wLaunchELF is set to a static IP that conflicts with another device or is on the wrong subnet (e.g. 192.168.1.10 while on a 192.168.137.x direct link), Windows will drop the return packets.
+- Update IPCONFIG.DAT in wLaunchELF to match your subnet or use DHCP to ensure smooth communication.
+
 No terminal required
 
 The buttons in the launcher footer are the normal way to manage PS2 Servers' Windows changes. Use "Allow through firewall" to add or refresh the rules. Use "Remove PS2 Servers firewall rules" to undo them. Use "Stop all" to shut down every running PS2 Servers process from the GUI.
