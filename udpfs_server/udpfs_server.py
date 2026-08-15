@@ -2239,7 +2239,7 @@ class UdpfsServer:
         self._sendto(packet, addr)
 
     def _send_data(self, addr: Tuple[str, int], payload: bytes):
-        """Send DATA packet with payload (single packet, always FIN) and confirm receipt."""
+        """Send DATA packet with payload (single packet RPC reply, always FIN)."""
         padded_size = (len(payload) + 3) & ~3
         padded_payload = payload.ljust(padded_size, b'\x00')
 
@@ -2255,7 +2255,6 @@ class UdpfsServer:
         self.tx_buffer = [(self.tx_seq_nr, packet)]
         self._sendto(packet, addr)
         self.tx_seq_nr = (self.tx_seq_nr + 1) & 0xFFF
-        self._wait_for_final_ack(addr)
 
     def _send_data_packet(self, addr: Tuple[str, int], payload: bytes,
                           fin: bool = False, hdr_size: int = 0):
