@@ -2702,7 +2702,10 @@ class Session:
         self.server._local.session = self
         while not self._closing and not self.server._shutdown:
             try:
-                item = self.server._queue_get(self, timeout=1.0)
+                if getattr(self, "pushback", None):
+                    item = self.pushback.popleft()
+                else:
+                    item = self.queue.get(timeout=1.0)
             except queue.Empty:
                 continue
             if item is None:
