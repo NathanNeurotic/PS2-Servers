@@ -175,7 +175,7 @@ class AutoUdpfsServer(UdpfsServer):
         disc = DiscHeader(
             service_id=UDPRDMA_SVC_UDPFS,
             port=self.dsock.getsockname()[1])
-        self._send_specific(self.dsock, hdr.pack() + disc.pack(), addr)
+        self._send_specific(self.sock, hdr.pack() + disc.pack(), addr)
 
     def _compatibility_inform(self, sess):
         hdr = Header(packet_type=PacketType.INFORM, seq_nr=sess.tx_seq_nr)
