@@ -953,6 +953,7 @@ def apply_adapter_config(if_index, server_ip, client_ip,
     """
     server_ip, _client_ip, prefixlen = _validate_topology(
         server_ip, client_ip, prefixlen)
+    netmask = _prefix_to_netmask(prefixlen)
     script = "\n".join([
         "$ErrorActionPreference = 'Stop'",
         "$idx = {}".format(int(if_index)),
@@ -972,35 +973,16 @@ def apply_adapter_config(if_index, server_ip, client_ip,
         "$name = $adapter.Name",
         "$mutationStarted = $false",
         "try {",
-        "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Disabled -ErrorAction SilentlyContinue",
-        "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Disabled -PolicyStore PersistentStore -ErrorAction SilentlyContinue",
-        "$mutationStarted = $true",
-        "Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
-        "-ErrorAction SilentlyContinue | "
-        "Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
-        "Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PolicyStore PersistentStore "
-        "-ErrorAction SilentlyContinue | "
-        "Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
-        "New-NetIPAddress -InterfaceIndex $idx -IPAddress '{}' -PrefixLength {} "
-        "-ErrorAction Stop | Out-Null".format(server_ip, int(prefixlen)),
-        "Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses "
-        "-ErrorAction SilentlyContinue",
-        "Write-Output ('CONFIGURED=' + $name)",
+        "  $mutationStarted = $true",
+        "  netsh interface ipv4 set address name=$name static '{}' '{}'".format(server_ip, netmask),
+        "  Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses -ErrorAction SilentlyContinue",
+        "  Write-Output ('CONFIGURED=' + $name)",
         "} catch {",
         "  $originalError = $_",
         "  if ($mutationStarted) {",
-        "    Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
-        "-ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false "
-        "-ErrorAction SilentlyContinue",
-        "    Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PolicyStore PersistentStore "
-        "-ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false "
-        "-ErrorAction SilentlyContinue",
-        "    Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 "
-        "-Dhcp Enabled -ErrorAction SilentlyContinue",
-        "    Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 "
-        "-Dhcp Enabled -PolicyStore PersistentStore -ErrorAction SilentlyContinue",
-        "    Set-DnsClientServerAddress -InterfaceIndex $idx "
-        "-ResetServerAddresses -ErrorAction SilentlyContinue",
+        "    netsh interface ipv4 set address name=$name source=dhcp",
+        "    Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue",
+        "    Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses -ErrorAction SilentlyContinue",
         "  }",
         "  throw $originalError",
         "}",
@@ -1036,17 +1018,12 @@ def restore_adapter_dhcp(if_index, expect_ip=None):
         "$ErrorActionPreference = 'Stop'",
         "& {",
         "$idx = {}".format(int(if_index)),
+        "$name = (Get-NetAdapter -InterfaceIndex $idx -ErrorAction Stop).Name",
         guard,
-        "Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
-        "-ErrorAction SilentlyContinue | "
-        "Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
-        "Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PolicyStore PersistentStore "
-        "-ErrorAction SilentlyContinue | "
-        "Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue",
+        "netsh interface ipv4 set address name=$name source=dhcp",
+        "netsh interface ipv4 set dnsservers name=$name source=dhcp",
         "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Enabled -ErrorAction SilentlyContinue",
-        "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Enabled -PolicyStore PersistentStore -ErrorAction SilentlyContinue",
-        "Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses "
-        "-ErrorAction SilentlyContinue",
+        "Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses -ErrorAction SilentlyContinue",
         "Write-Output 'RESTORED=automatic (DHCP)'",
         "}",
     ])
