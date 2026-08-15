@@ -217,14 +217,25 @@ def enumerate_adapters():
 _ENUMERATE_SCRIPT = r"""
 $ErrorActionPreference = 'SilentlyContinue'
 $phys = @{}
-foreach ($a in @(Get-NetAdapter -Physical)) { $phys[[int]$a.ifIndex] = $true }
+$statuses = @{}
+foreach ($a in @(Get-NetAdapter -Physical)) {
+  $phys[[int]$a.ifIndex] = $true
+  $statuses[[int]$a.ifIndex] = [string]$a.Status
+}
 $gws = @{}
 foreach ($r in @(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4)) {
-  $gws[[int]$r.InterfaceIndex] = $true
+  $idx = [int]$r.InterfaceIndex
+  if ($statuses.ContainsKey($idx) -and $statuses[$idx] -eq 'Up') {
+    $gws[$idx] = $true
+  }
 }
 $addrs = @{}
 foreach ($ip in @(Get-NetIPAddress -AddressFamily IPv4)) {
   $k = [int]$ip.InterfaceIndex
+  $state = [string]$ip.AddressState
+  if ($state -eq 'Deprecated' -or $state -eq 'Tentative' -or $state -eq 'Invalid') {
+    continue
+  }
   if (-not $addrs.ContainsKey($k)) { $addrs[$k] = @() }
   $addrs[$k] += ,@{ ip = [string]$ip.IPAddress; prefix = [int]$ip.PrefixLength;
                     origin = [string]$ip.PrefixOrigin }
@@ -571,9 +582,8 @@ def classify_adapter(adapter, allow_down=False):
 
     allow_down tolerates a link that is merely not up -- right for re-checking
     a port that is ALREADY ours (the console being off is the normal state of
-    the world at PC boot, and a down port can receive nothing anyway), wrong
-    for choosing a new one (a dead port tells us nothing about what it is
-    plugged into).
+    the world at PC boot, and a down port can receive nothing anyway), or
+    for selecting a physical wired port before powering on the console.
     """
     media = (adapter.get("media") or "").lower()
     if not adapter.get("physical"):
@@ -946,17 +956,20 @@ def apply_adapter_config(if_index, server_ip, client_ip,
     script = "\n".join([
         "$ErrorActionPreference = 'Stop'",
         "$idx = {}".format(int(if_index)),
-        "if (@(Get-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' "
+        "$adapter = Get-NetAdapter -InterfaceIndex $idx -ErrorAction Stop",
+        "if ($adapter.Status -eq 'Up') {",
+        "  if (@(Get-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' "
         "-AddressFamily IPv4 -ErrorAction SilentlyContinue).Count -gt 0) {",
-        "  throw 'REFUSED: that adapter reaches a router (default gateway); "
+        "    throw 'REFUSED: that adapter reaches a router (default gateway); "
         "it is not a direct PS2 link.'",
-        "}",
-        "if (@(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
+        "  }",
+        "  if (@(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 "
         "-ErrorAction SilentlyContinue | Where-Object { $_.PrefixOrigin -eq 'Dhcp' "
-        "}).Count -gt 0) {",
-        "  throw 'REFUSED: that adapter holds a DHCP lease from a real network.'",
+        "-and $_.AddressState -ne 'Deprecated' }).Count -gt 0) {",
+        "    throw 'REFUSED: that adapter holds a DHCP lease from a real network.'",
+        "  }",
         "}",
-        "$name = (Get-NetAdapter -InterfaceIndex $idx -ErrorAction Stop).Name",
+        "$name = $adapter.Name",
         "$mutationStarted = $false",
         "try {",
         "Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Disabled",
