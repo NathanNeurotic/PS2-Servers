@@ -2687,8 +2687,10 @@ class LauncherApp:
     def _autostart_servers(self):
         if getattr(self, "_shutting_down", False):
             return
-        last = list(self.saved.get("last_active_servers") or [])
-        if not last:
+        if "last_active_servers" in self.saved:
+            last = list(self.saved.get("last_active_servers") or [])
+        else:
+            last = []
             for key, card in self.cards.items():
                 server = REGISTRY[key]
                 values = card.values()

@@ -267,6 +267,7 @@ def migrate_saved(server_key, saved):
     if not saved.get("modulo_mode"):
         return saved
     migrated = dict(saved)
+    migrated["enforce_modulo"] = True
     # Only fills an empty selection. Someone who has since made an explicit
     # choice in the new control means it.
     if not protocol_mode_value(migrated.get("protocol_mode")):
@@ -315,20 +316,10 @@ def _udpfs_argv(v):
         args.append("--read-only")
     if not v.get("enable_compression", True):
         args.append("--no-compression")
-    # The old global "Modulo mode" checkbox was removed because it applied one
-    # client's quirk to every client at once. Auto classifies each session on its
-    # own, so a Standard client and several Modulo clients transfer side by side.
-    #
-    # The selector is back as a visible three-way choice, not because Auto is
-    # unreliable, but because when it does misjudge a client there has to be a
-    # way to say so from the interface rather than by hand-editing a settings
-    # file. Auto stays the default.
-    #
-    # modulo_mode is still read: a settings file written before the dropdown
-    # existed carries it, and losing that on upgrade would silently move someone
-    # off the setting that made their console work.
+    # The selector provides Auto / Standard / Modulo, and the explicit
+    # "Enforce Modulo mode" checkbox guarantees single-port Modulo operation.
     protocol_mode = protocol_mode_value(v.get("protocol_mode"))
-    if v.get("modulo_mode"):
+    if v.get("enforce_modulo") or v.get("modulo_mode"):
         protocol_mode = "modulo"
     # "auto" is deliberately not passed. It is the server default, so omitting it
     # keeps the logged command line honest about what was actually chosen.
@@ -431,6 +422,8 @@ UDPFS = ServerDef(
               help="A single disk image to serve as a block device."),
         Field("enable_compression", "Decompress CHD/CSO/ZSO", "bool", default=True,
               help="On by default. Formats without their optional library remain unadvertised."),
+        Field("enforce_modulo", "Enforce Modulo mode", "bool", default=False,
+              help="Tick this if using Modulo. Forces single-port Modulo compatibility mode and bypasses auto-detection."),
         # Visible rather than advanced. It is the first thing to reach for when a
         # console will not connect, and a setting you have to know exists is no
         # use to the person who needs it.

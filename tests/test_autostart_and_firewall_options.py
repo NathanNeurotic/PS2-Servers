@@ -99,7 +99,7 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
             app._shutting_down = True
             root.destroy()
 
-    def test_autostart_servers_fallback(self):
+    def test_autostart_servers_empty_list_does_not_fallback(self):
         try:
             import tkinter as tk
         except ImportError:
@@ -116,6 +116,33 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
             started_keys = []
             app.start_server = lambda key: started_keys.append(key)
             app.saved["last_active_servers"] = []
+
+            card = app.cards["udpfs"]
+            card.set_values({"root": "/tmp/games", "port": 62966})
+
+            app._autostart_servers()
+            self.assertEqual(started_keys, [])
+        finally:
+            app._shutting_down = True
+            root.destroy()
+
+    def test_autostart_servers_fallback(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            raise unittest.SkipTest("no tkinter")
+
+        from launcher import gui
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            raise unittest.SkipTest("no display")
+
+        try:
+            app = gui.LauncherApp(root)
+            started_keys = []
+            app.start_server = lambda key: started_keys.append(key)
+            app.saved.pop("last_active_servers", None)
 
             # Seed a card with required fields populated
             card = app.cards["udpfs"]

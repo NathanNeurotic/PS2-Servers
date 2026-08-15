@@ -675,6 +675,23 @@ class ClassifyTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("router", reason)
 
+    def test_find_candidates_prioritizes_up_and_allows_down(self):
+        adapter_up = self.adapter(name="EthUp", status="Up")
+        adapter_down = self.adapter(name="EthDown", status="Disconnected")
+        adapter_gw = self.adapter(name="EthGW", status="Up", has_gateway=True)
+
+        # When up exists, returns up candidates
+        cands, rej = directlink.find_candidates({"adapters": [adapter_up, adapter_down, adapter_gw]})
+        self.assertEqual([a["name"] for a in cands], ["EthUp"])
+
+        # When only disconnected physical port exists, returns it as candidate
+        cands2, rej2 = directlink.find_candidates({"adapters": [adapter_down, adapter_gw]})
+        self.assertEqual([a["name"] for a in cands2], ["EthDown"])
+
+        # When allow_down=False, down is not returned
+        cands3, rej3 = directlink.find_candidates({"adapters": [adapter_down, adapter_gw]}, allow_down=False)
+        self.assertEqual(cands3, [])
+
 
 class ConfigurationSafetyTests(unittest.TestCase):
     def test_invalid_server_ip_is_rejected_before_powershell(self):
