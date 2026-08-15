@@ -257,7 +257,7 @@ HAS_PWRITE = hasattr(os, 'pwrite')
 # Flow control
 SEND_WINDOW = 8           # Max unacked packets in flight
 WINDOW_ACK_TIMEOUT = 0.1  # Seconds to wait for window ACK
-MAX_WINDOW_RETRIES = 4    # Max retries waiting for window ACK (matches IOP)
+MAX_WINDOW_RETRIES = 200  # Max retries waiting for window ACK (matches IOP ~20s tolerance)
 
 # Request size limits.
 #
@@ -1469,7 +1469,7 @@ class UdpfsServer:
                 if self.verbose:
                     self._print_event(f"  Received seq={hdr.seq_nr}, assuming the peer was reset")
                 self.tx_seq_nr = 0
-                self.tx_buffer = ()
+                self.tx_buffer = []
                 self.tx_start_seq = 0
                 self.tx_seq_nr_acked = 0
                 self.rx_seq_nr_expected = 0
@@ -2283,11 +2283,20 @@ class UdpfsServer:
         self.tx_seq_nr = (self.tx_seq_nr + 1) & 0xFFF
 
     def _retransmit_from(self, addr: Tuple[str, int], from_seq: int):
-        """Retransmit packets starting from sequence number"""
+        """Retransmit packets starting from sequence number with pacing to avoid FIFO overflows"""
+        now = time.monotonic()
+        sess = getattr(self._local, "session", None)
+        if sess is not None:
+            last = getattr(sess, "_last_retx", None)
+            if last is not None and last[0] == from_seq and now - last[1] < 0.05:
+                return
+            sess._last_retx = (from_seq, now)
         count = 0
         for seq, packet in self.tx_buffer:
             seq_diff = (seq - from_seq) & 0xFFF
             if seq_diff < 2048:
+                if count:
+                    time.sleep(0.001)
                 self._sendto(packet, addr)
                 count += 1
         if self.verbose and count > 0:

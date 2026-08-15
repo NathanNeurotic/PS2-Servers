@@ -254,8 +254,9 @@ class AutoUdpfsServer(UdpfsServer):
         with sess.compat_lock:
             # Active clients can keep discovery traffic running in parallel with
             # reads. Never reset or interfere with an active stream. After a quiet
-            # interval the same endpoint is treated as a replacement.
-            if sess.rx_streaming and quiet < 2.0:
+            # interval or when a new stage/loader starts (hdr.seq_nr == 0), the
+            # endpoint is treated as a replacement session.
+            if sess.rx_streaming and quiet < 2.0 and hdr.seq_nr != 0:
                 return
 
             initial_profile = (
