@@ -381,6 +381,7 @@ work in something click‑and‑go. With genuine gratitude:
   UDPBD port we read while writing our own.
 - The folks behind **CHD ([libchdr](https://github.com/rtissera/libchdr) / MAME)**,
   **CSO**, and **ZSO** — the compressed‑image formats UDPFS decompresses on the fly.
+- **v_txl** (Discord) — for dedicated testing and hardware validation of Modulo UDPFS mode and direct ethernet link connectivity.
 
 ### What's original here
 
