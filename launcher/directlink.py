@@ -921,8 +921,8 @@ def _parse_neighbors(json_text, our_ips=()):
 def _neighbor_script(if_index):
     return ("Get-NetNeighbor -InterfaceIndex " + str(int(if_index)) +
             " -AddressFamily IPv4 -ErrorAction SilentlyContinue | "
-            "Where-Object { $_.State -in 'Reachable','Stale','Delay','Probe',"
-            "'Permanent' } | ForEach-Object { [string]$_.IPAddress } | "
+            "Where-Object { $_.State -in 'Reachable','Permanent' } | "
+            "ForEach-Object { [string]$_.IPAddress } | "
             "ConvertTo-Json")
 
 
@@ -978,6 +978,7 @@ def apply_adapter_config(if_index, server_ip, client_ip,
         "$mutationStarted = $false",
         "try {",
         "  $mutationStarted = $true",
+        "  Clear-NetNeighbor -InterfaceIndex $idx -Confirm:$false -ErrorAction SilentlyContinue",
         "  netsh interface ipv4 set address name=$name static '{}' '{}'".format(server_ip, netmask),
         "  Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses -ErrorAction SilentlyContinue",
         "  Write-Output ('CONFIGURED=' + $name)",
@@ -1618,6 +1619,9 @@ class DhcpResponder:
         network's static IP). No console reconfiguration -- it finds us by
         broadcasting UDPFS discovery regardless of our address.
         """
+        adapter = adapter_state(self.if_index, self.adapter_name or None)
+        if adapter is None or adapter.get("status") != "Up":
+            return None
         # Exclude our own address from the neighbour list ONLY while we still
         # hold it. If a duplicate-address conflict has removed it, the device
         # now answering for that address IS the conflict we must see -- filtering

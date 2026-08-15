@@ -386,6 +386,8 @@ class MissingIpDiagnosisTests(unittest.TestCase):
                 mock.patch.object(directlink.DhcpResponder,
                                   "IP_RECHECK_SECONDS", -1), \
                 mock.patch.object(directlink, "is_windows", return_value=True), \
+                mock.patch.object(directlink, "adapter_state",
+                                  return_value={"name": "Ethernet", "status": "Up"}), \
                 mock.patch.object(directlink, "_powershell", return_value=neigh):
             with self.assertRaises(directlink._Rehome) as caught:
                 r.serve_forever()
@@ -398,6 +400,8 @@ class MissingIpDiagnosisTests(unittest.TestCase):
         r.if_index = 3
         neigh = mock.Mock(returncode=0, stdout='["192.168.137.1"]')  # only us
         with mock.patch.object(directlink, "is_windows", return_value=True), \
+                mock.patch.object(directlink, "adapter_state",
+                                  return_value={"name": "Ethernet", "status": "Up"}), \
                 mock.patch.object(directlink, "_powershell", return_value=neigh):
             self.assertIsNone(r._plan_rehome_now(server_ip_present=True))
 
