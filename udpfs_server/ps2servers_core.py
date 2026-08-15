@@ -100,11 +100,11 @@ class AutoUdpfsServer(UdpfsServer):
             raise ValueError("protocol_mode must be auto, standard, or modulo")
         self.protocol_mode = mode
         self.fallback_interval = max(0.01, float(fallback_interval))
-        # Never activate the legacy global mode. Single-port remains an independent
-        # topology choice and per-session response sockets are selected below.
-        kwargs["modulo_compat"] = False
         if mode == PROFILE_MODULO:
             kwargs["single_port"] = True
+            kwargs["modulo_compat"] = True
+        else:
+            kwargs["modulo_compat"] = False
         super().__init__(*args, **kwargs)
 
     def _init_compat(self, sess: Session) -> Session:
@@ -253,15 +253,10 @@ class AutoUdpfsServer(UdpfsServer):
             self._print_event(f"[{addr[0]}:{addr[1]}] DISCOVERY seq={hdr.seq_nr}")
         with sess.compat_lock:
             # Active clients can keep discovery traffic running in parallel with
-            # reads. Reply to it, but never reset a live stream. After a quiet
+            # reads. Never reset or interfere with an active stream. After a quiet
             # interval the same endpoint is treated as a replacement.
             if sess.rx_streaming and quiet < 2.0:
-                if sess.protocol_profile == PROFILE_MODULO or self.protocol_mode == PROFILE_MODULO:
-                    self._compatibility_inform(sess)
-                    return
-                elif hdr.seq_nr == 0:
-                    self._canonical_inform(addr)
-                    return
+                return
 
             initial_profile = (
                 self.protocol_mode if self.protocol_mode != "auto"

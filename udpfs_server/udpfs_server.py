@@ -28,6 +28,7 @@ Compression Support:
 """
 
 import argparse
+import collections
 import errno
 import math
 import os
@@ -2315,6 +2316,16 @@ class UdpfsServer:
 
         return best_chunk
 
+    def _queue_get(self, sess: "Session", timeout: Optional[float] = None):
+        if getattr(sess, "pushback", None):
+            return sess.pushback.popleft()
+        return sess.queue.get(timeout=timeout)
+
+    def _queue_pushback(self, sess: "Session", item):
+        if not hasattr(sess, "pushback"):
+            sess.pushback = collections.deque()
+        sess.pushback.append(item)
+
     def _wait_for_window_ack(self, addr: Tuple[str, int]):
         """Wait for a window ACK/NACK during a multi-packet send. Reads from this
         client's session queue (the demux routes the client's ACKs there), so one
@@ -2323,21 +2334,11 @@ class UdpfsServer:
         sess = self._local.session
         while True:
             try:
-                item = sess.queue.get(timeout=WINDOW_ACK_TIMEOUT)
+                item = self._queue_get(sess, timeout=WINDOW_ACK_TIMEOUT)
             except queue.Empty:
                 if self.tx_buffer:
                     self._retransmit_from(addr, self.tx_buffer[0][0])
                 return
-            # Checked BEFORE unpacking. Session.shutdown() enqueues a bare None
-            # to wake a blocked worker, so `pkt, _ = item` raises TypeError on
-            # it -- which meant the guard below could never run and every reap
-            # with a transfer in flight logged
-            #   session error: TypeError: cannot unpack non-iterable NoneType
-            # instead of shutting down quietly. The session still ended (_run
-            # exits on _closing), so this was a misleading error rather than a
-            # hang -- but a log line that looks like a fault, on a path that is
-            # working as intended, costs exactly the debugging time these
-            # messages exist to save.
             if item is None:
                 return  # session shutting down
             pkt, _recv_addr, _ingress = item
@@ -2347,8 +2348,8 @@ class UdpfsServer:
             if hdr.packet_type != PacketType.DATA:
                 continue
             data_hdr = DataHeader.unpack(pkt[2:6])
-            if data_hdr.data_byte_count > 0 or data_hdr.hdr_word_count > 0:
-                continue  # Not an ACK/NACK packet
+            hdr_size = data_hdr.hdr_word_count * 4
+            payload_size = hdr_size + data_hdr.data_byte_count
             if data_hdr.flags & DataFlags.ACK:
                 # Window ACK - advance acked position
                 self.tx_seq_nr_acked = data_hdr.seq_nr_ack
@@ -2356,11 +2357,16 @@ class UdpfsServer:
                     (seq, p) for seq, p in self.tx_buffer
                     if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
                 ]
+                if payload_size > 0:
+                    self._queue_pushback(sess, item)
                 return
             else:
-                # NACK - retransmit and keep waiting for the confirming ACK.
-                self.tx_seq_nr_acked = (data_hdr.seq_nr_ack - 1) & 0xFFF
-                self._retransmit_from(addr, data_hdr.seq_nr_ack)
+                if payload_size == 0:
+                    # NACK - retransmit and keep waiting for the confirming ACK.
+                    self.tx_seq_nr_acked = (data_hdr.seq_nr_ack - 1) & 0xFFF
+                    self._retransmit_from(addr, data_hdr.seq_nr_ack)
+                else:
+                    self._queue_pushback(sess, item)
 
     def _in_flight(self) -> int:
         """Number of unacknowledged packets in flight"""
@@ -2374,7 +2380,7 @@ class UdpfsServer:
         fin_seq = (self.tx_seq_nr - 1) & 0xFFF
         while True:
             try:
-                item = sess.queue.get(timeout=timeout)
+                item = self._queue_get(sess, timeout=timeout)
             except queue.Empty:
                 return False
             # Before unpacking, as in _wait_for_window_ack above.
@@ -2387,23 +2393,32 @@ class UdpfsServer:
             if hdr.packet_type != PacketType.DATA:
                 continue
             data_hdr = DataHeader.unpack(pkt[2:6])
-            if data_hdr.data_byte_count == 0 and data_hdr.hdr_word_count == 0:
-                if data_hdr.flags & DataFlags.ACK:
-                    # Always advance acked position and prune tx_buffer
-                    self.tx_seq_nr_acked = data_hdr.seq_nr_ack
-                    if self.tx_buffer:
-                        self.tx_buffer = [
-                            (seq, p) for seq, p in self.tx_buffer
-                            if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
-                        ]
-                    # Only accept as final ACK if it covers the FIN packet
-                    if data_hdr.seq_nr_ack == fin_seq:
-                        self.tx_buffer = []
-                        return True
-                    # else: mid-stream window ACK — keep waiting
-                else:
-                    # NACK - retransmit and keep waiting
+            hdr_size = data_hdr.hdr_word_count * 4
+            payload_size = hdr_size + data_hdr.data_byte_count
+            if data_hdr.flags & DataFlags.ACK:
+                # Always advance acked position and prune tx_buffer
+                self.tx_seq_nr_acked = data_hdr.seq_nr_ack
+                if self.tx_buffer:
+                    self.tx_buffer = [
+                        (seq, p) for seq, p in self.tx_buffer
+                        if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
+                    ]
+                # Only accept as final ACK if it covers the FIN packet
+                if data_hdr.seq_nr_ack == fin_seq:
+                    self.tx_buffer = []
+                    if payload_size > 0:
+                        self._queue_pushback(sess, item)
+                    return True
+                # else: mid-stream window ACK — keep waiting
+                if payload_size > 0:
+                    self._queue_pushback(sess, item)
+            else:
+                # NACK - retransmit and keep waiting
+                if payload_size == 0:
+                    self.tx_seq_nr_acked = (data_hdr.seq_nr_ack - 1) & 0xFFF
                     self._retransmit_from(addr, data_hdr.seq_nr_ack)
+                else:
+                    self._queue_pushback(sess, item)
 
     def _wait_for_final_ack(self, addr: Tuple[str, int]):
         """Confirm transfer completion: wait for ACK, retransmit on NACK or timeout.
@@ -2668,6 +2683,7 @@ class Session:
         self.ingress = None
         # concurrency plumbing
         self.queue: "queue.Queue" = queue.Queue()
+        self.pushback: collections.deque = collections.deque()
         self.last_activity = time.monotonic()
         self._closing = False
         self._thread = threading.Thread(
@@ -2686,7 +2702,7 @@ class Session:
         self.server._local.session = self
         while not self._closing and not self.server._shutdown:
             try:
-                item = self.queue.get(timeout=1.0)
+                item = self.server._queue_get(self, timeout=1.0)
             except queue.Empty:
                 continue
             if item is None:
