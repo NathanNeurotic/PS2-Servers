@@ -1665,6 +1665,15 @@ class DhcpResponder:
                 if plan is not None:
                     raise _Rehome(plan)
                 if not present:
+                    try:
+                        ad = adapter_state(self.if_index, self.adapter_name or None)
+                        st = (ad.get("status") or "").lower() if ad else ""
+                    except Exception:
+                        st = ""
+                    if st in ("disconnected", "down", "not present", "disabled",
+                              "not operational", "inactive", "lowerlayerdown"):
+                        time.sleep(0.5)
+                        continue
                     raise DirectLinkRefused(self._diagnose_missing_server_ip())
             if now - last_probe > self.REPROBE_SECONDS:
                 last_probe = now
