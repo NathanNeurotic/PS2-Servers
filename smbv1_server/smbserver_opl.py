@@ -30,6 +30,7 @@ import time
 SMB_MAGIC = b"\xffSMB"
 
 # Commands
+SMB_COM_CREATE_DIRECTORY = 0x00
 SMB_COM_CLOSE = 0x04
 SMB_COM_CHECK_DIRECTORY = 0x10
 SMB_COM_QUERY_INFORMATION_DISK = 0x80
@@ -53,6 +54,7 @@ STATUS_SUCCESS = 0x00000000
 STATUS_NOT_IMPLEMENTED = 0xC0000002
 STATUS_ACCESS_DENIED = 0xC0000022
 STATUS_OBJECT_NAME_NOT_FOUND = 0xC0000034
+STATUS_OBJECT_NAME_COLLISION = 0xC0000035
 STATUS_LOGON_FAILURE = 0xC000006D
 
 # NEGOTIATE response capabilities. UNICODE deliberately OFF so every string stays ASCII/OEM --
@@ -71,6 +73,23 @@ FLAGS1_REPLY = 0x80  # SERVER_TO_REDIR
 # Ext file attributes
 ATTR_NORMAL = 0x80
 ATTR_DIRECTORY = 0x10
+
+# NT_CREATE_ANDX CreateDisposition values. These are not bit flags.
+FILE_SUPERSEDE = 0x00000000
+FILE_OPEN = 0x00000001
+FILE_CREATE = 0x00000002
+FILE_OPEN_IF = 0x00000003
+FILE_OVERWRITE = 0x00000004
+FILE_OVERWRITE_IF = 0x00000005
+
+# NT_CREATE_ANDX CreateAction response values.
+FILE_SUPERSEDED = 0x00000000
+FILE_OPENED = 0x00000001
+FILE_CREATED = 0x00000002
+FILE_OVERWRITTEN = 0x00000003
+
+# CreateOptions bits used here.
+FILE_DIRECTORY_FILE = 0x00000001
 
 # TRANS2 subcommands
 TRANS2_FIND_FIRST2 = 0x01
@@ -623,43 +642,97 @@ def h_open_andx(conn, r):
 
 
 def h_nt_create_andx(conn, r):
-    # smbman opens files (cover art / cfg) because we advertised CAP_NT_SMBS.
+    # OPL's ioman layer uses NT_CREATE_ANDX for ordinary opens AND for
+    # O_CREAT/O_TRUNC. The old server treated every request as OPEN:
+    # a missing file returned NAME_NOT_FOUND and overwrite requests did
+    # not truncate, so a fresh CFG/VMC could never be born and shorter
+    # rewrites left stale tail bytes behind.
     sh = _share_for_tid(conn, r)
     if sh is None:
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
-    name_len = struct.unpack_from("<H", r.params, 5)[0]  # NameLength after AndX(4)+Reserved(1)
-    d = r.data
-    # ASCII (unicode off): name is name_len bytes, possibly after a 1-byte pad.
-    raw = d
+    if len(r.params) < 39:
+        return None, None, STATUS_ACCESS_DENIED
+
+    name_len = struct.unpack_from("<H", r.params, 5)[0]
+    disposition = struct.unpack_from("<I", r.params, 35)[0]
+    create_options = struct.unpack_from("<I", r.params, 39)[0] if len(r.params) >= 43 else 0
+    if disposition > FILE_OVERWRITE_IF:
+        return None, None, STATUS_ACCESS_DENIED
+
+    raw = r.data
     if raw[:1] == b"\x00":
         raw = raw[1:]
     name = raw[:name_len].split(b"\x00", 1)[0].decode("ascii", "ignore")
     local = sh.resolve(name)
-    if local is None or not os.path.exists(local):
-        log("ntcreate MISS", repr(name))
-        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+    if local is None:
+        return None, None, STATUS_ACCESS_DENIED
+
+    exists = os.path.exists(local)
+    requested_dir = bool(create_options & FILE_DIRECTORY_FILE)
+    action = FILE_OPENED
+
+    if exists:
+        is_dir = os.path.isdir(local)
+        if disposition == FILE_CREATE:
+            return None, None, STATUS_OBJECT_NAME_COLLISION
+        if requested_dir and not is_dir:
+            return None, None, STATUS_ACCESS_DENIED
+        if disposition in (FILE_SUPERSEDE, FILE_OVERWRITE, FILE_OVERWRITE_IF):
+            if conn.server.read_only or is_dir:
+                return None, None, STATUS_ACCESS_DENIED
+            try:
+                # Truncate during CREATE, before WRITE_ANDX, matching
+                # O_TRUNC and preventing stale tail bytes on shorter CFGs.
+                with open(local, "wb"):
+                    pass
+            except OSError:
+                return None, None, STATUS_ACCESS_DENIED
+            action = FILE_SUPERSEDED if disposition == FILE_SUPERSEDE else FILE_OVERWRITTEN
+    else:
+        if disposition in (FILE_OPEN, FILE_OVERWRITE):
+            return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+        if conn.server.read_only:
+            return None, None, STATUS_ACCESS_DENIED
+        parent = os.path.dirname(local)
+        if not os.path.isdir(parent):
+            return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+        try:
+            if requested_dir:
+                os.mkdir(local)
+            else:
+                with open(local, "xb"):
+                    pass
+        except FileExistsError:
+            return None, None, STATUS_OBJECT_NAME_COLLISION
+        except OSError:
+            return None, None, STATUS_ACCESS_DENIED
+        action = FILE_CREATED
+
     is_dir = os.path.isdir(local)
-    of = OpenFile(local, is_dir=is_dir)
+    try:
+        of = OpenFile(local, is_dir=is_dir)
+        mtime = to_filetime(os.path.getmtime(local))
+    except OSError:
+        return None, None, STATUS_ACCESS_DENIED
     fid = conn.alloc_fid()
     conn.files[fid] = of
     size = of.size
-    mtime = to_filetime(os.path.getmtime(local))
-    log("ntcreate", repr(name), "fid", fid, "dir" if is_dir else "size %d" % size)
+    log("ntcreate", repr(name), "fid", fid,
+        "dir" if is_dir else "size %d" % size, "action", action)
     params = struct.pack(
         "<BBHBHIqqqqIQQHHB",
-        SMB_COM_NONE, 0, 0,                 # AndX none
-        0,                                  # OplockLevel
-        fid,                                # FID
-        1,                                  # CreateAction = FILE_OPENED
-        mtime, mtime, mtime, mtime,         # Creation/Access/Write/Change times
-        ATTR_DIRECTORY if is_dir else ATTR_NORMAL,  # ExtFileAttributes
-        size, size,                         # AllocationSize, EndOfFile
-        0,                                  # FileType
-        0,                                  # IPCState
-        1 if is_dir else 0,                 # IsDirectory
+        SMB_COM_NONE, 0, 0,
+        0,
+        fid,
+        action,
+        mtime, mtime, mtime, mtime,
+        ATTR_DIRECTORY if is_dir else ATTR_NORMAL,
+        size, size,
+        0,
+        0,
+        1 if is_dir else 0,
     )
     return params, b"", STATUS_SUCCESS
-
 
 def h_read_andx(conn, r):
     # HOT PATH. Response struct ReadAndXResponse_t is 59 bytes; data starts at offset 59
@@ -749,6 +822,34 @@ def h_query_disk(conn, r):
     # All u16 to avoid overflow; smbman just needs non-zero free space.
     params = struct.pack("<HHHHH", 0xFFFF, 64, 512, 0xFFFF, 0)
     return params, b"", STATUS_SUCCESS
+
+
+def h_create_directory(conn, r):
+    # RiptOPL calls mkdir() for CFG/THM/LNG/ART/VMC/... on SMB connect.
+    # SMB_COM_CREATE_DIRECTORY carries BufferFormat=0x04 before the
+    # NUL-terminated share-relative directory name.
+    if conn.server.read_only:
+        return None, None, STATUS_ACCESS_DENIED
+    sh = _share_for_tid(conn, r)
+    if sh is None:
+        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+    raw = r.data[1:] if r.data[:1] == b"\x04" else r.data
+    name = raw.split(b"\x00", 1)[0].decode("ascii", "ignore")
+    local = sh.resolve(name)
+    if local is None:
+        return None, None, STATUS_ACCESS_DENIED
+    if os.path.exists(local):
+        return None, None, STATUS_OBJECT_NAME_COLLISION
+    if not os.path.isdir(os.path.dirname(local)):
+        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+    try:
+        os.mkdir(local)
+    except FileExistsError:
+        return None, None, STATUS_OBJECT_NAME_COLLISION
+    except OSError:
+        return None, None, STATUS_ACCESS_DENIED
+    log("mkdir", repr(name))
+    return b"", b"", STATUS_SUCCESS
 
 
 def h_check_directory(conn, r):
@@ -972,6 +1073,7 @@ def h_transaction(conn, r):
 # Dispatch
 # --------------------------------------------------------------------------------------------
 HANDLERS = {
+    SMB_COM_CREATE_DIRECTORY: h_create_directory,
     SMB_COM_NEGOTIATE: h_negotiate,
     SMB_COM_SESSION_SETUP_ANDX: h_session_setup,
     SMB_COM_TREE_CONNECT_ANDX: h_tree_connect,

@@ -151,6 +151,7 @@ class SmbWireParity(unittest.TestCase):
         # A transposed opcode would send a valid-looking reply to the wrong
         # request, which is far harder to diagnose than a malformed one.
         pairs = [
+            ("ComCreateDirectory", "SMB_COM_CREATE_DIRECTORY"),
             ("ComClose", "SMB_COM_CLOSE"), ("ComCheckDirectory", "SMB_COM_CHECK_DIRECTORY"),
             ("ComTransaction", "SMB_COM_TRANSACTION"), ("ComEcho", "SMB_COM_ECHO"),
             ("ComOpenAndX", "SMB_COM_OPEN_ANDX"), ("ComReadAndX", "SMB_COM_READ_ANDX"),
@@ -167,6 +168,7 @@ class SmbWireParity(unittest.TestCase):
             ("StatusNotImplemented", "STATUS_NOT_IMPLEMENTED"),
             ("StatusAccessDenied", "STATUS_ACCESS_DENIED"),
             ("StatusObjectNameNotFound", "STATUS_OBJECT_NAME_NOT_FOUND"),
+            ("StatusObjectNameCollision", "STATUS_OBJECT_NAME_COLLISION"),
             ("Flags2", "FLAGS2"), ("Flags1Reply", "FLAGS1_REPLY"),
         ]
         body = "\n".join(
