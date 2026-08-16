@@ -1,5 +1,4 @@
-<img width="1254" height="1254" alt="image" src="https://github.com/user-attachments/assets/322622b6-24e8-4a17-89c6-fef98bbf7673" />
-<p align="center">
+<p align="center"> <img width="400" height="92" alt="AI-Assisted-Software-Development" src="https://github.com/user-attachments/assets/68f0cac3-b256-4117-b344-39cf07f8b5d0" /><br>
   <img src="ps2serversgithubbanner.png" alt="PS2 Servers" width="820">
 </p>
 
