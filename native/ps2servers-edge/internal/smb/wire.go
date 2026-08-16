@@ -22,6 +22,7 @@ var Magic = [4]byte{0xFF, 'S', 'M', 'B'}
 // Command codes, and only the ones this server answers. An unlisted command is
 // refused rather than guessed at.
 const (
+	ComCreateDirectory      = 0x00
 	ComClose                = 0x04
 	ComCheckDirectory       = 0x10
 	ComTransaction          = 0x25
@@ -45,10 +46,11 @@ const (
 
 // NT status codes used in replies.
 const (
-	StatusSuccess            uint32 = 0x00000000
-	StatusNotImplemented     uint32 = 0xC0000002
-	StatusAccessDenied       uint32 = 0xC0000022
-	StatusObjectNameNotFound uint32 = 0xC0000034
+	StatusSuccess             uint32 = 0x00000000
+	StatusNotImplemented      uint32 = 0xC0000002
+	StatusAccessDenied        uint32 = 0xC0000022
+	StatusObjectNameNotFound  uint32 = 0xC0000034
+	StatusObjectNameCollision uint32 = 0xC0000035
 )
 
 const (

@@ -8,6 +8,22 @@ import (
 	"strings"
 )
 
+const (
+	fileSupersede   uint32 = 0x00000000
+	fileOpen        uint32 = 0x00000001
+	fileCreate      uint32 = 0x00000002
+	fileOpenIf      uint32 = 0x00000003
+	fileOverwrite   uint32 = 0x00000004
+	fileOverwriteIf uint32 = 0x00000005
+
+	fileSuperseded  uint32 = 0x00000000
+	fileOpened      uint32 = 0x00000001
+	fileCreated     uint32 = 0x00000002
+	fileOverwritten uint32 = 0x00000003
+
+	fileDirectoryFile uint32 = 0x00000001
+)
+
 // asciiz reads a NUL-terminated ASCII string from the front of b.
 //
 // Every string in this protocol is single-byte OEM/ASCII: the reply Flags2
@@ -239,10 +255,21 @@ func (c *conn) ntCreateAndX(r *req) reply {
 	if sh == nil {
 		return fail(StatusObjectNameNotFound)
 	}
-	// NameLength sits after AndX(4) + Reserved(1).
+	if len(r.params) < 39 {
+		return fail(StatusAccessDenied)
+	}
+
 	nameLen := int(u16(r.params, 5))
+	disposition := u32(r.params, 35)
+	var createOptions uint32
+	if len(r.params) >= 43 {
+		createOptions = u32(r.params, 39)
+	}
+	if disposition > fileOverwriteIf {
+		return fail(StatusAccessDenied)
+	}
+
 	raw := r.data
-	// ASCII with unicode off: the name may be preceded by a single pad byte.
 	if len(raw) > 0 && raw[0] == 0x00 {
 		raw = raw[1:]
 	}
@@ -250,22 +277,88 @@ func (c *conn) ntCreateAndX(r *req) reply {
 		nameLen = len(raw)
 	}
 	name := asciiz(raw[:nameLen])
-
-	local, ok := sh.resolve(name, false)
+	local, ok := sh.resolve(name, true)
 	if !ok {
-		return fail(StatusObjectNameNotFound)
+		return fail(StatusAccessDenied)
 	}
+
+	info, statErr := os.Stat(local)
+	exists := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return fail(StatusAccessDenied)
+	}
+	requestedDir := createOptions&fileDirectoryFile != 0
+	action := fileOpened
+
+	if exists {
+		isDir := info.IsDir()
+		if disposition == fileCreate {
+			return fail(StatusObjectNameCollision)
+		}
+		if requestedDir && !isDir {
+			return fail(StatusAccessDenied)
+		}
+		switch disposition {
+		case fileSupersede, fileOverwrite, fileOverwriteIf:
+			if c.server.cfg.ReadOnly || isDir {
+				return fail(StatusAccessDenied)
+			}
+			fh, err := os.OpenFile(local, os.O_WRONLY|os.O_TRUNC, 0)
+			if err != nil {
+				return fail(StatusAccessDenied)
+			}
+			if err := fh.Close(); err != nil {
+				return fail(StatusAccessDenied)
+			}
+			if disposition == fileSupersede {
+				action = fileSuperseded
+			} else {
+				action = fileOverwritten
+			}
+		}
+	} else {
+		if disposition == fileOpen || disposition == fileOverwrite {
+			return fail(StatusObjectNameNotFound)
+		}
+		if c.server.cfg.ReadOnly {
+			return fail(StatusAccessDenied)
+		}
+		parentInfo, err := os.Stat(filepath.Dir(local))
+		if err != nil || !parentInfo.IsDir() {
+			return fail(StatusObjectNameNotFound)
+		}
+		if requestedDir {
+			if err := os.Mkdir(local, 0o777); err != nil {
+				if os.IsExist(err) {
+					return fail(StatusObjectNameCollision)
+				}
+				return fail(StatusAccessDenied)
+			}
+		} else {
+			fh, err := os.OpenFile(local, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+			if err != nil {
+				if os.IsExist(err) {
+					return fail(StatusObjectNameCollision)
+				}
+				return fail(StatusAccessDenied)
+			}
+			if err := fh.Close(); err != nil {
+				return fail(StatusAccessDenied)
+			}
+		}
+		action = fileCreated
+	}
+
 	info, err := os.Stat(local)
 	if err != nil {
-		c.server.cfg.Log.Debug("SMB ntcreate miss", map[string]any{"name": name})
-		return fail(StatusObjectNameNotFound)
+		return fail(StatusAccessDenied)
 	}
 	isDir := info.IsDir()
 	of := &openFile{path: local, isDir: isDir}
 	if !isDir {
 		fh, err := os.Open(local)
 		if err != nil {
-			return fail(StatusObjectNameNotFound)
+			return fail(StatusAccessDenied)
 		}
 		of.fh = fh
 		of.size = info.Size()
@@ -283,26 +376,23 @@ func (c *conn) ntCreateAndX(r *req) reply {
 
 	p := make([]byte, 0, 68)
 	p = append(p, ComNone, 0)
-	p = le16(p, 0)           // AndXOffset
-	p = append(p, 0)         // OplockLevel
-	p = le16(p, fid)         // FID
-	p = le32(p, 1)           // CreateAction = FILE_OPENED
-	for i := 0; i < 4; i++ { // Creation/Access/Write/Change
+	p = le16(p, 0)
+	p = append(p, 0)
+	p = le16(p, fid)
+	p = le32(p, action)
+	for i := 0; i < 4; i++ {
 		p = le64(p, uint64(ft))
 	}
-	p = le32(p, attrs)           // ExtFileAttributes
-	p = le64(p, uint64(of.size)) // AllocationSize
-	p = le64(p, uint64(of.size)) // EndOfFile
-	p = le16(p, 0)               // FileType
-	p = le16(p, 0)               // IPCState
+	p = le32(p, attrs)
+	p = le64(p, uint64(of.size))
+	p = le64(p, uint64(of.size))
+	p = le16(p, 0)
+	p = le16(p, 0)
 	if isDir {
 		p = append(p, 1)
 	} else {
 		p = append(p, 0)
 	}
-	// The parameter block must be a whole number of 16-bit words; the trailing
-	// IsDirectory byte makes it odd, so it is padded. buildBody divides by two
-	// to produce WordCount, and an odd length would understate it.
 	if len(p)%2 != 0 {
 		p = append(p, 0)
 	}
@@ -429,6 +519,42 @@ func (c *conn) closeFile(r *req) reply {
 			}
 		}
 	}
+	return reply{params: []byte{}, data: []byte{}}
+}
+
+func (c *conn) createDirectory(r *req) reply {
+	if c.server.cfg.ReadOnly {
+		return fail(StatusAccessDenied)
+	}
+	sh := c.shareForTID(r.tid)
+	if sh == nil {
+		return fail(StatusObjectNameNotFound)
+	}
+	raw := r.data
+	if len(raw) > 0 && raw[0] == 0x04 {
+		raw = raw[1:]
+	}
+	name := asciiz(raw)
+	local, ok := sh.resolve(name, true)
+	if !ok {
+		return fail(StatusAccessDenied)
+	}
+	if _, err := os.Stat(local); err == nil {
+		return fail(StatusObjectNameCollision)
+	} else if !os.IsNotExist(err) {
+		return fail(StatusAccessDenied)
+	}
+	parentInfo, err := os.Stat(filepath.Dir(local))
+	if err != nil || !parentInfo.IsDir() {
+		return fail(StatusObjectNameNotFound)
+	}
+	if err := os.Mkdir(local, 0o777); err != nil {
+		if os.IsExist(err) {
+			return fail(StatusObjectNameCollision)
+		}
+		return fail(StatusAccessDenied)
+	}
+	c.server.cfg.Log.Debug("SMB mkdir", map[string]any{"name": name})
 	return reply{params: []byte{}, data: []byte{}}
 }
 

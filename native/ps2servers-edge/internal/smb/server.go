@@ -610,6 +610,8 @@ func (c *conn) dispatch(r *req) reply {
 	case ComLogoffAndX:
 		c.dropSearches()
 		return reply{params: []byte{ComNone, 0, 0, 0}, data: []byte{}}
+	case ComCreateDirectory:
+		return c.createDirectory(r)
 	case ComOpenAndX:
 		return c.openAndX(r)
 	case ComNTCreateAndX:
