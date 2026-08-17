@@ -1645,8 +1645,9 @@ class DhcpResponder:
         last_check = time.monotonic()
         last_neigh = time.monotonic()
         last_probe = time.monotonic()  # a full probe already ran before serving
-        self.log("waiting for the PS2 to ask for an address "
-                 "(it will get {})".format(self.client_ip))
+        self.log("DHCP responder active on {} (server IP: {}, PS2 will get {})".format(
+            self.adapter_name or "port", self.server_ip, self.client_ip))
+        self.log("Ready! Start your server (SMBv1, UDPFS) and power on your console.")
         while True:
             now = time.monotonic()
             if self._stop_requested():

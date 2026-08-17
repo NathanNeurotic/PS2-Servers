@@ -194,7 +194,7 @@ def _smbv3_argv(v):
 
 _SMB2_FIELDS = [
     Field("games_folder", "Games folder", "folder", required=True,
-          help="Folder to share. Browsable from a modern PC, unlike SMBv1."),
+          help="Root folder containing OPL structure (DVD/ and CD/ subfolders with your .iso games). Browsable from a modern PC, unlike SMBv1."),
     Field("port", "Port", "port", default=1445, advanced=False,
           help="TCP port (default 1445). Windows itself can only connect on "
                "445 -- use the advanced option below for that."),
@@ -350,7 +350,7 @@ SMBV1 = ServerDef(
     module_dir=_repo("smbv1_server"),
     fields=[
         Field("games_folder", "Games folder", "folder", required=True,
-              help="Folder to share over SMBv1 for OPL."),
+              help="Root folder containing OPL structure (DVD/ and CD/ subfolders with your .iso games)."),
         Field("share_name", "Share name", "text", default="games",
               help="The name typed after the IP on a client, and in OPL's "
                    "Share field. 'games' is what the guides assume."),
@@ -417,7 +417,7 @@ UDPFS = ServerDef(
     module_dir=_repo("udpfs_server"),
     fields=[
         Field("root_dir", "Games folder", "folder", required=False,
-              help="Folder to serve files from (folder and/or image required)."),
+              help="Root folder containing OPL structure (DVD/ and CD/ subfolders with your .iso games; folder and/or image required)."),
         Field("block_device", "Disk image", "file", required=False,
               help="A single disk image to serve as a block device."),
         Field("enable_compression", "Decompress CHD/CSO/ZSO", "bool", default=True,
