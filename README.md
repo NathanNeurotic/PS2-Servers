@@ -3,7 +3,7 @@
 </p>
 
 # PS2-Servers
-
+*in collaboration with https://github.com/FatBaldDad/PS2-EtherDrive*
 Standard PS2 network servers — **SMBv1**, **UDPFS**, and **UDPBD** — for
 loading PlayStation 2 games, apps, and media over a LAN. These are the protocols
 PS2 homebrew uses to load over a network, so they are not OPL-only. Loaders
