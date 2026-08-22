@@ -18,6 +18,7 @@ from launcher.directlink import (
     build_reply, choose_subnet, classify_adapter, networks_overlap,
     parse_packet, plan_rehome, taken_networks, _BOOTP, _free_host, _ip_to_int,
     _build_discover, _foreign_offer_server_id, _synthetic_probe_mac,
+    static_client_settings,
 )
 from launcher.gui import LauncherApp
 from launcher.windows_setup import WindowsSetupError
@@ -250,6 +251,16 @@ class RehomeTests(unittest.TestCase):
     def test_no_neighbors_no_move(self):
         self.assertIsNone(plan_rehome("192.168.137.1", "192.168.137.10", 24,
                                       [], our_ip_present=True))
+
+    def test_static_client_uses_distinct_address_after_dhcp_lease(self):
+        self.assertEqual(
+            static_client_settings(SERVER, CLIENT, 24),
+            ("192.168.137.11", "255.255.255.0", SERVER))
+
+    def test_static_client_wraps_at_end_of_subnet(self):
+        self.assertEqual(
+            static_client_settings("192.168.137.1", "192.168.137.254", 24),
+            ("192.168.137.2", "255.255.255.0", "192.168.137.1"))
 
     def test_neighbor_in_subnet_not_contesting_no_move(self):
         # A console at .10 (not our address) with our address still present:
@@ -781,6 +792,15 @@ class LauncherLifecycleTests(unittest.TestCase):
         app._set_direct_status = mock.Mock()
         app._shutting_down = False  # real __init__ sets this; _poll_status reads it
         return app
+
+    def test_ready_status_lists_dhcp_and_static_client_settings(self):
+        status = LauncherApp._direct_ready_status(
+            self.app(), self.app().saved["direct_link"])
+        self.assertIn("Server: 192.168.137.1", status)
+        self.assertIn("DHCP PS2: 192.168.137.10", status)
+        self.assertIn("Static PS2/POPStarter: IP 192.168.137.11", status)
+        self.assertIn("mask 255.255.255.0", status)
+        self.assertIn("gateway 192.168.137.1", status)
 
     def test_enable_is_not_saved_when_helper_fails_to_start(self):
         app = self.app()

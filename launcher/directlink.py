@@ -173,6 +173,40 @@ def _validate_topology(server_ip, client_ip, prefixlen):
     return server_ip, client_ip, prefixlen
 
 
+def static_client_settings(server_ip, dhcp_client_ip, prefixlen):
+    """Return (address, netmask, gateway) for a non-DHCP PS2 client.
+
+    The address is deliberately distinct from the responder's one DHCP lease,
+    so a second network stack (for example POPStarter) has an unambiguous
+    static configuration. No reservation is needed: the responder offers only
+    dhcp_client_ip.
+    """
+    server_ip, dhcp_client_ip, prefixlen = _validate_topology(
+        server_ip, dhcp_client_ip, prefixlen)
+    network = ipaddress.IPv4Network(
+        "{}/{}".format(server_ip, prefixlen), strict=False)
+    server = ipaddress.IPv4Address(server_ip)
+    dhcp_client = ipaddress.IPv4Address(dhcp_client_ip)
+    avoided = {network.network_address, network.broadcast_address,
+               server, dhcp_client}
+
+    # Prefer the address immediately after the DHCP lease (normally .11).
+    candidate = int(dhcp_client) + 1
+    for _ in range(3):
+        if candidate > int(network.broadcast_address):
+            break
+        address = ipaddress.IPv4Address(candidate)
+        if address in network and address not in avoided:
+            return str(address), str(network.netmask), server_ip
+        candidate += 1
+
+    # Handles a DHCP lease at the end of the subnet and very small subnets.
+    for address in network.hosts():
+        if address not in avoided:
+            return str(address), str(network.netmask), server_ip
+    return None
+
+
 def _ip_to_int(ip):
     return struct.unpack("!I", socket.inet_aton(ip))[0]
 
