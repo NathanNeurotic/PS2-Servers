@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import pathlib
+import struct
 import sys
 import unittest
 
@@ -43,6 +44,25 @@ class NegotiationTests(unittest.TestCase):
         parser = CORE.build_parser()
         args = parser.parse_args(["--root-dir", str(ROOT)])
         self.assertEqual(args.protocol_mode, "auto")
+
+    def test_canonical_inform_uses_data_socket_and_zero_reserved_word(self):
+        data_socket = object()
+        discovery_socket = object()
+        destination = ("192.0.2.10", 0xF5F6)
+        sent = []
+        server = CORE.AutoUdpfsServer.__new__(CORE.AutoUdpfsServer)
+        server.dsock = data_socket
+        server.sock = discovery_socket
+        server._send_specific = lambda sock, packet, addr: sent.append(
+            (sock, packet, addr))
+
+        server._canonical_inform(destination)
+
+        self.assertEqual(sent, [(
+            data_socket,
+            struct.pack("<HHH", 0x0011, CORE.UDPRDMA_SVC_UDPFS, 0),
+            destination,
+        )])
 
 
 if __name__ == "__main__":

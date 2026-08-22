@@ -1265,11 +1265,23 @@ class LauncherApp:
             self._direct_check.config(state="disabled" if busy else "normal")
 
     def _direct_ready_status(self, cfg):
-        return ("Ready on '{adapter}': this PC is {server}, the PS2 gets "
-                "{client} by itself. Use {server} wherever an app asks for "
-                "the server IP.".format(adapter=cfg.get("adapter", "?"),
-                                        server=cfg.get("server_ip", "?"),
-                                        client=cfg.get("client_ip", "?")))
+        server = cfg.get("server_ip", "?")
+        client = cfg.get("client_ip", "?")
+        prefix = cfg.get("prefix", directlink.PREFIX_LENGTH)
+        try:
+            static = directlink.static_client_settings(server, client, prefix)
+        except (ValueError, windows_setup.WindowsSetupError):
+            static = None
+        text = ("Ready on '{adapter}'. Server: {server}. "
+                "DHCP PS2: {client}.".format(
+                    adapter=cfg.get("adapter", "?"), server=server,
+                    client=client))
+        if static is not None:
+            static_ip, mask, gateway = static
+            text += (" Static PS2/POPStarter: IP {ip}, mask {mask}, gateway "
+                     "{gateway}.".format(ip=static_ip, mask=mask,
+                                         gateway=gateway))
+        return text + " Use the server address wherever an app asks for it."
 
     def _on_direct_link_toggle(self):
         if self._direct_busy:
