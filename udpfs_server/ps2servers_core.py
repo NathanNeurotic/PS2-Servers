@@ -266,6 +266,15 @@ class AutoUdpfsServer(UdpfsServer):
 
         quiet = time.monotonic() - getattr(sess, "last_activity", 0.0)
         with sess.compat_lock:
+            if sess.rx_streaming and hdr.seq_nr == 0 and quiet < 1.0:
+                self._canonical_inform(addr)
+                if self.verbose:
+                    self._print_event(
+                        f"[{addr[0]}:{addr[1]}] DISCOVERY seq=0 during active stream "
+                        f"quiet={quiet:.2f}s -> preserve session"
+                    )
+                return
+
             # Active clients can keep discovery traffic running in parallel with
             # reads. Never reset or interfere with an active stream. After a quiet
             # interval or when a new stage/loader starts (hdr.seq_nr == 0), the
