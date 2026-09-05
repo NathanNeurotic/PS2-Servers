@@ -83,6 +83,66 @@ Suggested fields: PS2 IP (required), Port (10809), Export (a dropdown filled
 from `NBD_OPT_LIST`), Destination file, Read-only (default **on** — this is
 someone's console drive).
 
+### Writing to the console's drive: two gates, not one
+
+Reading needs no ceremony — dumping an export to a `.img` cannot hurt anything.
+**Writing is the one case that can destroy a console's drive**, and NBD writes
+go straight to the physical disk with no filesystem or undo between them. A
+mistyped export name or the wrong console on the network is an unrecoverable
+loss of somebody's saves and installed games. It gets **two separate warnings**,
+deliberately at different moments and answering different questions.
+
+**Gate 1 — when write is enabled.** The moment the user unticks Read-only, an
+`askyesno` in the style of the direct-link prompt (`launcher/gui.py:1388`),
+itemising what write mode means:
+
+> Allow writing to the PS2's drive?
+>
+> NBD writes go directly to the console's physical disk. There is no
+> filesystem, no recycle bin and no undo.
+>
+> • existing partitions, saves and installed games can be overwritten
+> • a wrong export or a wrong console cannot be taken back
+> • PS2 Servers cannot verify the drive is the one you meant
+>
+> Leave this off unless you are restoring a backup you made yourself.
+
+Declining must snap the tick back to Read-only, not leave it ambiguous.
+
+**Gate 2 — when the write actually starts.** A second confirmation naming *this
+specific operation*, so the user is agreeing to a target rather than to a
+concept:
+
+> Write to `<export>` on `<console IP>`?
+>
+> Source: `<path to image>` (`<size>`)
+> This replaces the contents of that drive. It cannot be undone.
+>
+> Type the export name to confirm:  [_______]
+
+The second gate must **not** be a plain OK button. After Gate 1 the user is
+already in "yes" mode, and a default-focused OK is dismissed by muscle memory —
+which would make the second warning decorative. Requiring the export name typed
+back is what makes it a real second check, and it also catches the "two consoles
+on the bench, wrong one selected" case that Gate 1 cannot.
+
+Three supporting rules, without which the gates are theatre:
+
+1. **Never persist write-enable.** The launcher saves card values between runs
+   (`_save()` / `self.saved`). If this one survives a restart, a later Start
+   could reach a real write with neither gate ever appearing. It must reset to
+   Read-only on every launch — and resetting it after each completed run is
+   better still.
+2. **Name the mode in the terminal at start**, loudly, so the log makes plain
+   which mode ran when someone asks what happened to their drive.
+3. **Confirm the export is writable before promising anything.** NBD's
+   transmission flags carry `NBD_FLAG_READ_ONLY`; if the server exports
+   read-only, say so up front instead of failing partway through a write.
+
+A verify-after-write pass (read the export back and compare) is the honest
+fourth thing, but do not let it hold up the read path — mention it to Ripto and
+scope it separately.
+
 ---
 
 ## Part 2 — PS2Client / PS2Link tab
@@ -191,8 +251,10 @@ if you miss one:
 3. ps2link: command sender + log listener + `host:` fileio server, contained.
 4. The interactive terminal UI, wired to the ps2link dispatcher.
 5. ps2netfs client verbs in the same tab.
-6. NBD client: handshake, `NBD_OPT_LIST`, raw image read; write-back behind the
-   read-only toggle.
+6. NBD client: handshake, `NBD_OPT_LIST`, raw image read. **Ship this and stop.**
+7. NBD write-back, as its own phase with its own review — both gates, the
+   no-persist rule, and the `NBD_FLAG_READ_ONLY` check land together or not at
+   all. Do not fold this into phase 6 to save a round trip.
 
 ## Verification
 
@@ -210,9 +272,14 @@ if you miss one:
 
 ## Risks
 
-- **NBD write support can destroy a console's drive.** Default read-only, and
-  make writes an explicit, separate confirmation. This is the highest-stakes
-  thing the project would ship.
+- **NBD write support can destroy a console's drive.** This is the
+  highest-stakes thing the project would ship — writes land on the physical disk
+  with no filesystem and no undo. Read-only by default, **two separate
+  confirmations** before any write reaches the wire, and write-enable never
+  persisted across launches. See "Writing to the console's drive: two gates, not
+  one" above; that section is a requirement, not a suggestion. If the schedule
+  gets tight, ship the read path alone — a dump-only NBD client is genuinely
+  useful, and a half-guarded write path is worse than none.
 - ps2client's protocol docs are from 2004 and mark several opcodes
   UNDOCUMENTED; treat `src/ps2netfs.c` and `src/ps2link.c` as the real spec, the
   way the HTTP work treated `src/ethsupport.c` over the fork's README.
