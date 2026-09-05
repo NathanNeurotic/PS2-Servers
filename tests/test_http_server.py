@@ -45,6 +45,7 @@ import http_server as hs  # noqa: E402
 
 
 PATTERN = bytes(range(256)) * 128  # 32768 bytes, position-revealing
+CRLF = chr(13) + chr(10)
 
 
 def _recv_response(sock):
@@ -77,6 +78,10 @@ class _ServerFixture(unittest.TestCase):
     """A running server over a temporary OPL folder."""
 
     compression = True
+    # Loopback by default so the suite never opens a listener on a real
+    # interface. ReachableOnEveryAdapterTests overrides it, because
+    # binding everything is the property it exists to prove.
+    bind_host = "127.0.0.1"
 
     def setUp(self):
         self.work = tempfile.mkdtemp()
@@ -86,7 +91,7 @@ class _ServerFixture(unittest.TestCase):
         self.write_games()
 
         self.index = hs.GameIndex(self.work, enable_compression=self.compression)
-        self.server = hs.Ps2HTTPServer(("127.0.0.1", 0), self.index)
+        self.server = hs.Ps2HTTPServer((self.bind_host, 0), self.index)
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever,
                                        daemon=True)
@@ -361,6 +366,45 @@ class HotPathCostTests(_ServerFixture):
         self._write(os.path.join("DVD", "SLES_502.11.Fresh.iso"), b"\x00" * 32)
         _head, body = self.simple_get("/games.csv")
         self.assertIn(b"SLES_502.11", body)
+
+
+class ReachableOnEveryAdapterTests(_ServerFixture):
+    """Direct connect and LAN are the same server on different adapters.
+
+    A PS2 cabled straight into the PC arrives on a gateway-less adapter, so a
+    server bound to loopback -- or to one chosen interface -- would answer on
+    the LAN and be invisible over the cable, with nothing in the logs to say
+    so. Binding every interface is what makes both work, and the default Bind
+    field is blank precisely so that happens.
+    """
+
+    # What the launcher passes when the Bind field is left blank.
+    bind_host = ""
+
+    def test_default_bind_listens_on_all_interfaces(self):
+        self.assertEqual(self.server.server_address[0], "0.0.0.0")
+
+    def test_a_range_read_succeeds_over_a_non_loopback_address(self):
+        try:
+            addrs = sorted({info[4][0] for info in socket.getaddrinfo(
+                socket.gethostname(), None, socket.AF_INET)}
+                - {"127.0.0.1"})
+        except socket.gaierror:
+            addrs = []
+        if not addrs:
+            self.skipTest("no non-loopback IPv4 address on this host")
+        for ip in addrs:
+            with self.subTest(address=ip):
+                sock = socket.create_connection((ip, self.port), timeout=5)
+                self.addCleanup(sock.close)
+                sock.sendall((
+                    "GET /{} HTTP/1.1{}Host: {}:{}{}Range: bytes=0-2047{}"
+                    "Connection: keep-alive{}{}".format(
+                        "SLUS_201.74.Rumble%20Racing.iso", CRLF, ip, self.port,
+                        CRLF, CRLF, CRLF, CRLF)).encode("ascii"))
+                head, body = _recv_response(sock)
+                self.assertTrue(head.startswith(b"HTTP/1.1 206"), ip)
+                self.assertEqual(len(body), 2048, ip)
 
 
 class StartupParsingTests(unittest.TestCase):
