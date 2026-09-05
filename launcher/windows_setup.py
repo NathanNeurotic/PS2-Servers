@@ -148,6 +148,14 @@ def _server_ports(key, values):
             if data_port:
                 ports.append(("UDP", data_port, "UDPFS data"))
         return ports
+    if key == "http":
+        # One inbound TCP port, and the console makes a normal outbound
+        # connection to it -- nothing to discover and no second data socket.
+        # This has to be declared even though the program-wide "PS2 Servers -
+        # App" rule usually covers it: a user behind port-based rules gets
+        # nothing from the app rule, and on Linux there is no app rule at all,
+        # only the hint lines built from this list.
+        return [("TCP", _parse_port(values.get("port"), 1100), "HTTP")]
     if key == "udpbd":
         return [("UDP", UDPBD_PORT, "UDPBD")]
     if key == "directlink":

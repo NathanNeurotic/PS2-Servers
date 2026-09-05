@@ -130,6 +130,7 @@ What it runs
 - SMBv1 mode: runs PS2 Servers' own small OPL-compatible SMB/CIFS server. This is not Windows File Sharing and does not require Windows' built-in SMB1 optional feature tree. It accepts a guest logon with a blank password, which is what a console sends.
 - SMBv2 / SMBv3 mode: runs a modern SMB server for clients that speak SMB2 or newer -- a PC, a phone, or SMB2-capable homebrew. SMBv3 is the same server negotiating up to SMB 3.0.2; pick it unless a client refuses it and needs SMB2. Modern clients, Windows included, speak these modes natively, with no re-enabling SMB1. There is no guest mode here: set a username and password, or tick "No password" only on a network you trust.
 - UDPFS mode: serves a folder and/or a disk image over UDP for OPL's UDPFS device support, and is recommended for most setups. Its Auto protocol mode detects Standard and Modulo clients at the same time; choose a mode yourself only if a console will not connect on Auto.
+- HTTP mode: serves a games folder over plain HTTP for OPL's HTTP mode, which streams ISOs with Range requests instead of SMB. There are no shares, no logins and no dialects to negotiate; type the same port into OPL that the card shows, because leaving OPL's Port at 0 makes it look for the game list on a different port than the games. CHD and CSO images are decompressed on the fly and offered as .iso, which a stock web server cannot do; ZSO is passed through for the console to decode. HTTP is read-only, so saves still need a memory card. This mode is new and awaits validation on real hardware.
 - UDPBD mode: serves a single disk image as a block device over UDP. Largely superseded by UDPFS; kept for compatible clients.
 
 How SMBv1 mode works
@@ -206,6 +207,7 @@ TAB_TITLES = {
     "smbv2": "SMBv2",
     "smbv3": "SMBv3",
     "udpfs": "UDPFS",
+    "http": "HTTP",
     "udpbd": "UDPBD",
     "setup": "SETUP",
     "directlink": "DIRECT",
@@ -271,6 +273,14 @@ def opl_hint(key, ip, values):
                 "·  NetBIOS off  ·  {}".format(ip, port, share, creds))
     if key == "udpfs":
         return "In OPL → select UDPFS  ·  server IP {} (if prompted)".format(ip)
+    if key == "http":
+        port = str(values.get("port") or 1100)
+        # Say the port twice over, because leaving OPL's Port at 0 is the one
+        # mistake that looks like a network fault: OPL's game-list code falls
+        # back to 8080 while its in-game driver falls back to 1100, so the list
+        # loads from one port and the game streams from another.
+        return ("In OPL → Network:  Protocol 'HTTP'  ·  IP {}  ·  Port {}  "
+                "·  set Port to {}, not 0".format(ip, port, port))
     if key == "udpbd":
         return "In OPL → select UDPBD  ·  auto-discovered (no IP or port needed)"
     return ""
@@ -748,7 +758,14 @@ class LauncherApp:
         if not self._scrollbar.winfo_ismapped():
             chrome += self._scrollbar.winfo_reqwidth()
         screen_width = max(640, self.root.winfo_screenwidth())
-        needed = strip + TAB_STRIP_TAIL + chrome
+        # The probe binary-searches to a 2px tolerance, so `strip` can land just
+        # under the true edge; TAB_STRIP_TAIL covers that, but only while the
+        # slop stays smaller than the tail. Adding a seventh tab (HTTP) was
+        # enough to put the measurement one pixel short of what ttk then asked
+        # for, which showed up as a notebook wanting more width than it had.
+        # The notebook's own reqwidth is exact, so take whichever is larger and
+        # let the count of servers stop mattering.
+        needed = max(strip + TAB_STRIP_TAIL, self.nb.winfo_reqwidth()) + chrome
         minimum = min(max(APP_MIN_WIDTH, needed), screen_width - 40)
         try:
             self.root.minsize(minimum, self._min_height)

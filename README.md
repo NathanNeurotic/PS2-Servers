@@ -86,12 +86,13 @@ firewall behavior, and uninstall/cleanup details.
 
 ## What's inside
 
-All three servers are pure-Python (standard library) and run on Windows, Linux and macOS.
+All of these servers are pure-Python (standard library) and run on Windows, Linux and macOS.
 
 | Folder | Server | What it does |
 |--------|--------|--------------|
 | [`smbv1_server/`](smbv1_server/) | **SMBv1** | Shares a games folder over SMB — works even on Windows 11 where the OS removed SMB1. |
 | [`udpfs_server/`](udpfs_server/) | **UDPFS** | Serves a folder and/or disk image over UDP; can transparently decompress CHD/CSO/ZSO. |
+| [`http_server/`](http_server/) | **HTTP** | Serves a games folder over plain HTTP for OPL's HTTP mode; generates the `games.csv` game list and streams CHD/CSO as `.iso`. |
 | [`udpbd_server/`](udpbd_server/) | **UDPBD** | Serves a disk image as a block device over UDP; the PS2 auto-discovers it. |
 
 `udpbd_server/udpbd_server.py` is a pure-Python port of Rick Gaiser's UDPBD server —
@@ -100,6 +101,11 @@ see [its provenance](udpbd_server/SOURCE.md). UDPBD has largely been superseded 
 UDPFS can transparently decompress CHD/CSO/ZSO images. How that support is bundled
 in releases and provided in source mode is documented in
 [docs/optional-compression-dependencies.md](docs/optional-compression-dependencies.md).
+
+HTTP mode targets [Docmine17's Open-PS2-Loader-HTTP](https://github.com/Docmine17/Open-PS2-Loader-HTTP),
+an OPL fork that streams ISOs with HTTP Range requests instead of SMB. It is new and
+still awaiting validation on real hardware — see [docs/HTTP.md](docs/HTTP.md) for
+setup, the OPL-side settings, and what it cannot do.
 
 Want a UDPFS server without Python (handy on low‑end hardware, or to avoid antivirus
 false positives on packaged builds)? **[udpfsd](https://github.com/pcm720/udpfsd)** by

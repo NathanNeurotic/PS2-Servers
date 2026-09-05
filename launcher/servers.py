@@ -450,6 +450,54 @@ UDPFS = ServerDef(
     _build_argv=_udpfs_argv,
 )
 
+def _http_argv(v):
+    if not v.get("root_dir"):
+        raise ValueError("HTTP needs a Games folder.")
+    args = ["--root-dir", v["root_dir"]]
+    if v.get("port"):
+        args += ["--port", str(v["port"])]
+    if v.get("bind"):
+        args += ["--bind", str(v["bind"])]
+    if not v.get("enable_compression", True):
+        args += ["--no-compression"]
+    if v.get("verbose"):
+        args += ["--verbose"]
+    return args
+
+
+HTTP = ServerDef(
+    key="http",
+    label="HTTP server",
+    blurb="Serve a games folder over plain HTTP for OPL's HTTP mode. No shares, "
+          "no logins, no SMB dialects -- and it streams CHD/CSO as .iso, which "
+          "a stock web server cannot.",
+    recommendation="Experimental -- needs hardware validation",
+    recommendation_kind="legacy",
+    runtime="python",
+    default_port=1100,
+    share_hint="games",
+    module_file=_repo("http_server", "http_server.py"),
+    module_dir=_repo("http_server"),
+    fields=[
+        Field("root_dir", "Games folder", "folder", required=True,
+              help="Root folder containing OPL structure (DVD/ and CD/ subfolders with your .iso games)."),
+        Field("enable_compression", "Decompress CHD/CSO", "bool", default=True,
+              help="Serve compressed images as virtual .iso files. ZSO is always "
+                   "passed through untouched -- the console decodes that itself."),
+        # Visible, not advanced. OPL's game-list and in-game code use different
+        # fallback ports when its Port field is left at 0, so the number here has
+        # to be one the user can see and copy across.
+        Field("port", "Port", "port", default=1100,
+              help="TCP port (default 1100). Type this same number into OPL's "
+                   "Port field -- leaving OPL's Port at 0 makes it look for the "
+                   "game list on a different port than the games."),
+        Field("bind", "Bind address", "text", default="", advanced=True,
+              help="Interface to bind (blank = all)."),
+        Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+    ],
+    _build_argv=_http_argv,
+)
+
 UDPBD = ServerDef(
     key="udpbd",
     label="UDPBD server",
@@ -469,4 +517,4 @@ UDPBD = ServerDef(
     _build_argv=_udpbd_argv,
 )
 
-REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, UDPBD)}
+REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, HTTP, UDPBD)}

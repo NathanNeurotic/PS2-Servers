@@ -163,5 +163,42 @@ class WindowsOnlyFieldTests(unittest.TestCase):
                                    ("smbv3", "take_445")))
 
 
+class EveryServerDeclaresItsPortsTests(unittest.TestCase):
+    """A registered server with no declared port is invisible to the firewall.
+
+    Windows builds its allow rules from server_ports(), and on Linux that same
+    list is the ONLY thing telling the user which port to open -- there is no
+    program-wide rule to fall back on there. HTTP mode shipped in review with
+    no branch in _server_ports, so "Allow through firewall" opened nothing and
+    the Linux hint named no port at all. This catches the next one.
+    """
+
+    def test_every_python_server_declares_at_least_one_inbound_port(self):
+        for key, server in servers.REGISTRY.items():
+            if server.runtime != "python":
+                continue
+            values = {f.key: f.default for f in server.fields}
+            with self.subTest(server=key):
+                ports = windows_setup.server_ports(key, values)
+                self.assertTrue(
+                    ports,
+                    "{} is registered but declares no inbound port, so the "
+                    "firewall rules and the Linux port hint both ignore it"
+                    .format(key))
+
+    def test_declared_ports_match_each_card_default(self):
+        """The rule must open the port the card actually binds."""
+        for key, server in servers.REGISTRY.items():
+            if server.runtime != "python" or server.default_port is None:
+                continue
+            values = {f.key: f.default for f in server.fields}
+            with self.subTest(server=key):
+                numbers = [p for _proto, p, _purpose
+                           in windows_setup.server_ports(key, values)]
+                self.assertIn(server.default_port, numbers,
+                              "{} binds {} but no rule opens it"
+                              .format(key, server.default_port))
+
+
 if __name__ == "__main__":
     unittest.main()
