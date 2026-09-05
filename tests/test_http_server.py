@@ -291,6 +291,31 @@ class IndexTests(_ServerFixture):
         head, _body = self.simple_get("/OUTSIDE.iso", "Range: bytes=0-10\r\n")
         self.assertTrue(head.startswith(b"HTTP/1.1 404"))
 
+    def test_replacing_a_game_in_place_is_noticed(self):
+        """Re-dumping an ISO under the same name must not serve the old size.
+
+        Found by running OPL's own client code against the server: the index
+        keyed staleness on directory mtime and entry count, and rewriting a
+        file's CONTENTS changes neither on Windows. The cached size then stuck
+        forever -- Content-Range advertised a total that no longer existed, and
+        every read past it came back 416, which on a console is a game that
+        simply refuses to load.
+        """
+        path = os.path.join(self.work, "DVD", "SLUS_201.74.Rumble Racing.iso")
+        with open(path, "wb") as handle:          # same name, different length
+            handle.write(bytes([0x11]) * 4096)
+        self.index._last_scan = time.monotonic() - self.index.RESCAN_INTERVAL
+        self.simple_get("/games.csv")             # the fetch that rescans
+
+        sock = self.connect()
+        head, body = self.driver_request(
+            sock, "SLUS_201.74.Rumble%20Racing.iso", 0, 2047)
+        self.assertTrue(head.startswith(b"HTTP/1.1 206"), head[:40])
+        self.assertIn(b"/4096", head,
+                      "Content-Range still advertises the old total: " +
+                      head[:60].decode(errors="replace"))
+        self.assertEqual(body, bytes([0x11]) * 2048)
+
     def test_new_games_appear_without_a_restart(self):
         self._write(os.path.join("DVD", "SLES_502.10.Added Later.iso"),
                     b"\xDD" * 2048)

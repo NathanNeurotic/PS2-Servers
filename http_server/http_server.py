@@ -208,19 +208,32 @@ class GameIndex(object):
         return result
 
     def _signature_of(self, scan_dirs):
-        """Cheap change token: each scanned directory's mtime and entry count.
+        """Change token covering each scanned file's identity, size and mtime.
 
-        Enough to notice a game being added or removed without re-stat'ing
-        every file on every games.csv request.
+        Directory mtime and entry count are NOT enough. Replacing a game's
+        contents in place -- re-dumping an ISO under the same name, which people
+        do -- changes neither on Windows, so the index kept serving the old size
+        forever: Content-Range advertised a total that no longer existed, and
+        every read past it came back 416 with the game simply refusing to load.
+
+        scandir carries the stat data from the directory read, so this costs
+        little, and it only runs on a games.csv fetch (throttled) -- never on the
+        read path.
         """
         parts = []
         for path, _media in scan_dirs:
+            entries = []
             try:
-                stat = os.stat(path)
-                count = len(os.listdir(path))
+                with os.scandir(path) as it:
+                    for entry in it:
+                        try:
+                            st = entry.stat()
+                        except OSError:
+                            continue
+                        entries.append((entry.name, st.st_mtime_ns, st.st_size))
             except OSError:
                 continue
-            parts.append((path, int(stat.st_mtime), count))
+            parts.append((path, tuple(sorted(entries))))
         return tuple(parts)
 
     def _media_for(self, implied, size):
