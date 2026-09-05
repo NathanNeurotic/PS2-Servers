@@ -57,6 +57,40 @@ the PS2's internal drive from Windows without WSL.
 - Use `NBD_OPT_LIST` to discover export names rather than hardcoding one. **We do
   not know what lwNBD names its exports** — find out first.
 
+### "Shouldn't NBD go both ways?" — two questions, one answer each
+
+Asked by Ripto 2026-09-05, and worth recording because the answer is not
+obvious.
+
+**Read vs write is bidirectional, and that IS a toggle.** One NBD connection
+carries both; the server advertises `NBD_FLAG_READ_ONLY` to say whether the
+client may write. That is the Read-only checkbox and the two gates below.
+
+**Server vs client is not a toggle.** It is which program you run, fixed for the
+life of a connection. NBD as a standard is perfectly happy either way — on Linux
+you run `nbd-server` or `nbd-client` as you please — but in the PS2 world it is
+currently one-directional:
+
+- lwNBD is a *server* framework. `include/lwnbd/lwnbd-server.h`,
+  `examples/lwnbd-server.c`, and plugins that **export** hardware (`atad` for
+  the console's ATA drive, `bdm`). Its README frames contribution as adding
+  "new Protocols (Servers) or Drivers (Plugins)". There is no client in it.
+- OPL's menu item is "Start NBD server", and it "currently only supports
+  exporting the PS2's drive".
+
+So a PC-side NBD server would have nothing to talk to today. A PS2-side NBD
+client would amount to UDPBD over TCP, and UDPBD/UDPFS already fill that niche
+with a UDP transport tuned for the console — which is likely why nobody has
+written one.
+
+**What to do about it:** do not build the server half, but do not design it out
+either. Put the wire protocol — handshake, option haggling, request/reply
+framing — in its own module with the role as a thin layer on top, the way
+`udpfs_server/compressed_iso/` sits under both UDPFS and HTTP. Client and server
+share nearly all of that code, so if a PS2 NBD client ever appears, the server
+half is a small addition rather than a rewrite. Note the trigger in the docs so
+the next person knows what would justify building it.
+
 ### The Windows problem, and the recommended answer
 
 Windows cannot present a block device without a kernel driver, so "mount the PS2
