@@ -1,0 +1,187 @@
+/* PC socket shims and assertions; upstream functions are injected by run.py. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define poll_close closesocket
+
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#define poll_close close
+#endif
+
+typedef unsigned long long u64;
+typedef unsigned int u32;
+typedef unsigned char u8;
+typedef int s32;
+
+/* --- PS2SDK platform shims (the ONLY adaptation) ------------------------- */
+#ifdef _WIN32
+static SOCKET host_socket = INVALID_SOCKET;
+#else
+static int host_socket = -1;
+#endif
+static int sh_socket(int d, int t, int p) {
+    host_socket = socket(d, t, p);
+#ifdef _WIN32
+    return host_socket == INVALID_SOCKET ? -1 : 1;
+#else
+    return host_socket < 0 ? -1 : 1;
+#endif
+}
+static int sh_connect(int s, struct sockaddr *a, socklen_t l) { (void)s; return connect(host_socket, a, l); }
+static int sh_send(int s, void *b, int n, unsigned int f) { (void)s; return send(host_socket, (const char *)b, n, f); }
+static int sh_recv(int s, void *b, int n, unsigned int f) { (void)s; return recv(host_socket, (char *)b, n, f); }
+static int sh_close(int s) { (void)s; return poll_close(host_socket); }
+static u32 sh_inet_addr(const char *cp) { return inet_addr(cp); }
+
+static int (*plwip_close)(int) = sh_close;
+static int (*plwip_connect)(int, struct sockaddr *, socklen_t) = sh_connect;
+static int (*plwip_recv)(int, void *, int, unsigned int) = sh_recv;
+static int (*plwip_send)(int, void *, int, unsigned int) = sh_send;
+static int (*plwip_socket)(int, int, int) = sh_socket;
+static u32 (*pinet_addr)(const char *) = sh_inet_addr;
+
+static int main_socket = -1;
+static struct in_addr server_ip;
+static unsigned short server_port;
+static char base_path[64];
+static char ip_str[32];
+
+/* Generated from hash-verified upstream source; never edited here. */
+#define HTTP_MAX_CHUNK_SIZE 8192
+static int OpenTCPSession(struct in_addr ip, unsigned short port)
+{
+    int sock = plwip_socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    struct sockaddr_in sa;
+    if (sock < 0) return -2;
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_addr = ip;
+    sa.sin_port = htons(port);
+    if (plwip_connect(sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+        plwip_close(sock);
+        return -3;
+    }
+    return sock;
+}
+@UPSTREAM_IO@
+@UPSTREAM_RANGE@
+
+/* --- the u64_to_str equivalence check (their math, our expectations) ----- */
+static int check_u64_to_str(void)
+{
+    u64 cases[] = {0ULL, 1ULL, 2047ULL, 2048ULL, 8191ULL, 65535ULL,
+                   999999999ULL, 1000000000ULL, 2147483647ULL, 2147483648ULL,
+                   4294967295ULL, 4294967296ULL, 4294967297ULL,
+                   4700372992ULL,          /* a DVD5 tail */
+                   8547991552ULL,          /* a DVD9 tail */
+                   9999999999ULL, 10000000000ULL, 123456789012ULL};
+    int n = (int)(sizeof(cases) / sizeof(cases[0])), i, bad = 0;
+    char buf[24], want[32];
+    for (i = 0; i < n; i++) {
+        u64_to_str(cases[i], buf);
+        sprintf(want, "%llu", cases[i]);
+        if (strcmp(buf, want) != 0) {
+            printf("FAIL  u64_to_str(%llu) = \"%s\", want \"%s\"\n", cases[i], buf, want);
+            bad++;
+        }
+    }
+    printf("%s  u64_to_str: %d/%d offsets formatted correctly (their 32-bit math)\n",
+           bad ? "FAIL" : "PASS", n - bad, n);
+    return bad;
+}
+
+int main(int argc, char **argv)
+{
+    const char *host = argc > 1 ? argv[1] : "127.0.0.1";
+    int port        = argc > 2 ? atoi(argv[2]) : 1100;
+    const char *fn  = argc > 3 ? argv[3] : "SLUS_201.74.Rumble Racing.iso";
+    int failures = 0, i;
+    static unsigned char buf[HTTP_MAX_CHUNK_SIZE];
+
+#ifdef _WIN32
+    WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
+
+    printf("OPL's own client code vs the PS2 Servers HTTP server\n");
+    printf("host=%s port=%d file=\"%s\"\n\n", host, port, fn);
+
+    failures += check_u64_to_str();
+
+    strncpy(ip_str, host, sizeof(ip_str) - 1);
+    server_port = (unsigned short)port;
+    strcpy(base_path, "/");           /* hardcoded in src/ethsupport.c */
+    server_ip.s_addr = pinet_addr(ip_str);
+
+    main_socket = OpenTCPSession(server_ip, server_port);
+    if (main_socket < 0) { printf("FAIL  cannot connect\n"); return 2; }
+
+    /* Sequential 8 KB reads down ONE keep-alive socket, as the driver does. */
+    for (i = 0; i < 4; i++) {
+        u64 off = (u64)i * HTTP_MAX_CHUNK_SIZE;
+        int rc = http_ReadRangeInternal(fn, off, HTTP_MAX_CHUNK_SIZE, buf);
+        if (rc != HTTP_MAX_CHUNK_SIZE) {
+            printf("FAIL  read %d at offset %llu returned %d\n", i, off, rc);
+            failures++;
+            continue;
+        }
+        /* Server serves bytes(range(256)) repeated; verify byte-exactly. */
+        int j, wrong = 0;
+        for (j = 0; j < HTTP_MAX_CHUNK_SIZE; j++)
+            if (buf[j] != (unsigned char)((off + j) % 256)) { wrong = 1; break; }
+        if (wrong) {
+            printf("FAIL  read %d at offset %llu: wrong byte at %d\n", i, off, j);
+            failures++;
+        } else {
+            printf("PASS  read %d at offset %llu: 8192 bytes, byte-exact\n", i, off);
+        }
+    }
+
+    /* A read at a non-block-aligned offset, the way a game's seeks land. */
+    {
+        u64 off = 3000;
+        int rc = http_ReadRangeInternal(fn, off, 2048, buf);
+        if (rc != 2048) { printf("FAIL  unaligned read returned %d\n", rc); failures++; }
+        else {
+            int j, wrong = -1;
+            for (j = 0; j < 2048; j++)
+                if (buf[j] != (unsigned char)((off + j) % 256)) { wrong = j; break; }
+            if (wrong >= 0) { printf("FAIL  unaligned read wrong at %d\n", wrong); failures++; }
+            else printf("PASS  unaligned read at %llu: 2048 bytes, byte-exact\n", off);
+        }
+    }
+
+    /* Their client never drains a non-206 body, so a 416 desyncs the socket.
+     * http_ReadRange (their wrapper, verbatim above) is what saves it: it
+     * reconnects and retries once. This checks recovery in the PC-hosted client logic.
+     * Console timing and gameplay still require hardware validation. */
+    {
+        int rc = http_ReadRange(fn, 1000000000ULL, HTTP_MAX_CHUNK_SIZE, buf);
+        printf("%s  a range past EOF fails cleanly (rc=%d)\n",
+               rc == -5 ? "PASS" : "FAIL", rc);
+        if (rc != -5) failures++;
+        rc = http_ReadRange(fn, 0, HTTP_MAX_CHUNK_SIZE, buf);
+        if (rc != HTTP_MAX_CHUNK_SIZE) {
+            printf("FAIL  driver did NOT recover after the 416: %d\n", rc);
+            failures++;
+        } else {
+            int j, wrong = -1;
+            for (j = 0; j < HTTP_MAX_CHUNK_SIZE; j++)
+                if (buf[j] != (unsigned char)(j % 256)) { wrong = j; break; }
+            if (wrong >= 0) { printf("FAIL  recovered read wrong at %d\n", wrong); failures++; }
+            else printf("PASS  driver recovered after the 416, next read byte-exact\n");
+        }
+    }
+
+    plwip_close(main_socket);
+    printf("\n%s\n", failures ? "SMOKE TEST FAILED" : "all checks passed");
+    return failures ? 1 : 0;
+}

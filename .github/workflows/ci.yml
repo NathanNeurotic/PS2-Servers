@@ -54,6 +54,9 @@ jobs:
       - name: Check release compliance posture
         run: python tools/check_release_compliance.py
 
+      - name: Run pinned OPL HTTP client conformance
+        run: python conformance/integration/opl_http/run.py
+
       - name: Run UDPBD protocol selftest
         run: python udpbd_server/selftest.py
 

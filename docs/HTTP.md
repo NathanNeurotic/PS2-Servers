@@ -6,8 +6,9 @@ an OPL fork that streams ISOs with HTTP Range requests instead of SMB. There are
 shares, no logins, and no SMB dialects to negotiate.
 
 > **Status: experimental.** The OPL fork is young and prototype-stage, and nothing
-> here has been validated against a real console yet. Everything below is derived
-> from reading the client's source. If you test it on hardware, please report back.
+> here has been validated against a real console yet. The pinned client's range-read
+> functions and CSV parser are tested on a PC; PS2 networking, timing and gameplay
+> still need hardware testing. If you test it on hardware, please report back.
 
 ## Setting it up
 
@@ -145,3 +146,59 @@ else DVD. Blank lines and `#` comments are skipped.
 An out-of-range request is answered `416` rather than clamped, deliberately: a short
 body would leave the driver blocked waiting for bytes that never arrive, whereas a
 416 fails a read it can retry.
+
+## Reproduce the upstream-client test
+
+From the repository root, with Python 3 and GCC on PATH:
+
+```
+python conformance/integration/opl_http/run.py
+```
+
+Use `--cc /path/to/gcc` to select a compiler. Windows GCC must support Winsock;
+Linux uses the system socket library. Internet access to GitHub is required.
+CI runs the same command on Linux.
+
+The runner fetches source from `Docmine17/Open-PS2-Loader-HTTP` at
+`6fced11a6afafe20c52b8d1a090067e3e1889b99` and verifies each file's SHA256.
+It injects unchanged upstream `SendData`, `RecvData`, `url_encode`, `u64_to_str`,
+`http_ReadRangeInternal`, `http_ReadRange`, and the CSV parsing block into PC
+scaffolding. Socket creation/connection and the PS2 data types are host shims;
+the CSV arrives on stdin after Python fetches it over HTTP. This does not exercise
+the console's game-list HTTP client, IOP semaphores or connection retry timing.
+
+Every run creates fresh temporary sources, binaries and deterministic fixtures.
+A download, hash, extraction, compilation, timeout or assertion failure exits
+nonzero. No previously built executable can be used after a failed compilation.
+Generated upstream source is not committed or packaged with PS2 Servers.
+
+Checks cover exact parsed startup IDs, filenames and CD/DVD media; sequential and
+unaligned reads of ISO, an ampersand filename and CSO served as virtual ISO;
+the expected `-5` result for a range beyond EOF followed by byte-exact recovery;
+and a rewritten ISO's size after a game-list refresh. The high-offset check tests
+decimal formatting above 4 GB, not actual reads from a DVD9 image. CHD is not
+covered by this harness.
+
+Replacing an image is detected on the next game-list fetch after the five-second
+rescan interval. Finish copying before refreshing the list; this is not support
+for replacing an image while the console is playing it.
+
+## PS2 hardware handoff
+
+1. Record the tested PS2 Servers commit (for a packaged build, verify its build
+   identity), the OPL ELF's source commit and hash, PS2 model, and network topology.
+   The PC test above is pinned to OPL commit
+   `6fced11a6afafe20c52b8d1a090067e3e1889b99`; other client revisions need separate
+   verification. Run the server from the checkout with `python ps2servers.py`.
+2. Start HTTP with a known-good plain ISO in `DVD/`. Set the console's HTTP port
+   explicitly to the displayed server port. Reload the list, confirm the startup
+   ID/title, boot, and exercise gameplay and loading transitions. Record the
+   deepest successful stage and server errors if it stops.
+3. Repeat with a filename containing `&`, then a CSO of a known-good game.
+   Treat CHD and ZSO as additional hardware cases, not as established by this test.
+4. With gameplay stopped, replace an ISO under the same name with a completed,
+   known-good image of a different size. Wait at least five seconds, reload the
+   game list, and launch again without restarting the server.
+
+Passing the PC test is a prerequisite for this handoff, not evidence that a game
+has booted on a PS2. Keep HTTP experimental until hardware results are recorded.
