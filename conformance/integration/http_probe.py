@@ -63,7 +63,13 @@ def read_response(sock):
     while len(rest) < length:
         chunk = sock.recv(65536)
         if not chunk:
-            break
+            # EOF before Content-Length is satisfied. Returning the short
+            # body would let probe_game_list pass on a truncated frame
+            # whose surviving bytes happen to parse -- the mirror of the
+            # surplus case below, and just as invisible.
+            raise ProtocolError(
+                "connection closed after {} of {} declared body bytes"
+                .format(len(rest), length))
         rest += chunk
     # Surplus is a failure, not something to trim. Slicing to length would
     # hide the exact violation this probe exists to catch: a server that
