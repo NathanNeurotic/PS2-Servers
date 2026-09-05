@@ -24,14 +24,15 @@ Evidence for NBD: OPL's tree carries `download_lwNBD.sh` (pinning
 describes users running `nbd-client`/`nbdfuse` on the PC against the PS2. OPL
 "currently only supports exporting the PS2's drive."
 
-**So "treat NBD like the others" needs revisiting before any code is written.**
-A PC-side NBD *server* would have no consumer — OPL ships the server. The thing
-with real value is a PC-side NBD **client**, and specifically a Windows-native
-one, because today Windows users need WSL or Ceph-for-Windows to reach their own
-PS2 drive. That is a genuinely good reason to build it here.
+**So "treat NBD like the others" does not apply.** A PC-side NBD *server* would
+have no consumer — OPL ships the server. The thing with real value is a PC-side
+NBD **client**, and specifically a Windows-native one, because today Windows
+users need WSL or Ceph-for-Windows to reach their own PS2 drive.
 
-This is a design question for Ripto, not something to decide in code. Flag it
-before starting.
+**DECIDED (Ripto, 2026-09-05): the target is a PC-side NBD client speaking to
+OPL's lwNBD export.** Not a server, and not a role toggle — see "Shouldn't NBD
+go both ways?" below for why, and for what to do so the server half stays cheap
+to add if that ever changes.
 
 ---
 
@@ -54,8 +55,29 @@ the PS2's internal drive from Windows without WSL.
 - Transmission: request magic `0x25609513`, simple reply magic `0x67446698`.
   Structured replies (`0x668e33ef`) exist in the header — check whether lwNBD
   actually negotiates them before assuming simple-only.
-- Use `NBD_OPT_LIST` to discover export names rather than hardcoding one. **We do
-  not know what lwNBD names its exports** — find out first.
+- Use `NBD_OPT_LIST` to discover export names, but we already know the default:
+  **`hdd0`**. From `loadLwnbdSvr()` in OPL's `src/opl.c` — the user can set one
+  via `CONFIG_NET_NBD_DEFAULT_EXPORT` (`gExportName`, max 32 chars), and when
+  it is blank OPL falls back to `strcpy(config.defaultexport, "hdd0")`. Prefill
+  the field with `hdd0` and let `NBD_OPT_LIST` correct it.
+
+### What OPL actually does when it serves (verified in `src/opl.c`)
+
+Three facts from `loadLwnbdSvr()` that shape the client:
+
+- **It exports the internal ATA drive.** OPL loads `ps2atad_irx` and then
+  `lwnbdsvr_irx`. That is the console's own HDD, not a mounted image.
+- **The export is read-only unless the user enabled writes ON THE CONSOLE.**
+  `config.readonly = !gEnableWrite;`, where `gEnableWrite` comes from
+  `CONFIG_OPL_ENABLE_WRITE` and **defaults to 0** (`src/opl.c:1744`). This is a
+  gate we get for free and must not paper over: if the server advertises
+  read-only, say plainly that OPL's "Enable write" is off, rather than reporting
+  a generic write failure.
+- **The console is fully occupied while serving.** OPL calls `audioEnd()`,
+  `ioBlockOps(1)`, `deinitAllSupport(...)` and `unloadPads()` before starting
+  the server. The PS2 is not usable for anything else, and nothing else on it is
+  listening — so do not expect to talk to any other PS2 Servers mode at the same
+  time, and expect the user to be sitting at a "NBD Server running..." screen.
 
 ### "Shouldn't NBD go both ways?" — two questions, one answer each
 
@@ -279,8 +301,8 @@ if you miss one:
 
 ## Phases
 
-1. Settle the direction question with Ripto (NBD client vs server), and confirm
-   the ps2link command/log port collision against `src/ps2link.c`.
+1. Confirm the ps2link command/log port collision against `src/ps2link.c`.
+   (The NBD direction is settled: client. See "Direction" above.)
 2. `role` on `ServerDef` + role-aware firewall guard. Small, unblocks both.
 3. ps2link: command sender + log listener + `host:` fileio server, contained.
 4. The interactive terminal UI, wired to the ps2link dispatcher.
@@ -311,12 +333,18 @@ if you miss one:
   with no filesystem and no undo. Read-only by default, **two separate
   confirmations** before any write reaches the wire, and write-enable never
   persisted across launches. See "Writing to the console's drive: two gates, not
-  one" above; that section is a requirement, not a suggestion. If the schedule
-  gets tight, ship the read path alone — a dump-only NBD client is genuinely
+  one" above; that section is a requirement, not a suggestion. Note OPL gates
+  this too — it exports read-only unless the user set `CONFIG_OPL_ENABLE_WRITE`
+  on the console — so a write reaching the drive takes THREE deliberate acts.
+  Do not treat OPL's gate as a substitute for ours; treat it as the reason a
+  failed write is usually "the console says no" rather than a bug. If the
+  schedule gets tight, ship the read path alone — a dump-only NBD client is genuinely
   useful, and a half-guarded write path is worse than none.
 - ps2client's protocol docs are from 2004 and mark several opcodes
   UNDOCUMENTED; treat `src/ps2netfs.c` and `src/ps2link.c` as the real spec, the
   way the HTTP work treated `src/ethsupport.c` over the fork's README.
-- lwNBD export naming is unknown — discover it, do not guess.
+- lwNBD's default export is `hdd0`, and OPL exports the internal ATA drive —
+  both read out of `loadLwnbdSvr()`. Still call `NBD_OPT_LIST` rather than
+  assuming the user kept the default.
 - ps2link has no authentication at all. Anyone on the network can run code on the
   console. Say so in the docs.
