@@ -159,6 +159,17 @@ Use `--cc /path/to/gcc` to select a compiler. Windows GCC must support Winsock;
 Linux uses the system socket library. Internet access to GitHub is required.
 CI runs the same command on Linux.
 
+**If the upstream source cannot be fetched, the runner skips loudly and exits
+0.** That check gates CI on a repository nobody here controls — three days old
+when this was written, and a proof of concept by its author's own description.
+If it were deleted, renamed or made private, a hard failure would redden every
+pull request for a reason unrelated to the change being tested. Only being
+unable to *reach* the source is tolerated: a SHA256 mismatch, drifted
+extraction anchors, a build failure or a failed assertion all still fail hard,
+because those are real signals. Pass `--require-upstream` to turn the skip back
+into a failure where "we could not check" is not good enough, such as a release
+gate.
+
 The runner fetches source from `Docmine17/Open-PS2-Loader-HTTP` at
 `6fced11a6afafe20c52b8d1a090067e3e1889b99` and verifies each file's SHA256.
 It injects unchanged upstream `SendData`, `RecvData`, `url_encode`, `u64_to_str`,

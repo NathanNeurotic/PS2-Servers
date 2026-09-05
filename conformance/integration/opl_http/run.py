@@ -37,11 +37,33 @@ def between(source, start, end):
     return source[a:b]
 
 
+class UpstreamUnavailable(Exception):
+    """The pinned upstream source could not be retrieved at all.
+
+    Distinct from every other failure here on purpose. This check gates CI on a
+    repository nobody in this project controls -- three days old and described
+    by its own author as a proof of concept. If it is deleted, renamed or made
+    private, every pull request would go red for a reason unrelated to the
+    change being tested. Not being able to REACH the source is an availability
+    problem and skips loudly; anything after the bytes arrive (a hash mismatch,
+    drifted extraction anchors, a build failure, a failed assertion) is a real
+    signal and still fails hard.
+    """
+
+
 def generate(work):
     sources = {}
     for path, digest in HASHES.items():
-        with urllib.request.urlopen(BASE + path, timeout=30) as response:
-            data = response.read()
+        try:
+            with urllib.request.urlopen(BASE + path, timeout=30) as response:
+                data = response.read()
+        except OSError as exc:
+            # urllib's HTTPError and URLError are both OSError subclasses, so
+            # this covers a deleted or private repo (404/403) as well as DNS,
+            # TLS and timeout failures. A pinned commit's bytes cannot change
+            # underneath us, so a 404 here means the source is gone, not that
+            # it was edited -- that case is the hash check below.
+            raise UpstreamUnavailable("{}: {}".format(path, exc)) from exc
         if hashlib.sha256(data).hexdigest() != digest:
             raise ValueError("Upstream SHA256 mismatch: " + path)
         (work / Path(path).name).write_bytes(data)
@@ -146,6 +168,10 @@ def exercise(work, binaries):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cc", default="gcc", help="C compiler executable (default: gcc)")
+    parser.add_argument("--require-upstream", action="store_true",
+                        help="Fail instead of skipping when the pinned upstream "
+                             "source cannot be fetched. For a release gate, "
+                             "where 'we could not check' is not good enough.")
     args = parser.parse_args()
     compiler = shutil.which(args.cc)
     if not compiler:
@@ -153,11 +179,24 @@ def main():
     print("Upstream OPL commit: " + COMMIT, flush=True)
     with tempfile.TemporaryDirectory(prefix="ps2-http-conformance-") as directory:
         work = Path(directory)
-        generate(work)
+        try:
+            generate(work)
+        except UpstreamUnavailable as exc:
+            if args.require_upstream:
+                print("FAIL  pinned upstream source unreachable: " + str(exc))
+                return 1
+            print("SKIP  pinned upstream source unreachable: " + str(exc))
+            print("SKIP  the OPL client conformance check did NOT run. This says "
+                  "nothing about whether the server is correct -- only that the "
+                  "upstream repository could not be reached.")
+            return 0
         binaries = build(work, compiler)
         exercise(work, binaries)
     print("PASS  all PC-hosted upstream client checks (not PS2 hardware validation)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    # main() returns the exit code now that a skip is distinct from a pass;
+    # dropping it would make --require-upstream silently succeed.
+    sys.exit(main())
