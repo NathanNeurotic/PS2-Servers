@@ -264,6 +264,22 @@ class GameIndex(object):
                  "{}".format(FILENAME_MAX, name))
             return None
 
+        # games.csv has no quoting or escaping -- OPL splits on commas and
+        # newlines full stop. A comma would cut the filename field short, so the
+        # console would request a name the index does not hold and get a 404 at
+        # boot with nothing to explain it; a newline (legal on Linux) would
+        # inject a whole extra row. Neither can be fixed server-side without
+        # renaming the user's file, so say which file and why.
+        bad = [label for ch, label in ((",", "comma"),
+                                       (chr(10), "newline"),
+                                       (chr(13), "carriage return"))
+               if ch in advertised]
+        if bad:
+            _log("  skipped ({} in name -- games.csv has no escaping, so the "
+                 "console would look for the wrong file; rename it): {}"
+                 .format(" and ".join(bad), name))
+            return None
+
         startup, _title = parse_startup(stem)
         conventional = bool(_STARTUP_RE.match(stem))
         return GameEntry(startup, advertised, path,
@@ -607,11 +623,23 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
             try:
                 sent = self.connection.sendfile(handle, offset, length)
-            except (AttributeError, OSError, ValueError):
+            except (AttributeError, ValueError):
+                # sendfile is unavailable or refused the arguments before
+                # sending anything, so the manual path below is safe.
                 sent = 0
+            except OSError:
+                # An OSError can surface AFTER a partial send, and the byte
+                # count is lost with it -- CPython's _sendfile_use_send lets the
+                # exception escape without returning total_sent. Resending from
+                # the original offset would put those bytes on the wire twice
+                # and desynchronise every later read, so the only safe move is
+                # to drop the connection. The driver reconnects and retries,
+                # which is recoverable; a duplicated range is not.
+                self.close_connection = True
+                return
             if sent == length:
                 return
-            # Partial or unsupported: finish by hand from where it stopped.
+            # Short but not failed: finish by hand from where it stopped.
             offset += sent
             length -= sent
 

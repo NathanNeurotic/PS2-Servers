@@ -29,6 +29,10 @@ CHUNK = 8192
 FAILURES = []
 
 
+class ProtocolError(Exception):
+    """Framing broke badly enough that we cannot keep reading."""
+
+
 def check(ok, label, detail=""):
     print("{}  {}{}".format("PASS" if ok else "FAIL", label,
                             "" if ok else "  -- " + detail))
@@ -43,20 +47,34 @@ def read_response(sock):
     while b"\r\n\r\n" not in data:
         chunk = sock.recv(65536)
         if not chunk:
-            raise RuntimeError("connection closed before headers")
+            raise ProtocolError("connection closed before headers arrived")
         data += chunk
     head, _, rest = data.partition(b"\r\n\r\n")
     header = head + b"\r\n\r\n"
     length = 0
     for line in head.split(b"\r\n"):
         if line.lower().startswith(b"content-length:"):
-            length = int(line.split(b":", 1)[1].strip())
+            raw = line.split(b":", 1)[1].strip()
+            try:
+                length = int(raw)
+            except ValueError:
+                raise ProtocolError(
+                    "unparseable Content-Length: {!r}".format(raw))
     while len(rest) < length:
         chunk = sock.recv(65536)
         if not chunk:
             break
         rest += chunk
-    return header, rest[:length]
+    # Surplus is a failure, not something to trim. Slicing to length would
+    # hide the exact violation this probe exists to catch: a server that
+    # sends more than it declared still satisfies a len(body) == CHUNK
+    # check while leaving the keep-alive stream desynchronised.
+    if len(rest) > length:
+        raise ProtocolError(
+            "body exceeded Content-Length ({} declared, {} received); "
+            "the surplus desynchronises every later read"
+            .format(length, len(rest)))
+    return header, rest
 
 
 def url_encode(name):
@@ -164,14 +182,27 @@ def main():
     except OSError as exc:
         print("FAIL  cannot reach {}:{} -- {}".format(args.host, args.port, exc))
         return 2
+    except ProtocolError as exc:
+        # A nonconforming server should produce a reported failure, not a
+        # traceback -- diagnosing one is the whole point of this script.
+        print("FAIL  game list framing  -- {}".format(exc))
+        return 1
 
     game = args.game
-    if game is None and rows:
-        game = rows[0].split(",")[1]
+    if game is None:
+        # Only stream a row that actually parsed. Indexing [1] of a malformed
+        # row would raise here and hide the CSV failure already reported above.
+        valid = [row.split(",") for row in rows if len(row.split(",")) == 3]
+        if valid:
+            game = valid[0][1]
     if game:
-        probe_stream(args.host, args.port, game)
+        try:
+            probe_stream(args.host, args.port, game)
+        except (OSError, ProtocolError) as exc:
+            print("FAIL  streaming framing  -- {}".format(exc))
+            FAILURES.append("streaming framing")
     else:
-        print("SKIP  streaming: no game to read")
+        print("SKIP  streaming: no valid row to read")
 
     print("\n{} check(s) failed".format(len(FAILURES)) if FAILURES
           else "\nall checks passed")

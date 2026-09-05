@@ -23,6 +23,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,6 +32,14 @@ if ROOT not in sys.path:
 _HTTP_DIR = os.path.join(ROOT, "http_server")
 if _HTTP_DIR not in sys.path:
     sys.path.insert(0, _HTTP_DIR)
+# compression_selftest (used to build real CSO fixtures) imports the
+# top-level udpfs_server module. http_server adds that directory to
+# sys.path as a side effect of its own compression import; relying on
+# that would tie these tests to an implementation detail of the module
+# under test.
+_UDPFS_DIR = os.path.join(ROOT, "udpfs_server")
+if _UDPFS_DIR not in sys.path:
+    sys.path.insert(0, _UDPFS_DIR)
 
 import http_server as hs  # noqa: E402
 
@@ -88,6 +97,10 @@ class _ServerFixture(unittest.TestCase):
         self._write(os.path.join("DVD", "SLUS_201.74.Rumble Racing.iso"), PATTERN)
         self._write(os.path.join("CD", "SCUS_971.24.Some Game.iso"), b"\xAA" * 4096)
         self._write("not-a-convention.iso", b"\xBB" * 2048)
+        # games.csv has no quoting, so a comma in a name would split the
+        # filename field -- which makes the row assertions below meaningful.
+        self._write(os.path.join("DVD", "SLUS_209.46.Grand Theft, Auto.iso"),
+                    bytes([0xEE]) * 1024)
 
     def _write(self, rel, payload):
         path = os.path.join(self.work, rel)
@@ -279,6 +292,29 @@ class IndexTests(_ServerFixture):
         _head, body = self.simple_get("/games.csv")
         self.assertIn(b"SLES_502.10", body)
 
+    def test_names_with_a_comma_are_skipped(self):
+        """A comma would cut the filename field short in games.csv.
+    
+        OPL splits rows on commas with no quoting, so the console would
+        take "SLUS_209.46.Grand Theft" as the filename, request a name the
+        index does not hold, and get a 404 at boot with nothing to explain
+        it. Nothing can fix that server-side without renaming the user's
+        file, so the entry is dropped and the log says which and why.
+        """
+        _head, body = self.simple_get("/games.csv")
+        self.assertNotIn(b"SLUS_209.46", body)
+    
+    def test_names_with_a_newline_are_skipped(self):
+        """A newline is legal on Linux and would inject a whole extra row."""
+        name = "SLUS_209.47.Two" + chr(10) + "Lines.iso"
+        try:
+            self._write(os.path.join("DVD", name), bytes(32))
+        except OSError:
+            self.skipTest("filesystem rejects newlines in names")
+        self.index.refresh(force=True)
+        _head, body = self.simple_get("/games.csv")
+        self.assertNotIn(b"SLUS_209.47", body)
+    
     def test_names_too_long_for_the_console_are_skipped(self):
         """A name the console truncates would 404 at boot with no clue why."""
         long_name = "SLUS_200.01." + ("x" * 200) + ".iso"
@@ -318,7 +354,10 @@ class HotPathCostTests(_ServerFixture):
 
     def test_the_game_list_still_notices_new_games(self):
         """The throttle must not turn into 'never rescans'."""
-        self.index._last_scan = 0.0
+        # Not 0.0: time.monotonic() counts from boot, so on a machine with
+        # under RESCAN_INTERVAL seconds of uptime 0.0 still reads as recent
+        # and the rescan this test depends on would be skipped.
+        self.index._last_scan = time.monotonic() - self.index.RESCAN_INTERVAL
         self._write(os.path.join("DVD", "SLES_502.11.Fresh.iso"), b"\x00" * 32)
         _head, body = self.simple_get("/games.csv")
         self.assertIn(b"SLES_502.11", body)
