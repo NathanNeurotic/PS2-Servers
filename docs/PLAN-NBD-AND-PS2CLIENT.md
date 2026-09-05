@@ -85,8 +85,19 @@ Asked by Ripto 2026-09-05, and worth recording because the answer is not
 obvious.
 
 **Read vs write is bidirectional, and that IS a toggle.** One NBD connection
-carries both; the server advertises `NBD_FLAG_READ_ONLY` to say whether the
-client may write. That is the Read-only checkbox and the two gates below.
+carries both. But keep two separate things separate, because they are easy to
+collapse into one and this document did so in an earlier draft:
+
+- `NBD_FLAG_READ_ONLY` is the **server's capability** — whether the export will
+  accept writes at all. We read it; we cannot change it. For OPL it is driven by
+  `gEnableWrite` on the console.
+- The **Read-only checkbox is our client's policy** — whether we intend to send
+  writes. We own it; it defaults to on.
+
+A write needs both to line up, and the two failure modes read differently to a
+user: capability says "the console will not accept writes, turn on Enable write
+in OPL", policy says "you have not enabled writing here". Never derive one from
+the other, and never report one using the other's message.
 
 **Server vs client is not a toggle.** It is which program you run, fixed for the
 life of a connection. NBD as a standard is perfectly happy either way — on Linux
@@ -101,9 +112,10 @@ currently one-directional:
   exporting the PS2's drive".
 
 So a PC-side NBD server would have nothing to talk to today. A PS2-side NBD
-client would amount to UDPBD over TCP, and UDPBD/UDPFS already fill that niche
-with a UDP transport tuned for the console — which is likely why nobody has
-written one.
+client would give the console block-device access over NBD/TCP — a distinct
+protocol, but overlapping the use case UDPBD and UDPFS already cover over a UDP
+transport tuned for the console. That overlap, not any limitation of NBD, is
+likely why nobody has written one.
 
 **What to do about it:** do not build the server half, but do not design it out
 either. Put the wire protocol — handshake, option haggling, request/reply
