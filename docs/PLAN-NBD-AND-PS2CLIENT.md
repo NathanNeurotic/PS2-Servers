@@ -1,4 +1,9 @@
-# Plan: NBD and PS2Client/PS2Link tabs
+# Design proposal: NBD and PS2Client/PS2Link tabs
+
+**Not implemented.** These are proposed features, not current server modes or
+setup instructions. See [the README](../README.md) for the shipped modes.
+The remaining text records the design discussion dated below; it is not a
+release commitment.
 
 Handoff for the next agent. Written 2026-09-05, straight after HTTP mode landed
 (#188). Read the whole "Direction" section before designing anything — it

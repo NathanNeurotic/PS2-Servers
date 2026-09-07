@@ -3,10 +3,18 @@
 HTTP mode serves a games folder over plain HTTP for
 [Docmine17's Open-PS2-Loader-HTTP](https://github.com/Docmine17/Open-PS2-Loader-HTTP),
 an OPL fork that streams ISOs with HTTP Range requests instead of SMB. There are no
-shares, no logins, and no SMB dialects to negotiate.
+shares, no logins, and no SMB dialects to negotiate. This is the Desktop/Core
+HTTP game server, not Edge’s `webui` management port.
 
-> **Status: experimental.** The OPL fork is young and prototype-stage, and nothing
-> here has been validated against a real console yet. The pinned client's range-read
+The exact client limits below refer to the pinned Docmine17 revision in the
+conformance harness. Other HTTP loaders have different limits. RiptOPL also
+implements HTTP, but its own [HTTP guide](https://github.com/NathanNeurotic/Open-PS2-Loader/blob/rebuild/main/docs/HTTP.md)
+is authoritative for its settings and restrictions: it rejects client-side ZSO
+and uses Network Start Mode plus Network → Protocol. PS2-Servers host conformance
+does not establish RiptOPL gameplay.
+
+> **Status: experimental.** This integration has no recorded console validation
+> in the conformance evidence. The pinned client's range-read
 > functions and CSV parser are tested on a PC; PS2 networking, timing and gameplay
 > still need hardware testing. If you test it on hardware, please report back.
 
@@ -26,7 +34,8 @@ shares, no logins, and no SMB dialects to negotiate.
 
 3. Save and reload the game list.
 
-**Set the Port explicitly.** If OPL's Port is left at `0`, its game-list code falls
+**Set the Port explicitly.** In the pinned Docmine17 client, if Port is left
+at `0`, its game-list code falls
 back to 8080 while its in-game driver falls back to 1100 — so the list loads from one
 port and the games stream from another, and the symptom is a game list that appears
 and then a black screen on launch. This is a quirk of the client
@@ -91,12 +100,14 @@ byte ranges of a raw file, so those only work if the server decodes them. Untick
 - **The game list is capped at 8192 bytes** by the console's receive buffer — roughly
   200 games depending on name length. Past that the server drops whole entries and
   logs how many, rather than letting the console truncate the last line mid-field.
+- Names containing commas or line breaks are skipped because this client
+  profile has no CSV escaping. Keep names within the server’s encoded-name limit.
 - Filenames must stay under 160 characters; longer ones are skipped, because the
   console truncates them and the resulting request would 404 with no clue why.
 
 ## Direct PS2-to-PC link
 
-HTTP mode works over a direct cable exactly as it does on a LAN — tick
+The same server configuration can be used over a direct cable — enable
 **PS2 is plugged directly into this PC** and use the address the DIRECT tab reports.
 The direct-link helper works at the DHCP level and does not care which protocol you
 then run over it.
@@ -159,16 +170,11 @@ Use `--cc /path/to/gcc` to select a compiler. Windows GCC must support Winsock;
 Linux uses the system socket library. Internet access to GitHub is required.
 CI runs the same command on Linux.
 
-**If the upstream source cannot be fetched, the runner skips loudly and exits
-0.** That check gates CI on a repository nobody here controls — three days old
-when this was written, and a proof of concept by its author's own description.
-If it were deleted, renamed or made private, a hard failure would redden every
-pull request for a reason unrelated to the change being tested. Only being
-unable to *reach* the source is tolerated: a SHA256 mismatch, drifted
-extraction anchors, a build failure or a failed assertion all still fail hard,
-because those are real signals. Pass `--require-upstream` to turn the skip back
-into a failure where "we could not check" is not good enough, such as a release
-gate.
+**If the upstream source cannot be fetched, the runner prints a skip and exits
+0 by default.** A hash mismatch, drifted extraction anchors, compilation failure
+or assertion failure still fails. Use `--require-upstream` when fetching and
+running the upstream-client check is mandatory, and inspect the log before
+calling a default-mode CI result a conformance pass.
 
 The runner fetches source from `Docmine17/Open-PS2-Loader-HTTP` at
 `6fced11a6afafe20c52b8d1a090067e3e1889b99` and verifies each file's SHA256.
@@ -179,8 +185,9 @@ the CSV arrives on stdin after Python fetches it over HTTP. This does not exerci
 the console's game-list HTTP client, IOP semaphores or connection retry timing.
 
 Every run creates fresh temporary sources, binaries and deterministic fixtures.
-A download, hash, extraction, compilation, timeout or assertion failure exits
-nonzero. No previously built executable can be used after a failed compilation.
+A hash, extraction, compilation, test timeout or assertion failure exits
+nonzero. Download unavailability follows the skip/`--require-upstream` rule
+above. No previously built executable can be used after a failed compilation.
 Generated upstream source is not committed or packaged with PS2 Servers.
 
 Checks cover exact parsed startup IDs, filenames and CD/DVD media; sequential and

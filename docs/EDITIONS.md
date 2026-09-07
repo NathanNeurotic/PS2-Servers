@@ -5,7 +5,7 @@ PS2 Servers is one product family with three deployment shapes.
 ## PS2 Servers Desktop
 
 Use Desktop on Windows, macOS, or a normal Linux workstation. It includes the
-GUI launcher, SMBv1, UDPFS, UDPBD, compression support, logging, diagnostics,
+GUI launcher, SMBv1, SMB2/3, UDPFS, HTTP, UDPBD, compression support, logging, diagnostics,
 Windows Firewall assistance, and the established release packaging. Desktop is
 the most feature-complete edition and retains optional CHD support where the
 required library is available.
@@ -20,9 +20,11 @@ retaining the Python implementation's full feature set.
 ps2servers serve udpfs --root-dir /games --read-only
 ps2servers serve udpbd /images/ps2.img --read-only
 ps2servers serve smbv1 --share games=/games --read-only
+ps2servers serve http --root-dir /games --port 1100
 ```
 
-The internal `--serve` spelling remains supported for existing packaged
+Here `ps2servers` means the packaged executable, optionally installed under that
+name; from source use `python ps2servers.py`. The internal `--serve` spelling remains supported for existing packaged
 re-execution and scripts.
 
 ## PS2 Servers Edge
@@ -35,6 +37,7 @@ Current Edge scope:
 
 - UDPFS with reads and writes; writable by default, `--read-only` to restrict
 - UDPFS block access (`BREAD`/`BWRITE`) for one disk image via `--block-device`
+- guest SMBv1 as the `smb` subcommand (no SMB2/3)
 - native UDPBD as the `udpbd` subcommand
 - embedded responsive Web GUI management dashboard (`ps2servers-edge webui`)
 - automatic per-session standard/Modulo compatibility
@@ -44,9 +47,9 @@ Current Edge scope:
 - text or JSON logs
 - generic Linux, systemd, Docker, and OpenWrt deployment foundations
 
-Current Edge exclusions are explicit: no CHD in the generic static binaries,
-because it needs CGO and `libchdr` and would cost the static cross-compile
-across every target. Desktop/Core continue to provide CHD where supported.
+Edge does not implement the HTTP game server or SMB2/3. Its generic static
+binaries also exclude CHD, which needs a native decoder such as `libchdr`.
+Desktop/Core continue to provide CHD where that library is available.
 
 ## Selection guide
 
@@ -61,4 +64,5 @@ across every target. Desktop/Core continue to provide CHD where supported.
 | OpenWrt router | Edge |
 | NAS or embedded Linux | Edge |
 | Need CHD now | Desktop/Core |
-| Need UDPBD now | Either — Edge has `ps2servers-edge udpbd`; Desktop/Core is the hardware-validated one |
+| Need UDPBD | Either implementation; validate the chosen build and loader on your console |
+| Need HTTP game serving or SMB2/3 | Desktop/Core |

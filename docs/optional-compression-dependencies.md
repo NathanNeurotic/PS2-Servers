@@ -1,7 +1,9 @@
 # Optional compression dependencies
 
-UDPFS can expose compressed images as `.iso` files when optional compression
-support is available.
+Desktop/Core UDPFS can expose compressed images as `.iso` files when optional
+compression support is available. HTTP uses the same CHD/CSO readers but passes
+ZSO through to the console without needing PC-side LZ4. Edge has a separate
+built-in CSO/ZSO decoder and no CHD support. See [the editions](EDITIONS.md).
 
 ## GUI behavior
 
@@ -31,6 +33,13 @@ install command after user confirmation.
 
 Packaged release builds bundle `lz4` so users without Python can still get
 ZSO/LZ4 support.
+
+## Missing support
+
+If a packaged build reports a missing library, use a complete extracted release
+and report the asset name/version; installing system Python packages does not
+repair the embedded runtime. In UDPFS, formats whose decoder is unavailable
+remain unadvertised. HTTP skips CHD without libchdr; raw ISO serving is unaffected.
 
 ## CHD/libchdr
 

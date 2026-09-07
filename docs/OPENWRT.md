@@ -7,7 +7,9 @@ the SDK.
 
 ## Configuration
 
-The package installs `/etc/config/ps2servers-edge`:
+The package installs `/etc/config/ps2servers-edge`. The UDPFS and web dashboard
+defaults are shown below; SMB and UDPBD also have disabled sections. The complete
+shipped file is [here](../packaging/openwrt/files/ps2servers-edge.config).
 
 ```text
 config udpfs 'main'
@@ -31,18 +33,22 @@ config udpfs 'main'
     option metrics_period '1m'
 
 config webui 'webui'
-    option enabled '1'
+    option enabled '0'
     option port '8082'
     option bind '0.0.0.0'
+    option auth_user 'admin'
+    option auth_pass ''
+    option insecure '0'
+    option run_as_root '0'
 ```
 
-Every option maps to one Edge flag:
+The UDPFS options map to Edge flags as follows:
 
 | Option | Flag | Notes |
 |---|---|---|
 | `enabled` | — | `0` stops the service starting at boot |
 | `root` | `--root` | game directory; must be mounted before the service starts |
-| `bind` | `--bind` | `0.0.0.0` listens on every interface |
+| `bind` | `--bind` | `0.0.0.0` listens on every interface; a specific IP binds both sockets |
 | `port` | `--port` | discovery port, UDP 62966 (`0xF5F6`) |
 | `data_port` | `--data-port` | `0` picks automatically; set it for strict firewalls |
 | `protocol` | `--protocol-mode` | `auto`, `standard`, or `modulo` |
@@ -225,13 +231,14 @@ logread -e ps2servers-edge
 
 1. Install the matching OpenWrt SDK and its Go package infrastructure.
 2. Place or link `packaging/openwrt` under `package/ps2servers-edge`.
-3. Ensure the PS2-Servers source revision referenced by the package is available.
+3. Set `PS2SERVERS_REPO_DIR` to the absolute PS2-Servers repository root.
+   The package uses that checkout; pin it to the revision you intend to ship.
 4. Run `make package/ps2servers-edge/{clean,compile} V=s`.
 5. Install the resulting `.ipk` whose architecture is assigned by that SDK.
 
-The checked-in package is a source package. Release automation should build
-`.ipk` files inside named SDK matrices and publish the OpenWrt target/subtarget
-next to each artifact. This pull request does not publish guessed `.ipk` files.
+Releases provide the package source and generic Edge executables, not a
+prebuilt package for every OpenWrt target. Build the package with the matching
+SDK; a generic archive is not an installable `.ipk`.
 
 ## Storage and flash limits
 

@@ -1,5 +1,9 @@
 # Edge UDPFS operation and handoff diagnostics
 
+For ordinary Desktop launch failures, try the [PC bind-address steps](../README.md#udpfs-games-list-but-fail-to-launch)
+first. This is an optional advanced trace, not required setup. The A5-V11
+addresses below are a historical example, not defaults to copy onto your LAN.
+
 This guide is for operating PS2 Servers Edge on OpenWrt and for tracing the
 handoff from NHDDL to Neutrino. The examples use the A5-V11 test layout:
 
@@ -14,7 +18,8 @@ OpenWrt init script, and default UCI configuration in this repository.
 
 ## Pick the right Edge mode
 
-`ps2servers-edge` has three independent subcommands. The OpenWrt package can
+`ps2servers-edge` has three game-serving subcommands plus `webui` for management.
+The OpenWrt package can
 run more than one at once as separate `procd` instances.
 
 | Mode | What it serves | Use it for |
@@ -37,7 +42,8 @@ A normal two-port exchange is:
 
 1. The PS2 sends a UDPFS `DISCOVERY` datagram to the router's discovery port,
    normally UDP 62966.
-2. Edge replies with an `INFORM` that identifies its data port.
+2. Edge replies with an `INFORM` from its data socket. The client takes the
+   data endpoint from the reply source; the canonical payload port is zero.
 3. The PS2 sends file-operation and control datagrams to that data port.
 4. Edge associates those datagrams with the observed PS2 endpoint and UDPFS
    sequence state.
@@ -427,7 +433,7 @@ The `last_rx_*` fields are absent until the first datagram has been read.
 | Pattern | Interpretation |
 |---|---|
 | RX remains unchanged after the NHDDL session and link-down | Edge did not read a later datagram on either UDP socket |
-| Discovery RX grows, data RX does not | Discovery reaches Edge, but the client does not reach the advertised/fixed data path |
+| Discovery RX grows, data RX does not | Inspect packet types and negotiated response socket: requests may use discovery in single-port/compatibility operation. A separate idle data socket alone does not prove failure. |
 | Data RX grows, but operation counters do not | A datagram arrived; correlate its timestamp with the reset, then inspect header trace, malformed counts, ACK/sequence state, and handoff markers |
 | `malformed_datagrams` grows | A datagram reached Edge but failed protocol parsing |
 | `open` grows, `read` stays zero | A recognized OPEN attempt reached the filesystem layer; inspect the requested path. This build does not decode an OPEN outcome into a log field |
@@ -475,7 +481,7 @@ were not reached. It does **not** prove that:
 - a firewall did not discard the packet;
 - the server's handoff logic would fail if a packet reached it.
 
-For the reported A5-V11 failure, the missing post-reset link-up event plus
+In the historical A5-V11 trace described here, the missing post-reset link-up event plus
 unchanged server RX focuses the next investigation on the NHDDL/Neutrino launch,
 IOP/DEV9/SMAP initialization, configuration, or route to the server. It does not
 exercise the Edge handoff branches.
@@ -498,6 +504,13 @@ Ethernet returned after Neutrino's reset. Preserve this distinction when
 comparing the positive-control trace to the failing handoff trace.
 
 ## One-variable follow-up tests
+
+On multi-interface hosts, verify the local address used for replies. Edge
+`--bind IP` (UCI `main.bind`) binds both sockets; Core
+`--bind IP` binds only the data socket. Test discovery after pinning an Edge
+address because broadcast reception depends on the host network setup.
+Changing a source IP printed as the peer is a client-side observation, not
+evidence that the server selected a different local address.
 
 Run these only after saving the `auto`, dynamic-data-port baseline.
 

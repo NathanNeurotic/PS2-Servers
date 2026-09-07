@@ -19,6 +19,7 @@ The following parts are original to this repository unless otherwise noted:
 - the Tkinter GUI launcher and tray/Windows setup glue;
 - the SMBv1/CIFS server implementation in `smbv1_server/`;
 - the pure-Python UDPBD server in `udpbd_server/udpbd_server.py`;
+- the SMB2/3 server, HTTP game server, and native Edge implementation;
 - release/build workflow glue and project documentation.
 
 The SMBv1 server was authored from public protocol documentation and
@@ -37,7 +38,9 @@ tools:
 - upstream license: Academic Free License 3.0
 
 The upstream copyright and license terms remain with their respective owners.
-This repository keeps that code under AFL-3.0 and documents it here.
+This repository keeps that code under AFL-3.0 and documents it here. The
+upstream-derived engine has local extensions; Desktop/Core launches it through
+`udpfs_server/ps2servers_core.py` for automatic protocol compatibility.
 
 ## Protocol implementations and references
 
@@ -118,9 +121,12 @@ with the laws of their jurisdiction. The project does not condone or facilitate
 copyright infringement; the intended use is with homebrew and backups of media the
 user legally owns.
 
-The servers are unauthenticated (guest) and intended for trusted home LANs, not
+SMBv1, UDPFS, UDPBD, and HTTP game serving are unauthenticated and intended
+for trusted home LANs, not
 the public internet. Writable modes allow the PlayStation 2 to write to the shared
-folders and disc images (saves, VMC) — keep backups.
+folders and disc images (saves, VMC) — keep backups. SMB2/3 supports
+authentication and the Edge dashboard requires authentication for LAN binds;
+neither changes the intended private-network deployment.
 
 The software is provided **"as is", without warranty of any kind**, and the
 authors' liability is limited, as set out in the Academic Free License 3.0

@@ -12,13 +12,12 @@ The implementation was informed by:
 - `pcm720/udpfsd`, reviewed as a permissively licensed technical reference for
   protocol behavior, platform targets, and the practical CHD/CGO boundary.
 
-No fork relationship or upstream Git history was imported. No issue, pull
-request, discussion, comment, or other contact was made in any `pcm720`
-repository. The Edge source tree, CLI, documentation, packaging, and session
+No fork relationship or upstream Git history was imported. The Edge source
+tree, CLI, documentation, packaging, and session
 implementation were not copied wholesale from `udpfsd`.
 
 No source file from `pcm720/udpfsd` is currently copied into Edge. Its BSD
-license is nevertheless included in `THIRD_PARTY_NOTICES.md` to preserve clear
+license is nevertheless included in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) to preserve clear
 provenance for reviewers and for any later, specifically documented adaptation.
 If future work adapts code, the affected files must identify the adapted region
 and preserve the applicable copyright and license notice.

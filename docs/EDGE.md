@@ -20,6 +20,9 @@ ps2servers-edge udpfs \
 Important options:
 
 - `--read-only` — serve read-only; writes are allowed by default
+- `--bind IP` — bind both discovery and data sockets to this local IPv4 address;
+  unlike Core, Edge does not accept an `IP:port` suffix. Verify broadcast
+  discovery still reaches a specifically bound socket on your host.
 - `--protocol-mode auto|standard|modulo`
 - `--modulo-mode` — deprecated alias for strict Modulo mode
 - `--single-port`
@@ -59,13 +62,14 @@ Web UI:
 - `ps2servers-edge webui` — run embedded web dashboard on port `8082` (or OS assigned)
 - Options: `--webui-port 8082`, `--bind 127.0.0.1`, `--auth-pass`, `--config-file /etc/ps2servers-edge/config.json`, `--no-browse`
 
-For an OpenWrt command reference and a packet-by-packet NHDDL-to-Neutrino
-diagnostic procedure, see
-[UDPFS-HANDOFF-DIAGNOSTICS.md](UDPFS-HANDOFF-DIAGNOSTICS.md).
+For CLI and deployment instructions, see [the operator manual](INSTRUCTIONS.md).
+For an optional packet-by-packet NHDDL-to-Neutrino diagnostic procedure, see
+[UDPFS-HANDOFF-DIAGNOSTICS.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/UDPFS-HANDOFF-DIAGNOSTICS.md).
 
-Every option also reads an environment variable (`FSROOT`, `BIND`, `PORT`,
-`BDPATH`, `RO`, `NO_COMPRESSION`, `METRICS`, and so on), which is what the
-Docker images use.
+Most serving options also read environment defaults (`FSROOT`, `BIND`, `PORT`,
+`BDPATH`, `RO`, `NO_COMPRESSION`, `METRICS`, and others). CLI flags take
+precedence. Some flags, including `--quiet` and `--modulo-mode`, have no
+environment equivalent; use `--help` for the installed binary.
 
 Edge does not need root. Grant the service account read and directory-traverse
 permission on the game root and open the selected UDP ports in the firewall.
@@ -137,7 +141,7 @@ also contains a `WHICH-DEVICE.txt` stating exactly what it is for.
 
 The Linux builds are generic executables, not OpenWrt `.ipk` packages. For
 OpenWrt, build the source package for your exact target — see
-[OPENWRT.md](OPENWRT.md).
+[OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
 
 Windows and macOS ship as `.zip`, which both Explorer and Finder open with a
 double-click; everything else ships as `.tar.gz`, which preserves the
@@ -146,9 +150,9 @@ for the graphical app use the `PS2Servers-*` downloads instead. They exist for
 users who want one small native binary and no Python runtime, including those
 whose antivirus flags the packaged Python build.
 
-32-bit big-endian PowerPC (WD MyBook Live, OpenWrt `apm821xx`) has no Edge
-build and never will: Go does not support that architecture. Use the
-Desktop/Python UDPFS server there instead.
+32-bit big-endian PowerPC has no current Edge target. Core is the alternative
+where a suitable Python runtime is available; performance on those hosts is
+unverified. See the [build picker](EDGE-WHICH-BUILD.md).
 
 ## Raspberry Pi and NAS
 
@@ -167,11 +171,8 @@ the service starts.
 | ZSO/ZISO | Yes when LZ4 is available | Yes, bounded pure-Go LZ4 block decoder |
 | CHD | Yes when `libchdr` is available | No |
 
-CHD normally requires CGO and `libchdr`. This pull request does not pretend that
-CHD can be universally statically cross-compiled. A future CHD build family
-should use an explicit build tag, supported host/target combinations, separate
-artifact names, dependency documentation, and CHD integration fixtures. The
-CGO-free router binaries remain independent of that path.
+CHD is not implemented in the generic CGO-free Edge binaries. Use Desktop/Core
+with `libchdr` for CHD; no separate Edge CHD download is currently provided.
 
 ## UDPBD
 
@@ -227,13 +228,16 @@ Options:
 - `--bind 0.0.0.0` — bind address
 - `--port 1111` — TCP port (set OPL's SMB Port to match; ports below 1024 require root)
 - `--read-only` — serve share read-only
-- `--status-port 0` — router status query port (`0` disables, `-1` binds standard discovery port)
+- `--status-port -1` — router status query port (binary default: UDP 62966;
+  `0` disables). Disable it when another process already owns that port, as
+  the OpenWrt package and supplied SMB environment file do.
 
 ## Web Management GUI
 
 Edge includes an embedded, responsive Web GUI dashboard (`ps2servers-edge webui`)
-so users on phones, tablets, or remote computers can manage all Edge services without
-touching a terminal:
+for configured OpenWrt/procd or systemd services. On other hosts, restart
+operations report manual instructions; the dashboard does not supervise arbitrary
+terminal-launched processes. Initial installation still requires host setup:
 
 ```sh
 # Loopback only, no password needed:
@@ -280,11 +284,9 @@ Options:
 
 ## Writes
 
-Edge supports file writes, so a console can save. They are **on by default**,
-matching the Desktop/Core server and udpfsd. UDPFS is a two-way protocol in
-practice — a console that loads a game off the share usually wants to write its
-saves back to the same place — so a read-only default would make Edge quietly
-less capable than its siblings for the ordinary case.
+Edge implements file writes. They are **on by default** in the bare binary.
+The loader must implement the corresponding save/VMC path; writable serving
+alone does not establish that a game can save over UDPFS.
 
 Pass `--read-only` (or `RO=1`) to serve read-only instead.
 
@@ -303,7 +305,7 @@ With writes enabled:
 | Single assembled write over 8 MiB | `EFBIG` — bounds what one peer can make the server buffer |
 | Chunk arrives out of order | `EIO`, whole write abandoned rather than silently misassembled |
 | Write on a handle opened read-only | `EACCES` — access is decided at OPEN and re-checked |
-| Write completes | `fsync` before `WRITE_DONE`, so a console pulled mid-session does not lose the save |
+| Write completes | `fsync` before `WRITE_DONE`; this does not make interrupted or multi-request saves atomic |
 
 Block-device writes (`BWRITE`) are implemented too, when `--block-device` is
 set. They reuse the same chunk-assembly path as file writes, so the table above
@@ -341,7 +343,8 @@ they held is released. Normal logs do not print full requested host paths.
 - sixteen target builds (eleven Linux, three Windows, two macOS): compiled and
   inspected
 - emulator tested: no
-- physical PS2 hardware tested: no
+- physical PS2 game launch/write validation: not established by the recorded tests;
+  the historical wLaunchELF browsing control is described in the handoff guide
 - **file writes: not verified on hardware or an emulator.** The write path is
   implemented against the Python server's wire behaviour and covered by unit
   and loopback tests only. No console has been observed writing through Edge.

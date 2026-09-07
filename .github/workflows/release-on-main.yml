@@ -386,11 +386,10 @@ jobs:
           <summary>Why "portable", and what are the other files?</summary>
 
           The **portable** build is the same app laid out as a plain folder,
-          with no self-extracting wrapper. The wrapper is what makes some
-          antivirus flag the single-file build, so the portable one usually
-          comes up clean — that is why it is the recommendation rather than the
-          single-file `PS2Servers-windows-x64.zip`, which is published for
-          convenience.
+          with no self-extracting wrapper. This avoids one source of heuristic
+          detections, but the portable app remains unsigned and can also be
+          flagged. The single-file `PS2Servers-windows-x64.zip` is published
+          for convenience; verify the exact file with its checksum/attestation.
 
           On Linux, `PS2Servers-linux-x64` is a single executable; take
           `PS2Servers-linux-x64-portable.tar.gz` instead if `/tmp` is mounted
@@ -400,7 +399,8 @@ jobs:
           directly or for inspection.
 
           Everything beginning **`PS2ServersEdge-`** is a different program —
-          see the section below. You do not need it on a normal computer.
+          see the section below. Choose it for headless use; Desktop is the
+          graphical launcher.
           </details>
           HEADER
           # Substitute the two dynamic values, then append the shared tail.

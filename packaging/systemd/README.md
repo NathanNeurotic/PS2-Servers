@@ -1,10 +1,11 @@
 # systemd deployment
 
-Two units here, and which one you want depends on whether you need SMB.
+Choose the template for the installed executable; a legacy UDPFS-only Edge
+unit is also retained.
 
 | unit | build | serves |
 |---|---|---|
-| `ps2servers@.service` | the normal Linux download | **SMBv1**, UDPFS, UDPBD |
+| `ps2servers@.service` | Desktop/Core Linux download | SMBv1, SMB2/3, UDPFS, HTTP, UDPBD (supply arguments for the chosen key) |
 | `ps2servers-edge@.service` | the Go Edge build | **SMBv1**, UDPFS, UDPBD |
 | `ps2servers-edge.service` | the Go Edge build | UDPFS only (predates the others) |
 
@@ -14,16 +15,28 @@ not practical, and `ps2servers@smbv1` on a normal machine. The older
 `ps2servers-edge.service` runs udpfs only and is left alone for anyone already
 using it.
 
+First install the Edge binary as `/usr/local/bin/ps2servers-edge`, create the
+`ps2edge` account, and grant it access to the chosen game directory (see the
+Edge installation example below). Then install the template and matching env
+file, edit that file for your paths, and reload systemd before enabling it:
+
 ```sh
 sudo install -m 0644 packaging/systemd/ps2servers-edge@.service /etc/systemd/system/
 sudo install -m 0644 packaging/systemd/ps2servers-edge-smb.env /etc/default/ps2servers-edge-smb
+sudo systemctl daemon-reload
 sudo systemctl enable --now ps2servers-edge@smb
 ```
 
 The instance name is the Edge subcommand, so `ps2servers-edge@udpfs`,
 `ps2servers-edge@udpbd`, and `ps2servers-edge@webui` work the same way, each
 reading its own `/etc/default/ps2servers-edge-<subcommand>`. Several can run
-at once. Enable the web GUI with `systemctl enable --now ps2servers-edge@webui`.
+at once. Install and configure `ps2servers-edge-webui.env` before enabling
+`ps2servers-edge@webui`. Its example env file binds `0.0.0.0` without a
+password: add `--auth-pass` before starting it, or change the bind to
+`127.0.0.1`; otherwise startup is refused. The unprivileged unit can display the dashboard, but
+Save/Restart still require appropriate filesystem and service-manager permissions.
+Changing JSON configuration does not rewrite the per-instance environment files;
+those files remain the arguments systemd actually starts.
 
 Edge's SMB defaults to **port 1111**, not 445, for the same reason as the
 Python one: below 1024 needs root and these units run as `ps2edge`.
@@ -56,7 +69,7 @@ sudo install -m 0644 packaging/systemd/ps2servers-smbv1.env /etc/default/ps2serv
 The instance name is the server key. `ps2servers@udpfs` and `ps2servers@udpbd`
 work the same way, each with its own file — install
 `ps2servers-udpfs.env` or `ps2servers-udpbd.env` instead. The env file is
-**required**: every server here refuses to start without arguments, so a
+**required** by the unit: serving modes need a root/share/image, so a
 missing one fails immediately rather than looping. Run `ps2servers --list` to
 see the keys available on your machine.
 
@@ -110,8 +123,9 @@ sudo systemctl edit ps2servers@smbv1
 ReadWritePaths=/mnt/games
 ```
 
-The share is writable on purpose — OPL stores its settings on it and a
-VMC-on-SMB lives there. Add `--read-only` only if you want saves to fail.
+Writable shares allow supported clients to store settings and VMCs. Add
+`--read-only` for a share that must not accept writes; saves then need another
+client-supported destination.
 
 If the share is on removable storage, add the mount unit to
 `After=`/`RequiresMountsFor=` with `systemctl edit ps2servers@smbv1`.

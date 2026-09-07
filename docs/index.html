@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PS2 Servers — zero-terminal LAN game servers for OPL</title>
-  <meta name="description" content="PS2 Servers gives Open PS2 Loader users click-and-go SMBv1, UDPFS, and UDPBD servers with a simple GUI launcher.">
+  <title>PS2 Servers — Desktop, Core and Edge LAN servers</title>
+  <meta name="description" content="PS2 Servers provides Desktop and Core SMBv1, SMB2/3, UDPFS, HTTP and UDPBD servers, plus native Edge servers for headless devices.">
   <meta property="og:title" content="PS2 Servers">
   <meta property="og:description" content="Click-and-go LAN servers for PS2 game loading through OPL.">
   <meta property="og:type" content="website">
@@ -22,6 +22,7 @@
         <a href="#udpfs-settings">UDPFS settings</a>
         <a href="#requirements">Requirements</a>
         <a href="#download">Download</a>
+        <a href="#guides">Guides</a>
         <a href="falsepositives.html">Antivirus</a>
         <a href="https://github.com/NathanNeurotic/PS2-Servers">GitHub</a>
       </nav>
@@ -32,16 +33,16 @@
     <section class="hero">
       <div class="container hero-grid">
         <div>
-          <div class="kicker">SMBv1 · UDPFS · UDPBD</div>
+          <div class="kicker">Desktop · Core · Edge</div>
           <h1>PS2 <span>Servers</span></h1>
-          <p class="lede">Run SMBv1, UDPFS, or UDPBD network servers for PlayStation 2 and Open PS2 Loader from one small GUI. Pick a server, point it at your games folder or disk image, press Start — the launcher shows your PC's LAN IP and the exact values to type on the PS2. No terminal, no config files.</p>
+          <p class="lede">Serve your games and files to network-capable PS2 homebrew. Desktop has six server cards in a small GUI; Core runs the same servers from a terminal; Edge runs on routers, NAS and headless computers. Choose a protocol your loader supports, select your folder or image, and start the server.</p>
           <div class="cta-row">
-            <a class="btn" href="https://github.com/NathanNeurotic/PS2-Servers/releases/latest">Download latest release</a>
+            <a class="btn" href="https://github.com/NathanNeurotic/PS2-Servers/releases">Choose a release</a>
             <a class="btn secondary" href="https://github.com/NathanNeurotic/PS2-Servers">View source</a>
           </div>
           <div class="status-strip" aria-label="Project highlights">
-            <div class="status-card"><strong>3</strong><span>server modes</span></div>
-            <div class="status-card"><strong>0</strong><span>terminal work required</span></div>
+            <div class="status-card"><strong>6</strong><span>Desktop server cards</span></div>
+            <div class="status-card"><strong>Edge</strong><span>native headless server</span></div>
             <div class="status-card"><strong>LAN</strong><span>OPL focused</span></div>
           </div>
         </div>
@@ -51,28 +52,38 @@
 
     <section class="section" id="servers">
       <div class="container">
-        <h2>One launcher. Three routes into OPL.</h2>
-        <p class="section-intro">PS2 Servers packages the useful host-side network servers into a single launcher that shows your LAN IP, collects the right folder or image path, and prints the exact values you need to enter in Open PS2 Loader.</p>
+        <h2>Choose the server your loader supports.</h2>
+        <p class="section-intro">The Desktop launcher shows setup values for each mode. Loader support varies: a server cannot add UDPFS, HTTP, or a newer SMB dialect to a client that does not implement it.</p>
         <div class="cards">
           <article class="card">
             <h3>SMBv1</h3>
-            <p>Shares a games folder over SMB. It speaks SMB itself, so it works on Windows 11 even though Windows removed its own SMB1 support — and it leaves your Windows file sharing untouched.</p>
-            <p><code>OPL: port 1111 · share games</code></p>
+            <p><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/SMB.md">Dialect, port, and authentication guide</a></p>
+            <p>Guest file sharing for OPL and other SMBv1 clients. Implements SMB itself without enabling Windows SMB1. Default custom-port operation leaves Windows File Sharing running; optional Take port 445 temporarily stops it.</p>
+            <p><code>Desktop: port 1025 · share games</code></p>
           </article>
           <article class="card">
             <h3>UDPFS</h3>
             <p>Serves a folder and/or a disk image over UDP — the newer protocol. Optionally decompresses CHD/CSO/ZSO images on the fly so they load as plain <code>.iso</code>.</p>
-            <p><code>OPL: select UDPFS</code></p>
+            <p><code>UDPFS-capable loader required</code></p>
           </article>
           <article class="card">
             <h3>UDPBD</h3>
-            <p>Serves a single disk image as a UDP block device. The PS2 finds the server by itself over the LAN — nothing to type on the console.</p>
-            <p><code>OPL: auto-discovered</code></p>
+            <p>Serves one disk image as a UDP block device. Requires a UDPBD-capable loader and compatible PS2 network settings; the server is discovered by broadcast.</p>
+            <p><code>UDP 48573 · disk image</code></p>
+          </article>
+          <article class="card">
+            <h3>SMB2 / SMB3</h3>
+            <p>Two Desktop cards for authenticated sharing with clients supporting SMB2 or SMB3 (up to 3.0.2). Use SMBv1 for an SMBv1-only loader. Both default to TCP 1445, so use different ports to run both.</p>
+          </article>
+          <article class="card">
+            <h3>HTTP games · experimental</h3>
+            <p>Generated game list and HTTP Range streaming for compatible OPL HTTP clients. Read-only, with server-side CHD/CSO decoding and client-side ZSO. Host-tested; console validation remains separate.</p>
+            <p><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/HTTP.md">HTTP setup and limits</a></p>
           </article>
           <article class="card">
             <h3>Edge &amp; Web GUI</h3>
-            <p>Headless standalone Go binary for routers, OpenWrt, Raspberry Pi, and NAS. Includes an embedded responsive Web GUI for phone or remote control.</p>
-            <p><code>Web UI: http://router:8082</code></p>
+            <p>Native Go UDPFS, SMBv1 and UDPBD server. Its optional web dashboard manages Edge services; it is separate from HTTP game serving. LAN dashboard access requires a password and service management requires the appropriate host setup.</p>
+            <p><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE.md">Edge setup and dashboard</a></p>
           </article>
         </div>
       </div>
@@ -80,12 +91,12 @@
 
     <section class="section" id="quickstart">
       <div class="container">
-        <h2>From download to in-game in four steps.</h2>
-        <p class="section-intro">Pick a server, choose the folder or image, press Start, then enter the displayed settings in OPL. The launcher fills in your LAN IP and the correct port for you.</p>
+        <h2>Start serving in four steps.</h2>
+        <p class="section-intro">Pick a server, choose the folder or image, press Start, then enter the displayed settings in OPL. The LAN IP selector supplies setup hints; server binding is a separate setting.</p>
         <div class="steps">
-          <article class="step"><h3>Download</h3><p>Grab the latest packaged build for your OS from GitHub Releases.</p></article>
-          <article class="step"><h3>Choose</h3><p>Select SMBv1, UDPFS, or UDPBD from the launcher tabs.</p></article>
-          <article class="step"><h3>Point</h3><p>Browse to your games folder or disk image. The app detects your LAN IP.</p></article>
+          <article class="step"><h3>Download</h3><p>Choose your OS on GitHub Releases. The newest pre-release carries development changes; tagged releases may be older.</p></article>
+          <article class="step"><h3>Choose</h3><p>Choose the server card matching your loader. HTTP and newer SMB dialects need explicit client support.</p></article>
+          <article class="step"><h3>Point</h3><p>Choose the parent of DVD/ and CD/ for file serving, or a disk image for UDPBD. Check the PC LAN IP.</p></article>
           <article class="step"><h3>Start</h3><p>Click Start and enter the shown values in OPL.</p></article>
         </div>
         <div class="ps2-config">
@@ -95,15 +106,16 @@
             <pre><b>SMBv1</b>   —   OPL &rarr; Settings &rarr; Network
 Address type      IP address      (turn NetBIOS off)
 PC IP Address     the LAN IP the launcher shows after you press Start
-Port              1111
+Port              1025 (Desktop default; match the running card)
 Share             games
 User              guest
 Password          leave blank
 
-<b>UDPFS</b>   select UDPFS in OPL; enter the shown server IP only if OPL asks.
-<b>UDPBD</b>   select UDPBD in OPL; the PS2 finds the server automatically — no IP or port.</pre>
+<b>UDPFS</b>   use a UDPFS-capable loader; check PS2 network settings before discovery.
+<b>UDPBD</b>   use a UDPBD-capable loader; discovery finds the server.
+<b>HTTP</b>    set the console port explicitly to the server port (default 1100).</pre>
           </div>
-          <p class="section-intro ps2-note">The launcher always prints these exact values while a server is running, so you never have to guess. You'll need a PS2 that boots homebrew and runs Open PS2 Loader (or PCSX2 with a network adapter) on the same LAN.</p>
+          <p class="section-intro ps2-note">Read the running server’s output for its actual address and port. Use a PS2 that boots compatible homebrew with network settings matching the PC. A menu listing is not yet proof of successful game launch.</p>
         </div>
       </div>
     </section>
@@ -111,24 +123,29 @@ Password          leave blank
     <section class="section" id="udpfs-settings">
       <div class="container">
         <h2>UDPFS settings worth knowing.</h2>
-        <p class="section-intro">The defaults are right for every client we know of — NHDDL, RiptOPL, POPSTARTER, POPSLOADER and wLaunchELF-R3Z all work out of the box. These are the ones you might change.</p>
+        <p class="section-intro">Start with Protocol mode Auto. If games list but fail at launch, check the PC address used for replies before changing compatibility or timing.</p>
         <div class="cards">
           <article class="card">
-            <h3>Using Modulo?</h3>
-            <p>There's a checkbox for it on the UDPFS tab. <strong>It's either/or</strong> — while it's on, the normal clients won't connect. Untick it and they're back.</p>
-            <p><a href="https://github.com/AdityaKumar7209/Modulo-R1-Beta-Preview---PS2">Modulo</a>'s client doesn't follow the UDPFS protocol: it never restarts its sequence counter, and it can't move to the server's data port. That isn't specific to us — it fails against <a href="https://github.com/pcm720/udpfsd">pcm720's udpfsd</a> for the same reasons. Modulo's own repo ships a patched server to work around both, so this mode answers the way that server does. A correct client can't follow it.</p>
-            <p><code>--modulo-mode</code></p>
+            <h3>Bind address (PC)</h3>
+            <p>Select the PC IP connected to the PS2 in the LAN IP box, then click <strong>Use LAN IP</strong> on the UDPFS card. You can also type that address. <strong>Stop and start UDPFS</strong> to apply it.</p>
+            <p>Use the PC’s address, not the PS2’s. Blank restores automatic binding. The button saves a copy; a later LAN IP change does not update that copy. Core binds its data socket while discovery stays on all interfaces.</p>
+            <p><code>--bind 192.168.0.3</code> · example PC address</p>
+          </article>
+          <article class="card">
+            <h3>Auto and Modulo</h3>
+            <p><strong>Auto</strong> negotiates Standard and Modulo independently for each peer. Leave <strong>Enforce Modulo mode</strong> unticked for normal Auto operation. That override selects Core’s legacy single-port Modulo behavior.</p>
+            <p><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/PROTOCOL-COMPATIBILITY.md">Protocol and Core/Edge differences</a></p>
           </article>
           <article class="card">
             <h3>Idle timeout</h3>
             <p>UDPFS drops a console once it goes quiet, closing whatever files it had open. There's no disconnect packet in the protocol — a paused game and an unplugged console look identical on the wire — so the timeout is the only thing that tells them apart.</p>
-            <p>Default <strong>1 hour</strong>, matching udpfsd, adjustable 60s–24h under Advanced. Lower it only to clear stale consoles faster; too low and a long pause loses its game.</p>
+            <p>Default <strong>1 hour</strong>, adjustable 60s–24h under Advanced. Zero is rejected by Core; it does not disable expiry. Lower it only to clear stale consoles faster; too low and a long pause loses its game.</p>
             <p><code>--peer-timeout SECONDS</code></p>
           </article>
           <article class="card">
             <h3>Ports</h3>
-            <p>Leave them alone unless something needs them predictable. Discovery is <code>0xF5F6</code>; each console is then handed to an ephemeral data port, which a manual firewall rule or a strict NAT can't follow — pin <strong>Data port</strong> in that case.</p>
-            <p>Single-port mode serves both on one port for networks that can't handle the two-port handshake. Unlike Modulo mode it changes no protocol behavior, so normal clients keep working.</p>
+            <p>Leave them alone unless something needs them predictable. Discovery is <code>0xF5F6</code>; the server also opens an automatic data port at startup. Pin <strong>Data port</strong> when a manual firewall needs a predictable pair, and allow both ports.</p>
+            <p>Single-port mode serves both on one port for networks that can't handle the two-port handshake. Auto negotiation supports either topology. Address binding and port selection solve different configuration problems.</p>
             <p><code>--port · --data-port · --single-port</code></p>
           </article>
         </div>
@@ -143,10 +160,10 @@ Password          leave blank
           <article class="card">
             <h3>Your PC</h3>
             <ul class="spec">
-              <li><b>OS</b> Windows 10/11, Linux, or macOS — all 64-bit</li>
+              <li><b>OS</b> Windows x64/x86, Linux x64, or macOS Intel/Apple Silicon</li>
               <li><b>Packaged</b> No Python needed; the download bundles everything</li>
-              <li><b>From source</b> Python 3 + Tkinter (Linux: <code>python3-tk</code>)</li>
-              <li><b>Hardware</b> Any modern 64-bit PC — a small Tkinter app, not Electron</li>
+              <li><b>From source</b> Python 3.12 used by CI; Tkinter for GUI (Linux: <code>python3-tk</code>)</li>
+              <li><b>Hardware</b> Desktop is a small Tkinter app; Edge has ARM/MIPS and other headless targets</li>
               <li><b>Network</b> Same LAN as the PS2; wired recommended for big games</li>
             </ul>
           </article>
@@ -154,7 +171,7 @@ Password          leave blank
             <h3>Your PS2</h3>
             <ul class="spec">
               <li><b>Console</b> A PS2 that boots homebrew (FreeMcBoot, FreeDVDBoot, modchip…)</li>
-              <li><b>Loader</b> Open PS2 Loader or a fork such as RiptOPL</li>
+              <li><b>Loader</b> A homebrew loader with the chosen network protocol</li>
               <li><b>Adapter</b> PS2 Ethernet — built into slims, SCPH‑10281 on fat units</li>
               <li><b>Emulator</b> PCSX2 with a network adapter works for testing too</li>
             </ul>
@@ -162,37 +179,58 @@ Password          leave blank
           <article class="card">
             <h3>Compressed images</h3>
             <ul class="spec">
-              <li><b>Packaged</b> CHD, CSO and ZSO decode out of the box</li>
+              <li><b>Packaged</b> Desktop bundles CHD/CSO/ZSO support; check Compression support in the app</li>
               <li><b>ZSO</b> From source, add <code>lz4</code></li>
               <li><b>CHD</b> From source, add a <code>libchdr</code> native library</li>
               <li><b>CSO</b> Always available — pure Python</li>
             </ul>
-            <p><code>UDPFS only · shown as .iso</code></p>
+            <p>UDPFS: virtual <code>.iso</code>. HTTP: CHD/CSO decode on server, ZSO on client. Edge: no CHD.</p>
           </article>
         </div>
+      </div>
+    </section>
+
+    <section class="section" id="guides">
+      <div class="container">
+        <h2>Setup and reference guides</h2>
+        <p>For a direct PS2-to-PC cable, enable the Desktop direct-link helper and follow the DIRECT tab. It configures the PC interface and serves DHCP with elevation; it is not for a router LAN. Linux/macOS direct-link support is experimental.</p>
+        <ul>
+          <li><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/README.md">Desktop/Core setup, saved settings, UDPFS binding, and verification</a></li>
+          <li><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDITIONS.md">Choose Desktop, Core, or Edge</a></li>
+          <li><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/INSTRUCTIONS.md">Edge operator manual</a> · <a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE-WHICH-BUILD.md">Build picker</a></li>
+          <li><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md">OpenWrt</a> · <a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/packaging/systemd/README.md">systemd</a> · <a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/packaging/docker/README.md">Docker</a></li>
+          <li><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/optional-compression-dependencies.md">Compression support</a> · <a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/SECURITY.md">Security and cleanup</a></li>
+        </ul>
+        <p>CI checks host behavior and builds. HTTP game serving remains experimental; Edge gameplay and writes need separate physical-console validation. A passing build is not a hardware compatibility result.</p>
       </div>
     </section>
 
     <section class="section" id="download">
       <div class="container">
         <h2>Downloads</h2>
-        <p class="section-intro"><b>On Windows, the portable build is the recommended download</b> — it is the same app without the self-extracting wrapper that makes the single-file <code>.exe</code> trip antivirus heuristics, so it comes up clean. A single-file build is also published per OS for convenience, and macOS ships as architecture-specific app zips.</p>
+        <p class="section-intro"><b>On Windows, the portable build is the recommended download</b> — it avoids the single-file self-extraction wrapper, but remains unsigned and may still be flagged. Use the release’s actual download table; portable/AppImage builds can be absent if their build fails. macOS ships architecture-specific app zips.</p>
         <div class="terminal">
           <div class="terminal-bar"><span></span><span></span><span></span></div>
           <pre><b>release assets</b>
-PS2Servers-windows-x64-portable.zip      # recommended on Windows (AV-clean)
+PS2Servers-windows-x64-portable.zip      # Windows x64 portable
 PS2Servers-windows-x64.zip             # single-file convenience build
+PS2Servers-windows-x86-portable.zip      # 32-bit Windows
 PS2Servers-linux-x64
 PS2Servers-linux-x64-portable.tar.gz
+PS2Servers-x86_64.AppImage              # when available
 PS2Servers-macos-arm64.zip
 PS2Servers-macos-x64.zip
 
-<b>from source</b>
+<b>run from source</b>
+python ps2servers.py
+python ps2servers.py serve udpfs --root-dir /srv/ps2
+
+<b>build a package</b>
 python -m pip install -r requirements-build.txt
 python build/build.py</pre>
         </div>
         <div class="cta-row">
-          <a class="btn" href="https://github.com/NathanNeurotic/PS2-Servers/releases/latest">Latest release</a>
+          <a class="btn" href="https://github.com/NathanNeurotic/PS2-Servers/releases">Releases and pre-releases</a>
           <a class="btn secondary" href="falsepositives.html">Antivirus statement</a>
           <a class="btn secondary" href="https://github.com/NathanNeurotic/PS2-Servers/issues">Report an issue</a>
         </div>
