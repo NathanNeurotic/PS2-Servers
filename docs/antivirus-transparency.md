@@ -165,7 +165,7 @@ submission"):
 | Bitdefender | https://www.bitdefender.com/consumer/support/answer/29358/ |
 | Kaspersky | https://opentip.kaspersky.com/ |
 | ESET | https://support.eset.com/en/kb141 |
-| Malwarebytes | https://www.malwarebytes.com/false-positive |
+| Malwarebytes | https://help.malwarebytes.com/hc/en-us/articles/31589211404571-Report-a-false-positive-to-Malwarebytes-Support |
 | Any / multi-engine | https://www.virustotal.com (paste the SHA-256 or upload the file) |
 
 When you report — to the vendor or to this project — please include:
