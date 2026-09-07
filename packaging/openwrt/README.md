@@ -16,7 +16,11 @@ The `procd` service:
 - restarts after failure or before a removable mount becomes available;
 - reads `/etc/config/ps2servers-edge`;
 - logs through the normal OpenWrt service logger;
-- serves read-only.
+- serves read-only by default; writes are opt-in per server section;
+- leaves SMB, UDPBD and the web dashboard disabled until configured.
+
+See [the OpenWrt guide](../../docs/OPENWRT.md) for dashboard authentication,
+optional root privileges for Save/Restart, and storage/firewall setup.
 
 The UCI file is the stable configuration contract: section and option names
 are additive-only, so tooling that generates it can rely on them across

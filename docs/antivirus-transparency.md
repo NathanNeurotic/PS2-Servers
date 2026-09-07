@@ -29,7 +29,7 @@ certificate — see [Code signing](#code-signing)) and provides **local
 network-server behavior by design**. An unsigned, low-reputation executable that
 opens listening sockets is exactly the profile that generic, heuristic, and
 machine-learning antivirus engines treat as suspicious, so a detection here is
-almost always a *false positive* rather than a confirmed malware family.
+not enough on its own to classify a file as either safe or malicious.
 Characteristics that can trip heuristics:
 
 - It is unsigned and not yet reputation-established with Microsoft SmartScreen or
@@ -56,20 +56,31 @@ each ship a **portable** build (`PS2Servers-windows-x64-portable.zip` — or
 `PS2Servers-linux-x64-portable.tar.gz`): the same application laid out as a plain
 folder of the executable plus its libraries, with **no self-extracting
 bootstrap** — which is the thing that makes the single-file `.exe` trip
-antivirus/SmartScreen heuristics. The portable build comes up clean where the
-single file does not. Unzip it and run `PS2Servers.exe` (Windows) or
+antivirus/SmartScreen heuristics. The portable build avoids that wrapper but remains unsigned and may also be
+flagged. Packaging is not a guarantee of antivirus clearance. Unzip it and run `PS2Servers.exe` (Windows) or
 `PS2Servers` (Linux) from inside the folder. A single-file build is also
 published per platform for convenience. macOS already ships as a standalone
 `.app`.
 
 ## Network behavior
 
-PS2 Servers only exposes local server behavior that the user chooses from the
-GUI:
+Desktop/Core starts the serving modes selected through the GUI or CLI:
 
-- SMBv1: built-in SMB/CIFS subset, normally TCP port 1111. (Ports below 1033 are discouraged — Windows can reserve or block low ports.)
-- UDPFS: UDP file/block serving, normally UDP port 0xF5F6 for discovery. Each console is then served on a second UDP port, which the OS assigns on startup unless the user pins it ("Data port"); single-port and Modulo modes serve everything on the discovery port instead. All of it is inbound LAN serving — the server never initiates a connection.
+- SMBv1: built-in SMB/CIFS subset. Desktop defaults to TCP 1025; Core/standalone and Edge default to TCP port 1111. Use the running server’s printed port.
+- UDPFS: UDP file/block serving, normally UDP port 0xF5F6 for discovery. A second UDP socket uses an OS-assigned data port unless pinned ("Data port"); single-port and Core forced-Modulo operation use discovery for data too. Auto selects a protocol profile per peer. Core **Bind address (PC)** pins the data socket, independently of the top LAN IP setup hint.
 - UDPBD: UDP block-device serving, normally UDP port 0xBDBD.
+- SMB2/3: authenticated file sharing, normally TCP 1445.
+- HTTP game server: unauthenticated, read-only serving, normally TCP 1100.
+- Direct-link helper: optional DHCP on a dedicated PS2 interface (UDP 67/68), with temporary interface configuration.
+
+Edge has UDPFS, SMBv1, UDPBD, and an optional HTTP management dashboard on TCP
+8082. The dashboard requires authentication for a LAN bind. SMB/UDPBD may also
+answer the router-status query on UDP 62966 when enabled. See [Edge setup](EDGE.md).
+
+The app opens project/release links in the browser when selected. In source
+mode, a confirmed compression-dependency install invokes pip and contacts its
+configured package index. Core/Edge servers can also be started by manually
+installed services or containers; they are not limited to GUI starts.
 
 The Windows SMB server uses PS2 Servers' own SMB/CIFS implementation. It does not enable Windows SMB1, does not disable Windows SMB1 automatic removal, and does not install or remove Windows optional features.
 
@@ -78,7 +89,8 @@ The Windows SMB server uses PS2 Servers' own SMB/CIFS implementation. It does no
 - **Elevation (UAC):** the launcher starts non-elevated. It requests
   administrator rights through the standard Windows UAC prompt
   (`ShellExecute "runas"`) **only** when you choose to create or remove PS2
-  Servers firewall rules or use the advanced port-445 mode. The packaged build
+  Servers firewall rules, configure/restore the direct-link interface, or use
+  the advanced port-445 mode. The packaged build
   keeps the default `asInvoker` manifest — it never silently auto-elevates on
   launch.
 - **Firewall:** Windows Firewall changes require user action and consent. Rules
@@ -105,16 +117,29 @@ Windows Firewall rules can be removed from the GUI or with:
 powershell -ExecutionPolicy Bypass -File .\tools\remove-windows-firewall-rules.ps1
 ```
 
-## What it does not do
+## Saved settings, optional services, and cleanup
 
-PS2 Servers does not contain malware, credential collection, persistence, adware, browser modification, or crypto-mining behavior. It does not install browser
-extensions, set up autostart/persistence, modify system files outside the
-documented `PS2 Servers - ...` firewall rules, or contact any server other than
-the LAN clients you point it at.
+The launcher saves `launcher.json` in the per-user configuration directory;
+see [the README](../README.md#direct-cable-and-saved-settings) for each OS path.
+That file can contain configured SMB2/3 credentials. **Auto-start servers on
+launch** starts them when the app opens; it does not register an OS startup task.
+
+Direct-link mode changes a dedicated network interface and runs DHCP with
+elevation. Disable it before removing the app so the saved network state can be
+restored. Stop servers, delete the extracted app folder, remove the app's
+firewall rules if desired, and optionally remove its per-user configuration.
+Manually installed systemd/OpenWrt services or containers need separate removal.
+The Edge dashboard can save configuration and restart supported services when
+given the required permissions; it is an intentional remote-management feature.
+
+The project does not add advertising, browser extensions, crypto-mining, or
+credential collection for an external service. Configured credentials and
+operator-installed services are distinct from those behaviors.
 
 ## False-positive review note
 
 PS2 Servers has been submitted to Avast/Gen Threat Labs for false-positive review.
+This records a submission, not vendor approval of every subsequent build.
 
 The application is open source and built from the public GitHub repository. It is
 a PS2 homebrew utility for user-controlled local server setup and does not
@@ -140,7 +165,7 @@ submission"):
 | Bitdefender | https://www.bitdefender.com/consumer/support/answer/29358/ |
 | Kaspersky | https://opentip.kaspersky.com/ |
 | ESET | https://support.eset.com/en/kb141 |
-| Malwarebytes | https://www.malwarebytes.com/false-positive |
+| Malwarebytes | https://help.malwarebytes.com/hc/en-us/articles/31589211404571-Report-a-false-positive-to-Malwarebytes-Support |
 | Any / multi-engine | https://www.virustotal.com (paste the SHA-256 or upload the file) |
 
 When you report — to the vendor or to this project — please include:
@@ -187,8 +212,7 @@ harmless — for that, read the source.
 
 ## Build it yourself
 
-You do not have to trust the published binary. The whole app is Python you can
-read, and the packaged build is reproducible from source:
+You do not have to trust the published binary. Desktop/Core source is Python; Edge is Go. Desktop can be rebuilt with:
 
 ```sh
 python -m pip install -r requirements-build.txt

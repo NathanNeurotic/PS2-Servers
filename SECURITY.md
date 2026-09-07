@@ -21,7 +21,7 @@ behavior, and false-positive review status.
 ## Administrator rights
 
 PS2 Servers is designed to launch normally without administrator rights. Normal
-custom-port SMB mode, UDPFS, UDPBD, folder browsing, and log viewing do not need
+custom-port SMB mode, UDPFS, HTTP, UDPBD, folder browsing, and log viewing do not need
 the whole launcher to run elevated.
 
 The launcher may request administrator rights only for Windows actions that need
@@ -29,7 +29,8 @@ them:
 
 - creating or refreshing PS2 Servers Windows Firewall allow rules;
 - removing PS2 Servers Windows Firewall rules;
-- using the advanced SMB port `445` mode.
+- using the advanced SMB port `445` mode;
+- configuring or restoring the optional direct PS2-to-PC network link and its DHCP helper.
 
 The GUI shows whether it is currently running as administrator and provides a
 manual **Restart as administrator** button. This is intentionally not automatic on
@@ -42,8 +43,8 @@ The SMBv1 server does **not** enable or depend on Windows' built-in SMB1
 optional feature tree.
 
 Normal SMB mode uses PS2 Servers' own small SMB/CIFS implementation and listens
-on a custom TCP port, by default `1111` (ports below 1033 are discouraged, as
-Windows can reserve or block low ports). OPL connects to this program directly.
+on a custom TCP port: Desktop defaults to `1025`; Core/standalone and Edge
+default to `1111`. Saved settings may differ. OPL connects to this program directly.
 Windows file sharing does not need to expose SMB1.
 
 The advanced "Take port 445" option is different:
@@ -93,7 +94,7 @@ Automatic releases (built on every push to `main`) include:
 
 - packaged Windows/Linux/macOS assets — for Windows the recommended download is
   the standalone **portable** build (the single-file `.exe` can trip antivirus
-  heuristics; the portable build comes up clean), plus a single-file build per OS
+  heuristics; portable builds can also be flagged), plus a single-file build per OS
   and a standalone **portable** build for Linux (`PS2Servers-linux-x64-portable.tar.gz`);
 - a portable source ZIP;
 - `SHA256SUMS.txt` for release asset checksums;
@@ -112,9 +113,28 @@ Checksums verify file integrity, and attestations verify build provenance. They 
 not prove that a program is harmless. Users who want the lowest-trust path should
 inspect the source and run from source instead of using the unsigned packaged EXE.
 
+## Saved data and removal
+
+The launcher stores per-user settings in `launcher.json`; see the
+[configuration locations](README.md#direct-cable-and-saved-settings). Settings
+may include SMB2/3 credentials, so treat that file as private. Auto-start servers
+on launch is an application setting, not an OS login service. Manually installed
+systemd/OpenWrt units persist until the operator disables/removes them.
+
+Before uninstalling, stop servers and disable direct link so its network changes
+can be restored. Then delete the extracted app folder, optionally remove the
+per-user configuration, and use the firewall cleanup above. A manually installed
+Edge service/container requires separate removal using its host tooling.
+
+The Edge web dashboard is an optional authenticated management interface;
+SMB2/3 also supports authentication. Guest SMBv1, UDPFS, UDPBD and HTTP game
+serving remain intended for trusted LANs. See [Edge setup](docs/EDGE.md).
+
 ## Antivirus false-positive review
 
 PS2 Servers has been submitted to Avast/Gen Threat Labs for false-positive review.
+That submission does not establish clearance of every current asset; report
+the exact build and file hash for a new detection.
 
 The application is open source and built from the public GitHub repository. It is
 a PS2 homebrew utility for user-controlled local server setup and does not

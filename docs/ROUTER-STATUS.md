@@ -17,8 +17,9 @@ cut mid-write. `busy` is how a launcher knows to say "don't".
 
 ## The compatibility rule this is built on
 
-Every PS2-Servers release, and udpfsd upstream, drops a discovery packet whose
-service ID is not UDPFS, without replying:
+The UDPFS handler drops discovery requests for an unsupported service ID.
+Current PS2-Servers intercepts recognized status queries before that handler;
+older UDPFS-only versions ignore them:
 
 - Edge: `internal/udpfs/negotiation.go` — `if err != nil || dh.ServiceID != protocol.ServiceUDPFS { return }`
 - Desktop: `udpfs_server/ps2servers_core.py` — `if hdr.packet_type != PacketType.DISCOVERY or disc.service_id != UDPRDMA_SVC_UDPFS: return`
@@ -108,7 +109,7 @@ it and whether it understands the layout.
 | value | name | meaning |
 |---|---|---|
 | 0 | `starting` | process is up, not yet able to serve |
-| 1 | `ready` | serving, no transfer in flight — safe to power-cycle |
+| 1 | `ready` | serving, no transfer observed in flight at the instant of the reply |
 | 2 | `busy` | at least one transfer in flight — **do not cut power** |
 | 3 | `degraded` | serving, but something is wrong (share unreadable, for example) |
 | 4 | `stopping` | shutting down |
@@ -131,8 +132,10 @@ version bump.
 
 ### Active sessions — offset 12
 
-Peers with live state. `busy` is the authoritative "in flight" signal; this is
-for display.
+Peers with live state. `busy` indicates an in-flight operation observed by this
+service; the count is for display. A `ready` snapshot is not a disk-unmount or
+power-off acknowledgement: traffic may begin immediately afterward and other
+services can still be writing.
 
 ### Uptime — offset 14
 

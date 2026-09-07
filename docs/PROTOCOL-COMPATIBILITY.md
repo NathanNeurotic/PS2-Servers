@@ -36,16 +36,36 @@ not conflate protocol diagnosis with single-port or two-port topology.
 `--protocol-mode modulo` forces the compatibility sequence behavior. It exists
 for controlled diagnosis and migration, not as the normal user setting.
 
-The historical `--modulo-mode` flag remains as a deprecated alias for
-`--protocol-mode modulo`. It prints a warning rather than silently changing
-meaning. New launcher sessions no longer display a global Modulo checkbox;
-Automatic mode requires no user intervention.
+The historical `--modulo-mode` flag remains a deprecated alias for
+`--protocol-mode modulo`. The Desktop card has an Auto/Standard/Modulo selector
+and an **Enforce Modulo mode** checkbox; the checkbox overrides the selector.
+Leave it unticked for Auto. Core routes forced Modulo through its legacy
+single-port engine. Edge forces the sequence profile but keeps topology
+controlled separately by `--single-port`.
 
 ## Single-port topology
 
-`--single-port` is independent of protocol mode. It uses the discovery socket
-for all traffic. Automatic negotiation works with either single-port or normal
-two-port operation.
+In Auto and Standard, `--single-port` uses the discovery socket for all traffic.
+Automatic negotiation supports either topology. Forced Modulo in Core already
+uses a single socket; Edge keeps the profile and topology choices independent.
+
+## Address binding and launch failures
+
+For Desktop/Core, use **Bind address (PC)** to select the PC address on the PS2
+network, or click **Use LAN IP**, then stop/start UDPFS. The top LAN IP selector
+alone changes setup hints. Core CLI `--bind IP` pins the data socket; discovery
+stays wildcard. `--bind IP:port` can also pin its data port, while an explicit
+`--data-port` takes precedence. In single-port Core operation the separate data
+bind is unused.
+
+Edge `--bind IP` binds both discovery and data sockets and accepts no port suffix.
+Binding one local address can affect broadcast reception on some hosts; verify
+initial discovery as well as game launch. See the [simple Desktop steps](https://github.com/NathanNeurotic/PS2-Servers/blob/main/README.md#udpfs-games-list-but-fail-to-launch).
+
+A DISCOVERY source address is the client endpoint. A new `seq=0` or a different
+client IP is evidence to correlate with launch, not proof of a broken server
+handshake. A read at EOF returning zero bytes is also not by itself a failed
+ISO read.
 
 ## Fallback timing
 

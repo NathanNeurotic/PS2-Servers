@@ -5,10 +5,9 @@ load games from — so SMB keeps working even on hosts where the OS has killed S
 
 ## Why this exists
 
-OPL's network game loading speaks **SMBv1** (`NT LM 0.12`) with **LM/NTLMv1** auth. Windows 11
-(24H2 / 25H2) ships the SMB1 server **off by default** and **removed NTLMv1**, so the old
-"share a folder from Windows" path is effectively dead — and re-enabling it fights Microsoft's
-hardening with no guarantee it works.
+OPL's traditional SMB backend speaks **SMBv1** (`NT LM 0.12`). This server
+accepts guest logons independently of the host OS SMB server, so using it does
+not require enabling Windows SMB1 or changing the host's authentication policy.
 
 This program sidesteps all of that: it **implements SMBv1 itself** and accepts **guest** logons,
 so it does not touch Windows' SMB stack at all. OPL connects to *this* server on a custom TCP
@@ -16,7 +15,12 @@ port — Windows' own SMB2/3 service on port 445 is left completely alone. No Wi
 no NTLMv1, no registry edits.
 
 It's pure Python 3 standard library (no `pip install`), so it runs as a bare `.py` with zero
-antivirus false-positives, and works the same on Windows, Linux and macOS.
+packaging dependencies, and runs on Windows, Linux and macOS. Running source
+does not guarantee antivirus clearance; see [the notice](../ANTIVIRUS-NOTICE.md).
+
+For the Desktop card, the default is **1025**; this standalone script and its
+batch wrapper default to **1111**. Saved/custom ports can differ. Use the
+running server’s printed port. For newer dialects, see [SMB setup](../docs/SMB.md).
 
 ## Quickstart
 
@@ -115,14 +119,15 @@ a custom port instead; take-445 works again once the pin is gone (e.g. Docker un
 ## Status / testing
 
 This SMBv1 server is validated by use against Open PS2 Loader. **Final validation is on
-real hardware** (an actual PS2 running OPL, or PCSX2 with a network adapter) — booting an
-ISO over the share and browsing the menu. There is no standalone protocol self-test in this
-folder; the repo's automated self-test harness covers the UDPBD server
-(`udpbd_server/selftest.py`, run in CI). If you hit an issue, start the server with `-v` and
+real hardware** (an actual PS2 running the tested loader). PCSX2 is a separate
+emulator check. CI runs the full Python suite, including SMB tests and
+`tests/test_smb_wire_parity.py` against Edge; these host checks do not establish
+console gameplay. If you hit an issue, start the server with `-v` and
 capture the output when you open a report.
 
 ## Optional: build a single `.exe`
 
 Power users should just run the `.py`. If you want a double-clickable Windows binary, see
-`build_exe.ps1` (uses Nuitka, not PyInstaller — PyInstaller's bootloader trips antivirus). Code
-signing is the single biggest false-positive reducer.
+[`build_exe.ps1`](build_exe.ps1), which uses Nuitka. The resulting executable
+is unsigned and may be flagged; verify the exact artifact as described in
+[the transparency guide](../docs/antivirus-transparency.md).

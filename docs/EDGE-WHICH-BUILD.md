@@ -2,9 +2,8 @@
 
 Edge ships one file per device family. This page tells you which one to take.
 
-> **On Windows or macOS, you probably do not want Edge at all.** Edge is the
-> headless command-line server for routers, NAS boxes and Raspberry Pi. On a
-> desktop you almost certainly want the graphical launcher — the
+> **Choose Desktop for the graphical launcher, Edge for a native headless server.**
+> Desktop downloads are the
 > `PS2Servers-windows-…` or `PS2Servers-macos-…` download. Take the Edge
 > desktop build only if you specifically want one small native binary with no
 > Python runtime, for example because antivirus flags the packaged Python
@@ -43,12 +42,12 @@ Match the output against this table:
 > build, even though the hardware is 64-bit capable. This is the single most
 > common mix-up.
 
-### Picking wrong is harmless
+### If a build does not start
 
-If you download the wrong build it simply will not start, usually with
-`cannot execute binary file` or `Exec format error`. Nothing is damaged and
-nothing is written. Just delete it and try another. You cannot brick a device
-by trying the wrong Edge build.
+An incompatible executable usually reports `cannot execute binary file` or
+`Exec format error`. Re-check the OS, architecture and endianness against the
+release’s `WHICH-DEVICE.txt`; do not install a mismatched package or replace
+system files to work around it.
 
 ---
 
@@ -140,7 +139,7 @@ Remember these are the **headless server**: you run them from a terminal, there
 is no window. Start one with:
 
 ```sh
-ps2servers-edge.exe udpfs --root D:\PS2Games      # Windows
+.\ps2servers-edge.exe udpfs --root D:\PS2Games    # Windows PowerShell
 ./ps2servers-edge udpfs --root /Users/you/PS2     # macOS
 ```
 
@@ -150,8 +149,9 @@ System Settings → Privacy & Security.
 
 ## Letting the console write (saves)
 
-Every build **allows writes by default**, so memory-card saves work with no
-extra flags. To serve read-only instead, add `--read-only`:
+The bare binary **allows writes by default**. The client must support the
+corresponding save/VMC path; game saves are not guaranteed by this setting.
+To serve read-only instead, add `--read-only`:
 
 ```sh
 ./ps2servers-edge udpfs --root /path/to/games --read-only
@@ -169,7 +169,7 @@ would destroy the image — keep anything you want written as a plain file.
 The prebuilt files above are **generic Linux binaries, not `.ipk` packages**.
 OpenWrt coverage is not limited to this list — `packaging/openwrt/` is a source
 package that builds through the OpenWrt SDK for whatever target your router
-uses. See [OPENWRT.md](OPENWRT.md). This is the supported route for any OpenWrt
+uses. See [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md). This is the supported route for any OpenWrt
 architecture not listed above.
 
 ### 32-bit big-endian PowerPC — use the Python server instead
@@ -177,17 +177,18 @@ architecture not listed above.
 Some older NAS units, most notably the **WD MyBook Live** and Netgear WNDR4700
 (OpenWrt target `apm821xx`), are 32-bit big-endian PowerPC. **Go cannot target
 this architecture at all** — `go tool dist list` offers `ppc64` and `ppc64le`
-only — so there will never be an Edge build for it.
+only — so this release family has no Edge build for it.
 
 Use the Desktop/Python UDPFS server on those devices instead. It runs there
-fine: these are disk-booted NAS units rather than flash-constrained routers, so
+where Python is available: these are disk-booted NAS units rather than flash-constrained routers, so
 they have room for a Python runtime, and the server's packet handling is
 explicitly byte-order safe. Throughput on an ~800 MHz PowerPC has not been
 measured, so treat performance as unverified.
 
 ### Anything else
 
-Build from source. Any platform in `go tool dist list` will work:
+Build from source for a Go-supported target and validate it. A target appearing
+in `go tool dist list` does not guarantee Edge supports that platform:
 
 ```sh
 cd native/ps2servers-edge

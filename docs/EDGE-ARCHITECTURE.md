@@ -1,8 +1,7 @@
 # PS2 Servers Edge architecture
 
-This document records the implementation boundary for the first PS2 Servers
-Edge pull request. It is intentionally separate from the desktop launcher and
-from the established Python server code.
+This document describes the native Edge implementation and its boundaries
+relative to the Desktop launcher and Python Core servers.
 
 ## Product boundary
 
@@ -82,7 +81,7 @@ names and their uncompressed size, and decompressed blocks are cached per open
 image up to `--compression-cache-size`. `--no-compression` turns both the
 decoding and the `.iso` substitution off, so a container is served as the raw
 bytes on disk under its real name. CHD is deliberately not in the default
-CGO-free implementation; see `docs/EDGE.md`.
+CGO-free implementation; see [Edge configuration](EDGE.md).
 
 `--block-device` additionally serves one image through the UDPFS `BREAD`/
 `BWRITE` opcodes on handle 0, which `OPEN` never returns. Access is positional
@@ -108,4 +107,5 @@ Still outstanding: no console or emulator has driven native UDPBD.
 
 This implementation is unit tested, loopback integration tested, statically
 analyzed with `go vet`, and cross-compiled for the documented Linux targets. It
-has not been emulator-tested or hardware-tested in this pull request.
+does not establish emulator or physical-console compatibility. Record those
+results with the exact Edge and loader builds separately.

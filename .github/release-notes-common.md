@@ -17,8 +17,8 @@ request.
 
 ### PS2 Servers Edge — routers, NAS, Raspberry Pi
 
-**If you are on a normal computer, ignore these.** The `PS2ServersEdge-*` files
-are a different program: a small headless server with no GUI and no Python, for
+The `PS2ServersEdge-*` files are the native headless edition, with an optional
+web dashboard and no Python runtime, for
 devices where the launcher does not fit — routers, NAS units, Raspberry Pi and
 other embedded Linux. Windows and macOS builds exist for people who want one
 native binary and no Python runtime.
@@ -28,7 +28,8 @@ Each file is named for the device family it serves, for example
 `router-mips-little-endian-mt7621`. Run `uname -m` on the device and match it in
 [EDGE-WHICH-BUILD.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE-WHICH-BUILD.md);
 every archive also contains a `WHICH-DEVICE.txt` confirming what it is for.
-Picking the wrong one is harmless — it simply will not start.
+An incompatible build usually refuses to start; verify the OS and architecture
+before installing it.
 
 Edge serves **three** protocols, one subcommand each, and can run more than one
 at a time:
@@ -56,7 +57,8 @@ access on the LAN, not someone capturing traffic.
 
 Edge supports **CSO and ZSO but not CHD** (CHD needs a native library that would
 break static linking — use the Desktop app for CHD). It **allows the console to
-write by default**, so saves work; pass `--read-only` to prevent that. `--metrics`
+write by default**; saves require a client that supports that write path.
+Pass `--read-only` to prevent writes. `--metrics`
 logs periodic transfer statistics, which is the way to tell a slow transfer from
 a stalled one on a machine with no screen. `--compression-cache-size` tunes how
 many decompressed blocks are held per image, which matters most on the slowest
@@ -66,8 +68,8 @@ For OpenWrt, build the source package for your exact target rather than using
 these generic binaries — see
 [OPENWRT.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/OPENWRT.md).
 The OpenWrt package starts read-only; set `option read_only '0'` in
-`/etc/config/ps2servers-edge` to let the console save. Every Edge option is a
-UCI option there, including `block_device`. Each subcommand is its own procd
+`/etc/config/ps2servers-edge` to let the console save. The UCI configuration exposes the serving options, including `block_device`;
+CLI-only flags such as `--quiet` are not UCI options. Each subcommand is its own procd
 instance, so a board can serve UDPFS and SMB at once. There are systemd units
 for the same thing on ordinary Linux, where `systemctl restart
 ps2servers-edge@smb` does restart just that one.
@@ -78,7 +80,7 @@ off by default and report a permission error. Status, configuration and file
 browsing all work regardless. Set `option run_as_root '1'` to enable them, which
 runs the dashboard as root; that is a real trade, which is why it is a choice.
 
-> **Edge has not been verified on a physical PlayStation 2 or an emulator.** Its
+> **Edge gameplay and writes have not been verified on a physical PlayStation 2 or an emulator.** Its
 > wire behaviour is checked in CI against the hardware-validated Python servers,
 > including a byte-for-byte comparison for UDPBD, which is the strongest evidence
 > available without a console — and not the same thing as one. Treat the write
@@ -89,12 +91,19 @@ runs the dashboard as root; that is a real trade, which is why it is a choice.
 PS2 Servers is an open-source PS2 homebrew utility for user-controlled local
 server setup. It runs local LAN servers for Open PS2 Loader:
 
-- **SMBv1** — built-in SMB/CIFS subset, normally TCP port `1111`
-  (below 1033 discouraged).
+- **SMBv1** — guest file sharing. Desktop defaults to TCP `1025`; Core/standalone
+  and Edge default to TCP port `1111`. Match the running server’s printed port.
 - **SMB2/SMB3** — a separate, newer server for clients that speak them,
   off by default and with NTLMv2 authentication when credentials are set.
 - **UDPFS** — UDP file serving, normally UDP port `0xF5F6` (62966).
 - **UDPBD** — UDP block-device serving, normally UDP port `0xBDBD` (48573).
+- **HTTP game serving** — experimental, read-only, normally TCP `1100`;
+  distinct from Edge’s management dashboard. Set the client port explicitly.
+
+For UDPFS, Auto negotiates Standard/Modulo per peer. If games list but fail to
+launch on a multi-interface PC, use the UDPFS card’s **Bind address (PC)** /
+**Use LAN IP**, then stop/start UDPFS. The top LAN IP selector alone supplies
+setup hints. See [UDPFS setup](https://github.com/NathanNeurotic/PS2-Servers/blob/main/README.md#udpfs-games-list-but-fail-to-launch).
 
 The PS2 Servers Edge build additionally offers an optional HTTP management
 dashboard on TCP `8082` (`ps2servers-edge webui`). It is **off by default**,
@@ -105,6 +114,11 @@ Every server here is started by the user and listens on the local network only.
 Nothing phones home, and nothing opens a port at install time.
 
 Windows behavior:
+
+Direct-link setup also requires elevation to configure/restore its dedicated
+interface and DHCP helper. Disable it before removing the app. The launcher
+stores per-user settings (including configured credentials); manually installed
+services and containers require separate cleanup.
 
 <!--
 The five bullets below, the verification list, and the two closing paragraphs
@@ -138,8 +152,8 @@ Verification:
 
 If your antivirus flags a download, see
 [ANTIVIRUS-NOTICE.md](https://github.com/NathanNeurotic/PS2-Servers/blob/main/ANTIVIRUS-NOTICE.md)
-— it explains why the single-file build trips heuristics, and why the portable
-build usually does not.
+— it explains packaging-related detections and how to verify the exact file.
+Portable builds remain unsigned and may also be flagged.
 
 PS2 Servers has been submitted to Avast/Gen Threat Labs for false-positive review.
 

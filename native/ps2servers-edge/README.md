@@ -1,6 +1,6 @@
 # PS2 Servers Edge
 
-Native UDPFS for routers, NAS devices, Raspberry Pi systems, embedded Linux,
+Native UDPFS, SMBv1, and UDPBD for routers, NAS devices, Raspberry Pi systems, embedded Linux,
 headless servers, and older computers. Also built for Windows and macOS as a
 single binary for people who want no Python runtime.
 
@@ -8,7 +8,7 @@ single binary for people who want no Python runtime.
 go build ./cmd/ps2servers-edge
 ./ps2servers-edge udpfs --root /mnt/games --protocol-mode auto
 
-# Serve read-only. Writes are allowed by default, so saves work without this.
+# Serve read-only. The bare binary allows writes by default.
 ./ps2servers-edge udpfs --root /mnt/games --read-only
 ```
 
@@ -18,6 +18,7 @@ both can transfer concurrently.
 
 ## Implemented
 
+- SMBv1 file sharing (`smb`) and optional web management (`webui`)
 - UDPFS discovery and canonical INFORM
 - delayed Modulo-compatible fallback
 - per-session sequence and response-socket state
@@ -37,9 +38,9 @@ both can transfer concurrently.
 
 ## Writes
 
-On by default, matching the Desktop/Core server and udpfsd. UDPFS is a two-way
-protocol in practice: a console loading a game off the share usually wants to
-write its saves back to it. Pass `--read-only` (or `RO=1`) to serve read-only.
+Writes are on by default in the bare binary. Saves require a client that
+implements that write path and writable host storage. Pass `--read-only`
+(or `RO=1`) to serve read-only.
 
 The OpenWrt package still starts read-only unless the operator sets
 `option read_only '0'` — a router share is often an entire attached disk.
@@ -108,6 +109,6 @@ reports failure rather than faking a successful save.
 - CHD in generic static builds
 - emulator or physical-console verification of the write paths
 
-See `docs/EDGE.md`, `docs/PROTOCOL-COMPATIBILITY.md`, and
-`docs/EDGE-ARCHITECTURE.md` for installation, compatibility, security, and
-validation details.
+See [Edge setup](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE.md), [protocol compatibility](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/PROTOCOL-COMPATIBILITY.md),
+and [architecture](https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/EDGE-ARCHITECTURE.md) for configuration, security,
+and validation details.
