@@ -137,12 +137,12 @@ class ServerRecommendationTests(unittest.TestCase):
         # The classic; not badged either way so it doesn't read as second-class.
         self.assertEqual(servers.REGISTRY["smbv1"].recommendation, "")
 
-    def test_bind_help_says_you_need_not_set_it(self):
-        # The tester assumed he had to set 0.0.0.0; discovery is already all-iface.
+    def test_bind_help_explains_automatic_and_explicit_binding(self):
+        # Keep the automatic default clear while explaining the launch workaround.
         bind = next(f for f in servers.REGISTRY["udpfs"].fields if f.key == "bind")
-        self.assertIn("Leave blank", bind.help)
-        self.assertIn("every network interface", bind.help)
-        self.assertIn("source address", bind.help)
+        self.assertIn("Blank = automatic", bind.help)
+        self.assertIn("PC IP connected to your PS2", bind.help)
+        self.assertIn("Stop/start UDPFS", bind.help)
 
 
 class WindowsOnlyFieldTests(unittest.TestCase):
