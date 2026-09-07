@@ -437,8 +437,9 @@ UDPFS = ServerDef(
               help="UDP discovery port (default 0xF5F6)."),
         Field("data_port", "Data port", "port", default=0, advanced=True,
               help="Leave 0 (auto) unless a firewall/NAT requires a predictable data port."),
-        Field("bind", "Bind address", "text", default="", advanced=True,
-              help="Leave blank. Discovery already listens on every network interface; this only pins the data source address."),
+        Field("bind", "Bind address (PC)", "text", default="",
+              help="If games list but fail to launch, use the PC IP connected to your PS2. "
+                   "Blank = automatic. Stop/start UDPFS to apply changes."),
         Field("tx_delay_ms", "TX delay (ms)", "text", default="0",
               advanced=True,
               help="Optional pacing delay between UDP transmissions in milliseconds."),

@@ -465,11 +465,19 @@ class ServerCard(ttk.LabelFrame):
             var = tk.StringVar(value=str(f.default or ""))
             ttk.Entry(parent, textvariable=var).grid(
                 row=row, column=1, sticky="ew", padx=6, pady=2)
+            if self.server.key == "udpfs" and f.key == "bind":
+                ttk.Button(parent, text="Use LAN IP",
+                           command=self._use_lan_ip).grid(
+                    row=row, column=2, sticky="e", padx=4, pady=2)
         self.vars[f.key] = var
         row += 1
         if f.help:
             row = self._add_help(parent, f.help, row, 1, 6, HELP_RESERVE)
         return row
+
+    def _use_lan_ip(self):
+        self.vars["bind"].set(self.app.current_ip().strip())
+        self.app._save()
 
     def _toggle_advanced(self):
         self._advanced_shown = not self._advanced_shown

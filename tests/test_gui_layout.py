@@ -156,7 +156,9 @@ class LauncherLayout(unittest.TestCase):
         self.app.nb.select(self.app.terminal_tab)
         self.resize(1024, 640)
         short = self.app.terminal.winfo_height()
-        self.resize(1024, 1000)
+        # A new visible field can make the page taller than 1000px. Only height
+        # beyond its natural size is spare space that should grow the terminal.
+        self.resize(1024, max(1000, self.app.content.winfo_reqheight() + 100))
         self.assertGreater(self.app.terminal.winfo_height(), short + 50,
                            "spare height should go to the log, not to dead page")
 
