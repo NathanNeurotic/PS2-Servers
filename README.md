@@ -265,9 +265,7 @@ trademark notes.
 
 ## Credits & thanks
 
-This is a fan project that stands entirely on the shoulders of the PS2 homebrew
-community. None of the clever parts are ours — we just wrapped brilliant existing
-work in something click‑and‑go. With genuine gratitude:
+PS2 Servers builds on the following projects and contributions:
 
 - **Rick Gaiser — [@rickgaiser](https://github.com/rickgaiser)** — the heart of all
   of this. He designed the **UDPBD** and **UDPFS** network protocols and wrote the
@@ -289,6 +287,8 @@ work in something click‑and‑go. With genuine gratitude:
   **[udpbd-server](https://github.com/israpps/udpbd-server)** on GitHub (Rick's code,
   with CI), which is the reference we ported from.
 - **Alex Parrado** — the Windows port of udpbd-server.
+- **Aerosol** — tested UDPFS across Linux, Windows, and direct connections, identified the
+  explicit-bind workaround, and isolated a shared-config line-ending issue affecting VMC paths.
 - **[Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)** and the
   **[ps2homebrew](https://github.com/ps2homebrew)** team — the loader everything here
   serves, and the wider toolchain that makes PS2 homebrew possible.
@@ -304,10 +304,3 @@ The **GUI launcher**, the **SMBv1** server, and the **pure‑Python UDPBD port**
 were written for this repo. Everything at the protocol level is the community's —
 we reimplemented from public protocols/source (rather than copying code) where we
 could, and tried to attribute accurately.
-
-### To the authors above 🙏
-
-This exists out of appreciation for what you've given the PS2 scene, not any sense of
-ownership. If you'd like attribution changed, a link corrected, or your work removed
-from this repo entirely, please [open an issue](https://github.com/NathanNeurotic/PS2-Servers/issues) — we'll sort it out
-right away, no questions asked. Thank you, sincerely.
