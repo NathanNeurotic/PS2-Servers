@@ -342,9 +342,6 @@ class GameIndex(object):
                                      entry.path))
                         continue
                     entries[key] = entry
-                    if rel_dir and rel_dir != ".":
-                        rel_key = posixpath.normpath(posixpath.join(rel_dir, entry.advertised)).lower()
-                        entries[rel_key] = entry
                     if not entry.conventional:
                         unconventional.append(entry.advertised)
 
