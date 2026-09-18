@@ -207,6 +207,10 @@ class GameIndex(object):
                 result.append((path, media))
         return result
 
+    def _disk_csv_path(self):
+        p = os.path.join(self.root_dir, "games.csv")
+        return p if os.path.isfile(p) else None
+
     def _signature_of(self, scan_dirs):
         """Change token covering each scanned file's identity, size and mtime.
 
@@ -234,6 +238,13 @@ class GameIndex(object):
             except OSError:
                 continue
             parts.append((path, tuple(sorted(entries))))
+        disk_csv = self._disk_csv_path()
+        if disk_csv:
+            try:
+                st = os.stat(disk_csv)
+                parts.append(("__disk_games_csv__", st.st_mtime_ns, st.st_size))
+            except OSError:
+                pass
         return tuple(parts)
 
     def _media_for(self, implied, size):
@@ -314,6 +325,7 @@ class GameIndex(object):
                 except OSError as exc:
                     _log("cannot read {}: {}".format(directory, exc))
                     continue
+                rel_dir = os.path.relpath(directory, self.root_dir).replace("\\", "/")
                 for name in names:
                     entry = self._entry_for(directory, name, implied_media,
                                             self._decompressible())
@@ -330,12 +342,27 @@ class GameIndex(object):
                                      entry.path))
                         continue
                     entries[key] = entry
+                    if rel_dir and rel_dir != ".":
+                        rel_key = posixpath.normpath(posixpath.join(rel_dir, entry.advertised)).lower()
+                        entries[rel_key] = entry
                     if not entry.conventional:
                         unconventional.append(entry.advertised)
 
             self._entries = entries
             self._signature = signature
-            self._csv, dropped = self._build_csv(entries)
+            disk_csv = self._disk_csv_path()
+            if disk_csv:
+                try:
+                    with open(disk_csv, "rb") as f:
+                        self._csv = f.read()
+                    dropped = 0
+                    _log("Using disk-resident games.csv from {}".format(disk_csv))
+                except OSError as exc:
+                    _log("Error reading disk games.csv: {}, falling back to auto-generation"
+                         .format(exc))
+                    self._csv, dropped = self._build_csv(entries)
+            else:
+                self._csv, dropped = self._build_csv(entries)
 
         self._report(entries, unconventional, dropped)
 
@@ -403,11 +430,15 @@ class GameIndex(object):
         to a console that is already reading one. New games are picked up by the
         next games.csv fetch.
 
-        Case-insensitive: the console echoes back the name we put in games.csv,
-        but a user testing with curl on Windows will not.
+        Case-insensitive: matches either relative path (e.g. 'DVD/Game.iso') or
+        bare filename ('Game.iso').
         """
         with self._lock:
-            return self._entries.get(name.lower())
+            entry = self._entries.get(name.lower())
+            if entry is not None:
+                return entry
+            base = posixpath.basename(name).lower()
+            return self._entries.get(base)
 
 
 class _RangeError(Exception):
