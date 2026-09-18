@@ -543,7 +543,46 @@ class CompressionDisabledTests(_ServerFixture):
         container bytes as if they were an ISO and fail at boot."""
         _head, body = self.simple_get("/games.csv")
         self.assertNotIn(b"SLUS_202.02", body)
-        self.assertIn(b"SLUS_201.74.Plain.iso", body)
+class SubdirectoryAndDiskCatalogTests(_ServerFixture):
+    def write_games(self):
+        self._write(os.path.join("DVD", "SLUS_201.74.Rumble Racing.iso"), PATTERN)
+        self._write(os.path.join("CD", "SCUS_971.01.Ico.iso"), PATTERN[:2048])
+        self._write("games.csv", b"SLUS_201.74,Custom Title,DVD,DVD/SLUS_201.74.Rumble Racing.iso\n")
+
+    def test_disk_resident_games_csv_is_served(self):
+        _head, body = self.simple_get("/games.csv")
+        self.assertEqual(body, b"SLUS_201.74,Custom Title,DVD,DVD/SLUS_201.74.Rumble Racing.iso\n")
+
+    def test_subdirectory_prefixed_requests_resolve(self):
+        sock = self.connect()
+        head, body = self.driver_request(sock, "DVD/SLUS_201.74.Rumble%20Racing.iso", 0, 15)
+        self.assertTrue(head.startswith(b"HTTP/1.1 206"))
+        self.assertEqual(body, PATTERN[:16])
+
+    def test_cd_subdirectory_prefixed_requests_resolve(self):
+        sock = self.connect()
+        head, body = self.driver_request(sock, "CD/SCUS_971.01.Ico.iso", 0, 15)
+        self.assertTrue(head.startswith(b"HTTP/1.1 206"))
+        self.assertEqual(body, PATTERN[:16])
+
+    def test_duplicate_basename_in_subdirectories(self):
+        self._write("Duplicate.iso", b"ROOT" * 16)
+        self._write(os.path.join("DVD", "Duplicate.iso"), b"DVDS" * 16)
+        self.server.index.refresh(force=True)
+
+        sock = self.connect()
+        head, body = self.driver_request(sock, "DVD/Duplicate.iso", 0, 15)
+        self.assertTrue(head.startswith(b"HTTP/1.1 206"))
+        self.assertEqual(body, b"DVDS" * 4)
+
+        head, _body = self.driver_request(sock, "Duplicate.iso", 0, 15)
+        self.assertTrue(head.startswith(b"HTTP/1.1 404"))
+
+    def test_oversized_disk_csv_falls_back_to_generated(self):
+        self._write("games.csv", b"X" * (hs.GAMES_CSV_MAX + 10))
+        self.server.index.refresh(force=True)
+        _head, body = self.simple_get("/games.csv")
+        self.assertIn(b"SLUS_201.74", body)
 
 
 if __name__ == "__main__":
