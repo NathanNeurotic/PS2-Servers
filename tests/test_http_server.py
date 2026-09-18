@@ -565,6 +565,25 @@ class SubdirectoryAndDiskCatalogTests(_ServerFixture):
         self.assertTrue(head.startswith(b"HTTP/1.1 206"))
         self.assertEqual(body, PATTERN[:16])
 
+    def test_duplicate_basename_in_subdirectories(self):
+        self._write("Duplicate.iso", b"ROOT" * 16)
+        self._write(os.path.join("DVD", "Duplicate.iso"), b"DVDS" * 16)
+        self.server.index.refresh(force=True)
+
+        sock = self.connect()
+        head, body = self.driver_request(sock, "DVD/Duplicate.iso", 0, 15)
+        self.assertTrue(head.startswith(b"HTTP/1.1 206"))
+        self.assertEqual(body, b"DVDS" * 4)
+
+        head, _body = self.driver_request(sock, "Duplicate.iso", 0, 15)
+        self.assertTrue(head.startswith(b"HTTP/1.1 404"))
+
+    def test_oversized_disk_csv_falls_back_to_generated(self):
+        self._write("games.csv", b"X" * (hs.GAMES_CSV_MAX + 10))
+        self.server.index.refresh(force=True)
+        _head, body = self.simple_get("/games.csv")
+        self.assertIn(b"SLUS_201.74", body)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -164,6 +164,8 @@ class GameIndex(object):
         self.enable_compression = enable_compression and COMPRESSION_AVAILABLE
         self._lock = threading.Lock()
         self._entries = {}
+        self._path_entries = {}
+        self._ambiguous_names = set()
         self._csv = b""
         self._signature = None
         self._last_scan = 0.0
@@ -318,6 +320,9 @@ class GameIndex(object):
             if not force and signature == self._signature:
                 return
             entries = {}
+            path_entries = {}
+            seen_names = {}
+            ambiguous_names = set()
             unconventional = []
             for directory, implied_media in scan_dirs:
                 try:
@@ -331,35 +336,49 @@ class GameIndex(object):
                                             self._decompressible())
                     if entry is None:
                         continue
+                    if rel_dir != ".":
+                        rel_path_key = posixpath.normpath(posixpath.join(rel_dir, name)).lstrip("/").lower()
+                        path_entries[rel_path_key] = entry
+
                     key = entry.advertised.lower()
-                    existing = entries.get(key)
+                    existing = seen_names.get(key)
                     if existing is not None:
-                        # The console addresses games by bare filename, so two
-                        # files that flatten to the same name are genuinely
-                        # ambiguous. Keep the first and say which lost.
+                        ambiguous_names.add(key)
                         _log("  duplicate name '{}': serving {}, ignoring {}"
                              .format(entry.advertised, existing.path,
                                      entry.path))
                         continue
+                    seen_names[key] = entry
                     entries[key] = entry
                     if not entry.conventional:
                         unconventional.append(entry.advertised)
 
             self._entries = entries
-            self._signature = signature
+            self._path_entries = path_entries
+            self._ambiguous_names = ambiguous_names
             disk_csv = self._disk_csv_path()
             if disk_csv:
                 try:
                     with open(disk_csv, "rb") as f:
-                        self._csv = f.read()
-                    dropped = 0
-                    _log("Using disk-resident games.csv from {}".format(disk_csv))
+                        disk_data = f.read()
+                    if len(disk_data) > GAMES_CSV_MAX:
+                        _log("WARNING: disk-resident games.csv exceeds {} bytes ({} bytes); "
+                             "falling back to auto-generated catalog"
+                             .format(GAMES_CSV_MAX, len(disk_data)))
+                        self._csv, dropped = self._build_csv(entries)
+                    else:
+                        self._csv = disk_data
+                        dropped = 0
+                        _log("Using disk-resident games.csv from {}".format(disk_csv))
+                    self._signature = signature
                 except OSError as exc:
+                    self._signature = None
                     _log("Error reading disk games.csv: {}, falling back to auto-generation"
                          .format(exc))
                     self._csv, dropped = self._build_csv(entries)
             else:
                 self._csv, dropped = self._build_csv(entries)
+                self._signature = signature
 
         self._report(entries, unconventional, dropped)
 
@@ -427,14 +446,17 @@ class GameIndex(object):
         to a console that is already reading one. New games are picked up by the
         next games.csv fetch.
 
-        Case-insensitive: matches either relative path (e.g. 'DVD/Game.iso') or
-        bare filename ('Game.iso').
+        Case-insensitive: matches normalized relative path (e.g. 'DVD/Game.iso')
+        first, then falls back to bare filename ('Game.iso') if unambiguous.
         """
+        clean = posixpath.normpath(name).lstrip("/").lower()
         with self._lock:
-            entry = self._entries.get(name.lower())
+            entry = self._path_entries.get(clean)
             if entry is not None:
                 return entry
             base = posixpath.basename(name).lower()
+            if base in self._ambiguous_names:
+                return None
             return self._entries.get(base)
 
 
