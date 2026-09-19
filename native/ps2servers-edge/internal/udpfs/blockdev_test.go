@@ -117,7 +117,7 @@ func TestBlockReadPastTheEndIsRefused(t *testing.T) {
 	}
 }
 
-func TestBlockReadOnAFileHandleIsRefused(t *testing.T) {
+func TestBlockReadOnAFileHandleServesNeutrinoFILEID(t *testing.T) {
 	disc, _, _ := startBlockServer(t, Config{})
 	c := dial(t, disc)
 
@@ -126,8 +126,11 @@ func TestBlockReadOnAFileHandleIsRefused(t *testing.T) {
 		t.Fatal("OPEN returned the reserved block handle")
 	}
 	reply := c.send(blockMsg(protocol.BReadRequest, h, 0, 1))
-	if got := result(reply); got != -int32(syscall.EBADF) {
-		t.Fatalf("BREAD on a file handle returned %d, want -EBADF", got)
+	if got := result(reply); got != 16 {
+		t.Fatalf("BREAD on a FILEID handle returned %d bytes, want 16", got)
+	}
+	if got := string(reply[8 : 8+16]); got != "0123456789abcdef" {
+		t.Fatalf("BREAD on a FILEID handle returned %q", got)
 	}
 }
 
