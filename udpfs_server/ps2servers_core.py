@@ -117,6 +117,11 @@ class AutoUdpfsServer(UdpfsServer):
             sess.handshake_generation = 0
             sess.fallback_sent = False
             sess.first_data_seen = False
+            # A sequence-zero discovery during an active stream is ambiguous:
+            # it can be a background rediscovery from the current client or a
+            # new loader taking over the same UDP endpoint. Defer the decision
+            # until the next payload-bearing DATA packet tells us which.
+            sess.pending_zero_discovery_at = 0.0
             sess.compat_lock = threading.RLock()
         return sess
 
@@ -152,6 +157,7 @@ class AutoUdpfsServer(UdpfsServer):
         sess.response_socket = SOCKET_DATA
         sess.fallback_sent = False
         sess.first_data_seen = False
+        sess.pending_zero_discovery_at = 0.0
 
     def _get_or_create_session(self, addr):
         return self._init_compat(super()._get_or_create_session(addr))
@@ -264,14 +270,22 @@ class AutoUdpfsServer(UdpfsServer):
                 self._compatibility_inform(sess)
             return
 
-        quiet = time.monotonic() - getattr(sess, "last_activity", 0.0)
+        now = time.monotonic()
+        quiet = now - getattr(sess, "last_activity", 0.0)
         with sess.compat_lock:
             if sess.rx_streaming and hdr.seq_nr == 0 and quiet < 1.0:
+                # Do not immediately decide that this belongs to the old
+                # stream. RiptOPL -> Neutrino keeps the same UDP endpoint and
+                # Neutrino starts a fresh session immediately after reading its
+                # modules through the inherited UDPFS mount. Remember the
+                # ambiguous discovery and let the next payload DATA packet
+                # distinguish "old stream continues" from "new loader starts".
+                sess.pending_zero_discovery_at = now
                 self._canonical_inform(addr)
                 if self.verbose:
                     self._print_event(
                         f"[{addr[0]}:{addr[1]}] DISCOVERY seq=0 during active stream "
-                        f"quiet={quiet:.2f}s -> preserve session"
+                        f"quiet={quiet:.2f}s -> defer replacement decision"
                     )
                 return
 
@@ -326,10 +340,47 @@ class AutoUdpfsServer(UdpfsServer):
         sess = self._local.session
         try:
             hdr = Header.unpack(data)
+            data_header = struct.unpack("<I", data[2:6])[0]
         except (struct.error, ValueError):
             return
+        header_words = (data_header >> 14) & 0xF
+        data_bytes = (data_header >> 18) & 0x3FFF
+        payload_size = header_words * 4 + data_bytes
+
         with sess.compat_lock:
             ingress = sess.ingress or SOCKET_DATA
+
+            # Commit the deferred seq0-discovery decision only when real DATA
+            # arrives. If it continues at the old expected sequence, the
+            # discovery was background traffic and #185's live-stream
+            # protection remains intact. If a fresh client instead begins at
+            # sequence 0 (Standard) or 1 (Modulo), reset the old transport state
+            # before the inherited sequence number can NACK the replacement
+            # forever. This is the RiptOPL -> Neutrino handoff seen on hardware:
+            # old expected=2213, DISCOVERY=0, first replacement DATA=1.
+            pending_at = getattr(sess, "pending_zero_discovery_at", 0.0)
+            if pending_at and payload_size > 0:
+                age = time.monotonic() - pending_at
+                if age >= 1.0:
+                    sess.pending_zero_discovery_at = 0.0
+                elif hdr.seq_nr == sess.rx_seq_nr_expected:
+                    sess.pending_zero_discovery_at = 0.0
+                    if self.verbose:
+                        self._print_event(
+                            f"[{addr[0]}:{addr[1]}] seq0 discovery resolved to existing "
+                            f"stream at seq={hdr.seq_nr}")
+                elif hdr.seq_nr in (0, 1):
+                    old_expected = sess.rx_seq_nr_expected
+                    initial_profile = (
+                        self.protocol_mode if self.protocol_mode != "auto"
+                        else PROFILE_PENDING)
+                    self._reset_session_state(sess, initial_profile)
+                    sess.discovery_sequence = 0
+                    sess.handshake_generation += 1
+                    self._print_event(
+                        f"[{addr[0]}:{addr[1]}] seq0 discovery resolved to replacement "
+                        f"session: old_expected={old_expected} first_data={hdr.seq_nr}")
+
             if sess.protocol_profile == PROFILE_PENDING:
                 profile = classify_profile(sess.discovery_sequence, hdr.seq_nr)
                 sess.protocol_profile = profile
