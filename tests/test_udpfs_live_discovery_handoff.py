@@ -8,6 +8,7 @@ without touching real sockets.
 """
 
 import importlib.util
+import io
 import pathlib
 import struct
 import sys
@@ -65,11 +66,32 @@ def _exercise_payload_data(server, sess, addr, seq_nr):
     return consumed, ack_packets
 
 
+def _exercise_bread(server, sess, addr, handle, sector=0, count=1):
+    """Issue a real inherited BREAD against an existing server-side handle."""
+    server._local = threading.local()
+    server._local.session = sess
+    server.stats.setdefault("bread", 0)
+    server.stats.setdefault("bytes_read", 0)
+    server._update_status = lambda: None
+    replies = []
+    server._send_read_result = (
+        lambda a, result, data: replies.append((a, result, data)))
+    payload = struct.pack(
+        "<BBHiII", 0x28, 0, count, handle,
+        sector & 0xFFFFFFFF, (sector >> 32) & 0xFFFFFFFF)
+    server._handle_bread(addr, payload)
+    return replies
+
+
 class _FakeHandle:
-    def __init__(self):
+    def __init__(self, data=b""):
         self.closed = False
+        self.obj = io.BytesIO(data)
+        self.is_dir = False
+
     def close(self):
         self.closed = True
+        self.obj.close()
 
 
 def _make_server(protocol_mode="auto"):
@@ -87,6 +109,7 @@ def _make_server(protocol_mode="auto"):
     server.send_lock = threading.RLock()
     server.tx_delay_s = 0.0
     server.bd_fh = None
+    server.max_transfer_bytes = 4 * 1024 * 1024
     server.server_name = "test"
     server.share_names = []
     server.modulo_compat = (protocol_mode == CORE.PROFILE_MODULO)
@@ -388,8 +411,9 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         finally:
             time.monotonic = real_mono
 
-        self.assertNotIn(1, sess.handles)
-        self.assertTrue(sess._handle_ref.closed)
+        self.assertIn(1, sess.handles)
+        self.assertFalse(sess._handle_ref.closed)
+        self.assertEqual(sess.next_handle, 7)
         self.assertEqual(sess.protocol_profile, CORE.PROFILE_MODULO)
         self.assertEqual(sess.discovery_sequence, 0)
         self.assertEqual(sess.rx_seq_nr_expected, 2)
@@ -404,7 +428,12 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         """A fresh Standard client taking over the endpoint starts at DATA 0."""
         addr = ("192.0.2.10", 5008)
         server = _make_server(protocol_mode="auto")
-        sess = _make_active_session(addr, quiet_seconds=0.1)
+        sess = _make_active_session(
+            addr, quiet_seconds=0.1, handle_id=81)
+        game_data = bytes((i & 0xFF) for i in range(1024))
+        sess.handles[81] = _FakeHandle(game_data)
+        sess._handle_ref = sess.handles[81]
+        sess.next_handle = 82
         sess.rx_seq_nr_expected = 2213
         server.sessions[addr] = sess
         server._get_or_create_session = lambda a: sess
@@ -420,8 +449,9 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         finally:
             time.monotonic = real_mono
 
-        self.assertNotIn(1, sess.handles)
-        self.assertTrue(sess._handle_ref.closed)
+        self.assertIn(81, sess.handles)
+        self.assertFalse(sess._handle_ref.closed)
+        self.assertEqual(sess.next_handle, 82)
         self.assertEqual(sess.protocol_profile, CORE.PROFILE_STANDARD)
         self.assertEqual(sess.discovery_sequence, 0)
         self.assertEqual(sess.rx_seq_nr_expected, 1)
@@ -431,6 +461,15 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         self.assertEqual(ack_packets[0]["ack_sequence"], 0)
         self.assertEqual(ack_packets[0]["flags"] & 0x1, 0x1)
         self.assertEqual(ack_packets[0]["addr"], addr)
+
+        # Neutrino's FILEID backend now owns handle 81 across the loader
+        # transition. Its first sector read must still resolve against the
+        # pre-opened game file instead of failing EBADF after negotiation.
+        replies = _exercise_bread(server, sess, addr, 81)
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(replies[0][0], addr)
+        self.assertEqual(replies[0][1], 512)
+        self.assertEqual(replies[0][2], game_data[:512])
 
     def test_standard_mode_preserves_too(self):
         """Preservation must be profile-agnostic (standard mode)."""

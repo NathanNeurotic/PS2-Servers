@@ -125,21 +125,15 @@ class AutoUdpfsServer(UdpfsServer):
             sess.compat_lock = threading.RLock()
         return sess
 
-    def _reset_session_state(self, sess, profile):
-        """Close peer-owned handles and reset transport state for a replacement.
+    def _reset_transport_state(self, sess, profile):
+        """Reset UDPRDMA state while preserving peer-owned open file handles.
 
-        Handle zero is the shared UDPBD image owned by the server and is retained.
+        Neutrino's UDPFS FILEID backend deliberately carries the server-side
+        handle of the already-open game ISO across its loader transition. A hot
+        same-endpoint handoff therefore needs fresh transport counters without
+        tearing down ``sess.handles`` or rewinding ``next_handle``.
         The caller holds ``sess.compat_lock``.
         """
-        for handle_id, file_handle in list(sess.handles.items()):
-            if handle_id == BLOCK_DEVICE_HANDLE:
-                continue
-            try:
-                file_handle.close()
-            except Exception:
-                pass
-            sess.handles.pop(handle_id, None)
-        sess.next_handle = 1
         sess.tx_seq_nr = 0
         sess.tx_seq_nr_acked = 0
         sess.rx_seq_nr_expected = 0
@@ -158,6 +152,23 @@ class AutoUdpfsServer(UdpfsServer):
         sess.fallback_sent = False
         sess.first_data_seen = False
         sess.pending_zero_discovery_at = 0.0
+
+    def _reset_session_state(self, sess, profile):
+        """Close peer-owned handles and fully reset a stale/replaced session.
+
+        Handle zero is the shared UDPBD image owned by the server and is retained.
+        The caller holds ``sess.compat_lock``.
+        """
+        for handle_id, file_handle in list(sess.handles.items()):
+            if handle_id == BLOCK_DEVICE_HANDLE:
+                continue
+            try:
+                file_handle.close()
+            except Exception:
+                pass
+            sess.handles.pop(handle_id, None)
+        sess.next_handle = 1
+        self._reset_transport_state(sess, profile)
 
     def _get_or_create_session(self, addr):
         return self._init_compat(super()._get_or_create_session(addr))
@@ -374,7 +385,11 @@ class AutoUdpfsServer(UdpfsServer):
                     initial_profile = (
                         self.protocol_mode if self.protocol_mode != "auto"
                         else PROFILE_PENDING)
-                    self._reset_session_state(sess, initial_profile)
+                    # This is an in-place loader handoff, not a stale
+                    # peer replacement. Neutrino's UDPFS FHI stores the
+                    # server-side game handle before switching stages, so keep
+                    # handles/next_handle alive while resetting only UDPRDMA.
+                    self._reset_transport_state(sess, initial_profile)
                     sess.discovery_sequence = 0
                     sess.handshake_generation += 1
                     self._print_event(

@@ -1,6 +1,7 @@
 package udpfs
 
 import (
+	"bytes"
 	"errors"
 	"net"
 	"testing"
@@ -211,22 +212,46 @@ func TestHotSeq0DiscoveryThenData0ReplacesOldSession(t *testing.T) {
 	defer client.Close()
 
 	dataAddr := prepareHotStandardSession(t, server, client, disc, 2213)
+
+	// Neutrino's loader has already opened the ISO and stored the returned
+	// server handle in the FILEID settings handed to udpfs_fhi.irx.
+	gameData := bytes.Repeat([]byte{0x5a}, 1024)
+	w := server.getWorker(client.LocalAddr().(*net.UDPAddr))
+	w.state.Mu.Lock()
+	w.state.Handles[81] = &session.Handle{Reader: bytes.NewReader(gameData)}
+	w.state.NextHandle = 82
+	w.state.Mu.Unlock()
+
 	if _, err := client.WriteToUDP(discoveryPacket(0), disc); err != nil {
 		t.Fatal(err)
 	}
 	_, _ = recvPacket(t, client)
 
-	if _, err := client.WriteToUDP(dataPacket(0, openGamePayload()), dataAddr); err != nil {
+	// The first request from the new stage can immediately be a sector read
+	// against that pre-opened handle. A full session reset makes this EBADF.
+	if _, err := client.WriteToUDP(
+		dataPacket(0, blockMsg(protocol.BReadRequest, 81, 0, 1)), dataAddr); err != nil {
 		t.Fatal(err)
 	}
 	_, payload, _ := recvDataPayload(t, client)
-	if len(payload) == 0 || protocol.MessageType(payload[0]) != protocol.OpenReply {
-		t.Fatalf("replacement DATA 0 was not accepted, payload=%x", payload)
+	if len(payload) < 8 || protocol.MessageType(payload[0]) != protocol.ResultReply {
+		t.Fatalf("replacement FILEID BREAD was not accepted, payload=%x", payload)
+	}
+	if got := result(payload); got != 512 {
+		t.Fatalf("replacement FILEID BREAD returned %d bytes, want 512", got)
+	}
+	if len(payload) < 8+512 || !bytes.Equal(payload[8:8+512], gameData[:512]) {
+		t.Fatal("replacement FILEID BREAD did not return preserved game data")
 	}
 
-	w := server.getWorker(client.LocalAddr().(*net.UDPAddr))
 	w.state.Mu.Lock()
 	defer w.state.Mu.Unlock()
+	if w.state.Handles[81] == nil {
+		t.Fatal("hot handoff discarded Neutrino's pre-opened FILEID handle")
+	}
+	if w.state.NextHandle != 82 {
+		t.Fatalf("next handle=%d, want 82 preserved across hot handoff", w.state.NextHandle)
+	}
 	if w.state.Profile != session.Standard {
 		t.Fatalf("replacement profile=%q, want standard", w.state.Profile)
 	}
