@@ -109,6 +109,7 @@ def _make_server(protocol_mode="auto"):
     server.send_lock = threading.RLock()
     server.tx_delay_s = 0.0
     server.bd_fh = None
+    server.max_transfer_bytes = 4 * 1024 * 1024
     server.server_name = "test"
     server.share_names = []
     server.modulo_compat = (protocol_mode == CORE.PROFILE_MODULO)
