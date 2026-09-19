@@ -280,7 +280,10 @@ func (s *Server) handleData(st *session.State, in inbound) {
 			if s.cfg.ProtocolMode == session.Standard || s.cfg.ProtocolMode == session.Modulo {
 				profile = s.cfg.ProtocolMode
 			}
-			st.Reset(profile)
+			// Hot same-endpoint loader replacement: reset transport only.
+			// Neutrino's UDPFS FILEID backend carries the already-open game
+			// handle across this transition and will BREAD it after negotiation.
+			st.ResetTransport(profile)
 			st.DiscoverySequence = 0
 			st.FallbackGeneration++
 			st.ResponseSocket = in.socket
