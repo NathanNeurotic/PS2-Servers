@@ -59,10 +59,11 @@ type State struct {
 	TransmitSequence   uint16
 	TransmitAcked      uint16
 	LastActivity       time.Time
-	FallbackGeneration uint64
-	FallbackSent       bool
-	Streaming          bool
-	Handles            map[int32]*Handle
+	FallbackGeneration  uint64
+	FallbackSent        bool
+	Streaming           bool
+	PendingZeroDiscovery time.Time
+	Handles             map[int32]*Handle
 	NextHandle         int32
 	TxBuffer           []BufferedPacket
 	AckEvents          chan AckEvent
@@ -145,6 +146,7 @@ func (s *State) Reset(profile Profile) {
 	s.TransmitAcked = 0x0FFF
 	s.FallbackSent = false
 	s.Streaming = false
+	s.PendingZeroDiscovery = time.Time{}
 	s.TxBuffer = nil
 	s.NextHandle = 1
 	s.ResetWrite()
