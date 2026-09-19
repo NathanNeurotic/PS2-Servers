@@ -31,10 +31,38 @@ def _pack_discovery(seq_nr: int) -> bytes:
     return hdr.pack() + disc.pack()
 
 
-def _pack_data(seq_nr: int, payload: bytes = b"\x01\x00\x00\x00") -> bytes:
+def _pack_data(seq_nr: int, payload: bytes = b"\x10\x00\x00\x00") -> bytes:
+    """Build one payload-bearing DATA packet; 0x10 is OPEN_REQ."""
     hdr = CORE.Header(packet_type=CORE.PacketType.DATA, seq_nr=seq_nr)
     data_header = (len(payload) & 0x3FFF) << 18
     return hdr.pack() + struct.pack("<I", data_header) + payload
+
+
+def _exercise_payload_data(server, sess, addr, seq_nr):
+    """Run the real inherited DATA handler and return consumption/ACK details."""
+    consumed = []
+    server._local = threading.local()
+    server._local.session = sess
+    server._handle_open = lambda a, payload: consumed.append((a, payload))
+    server._sent.clear()
+
+    server._handle_data(_pack_data(seq_nr), addr)
+
+    ack_packets = []
+    for sock, packet, sent_addr in server._sent:
+        if len(packet) != 6:
+            continue
+        hdr = CORE.Header.unpack(packet)
+        if hdr.packet_type != CORE.PacketType.DATA:
+            continue
+        raw = struct.unpack("<I", packet[2:6])[0]
+        ack_packets.append({
+            "socket": sock,
+            "addr": sent_addr,
+            "ack_sequence": raw & 0xFFF,
+            "flags": (raw >> 12) & 0x3,
+        })
+    return consumed, ack_packets
 
 
 class _FakeHandle:
@@ -322,24 +350,22 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
             orig_reset = CORE.AutoUdpfsServer._reset_session_state
             server._reset_session_state = (
                 lambda s, p: reset_calls.append(p) or orig_reset(server, s, p))
-            server._local = threading.local()
-            server._local.session = sess
             server._compatibility_inform = lambda s: None
-
-            orig_base = CORE.UdpfsServer._handle_data
-            CORE.UdpfsServer._handle_data = lambda _self, _data, _addr: None
-            try:
-                server._handle_data(_pack_data(2213), addr)
-            finally:
-                CORE.UdpfsServer._handle_data = orig_base
+            consumed, ack_packets = _exercise_payload_data(
+                server, sess, addr, 2213)
         finally:
             time.monotonic = real_mono
 
         self.assertEqual(reset_calls, [])
         self.assertIn(1, sess.handles)
         self.assertFalse(sess._handle_ref.closed)
-        self.assertEqual(sess.rx_seq_nr_expected, 2213)
+        self.assertEqual(sess.rx_seq_nr_expected, 2214)
         self.assertEqual(sess.pending_zero_discovery_at, 0.0)
+        self.assertEqual(len(consumed), 1, "resolving DATA must reach the request handler")
+        self.assertEqual(len(ack_packets), 1, "resolving DATA must be ACKed exactly once")
+        self.assertEqual(ack_packets[0]["ack_sequence"], 2213)
+        self.assertEqual(ack_packets[0]["flags"] & 0x1, 0x1)
+        self.assertEqual(ack_packets[0]["addr"], addr)
 
     def test_recent_seq0_then_modulo_data_replaces_old_session(self):
         """nuno trace: expected 2213, DISCOVERY 0, DATA 1 -> fresh Modulo."""
@@ -355,17 +381,10 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         try:
             time.monotonic = lambda: fake_now
             server._handle_discovery(_pack_discovery(0), addr)
-            server._local = threading.local()
-            server._local.session = sess
             server._compatibility_inform = (
                 lambda s: setattr(s, "fallback_sent", True))
-
-            orig_base = CORE.UdpfsServer._handle_data
-            CORE.UdpfsServer._handle_data = lambda _self, _data, _addr: None
-            try:
-                server._handle_data(_pack_data(1), addr)
-            finally:
-                CORE.UdpfsServer._handle_data = orig_base
+            consumed, ack_packets = _exercise_payload_data(
+                server, sess, addr, 1)
         finally:
             time.monotonic = real_mono
 
@@ -373,8 +392,13 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         self.assertTrue(sess._handle_ref.closed)
         self.assertEqual(sess.protocol_profile, CORE.PROFILE_MODULO)
         self.assertEqual(sess.discovery_sequence, 0)
-        self.assertEqual(sess.rx_seq_nr_expected, 1)
+        self.assertEqual(sess.rx_seq_nr_expected, 2)
         self.assertEqual(sess.pending_zero_discovery_at, 0.0)
+        self.assertEqual(len(consumed), 1, "replacement DATA must reach the request handler")
+        self.assertEqual(len(ack_packets), 1, "replacement DATA must be ACKed exactly once")
+        self.assertEqual(ack_packets[0]["ack_sequence"], 1)
+        self.assertEqual(ack_packets[0]["flags"] & 0x1, 0x1)
+        self.assertEqual(ack_packets[0]["addr"], addr)
 
     def test_recent_seq0_then_standard_data_replaces_old_session(self):
         """A fresh Standard client taking over the endpoint starts at DATA 0."""
@@ -390,16 +414,9 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         try:
             time.monotonic = lambda: fake_now
             server._handle_discovery(_pack_discovery(0), addr)
-            server._local = threading.local()
-            server._local.session = sess
             server._compatibility_inform = lambda s: None
-
-            orig_base = CORE.UdpfsServer._handle_data
-            CORE.UdpfsServer._handle_data = lambda _self, _data, _addr: None
-            try:
-                server._handle_data(_pack_data(0), addr)
-            finally:
-                CORE.UdpfsServer._handle_data = orig_base
+            consumed, ack_packets = _exercise_payload_data(
+                server, sess, addr, 0)
         finally:
             time.monotonic = real_mono
 
@@ -407,8 +424,13 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         self.assertTrue(sess._handle_ref.closed)
         self.assertEqual(sess.protocol_profile, CORE.PROFILE_STANDARD)
         self.assertEqual(sess.discovery_sequence, 0)
-        self.assertEqual(sess.rx_seq_nr_expected, 0)
+        self.assertEqual(sess.rx_seq_nr_expected, 1)
         self.assertEqual(sess.pending_zero_discovery_at, 0.0)
+        self.assertEqual(len(consumed), 1, "replacement DATA must reach the request handler")
+        self.assertEqual(len(ack_packets), 1, "replacement DATA must be ACKed exactly once")
+        self.assertEqual(ack_packets[0]["ack_sequence"], 0)
+        self.assertEqual(ack_packets[0]["flags"] & 0x1, 0x1)
+        self.assertEqual(ack_packets[0]["addr"], addr)
 
     def test_standard_mode_preserves_too(self):
         """Preservation must be profile-agnostic (standard mode)."""
