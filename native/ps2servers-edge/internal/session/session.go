@@ -50,23 +50,23 @@ type AckEvent struct {
 }
 
 type State struct {
-	Mu                 sync.Mutex
-	Peer               *net.UDPAddr
-	DiscoverySequence  uint16
-	Profile            Profile
-	ResponseSocket     Socket
-	ExpectedReceive    uint16
-	TransmitSequence   uint16
-	TransmitAcked      uint16
-	LastActivity       time.Time
-	FallbackGeneration  uint64
-	FallbackSent        bool
-	Streaming           bool
+	Mu                   sync.Mutex
+	Peer                 *net.UDPAddr
+	DiscoverySequence    uint16
+	Profile              Profile
+	ResponseSocket       Socket
+	ExpectedReceive      uint16
+	TransmitSequence     uint16
+	TransmitAcked        uint16
+	LastActivity         time.Time
+	FallbackGeneration   uint64
+	FallbackSent         bool
+	Streaming            bool
 	PendingZeroDiscovery time.Time
-	Handles             map[int32]*Handle
-	NextHandle         int32
-	TxBuffer           []BufferedPacket
-	AckEvents          chan AckEvent
+	Handles              map[int32]*Handle
+	NextHandle           int32
+	TxBuffer             []BufferedPacket
+	AckEvents            chan AckEvent
 
 	// In-flight write assembly. A WriteRequest opens the sequence and the
 	// chunks that follow accumulate here until ReceivedChunks reaches
