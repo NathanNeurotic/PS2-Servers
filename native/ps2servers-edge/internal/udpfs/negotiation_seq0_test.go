@@ -128,7 +128,6 @@ func TestStandardClientDoesNotReceiveModuloFallback(t *testing.T) {
 	}
 }
 
-
 func prepareHotStandardSession(t *testing.T, server *Server, client *net.UDPConn, disc *net.UDPAddr, expected uint16) *net.UDPAddr {
 	t.Helper()
 	if _, err := client.WriteToUDP(discoveryPacket(0), disc); err != nil {
