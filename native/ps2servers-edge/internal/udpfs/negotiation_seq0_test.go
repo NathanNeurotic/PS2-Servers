@@ -127,3 +127,153 @@ func TestStandardClientDoesNotReceiveModuloFallback(t *testing.T) {
 		}
 	}
 }
+
+
+func prepareHotStandardSession(t *testing.T, server *Server, client *net.UDPConn, disc *net.UDPAddr, expected uint16) *net.UDPAddr {
+	t.Helper()
+	server.cfg.FallbackDelay = time.Second
+	if _, err := client.WriteToUDP(discoveryPacket(0), disc); err != nil {
+		t.Fatal(err)
+	}
+	_, dataAddr := recvPacket(t, client)
+
+	peer := client.LocalAddr().(*net.UDPAddr)
+	w := server.getWorker(peer)
+	if w == nil {
+		t.Fatal("server did not create peer worker")
+	}
+	w.state.Mu.Lock()
+	w.state.Profile = session.Standard
+	w.state.Streaming = true
+	w.state.ExpectedReceive = expected
+	w.state.PendingZeroDiscovery = time.Time{}
+	w.state.LastActivity = time.Now()
+	w.state.Mu.Unlock()
+	return dataAddr
+}
+
+func openGamePayload() []byte {
+	open := make([]byte, 8)
+	open[0] = byte(protocol.OpenRequest)
+	return append(open, []byte("game.iso\x00")...)
+}
+
+// Hardware regression from nuno6573: RiptOPL's live UDPFS session expected
+// sequence 2213, Neutrino immediately issued DISCOVERY 0 from the same endpoint,
+// then began its replacement stream at DATA 1. The old <1s guard preserved the
+// 2213 expectation and NACKed DATA 1 forever. The discovery is now provisional:
+// DATA 1 resolves it as a fresh Modulo-shaped replacement.
+func TestHotSeq0DiscoveryThenData1ReplacesOldSession(t *testing.T) {
+	server, disc, _ := startTestServer(t, session.Pending)
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	dataAddr := prepareHotStandardSession(t, server, client, disc, 2213)
+	if _, err := client.WriteToUDP(discoveryPacket(0), disc); err != nil {
+		t.Fatal(err)
+	}
+	// Candidate discovery still receives the canonical INFORM immediately.
+	if p, _ := recvPacket(t, client); len(p) < 6 {
+		t.Fatal("short candidate INFORM")
+	}
+
+	if _, err := client.WriteToUDP(dataPacket(1, openGamePayload()), dataAddr); err != nil {
+		t.Fatal(err)
+	}
+	_, payload, _ := recvDataPayload(t, client)
+	if len(payload) == 0 || protocol.MessageType(payload[0]) != protocol.OpenReply {
+		t.Fatalf("replacement DATA 1 was not accepted, payload=%x", payload)
+	}
+
+	w := server.getWorker(client.LocalAddr().(*net.UDPAddr))
+	w.state.Mu.Lock()
+	defer w.state.Mu.Unlock()
+	if w.state.Profile != session.Modulo {
+		t.Fatalf("replacement profile=%q, want modulo", w.state.Profile)
+	}
+	if w.state.ExpectedReceive != 2 {
+		t.Fatalf("expected receive=%d, want 2 after DATA 1", w.state.ExpectedReceive)
+	}
+	if !w.state.PendingZeroDiscovery.IsZero() {
+		t.Fatal("replacement candidate was not cleared")
+	}
+}
+
+// A fresh Standard loader uses DATA 0 after the same ambiguous discovery.
+// It must also replace the old hot session rather than inherit its sequence.
+func TestHotSeq0DiscoveryThenData0ReplacesOldSession(t *testing.T) {
+	server, disc, _ := startTestServer(t, session.Pending)
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	dataAddr := prepareHotStandardSession(t, server, client, disc, 2213)
+	if _, err := client.WriteToUDP(discoveryPacket(0), disc); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = recvPacket(t, client)
+
+	if _, err := client.WriteToUDP(dataPacket(0, openGamePayload()), dataAddr); err != nil {
+		t.Fatal(err)
+	}
+	_, payload, _ := recvDataPayload(t, client)
+	if len(payload) == 0 || protocol.MessageType(payload[0]) != protocol.OpenReply {
+		t.Fatalf("replacement DATA 0 was not accepted, payload=%x", payload)
+	}
+
+	w := server.getWorker(client.LocalAddr().(*net.UDPAddr))
+	w.state.Mu.Lock()
+	defer w.state.Mu.Unlock()
+	if w.state.Profile != session.Standard {
+		t.Fatalf("replacement profile=%q, want standard", w.state.Profile)
+	}
+	if w.state.ExpectedReceive != 1 {
+		t.Fatalf("expected receive=%d, want 1 after DATA 0", w.state.ExpectedReceive)
+	}
+	if !w.state.PendingZeroDiscovery.IsZero() {
+		t.Fatal("replacement candidate was not cleared")
+	}
+}
+
+// Preserve #185's original protection: if the next real DATA continues at the
+// old expected sequence, the seq0 discovery was only background rediscovery.
+func TestHotSeq0DiscoveryThenExpectedDataPreservesOldSession(t *testing.T) {
+	server, disc, _ := startTestServer(t, session.Pending)
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	dataAddr := prepareHotStandardSession(t, server, client, disc, 2213)
+	if _, err := client.WriteToUDP(discoveryPacket(0), disc); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = recvPacket(t, client)
+
+	if _, err := client.WriteToUDP(dataPacket(2213, openGamePayload()), dataAddr); err != nil {
+		t.Fatal(err)
+	}
+	_, payload, _ := recvDataPayload(t, client)
+	if len(payload) == 0 || protocol.MessageType(payload[0]) != protocol.OpenReply {
+		t.Fatalf("continuing DATA was not accepted, payload=%x", payload)
+	}
+
+	w := server.getWorker(client.LocalAddr().(*net.UDPAddr))
+	w.state.Mu.Lock()
+	defer w.state.Mu.Unlock()
+	if w.state.Profile != session.Standard {
+		t.Fatalf("profile changed to %q; old stream should remain standard", w.state.Profile)
+	}
+	if w.state.ExpectedReceive != 2214 {
+		t.Fatalf("expected receive=%d, want 2214 after continuing DATA", w.state.ExpectedReceive)
+	}
+	if !w.state.PendingZeroDiscovery.IsZero() {
+		t.Fatal("background-discovery candidate was not cleared")
+	}
+}
