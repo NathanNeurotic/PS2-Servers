@@ -31,6 +31,12 @@ def _pack_discovery(seq_nr: int) -> bytes:
     return hdr.pack() + disc.pack()
 
 
+def _pack_data(seq_nr: int, payload: bytes = b"\x01\x00\x00\x00") -> bytes:
+    hdr = CORE.Header(packet_type=CORE.PacketType.DATA, seq_nr=seq_nr)
+    data_header = (len(payload) & 0x3FFF) << 18
+    return hdr.pack() + struct.pack("<I", data_header) + payload
+
+
 class _FakeHandle:
     def __init__(self):
         self.closed = False
@@ -95,6 +101,7 @@ def _make_active_session(addr, *, quiet_seconds=0.3, handle_id=1):
     sess.first_data_seen = True
     sess.discovery_sequence = 7
     sess.handshake_generation = 3
+    sess.pending_zero_discovery_at = 0.0
     sess.last_activity = now - quiet_seconds
     sess.compat_lock = threading.RLock()
     sess.ingress = None
@@ -163,6 +170,7 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         self.assertEqual(sess.handshake_generation, orig_gen)
         self.assertEqual(sess.tx_buffer, orig_tx_buf)
         self.assertEqual(sess.protocol_profile, orig_profile)
+        self.assertGreater(sess.pending_zero_discovery_at, 0.0)
         # Verify packet was sent via data socket (dsock) with seq 1, port 0
         self.assertEqual(len(server._sent), 1)
         sock, packet, sent_addr = server._sent[0]
@@ -292,7 +300,115 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         finally:
             time.monotonic = real_mono
         self.assertTrue(any("DISCOVERY seq=0 during active stream" in m for m in logs))
-        self.assertTrue(any("preserve session" in m for m in logs))
+        self.assertTrue(any("defer replacement decision" in m for m in logs))
+
+    def test_recent_seq0_then_old_expected_data_preserves_session(self):
+        """Background seq0 discovery followed by the old stream stays live."""
+        addr = ("192.0.2.10", 5006)
+        server = _make_server(protocol_mode="auto")
+        sess = _make_active_session(addr, quiet_seconds=0.2)
+        sess.rx_seq_nr_expected = 2213
+        server.sessions[addr] = sess
+        server._get_or_create_session = lambda a: sess
+
+        fake_now = sess.last_activity + 0.2
+        real_mono = time.monotonic
+        try:
+            time.monotonic = lambda: fake_now
+            server._handle_discovery(_pack_discovery(0), addr)
+            self.assertGreater(sess.pending_zero_discovery_at, 0.0)
+
+            reset_calls = []
+            orig_reset = CORE.AutoUdpfsServer._reset_session_state
+            server._reset_session_state = (
+                lambda s, p: reset_calls.append(p) or orig_reset(server, s, p))
+            server._local = threading.local()
+            server._local.session = sess
+            server._compatibility_inform = lambda s: None
+
+            orig_base = CORE.UdpfsServer._handle_data
+            CORE.UdpfsServer._handle_data = lambda _self, _data, _addr: None
+            try:
+                server._handle_data(_pack_data(2213), addr)
+            finally:
+                CORE.UdpfsServer._handle_data = orig_base
+        finally:
+            time.monotonic = real_mono
+
+        self.assertEqual(reset_calls, [])
+        self.assertIn(1, sess.handles)
+        self.assertFalse(sess._handle_ref.closed)
+        self.assertEqual(sess.rx_seq_nr_expected, 2213)
+        self.assertEqual(sess.pending_zero_discovery_at, 0.0)
+
+    def test_recent_seq0_then_modulo_data_replaces_old_session(self):
+        """nuno trace: expected 2213, DISCOVERY 0, DATA 1 -> fresh Modulo."""
+        addr = ("192.0.2.10", 5007)
+        server = _make_server(protocol_mode="auto")
+        sess = _make_active_session(addr, quiet_seconds=0.0)
+        sess.rx_seq_nr_expected = 2213
+        server.sessions[addr] = sess
+        server._get_or_create_session = lambda a: sess
+
+        fake_now = sess.last_activity
+        real_mono = time.monotonic
+        try:
+            time.monotonic = lambda: fake_now
+            server._handle_discovery(_pack_discovery(0), addr)
+            server._local = threading.local()
+            server._local.session = sess
+            server._compatibility_inform = (
+                lambda s: setattr(s, "fallback_sent", True))
+
+            orig_base = CORE.UdpfsServer._handle_data
+            CORE.UdpfsServer._handle_data = lambda _self, _data, _addr: None
+            try:
+                server._handle_data(_pack_data(1), addr)
+            finally:
+                CORE.UdpfsServer._handle_data = orig_base
+        finally:
+            time.monotonic = real_mono
+
+        self.assertNotIn(1, sess.handles)
+        self.assertTrue(sess._handle_ref.closed)
+        self.assertEqual(sess.protocol_profile, CORE.PROFILE_MODULO)
+        self.assertEqual(sess.discovery_sequence, 0)
+        self.assertEqual(sess.rx_seq_nr_expected, 1)
+        self.assertEqual(sess.pending_zero_discovery_at, 0.0)
+
+    def test_recent_seq0_then_standard_data_replaces_old_session(self):
+        """A fresh Standard client taking over the endpoint starts at DATA 0."""
+        addr = ("192.0.2.10", 5008)
+        server = _make_server(protocol_mode="auto")
+        sess = _make_active_session(addr, quiet_seconds=0.1)
+        sess.rx_seq_nr_expected = 2213
+        server.sessions[addr] = sess
+        server._get_or_create_session = lambda a: sess
+
+        fake_now = sess.last_activity + 0.1
+        real_mono = time.monotonic
+        try:
+            time.monotonic = lambda: fake_now
+            server._handle_discovery(_pack_discovery(0), addr)
+            server._local = threading.local()
+            server._local.session = sess
+            server._compatibility_inform = lambda s: None
+
+            orig_base = CORE.UdpfsServer._handle_data
+            CORE.UdpfsServer._handle_data = lambda _self, _data, _addr: None
+            try:
+                server._handle_data(_pack_data(0), addr)
+            finally:
+                CORE.UdpfsServer._handle_data = orig_base
+        finally:
+            time.monotonic = real_mono
+
+        self.assertNotIn(1, sess.handles)
+        self.assertTrue(sess._handle_ref.closed)
+        self.assertEqual(sess.protocol_profile, CORE.PROFILE_STANDARD)
+        self.assertEqual(sess.discovery_sequence, 0)
+        self.assertEqual(sess.rx_seq_nr_expected, 0)
+        self.assertEqual(sess.pending_zero_discovery_at, 0.0)
 
     def test_standard_mode_preserves_too(self):
         """Preservation must be profile-agnostic (standard mode)."""
