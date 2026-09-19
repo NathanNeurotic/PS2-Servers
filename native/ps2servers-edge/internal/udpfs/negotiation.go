@@ -93,9 +93,13 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 		"profile": st.Profile, "streaming": st.Streaming, "quiet": quiet.String(), "known": known,
 	})
 	// Both client families may keep broadcasting sequence-zero discovery while
-	// an established transfer is active. Reply, but never reset that live stream.
-	// A quiet session is treated as a replacement from the same UDP endpoint.
+	// an established transfer is active, but a new loader can also take over the
+	// same UDP endpoint immediately. RiptOPL -> Neutrino does exactly that: the
+	// old stream can still be hot when Neutrino starts a fresh sequence at 0/1.
+	// Do not destroy the old stream on discovery alone; mark the ambiguity and
+	// let the next payload-bearing DATA packet resolve it.
 	if st.Streaming && h.Sequence == 0 && quiet < sessionReplaceQuiet {
+		st.PendingZeroDiscovery = time.Now()
 		s.sendStandardInform(st)
 		return
 	}
@@ -251,6 +255,45 @@ func (s *Server) handleData(st *session.State, in inbound) {
 
 	st.Mu.Lock()
 	st.Touch()
+
+	// Resolve an ambiguous sequence-zero discovery only when payload DATA
+	// arrives. Continuing at the old expected sequence proves it was background
+	// rediscovery and keeps the live stream intact. Starting at 0 (Standard) or
+	// 1 (Modulo) while the old stream expected something else proves a new
+	// loader replaced the client on the same UDP endpoint. Reset before the old
+	// ExpectedReceive can NACK the replacement forever. Hardware reproduction:
+	// RiptOPL expected 2213, Neutrino DISCOVERY 0, first DATA 1.
+	if len(payload) > 0 && !st.PendingZeroDiscovery.IsZero() {
+		age := time.Since(st.PendingZeroDiscovery)
+		switch {
+		case age >= sessionReplaceQuiet:
+			st.PendingZeroDiscovery = time.Time{}
+		case h.Sequence == st.ExpectedReceive:
+			st.PendingZeroDiscovery = time.Time{}
+			s.cfg.Log.Debug("seq0 discovery resolved to existing stream", map[string]any{
+				"peer": inboundPeerString(in.peer), "socket": in.socket,
+				"sequence": h.Sequence, "profile": st.Profile,
+			})
+		case h.Sequence == 0 || h.Sequence == 1:
+			expected := st.ExpectedReceive
+			profile := session.Pending
+			if s.cfg.ProtocolMode == session.Standard || s.cfg.ProtocolMode == session.Modulo {
+				profile = s.cfg.ProtocolMode
+			}
+			st.Reset(profile)
+			st.DiscoverySequence = 0
+			st.FallbackGeneration++
+			st.ResponseSocket = in.socket
+			st.Touch()
+			s.stats.sequenceResets.Add(1)
+			s.cfg.Log.Info("seq0 discovery resolved to replacement session", map[string]any{
+				"peer": inboundPeerString(in.peer), "socket": in.socket,
+				"old_expected": expected, "first_data_sequence": h.Sequence,
+				"profile": profile,
+			})
+		}
+	}
+
 	if st.Profile == session.Pending {
 		st.Profile = classify(st.DiscoverySequence, h.Sequence)
 		st.ResponseSocket = in.socket
