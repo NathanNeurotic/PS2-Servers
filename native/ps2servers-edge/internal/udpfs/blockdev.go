@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"syscall"
 
@@ -134,15 +135,58 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
 		return
 	}
+	if count <= 0 {
+		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		return
+	}
+
+	// Neutrino's UDPFS FILEID backend carries an ordinary OPEN handle into its
+	// post-loader FHI driver and then addresses that file in 512-byte sectors
+	// with BREAD. Desktop/Core already supports this shape. Handle zero remains
+	// the shared block-device image; nonzero handles are peer-owned files.
+	if handle != blockHandle {
+		h := st.Handles[handle]
+		if h == nil || h.Reader == nil {
+			s.cfg.Log.Debug("BREAD invalid file handle", map[string]any{
+				"peer": st.Peer, "handle": handle, "sector": sector, "count": count})
+			s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EBADF)), nil)
+			return
+		}
+		const sectorSize int64 = DefaultSectorSize
+		total := count * sectorSize
+		if total > s.transferCap || sector < 0 || sector > math.MaxInt64/sectorSize {
+			s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+			return
+		}
+		if _, err := h.Reader.Seek(sector*sectorSize, io.SeekStart); err != nil {
+			s.cfg.Log.Warn("BREAD file seek failed", map[string]any{
+				"peer": st.Peer, "handle": handle, "error": err.Error()})
+			s.sendTransfer(st, result8(protocol.ResultReply, errno(err)), nil)
+			return
+		}
+		data := make([]byte, int(total))
+		n, err := io.ReadFull(h.Reader, data)
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			s.cfg.Log.Warn("BREAD file read failed", map[string]any{
+				"peer": st.Peer, "handle": handle, "error": err.Error()})
+			s.sendTransfer(st, result8(protocol.ResultReply, errno(err)), nil)
+			return
+		}
+		data = data[:n]
+		s.stats.bytesRead.Add(int64(n))
+		s.cfg.Log.Debug("BREAD file handle", map[string]any{
+			"peer": st.Peer, "handle": handle, "sector": sector, "count": count, "bytes": n})
+		s.sendTransfer(st, result8(protocol.ResultReply, int32(n)), data)
+		return
+	}
+
 	dev := s.blockDev
-	if dev == nil || handle != blockHandle {
-		// No image configured, or the client aimed a block read at a file
-		// handle. Either way there are no sectors to serve.
+	if dev == nil {
 		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EBADF)), nil)
 		return
 	}
 	total := count * dev.sectorSize
-	if count <= 0 || total > s.transferCap {
+	if total > s.transferCap {
 		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
 		return
 	}
