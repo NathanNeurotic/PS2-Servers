@@ -135,10 +135,12 @@ func New(peer *net.UDPAddr, forced Profile) *State {
 
 func (s *State) Touch() { s.LastActivity = time.Now() }
 
-// Reset closes per-peer resources and returns protocol counters to a clean
-// pre-handshake state. The caller must hold Mu.
-func (s *State) Reset(profile Profile) {
-	s.Close()
+// ResetTransport returns protocol counters to a clean pre-handshake state
+// without closing peer-owned handles or rewinding NextHandle. Neutrino's UDPFS
+// FILEID backend intentionally carries an already-open server handle across the
+// loader transition, so a confirmed hot same-endpoint handoff needs this
+// narrower reset. The caller must hold Mu.
+func (s *State) ResetTransport(profile Profile) {
 	s.Profile = profile
 	s.ResponseSocket = DataSocket
 	s.ExpectedReceive = 0
@@ -148,7 +150,6 @@ func (s *State) Reset(profile Profile) {
 	s.Streaming = false
 	s.PendingZeroDiscovery = time.Time{}
 	s.TxBuffer = nil
-	s.NextHandle = 1
 	s.ResetWrite()
 	for {
 		select {
@@ -157,6 +158,14 @@ func (s *State) Reset(profile Profile) {
 			return
 		}
 	}
+}
+
+// Reset closes per-peer resources and returns protocol counters to a clean
+// pre-handshake state. The caller must hold Mu.
+func (s *State) Reset(profile Profile) {
+	s.Close()
+	s.NextHandle = 1
+	s.ResetTransport(profile)
 }
 
 // Close closes every file owned by this peer. The caller must serialize access.
