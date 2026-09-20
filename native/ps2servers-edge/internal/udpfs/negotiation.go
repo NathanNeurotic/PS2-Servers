@@ -98,7 +98,7 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 	// old stream can still be hot when Neutrino starts a fresh sequence at 0/1.
 	// Do not destroy the old stream on discovery alone; mark the ambiguity and
 	// let the next payload-bearing DATA packet resolve it.
-	if st.Streaming && h.Sequence == 0 && quiet < sessionReplaceQuiet {
+	if st.Streaming && h.Sequence == 0 {
 		st.PendingZeroDiscovery = time.Now()
 		s.sendStandardInform(st)
 		return
@@ -264,10 +264,7 @@ func (s *Server) handleData(st *session.State, in inbound) {
 	// ExpectedReceive can NACK the replacement forever. Hardware reproduction:
 	// RiptOPL expected 2213, Neutrino DISCOVERY 0, first DATA 1.
 	if len(payload) > 0 && !st.PendingZeroDiscovery.IsZero() {
-		age := time.Since(st.PendingZeroDiscovery)
 		switch {
-		case age >= sessionReplaceQuiet:
-			st.PendingZeroDiscovery = time.Time{}
 		case h.Sequence == st.ExpectedReceive:
 			st.PendingZeroDiscovery = time.Time{}
 			s.cfg.Log.Debug("seq0 discovery resolved to existing stream", map[string]any{
