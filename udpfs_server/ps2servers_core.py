@@ -284,7 +284,7 @@ class AutoUdpfsServer(UdpfsServer):
         now = time.monotonic()
         quiet = now - getattr(sess, "last_activity", 0.0)
         with sess.compat_lock:
-            if sess.rx_streaming and hdr.seq_nr == 0 and quiet < 1.0:
+            if sess.rx_streaming and hdr.seq_nr == 0:
                 # Do not immediately decide that this belongs to the old
                 # stream. RiptOPL -> Neutrino keeps the same UDP endpoint and
                 # Neutrino starts a fresh session immediately after reading its
@@ -300,10 +300,10 @@ class AutoUdpfsServer(UdpfsServer):
                     )
                 return
 
-            # Active clients can keep discovery traffic running in parallel with
-            # reads. Never reset or interfere with an active stream. After a quiet
-            # interval or when a new stage/loader starts (hdr.seq_nr == 0), the
-            # endpoint is treated as a replacement session.
+            # Active clients can keep nonzero discovery traffic running in
+            # parallel with reads. A seq0 discovery is resolved by DATA above
+            # even after a quiet interval, because a delayed loader handoff
+            # still owns the open ISO handle.
             if sess.rx_streaming and quiet < 2.0 and hdr.seq_nr != 0:
                 return
 
@@ -371,10 +371,7 @@ class AutoUdpfsServer(UdpfsServer):
             # old expected=2213, DISCOVERY=0, first replacement DATA=1.
             pending_at = getattr(sess, "pending_zero_discovery_at", 0.0)
             if pending_at and payload_size > 0:
-                age = time.monotonic() - pending_at
-                if age >= 1.0:
-                    sess.pending_zero_discovery_at = 0.0
-                elif hdr.seq_nr == sess.rx_seq_nr_expected:
+                if hdr.seq_nr == sess.rx_seq_nr_expected:
                     sess.pending_zero_discovery_at = 0.0
                     if self.verbose:
                         self._print_event(

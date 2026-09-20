@@ -203,7 +203,7 @@ func TestHotSeq0DiscoveryThenData1ReplacesOldSession(t *testing.T) {
 
 // A fresh Standard loader uses DATA 0 after the same ambiguous discovery.
 // It must also replace the old hot session rather than inherit its sequence.
-func TestHotSeq0DiscoveryThenData0ReplacesOldSession(t *testing.T) {
+func TestDelayedSeq0DiscoveryThenData0PreservesFileID(t *testing.T) {
 	server, disc, _ := startTestServer(t, session.Pending)
 	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
@@ -220,12 +220,22 @@ func TestHotSeq0DiscoveryThenData0ReplacesOldSession(t *testing.T) {
 	w.state.Mu.Lock()
 	w.state.Handles[81] = &session.Handle{Reader: bytes.NewReader(gameData)}
 	w.state.NextHandle = 82
+	// Loader startup can leave the old stream quiet for longer than one second.
+	w.state.LastActivity = time.Now().Add(-2 * sessionReplaceQuiet)
 	w.state.Mu.Unlock()
 
 	if _, err := client.WriteToUDP(discoveryPacket(0), disc); err != nil {
 		t.Fatal(err)
 	}
 	_, _ = recvPacket(t, client)
+	w.state.Mu.Lock()
+	if w.state.PendingZeroDiscovery.IsZero() {
+		w.state.Mu.Unlock()
+		t.Fatal("delayed discovery discarded the candidate handoff")
+	}
+	// The first Neutrino DATA can itself be delayed beyond the old cutoff.
+	w.state.PendingZeroDiscovery = time.Now().Add(-2 * sessionReplaceQuiet)
+	w.state.Mu.Unlock()
 
 	// The first request from the new stage can immediately be a sector read
 	// against that pre-opened handle. A full session reset makes this EBADF.

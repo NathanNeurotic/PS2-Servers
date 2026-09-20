@@ -1,4 +1,4 @@
-"""Regression: preserve active streaming session on seq0 DISCOVERY <1s.
+"""Regression: preserve active streaming sessions through seq0 DISCOVERY.
 
 Go parity: native/ps2servers-edge/internal/udpfs/negotiation.go:98
 Python bug was: only nonzero discovery guarded an active stream.
@@ -230,47 +230,80 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         # Packet is INFORM seq1, service 0xF5F5, port 0
         self.assertEqual(packet, struct.pack("<HHH", 0x0011, CORE.UDPRDMA_SVC_UDPFS, 0))
 
-    def test_stale_seq0_after_quiet_ge_1s_does_reset(self):
-        """STALE + seq0 + quiet>=1s -> real reset/replacement behavior (handle closed)."""
+    def test_delayed_seq0_and_data0_preserve_fileid_handle(self):
+        """A slow Neutrino handoff still owns its pre-opened game ISO."""
         addr = ("192.0.2.10", 5001)
         server = _make_server(protocol_mode="auto")
-        sess = _make_active_session(addr, quiet_seconds=1.5)
-        # Use real _reset_session_state, do NOT mock it away
+        sess = _make_active_session(addr, quiet_seconds=1.5, handle_id=81)
+        game_data = bytes((i & 0xFF) for i in range(1024))
+        sess.handles[81] = _FakeHandle(game_data)
+        sess._handle_ref = sess.handles[81]
+        sess.next_handle = 82
+        sess.rx_seq_nr_expected = 2213
         server.sessions[addr] = sess
         server._get_or_create_session = lambda a: sess
 
-        # Track canonical but allow real reset to run
-        canonical_calls = []
-        orig_canonical = CORE.AutoUdpfsServer._canonical_inform
-
-        def tracking_canonical(a):
-            canonical_calls.append(a)
-            return orig_canonical(server, a)
-
-        server._canonical_inform = tracking_canonical
-        # Do NOT replace _reset_session_state; let real implementation run
-        # Ensure fallback not interfering
         real_mono = time.monotonic
         try:
             fake_now = sess.last_activity + 1.5
             time.monotonic = lambda: fake_now
             server._handle_discovery(_pack_discovery(0), addr)
+            self.assertIn(81, sess.handles)
+            self.assertFalse(sess._handle_ref.closed)
+            self.assertEqual(sess.rx_seq_nr_expected, 2213)
+            self.assertGreater(sess.pending_zero_discovery_at, 0.0)
+
+            # The first DATA can also arrive after the old one-second cutoff.
+            fake_now += 1.5
+            server._compatibility_inform = lambda s: None
+            consumed, ack_packets = _exercise_payload_data(
+                server, sess, addr, 0)
         finally:
             time.monotonic = real_mono
 
-        # After reset, handle 1 must be gone/closed, rx_streaming cleared, tx seq reset
-        self.assertNotIn(1, sess.handles, "stale seq0 must close active handle 1")
-        self.assertTrue(sess._handle_ref.closed)
-        # Block device handle retained if present
-        self.assertIn(CORE.BLOCK_DEVICE_HANDLE, sess.handles)
-        self.assertEqual(sess.next_handle, 1)
-        self.assertFalse(sess.rx_streaming)
+        self.assertIn(81, sess.handles)
+        self.assertFalse(sess._handle_ref.closed)
+        self.assertEqual(sess.next_handle, 82)
         self.assertEqual(sess.tx_seq_nr, 0)
-        self.assertEqual(sess.rx_seq_nr_expected, 0)
-        # After reset, a canonical INFORM is sent for the replacement handshake
-        self.assertEqual(len(canonical_calls), 1)
-        # Also sent list should have one inform
-        self.assertEqual(len(server._sent), 1)
+        self.assertEqual(sess.rx_seq_nr_expected, 1)
+        self.assertEqual(sess.pending_zero_discovery_at, 0.0)
+        self.assertEqual(len(consumed), 1)
+        self.assertEqual(len(ack_packets), 1)
+        self.assertEqual(ack_packets[0]["flags"] & 0x1, 0x1)
+        replies = _exercise_bread(server, sess, addr, 81)
+        self.assertEqual(replies, [(addr, 512, game_data[:512])])
+
+    def test_delayed_seq0_then_modulo_data1_is_accepted(self):
+        """The pending handoff must not expire before a Modulo DATA 1."""
+        addr = ("192.0.2.10", 5009)
+        server = _make_server(protocol_mode="auto")
+        sess = _make_active_session(addr, quiet_seconds=1.5)
+        sess.rx_seq_nr_expected = 2213
+        server.sessions[addr] = sess
+        server._get_or_create_session = lambda a: sess
+
+        real_mono = time.monotonic
+        try:
+            fake_now = sess.last_activity + 1.5
+            time.monotonic = lambda: fake_now
+            server._handle_discovery(_pack_discovery(0), addr)
+            fake_now += 1.5
+            server._compatibility_inform = (
+                lambda s: setattr(s, "fallback_sent", True))
+            consumed, ack_packets = _exercise_payload_data(
+                server, sess, addr, 1)
+        finally:
+            time.monotonic = real_mono
+
+        self.assertIn(1, sess.handles)
+        self.assertFalse(sess._handle_ref.closed)
+        self.assertEqual(sess.protocol_profile, CORE.PROFILE_MODULO)
+        self.assertEqual(sess.rx_seq_nr_expected, 2)
+        self.assertEqual(sess.pending_zero_discovery_at, 0.0)
+        self.assertEqual(len(consumed), 1)
+        self.assertEqual(len(ack_packets), 1)
+        self.assertEqual(ack_packets[0]["ack_sequence"], 1)
+        self.assertEqual(ack_packets[0]["flags"] & 0x1, 0x1)
 
     def test_active_stream_nonzero_still_preserved_without_inform(self):
         """Existing nonzero guard must remain: active + seq!=0 + quiet<2s -> no reset, no inform."""
