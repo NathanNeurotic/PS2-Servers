@@ -155,6 +155,35 @@ class StallReportTests(unittest.TestCase):
             probe.assert_not_called()
             self.assertEqual(server.lines, [], name)
 
+    def test_a_console_that_resumes_mid_probe_gets_no_verdict(self):
+        server = _server()
+        sess = _session(60, 60)
+        server.sessions[(IP, 62966)] = sess
+
+        def resume_during_probe(ip):
+            sess.last_request = time.monotonic()  # an accepted request landed
+            return True
+
+        server._last_sweep = 0.0
+        with mock.patch.object(UDPFS, "console_answers_arp", resume_during_probe), \
+                mock.patch.object(UDPFS.threading, "Thread", _ImmediateThread):
+            server._sweep_idle_sessions()
+        self.assertEqual(server.lines, [])
+
+    def test_no_threads_left_does_not_stop_the_sweep(self):
+        server = _server()
+        server.sessions[(IP, 62966)] = _session(60, 60)
+
+        class _NoThreads(_ImmediateThread):
+            def start(self):
+                raise RuntimeError("can't start new thread")
+
+        server._last_sweep = 0.0
+        with mock.patch.object(UDPFS, "console_answers_arp", mock.Mock(return_value=True)), \
+                mock.patch.object(UDPFS.threading, "Thread", _NoThreads):
+            server._sweep_idle_sessions()  # must not raise: run() only catches KeyboardInterrupt
+        self.assertEqual(server.lines, [])
+
     def test_an_accepted_request_rearms_the_report(self):
         server = _server()
         sess = _session(60, 60)

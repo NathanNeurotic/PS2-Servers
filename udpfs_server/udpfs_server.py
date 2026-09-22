@@ -927,15 +927,17 @@ class UdpfsServer:
                     if (last and s.handles and not s.stall_reported
                             and now - last >= STALL_REPORT_AFTER):
                         s.stall_reported = True
-                        self._report_stall(a, now - last,
+                        self._report_stall(a, s, now - last,
                                            now - s.last_activity < STALL_REPORT_AFTER)
 
-    def _report_stall(self, addr, quiet: float, still_sending: bool):
+    def _report_stall(self, addr, sess, quiet: float, still_sending: bool):
         head = f"[{addr[0]}:{addr[1]}] no request for {quiet:.0f}s"
         if still_sending:
             self._print_event(f"{head}, but the console is still sending "
                               "(out-of-sequence DATA or DISCOVERY; see the lines above)")
             return
+
+        stalled_at = sess.last_request
 
         def probe():
             verdict = {
@@ -943,9 +945,14 @@ class UdpfsServer:
                 False: "the console no longer answers ARP: its IOP or network adapter is down",
                 None: "could not tell whether the console still answers ARP",
             }[console_answers_arp(addr[0])]
+            if sess.last_request != stalled_at:
+                return  # it resumed while we were asking; the verdict is already stale
             self._print_event(f"{head} -- {verdict}")
 
-        threading.Thread(target=probe, name="udpfs-stall-probe", daemon=True).start()
+        try:
+            threading.Thread(target=probe, name="udpfs-stall-probe", daemon=True).start()
+        except RuntimeError:
+            pass  # out of threads: a diagnostic must never take the server loop down
 
     def _emit_metrics(self):
         """Periodically log transfer/op stats when --metrics is enabled."""
