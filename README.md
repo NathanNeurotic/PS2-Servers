@@ -128,6 +128,16 @@ the server changing its own bind address. Repeated discovery or `seq=0` alone
 does not establish the cause of a launch failure. Check the launched loader's
 network settings if its source IP changes.
 
+If a game stops partway through loading, run Core with `--verbose`. When a
+console that has files open sends no request for 45 seconds, Core prints one
+line saying which of three things happened:
+
+- **Still sending.** The console is sending out-of-sequence packets.
+- **Still answers ARP.** Its network side is up, and it simply stopped asking.
+- **No longer answers ARP.** Its IOP or network adapter is down.
+
+A log that just stops can't tell these apart on its own.
+
 ### Protocol mode, ports, and idle timeout
 
 - **Protocol mode: Auto** is the default. It negotiates Standard and Modulo per

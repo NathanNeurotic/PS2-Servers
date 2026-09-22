@@ -37,6 +37,7 @@ import re
 import select
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -236,6 +237,12 @@ SESSION_TIMEOUT = 3600.0         # default seconds of peer inactivity before rea
 SESSION_TIMEOUT_MIN = 60.0
 SESSION_TIMEOUT_MAX = 86400.0
 SESSION_SWEEP_INTERVAL = 5.0     # how often the demux loop checks for idle sessions
+# --verbose: a peer holding open files that sends no request for this long gets one
+# line saying whether the console can still be reached (see _sweep_idle_sessions).
+# Not less than 45 s: Windows and Linux keep a neighbour entry "reachable" for up to
+# 45 s after the last ARP reply without asking again, so an earlier ARP check could
+# read a cached answer from a console that has already died.
+STALL_REPORT_AFTER = 45.0
 # Ceiling on concurrent peers. A session is a worker thread, a queue and up to
 # MAX_HANDLES descriptors, and any unauthenticated datagram creates one, so
 # without a cap a single host walking its source port can allocate without
@@ -543,6 +550,38 @@ class FileHandle:
             pass  # Directory entries are a list, nothing to close
         else:
             self.obj.close()
+
+
+def console_answers_arp(ip: str) -> Optional[bool]:
+    """Whether the console at `ip` still answers ARP; None when the OS cannot tell.
+
+    A console that has stopped sending may just be idle, or its IOP or network
+    adapter may be down. Its UDPFS client answers nothing while idle, but its IP
+    stack always answers ARP. One datagram to the discard port makes this machine
+    re-resolve the console's MAC (the console drops it: nothing is bound there),
+    and the neighbour table then says whether it replied."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.sendto(b"\0", (ip, 9))
+    except OSError:
+        return None
+    time.sleep(9.0)  # stale -> delay (5 s) -> three probes 1 s apart -> resolved
+    if os.name == "nt":
+        cmd = ["powershell", "-NoProfile", "-Command",
+               f"(Get-NetNeighbor -IPAddress {ip} -ErrorAction SilentlyContinue).State"]
+    else:
+        cmd = ["ip", "neigh", "show", ip]
+    try:
+        state = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                               ).stdout.upper()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if re.search(r"(?<!UN)REACHABLE", state):  # on any interface
+        return True
+    if "UNREACHABLE" in state or "FAILED" in state or "INCOMPLETE" in state:
+        return False
+    return None
 
 
 def _session_prop(name):
@@ -879,6 +918,34 @@ class UdpfsServer:
                     f"[{a[0]}:{a[1]}] idle {quiet:.0f}s > peer-timeout "
                     f"{self.session_timeout:.0f}s -- dropped, its open files "
                     f"closed (raise --peer-timeout if it was only paused)")
+            # A game that hangs mid-load leaves a log that simply stops, which
+            # reads the same whether the console stopped asking or stopped
+            # working. One line per silence tells those apart.
+            if self.verbose:
+                for a, s in self.sessions.items():
+                    last = getattr(s, "last_request", 0.0)
+                    if (last and s.handles and not s.stall_reported
+                            and now - last >= STALL_REPORT_AFTER):
+                        s.stall_reported = True
+                        self._report_stall(a, now - last,
+                                           now - s.last_activity < STALL_REPORT_AFTER)
+
+    def _report_stall(self, addr, quiet: float, still_sending: bool):
+        head = f"[{addr[0]}:{addr[1]}] no request for {quiet:.0f}s"
+        if still_sending:
+            self._print_event(f"{head}, but the console is still sending "
+                              "(out-of-sequence DATA or DISCOVERY; see the lines above)")
+            return
+
+        def probe():
+            verdict = {
+                True: "the console still answers ARP: its network side is up, so it stopped asking",
+                False: "the console no longer answers ARP: its IOP or network adapter is down",
+                None: "could not tell whether the console still answers ARP",
+            }[console_answers_arp(addr[0])]
+            self._print_event(f"{head} -- {verdict}")
+
+        threading.Thread(target=probe, name="udpfs-stall-probe", daemon=True).start()
 
     def _emit_metrics(self):
         """Periodically log transfer/op stats when --metrics is enabled."""
@@ -1463,6 +1530,8 @@ class UdpfsServer:
 
         self.rx_seq_nr_expected = (self.rx_seq_nr_expected + 1) & 0xFFF
         self._local.session.rx_streaming = True
+        self._local.session.last_request = time.monotonic()
+        self._local.session.stall_reported = False
 
         # Immediate ACK - lets PS2's udprdma_send() return quickly,
         # so it can enter udprdma_recv() (5s timeout) while we process
@@ -2683,6 +2752,9 @@ class Session:
         self.queue: "queue.Queue" = queue.Queue()
         self.pushback: collections.deque = collections.deque()
         self.last_activity = time.monotonic()
+        # Last in-order request, for the --verbose stall report (_sweep_idle_sessions).
+        self.last_request = 0.0
+        self.stall_reported = False
         self._closing = False
         self._thread = threading.Thread(
             target=self._run, name=f"udpfs-{addr[0]}:{addr[1]}", daemon=True)
