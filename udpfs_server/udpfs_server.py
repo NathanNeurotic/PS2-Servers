@@ -2392,6 +2392,18 @@ class UdpfsServer:
             sess.pushback = collections.deque()
         sess.pushback.append(item)
 
+    def _is_resent_request(self, seq_nr: int, payload_size: int) -> bool:
+        """True for a copy of the request the current transfer answers.
+
+        The console sends a request again when its 500 ms send timer fires
+        before our ACK reaches it: a busy IOP or a late packet. The transfer in
+        progress is already the reply, so the two waits below drop the copy.
+        Pushing it back made the next read return the same packet: the window
+        wait spent its 200 retries in a tight loop and aborted the transfer, and
+        the final-ACK wait never returned.
+        """
+        return payload_size > 0 and seq_nr == (self.rx_seq_nr_expected - 1) & 0xFFF
+
     def _wait_for_window_ack(self, addr: Tuple[str, int]):
         """Wait for a window ACK/NACK during a multi-packet send. Reads from this
         client's session queue (the demux routes the client's ACKs there), so one
@@ -2420,6 +2432,8 @@ class UdpfsServer:
             data_hdr = DataHeader.unpack(pkt[2:6])
             hdr_size = data_hdr.hdr_word_count * 4
             payload_size = hdr_size + data_hdr.data_byte_count
+            if self._is_resent_request(hdr.seq_nr, payload_size):
+                continue
             if data_hdr.flags & DataFlags.ACK:
                 # Window ACK - advance acked position
                 self.tx_seq_nr_acked = data_hdr.seq_nr_ack
@@ -2437,6 +2451,7 @@ class UdpfsServer:
                     self._retransmit_from(addr, data_hdr.seq_nr_ack)
                 else:
                     self._queue_pushback(sess, item)
+                    return
 
     def _in_flight(self) -> int:
         """Number of unacknowledged packets in flight"""
@@ -2469,6 +2484,8 @@ class UdpfsServer:
             data_hdr = DataHeader.unpack(pkt[2:6])
             hdr_size = data_hdr.hdr_word_count * 4
             payload_size = hdr_size + data_hdr.data_byte_count
+            if self._is_resent_request(hdr.seq_nr, payload_size):
+                continue
             if data_hdr.flags & DataFlags.ACK:
                 # Always advance acked position and prune tx_buffer
                 self.tx_seq_nr_acked = data_hdr.seq_nr_ack
@@ -2485,7 +2502,9 @@ class UdpfsServer:
                     return True
                 # else: mid-stream window ACK — keep waiting
                 if payload_size > 0:
+                    # A new request: the console has moved on.
                     self._queue_pushback(sess, item)
+                    return True
             else:
                 # NACK - retransmit and keep waiting
                 if payload_size == 0:
@@ -2493,6 +2512,7 @@ class UdpfsServer:
                     self._retransmit_from(addr, data_hdr.seq_nr_ack)
                 else:
                     self._queue_pushback(sess, item)
+                    return True
 
     def _wait_for_final_ack(self, addr: Tuple[str, int]):
         """Confirm transfer completion: wait for ACK, retransmit on NACK or timeout.
