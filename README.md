@@ -134,6 +134,8 @@ line saying which of three things happened:
 
 - **Still sending.** The console is sending out-of-sequence packets.
 - **Still answers ARP.** Its network side is up, and it simply stopped asking.
+  Neutrino's UDPFS driver stops for good after one failed read, so the lines
+  just before this one show what failed.
 - **No longer answers ARP.** Its IOP or network adapter is down.
 
 A log that just stops can't tell these apart on its own.
