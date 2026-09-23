@@ -107,9 +107,17 @@ class ResentRequestTests(unittest.TestCase):
                     self.sess.pushback.clear()
                     self.reads = 0
                     self.queue(_packet(298, 1573, REQUEST, flags))
-                    wait(ADDR)
+                    self.assertTrue(wait(ADDR))
                     self.assertEqual(self.reads, 1)
                     self.assertEqual(len(self.sess.pushback), 1)
+
+    def test_a_new_request_mid_window_stops_the_transfer(self):
+        self.queue(_packet(298, 1573, REQUEST))
+        self.server._send_raw_data_with_header(ADDR, b"\x00" * 8, bytes(14336))
+        self.assertEqual(len(self.sent), 8, "only the first window went out")
+        self.assertEqual(self.reads, 1)
+        self.assertEqual(len(self.sess.pushback), 1, "left for the worker")
+        self.assertFalse(any("aborting" in e for e in self.events), self.events)
 
 
 if __name__ == "__main__":
