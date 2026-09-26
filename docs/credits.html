@@ -1,0 +1,138 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Credits &amp; Sources · PS2 Servers Docs</title>
+<meta name="description" content="Acknowledgments, upstream sources, and credits for PS2 Servers, Open PS2 Loader, and the homebrew community.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html" class="active"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>Credits, Sources &amp; Acknowledgments</h1>
+<p class="lead">PS2 Servers is built on the collective achievements, reverse engineering efforts, and code contributions of the PlayStation 2 homebrew development community.</p>
+
+<h2 id="collaborators">Core Contributors &amp; Collaborators</h2>
+<div class="cards">
+  <article class="card">
+    <h3>NathanNeurotic (Ripto)</h3>
+    <p>Creator and maintainer of <a href="https://github.com/NathanNeurotic/PS2-Servers">PS2 Servers</a> (Desktop, Core, Edge), the <a href="https://github.com/NathanNeurotic/Open-PS2-Loader">RiptOPL</a> loader fork, and comprehensive PlayStation 2 documentation systems.</p>
+  </article>
+
+  <article class="card">
+    <h3>FatBaldDad</h3>
+    <p>Author of <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>. In direct collaboration, co-architecting unified server foundations, networking standards, and hardware testing methodologies.</p>
+  </article>
+</div>
+
+<h2 id="upstream-pioneers">Upstream Projects &amp; Specifications</h2>
+<div class="cards">
+  <article class="card">
+    <h3>pcm720</h3>
+    <p>Pioneer of the <b>udpfsd</b> protocol specification and original server implementation, establishing high-speed UDP-based network game loading on the PS2.</p>
+  </article>
+
+  <article class="card">
+    <h3>ps2homebrew Team</h3>
+    <p>The maintainers of the canonical <a href="https://github.com/ps2homebrew/Open-PS2-Loader">Open-PS2-Loader</a> repository and the open-source <b>ps2sdk</b> toolchain.</p>
+  </article>
+
+  <article class="card">
+    <h3>darkladark (dnunezx)</h3>
+    <p>Author of <a href="https://github.com/dnunezx/LUNA">LUNA</a> (Lightweight Unified Neutrino Access) and key contributor to Neutrino network loading, Modulo protocol integration, and RiptOPL improvements.</p>
+  </article>
+
+  <article class="card">
+    <h3>Docmine17</h3>
+    <p>Creator of <a href="https://github.com/Docmine17/Open-PS2-Loader-HTTP">Open-PS2-Loader-HTTP</a>, introducing ISO streaming via standard HTTP Range headers.</p>
+  </article>
+
+  <article class="card">
+    <h3>Maximus32</h3>
+    <p>Creator of the modular <b>Neutrino</b> external game loader core and driver architecture.</p>
+  </article>
+
+  <article class="card">
+    <h3>uyjulian</h3>
+    <p>Longtime contributor to OPL network drivers, lwIP integration, and high-performance SMB protocol improvements.</p>
+  </article>
+</div>
+
+<h2 id="open-source-libraries">Open-Source Technologies</h2>
+<ul>
+  <li><b>Python Software Foundation</b> &mdash; Python 3 runtime and Tkinter GUI engine.</li>
+  <li><b>Go (Golang) Project</b> &mdash; High-concurrency static binary compilation for Edge.</li>
+  <li><b>OpenWrt Project</b> &mdash; Embedded Linux router operating system and package ecosystem.</li>
+  <li><b>libchdr</b> &mdash; Fast, portable CHD compressed disc image decoding.</li>
+  <li><b>maxcso &amp; LZ4</b> &mdash; High-speed compressed ZSO disc image containers.</li>
+</ul>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

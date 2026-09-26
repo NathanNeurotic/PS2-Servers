@@ -1,0 +1,142 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Antivirus Transparency &amp; Trust · PS2 Servers Docs</title>
+<meta name="description" content="Detailed explanation of heuristic antivirus false positives, packaging wrappers, download verification, and security transparency for PS2 Servers.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html" class="active"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>Antivirus Transparency &amp; Trust</h1>
+<p class="lead">PS2 Servers is a 100% open-source, community-driven network utility. Because it binds to local network sockets, handles raw datagrams, and is packaged without commercial code-signing certificates, heuristic antivirus engines may flag downloaded binaries as false positives.</p>
+
+<div class="callout info"><div class="h">Core Trust Statement</div>
+A generic detection label (such as <i>Win32/Wacatac</i> or <i>Generic.Malware</i>) does not prove that a binary contains malicious code; it indicates that an automated heuristic rule matched patterns common to binary packers. Every line of source code in PS2 Servers is publicly auditable on GitHub.
+</div>
+
+<h2 id="why-flagged">1. Why Heuristics Flag PS2 Servers</h2>
+<div class="cards">
+  <article class="card">
+    <h3>Self-Extracting Packaging (Nuitka / PyInstaller)</h3>
+    <p>Single-file desktop executables bundle the Python interpreter, runtime DLLs, and server scripts into a compressed archive. When run, the stub extracts these files into a temporary directory (<code>%TEMP%</code>) and launches an unprivileged child process. Heuristic engines often flag any unpacker stub that extracts and executes code.</p>
+  </article>
+
+  <article class="card">
+    <h3>Network Socket Binding</h3>
+    <p>PS2 Servers listens on low-level TCP and UDP ports (such as SMB port 1025/1111 and UDPFS port 62966). Software that opens network listener sockets without a commercially purchased digital signature is routinely treated with suspicion by heuristic algorithms.</p>
+  </article>
+
+  <article class="card">
+    <h3>Lack of Commercial Code Signing</h3>
+    <p>Microsoft and commercial antivirus vendors give high trust ratings to executables signed with Extended Validation (EV) certificates. EV certificates cost hundreds of dollars annually and require corporate registration, which is prohibitive for free open-source hobbyist software.</p>
+  </article>
+</div>
+
+<h2 id="portable-builds">2. Portable Builds: The Recommended Choice</h2>
+<p>To reduce false positives, we provide <b>portable archives</b> (<code>PS2Servers-windows-x64-portable.zip</code>). The portable package contains all libraries and executables pre-extracted in a standard folder.</p>
+
+<p>Because portable builds do not use runtime self-extraction wrappers, they trigger significantly fewer heuristic alarms and launch noticeably faster.</p>
+
+<h2 id="verifying-authenticity">3. How to Verify Downloaded Files</h2>
+<p>Never bypass security warnings blindly. You can verify that your download has not been tampered with through cryptographic proofs:</p>
+
+<ol>
+  <li><b>Compare SHA-256 Checksums:</b> Verify that the hash of your file matches the official <code>SHA256SUMS.txt</code> attached to the GitHub release.</li>
+  <li><b>Verify GitHub Build Attestations:</b> Confirm that the file was built directly from our source repository by GitHub Actions:
+  <pre><code>gh attestation verify PS2Servers-windows-x64-portable.zip -R NathanNeurotic/PS2-Servers</code></pre></li>
+  <li><b>Run Directly From Source:</b> If you prefer not to execute pre-compiled binaries, clone the repository and run via Python directly:
+  <pre><code>git clone https://github.com/NathanNeurotic/PS2-Servers.git
+cd PS2-Servers
+python ps2servers.py</code></pre></li>
+</ol>
+
+<h2 id="expected-behavior">4. Expected System Behavior</h2>
+<p>PS2 Servers strictly adheres to the following security principles:</p>
+
+<ul>
+  <li><b>No Kernel Modifications:</b> Does not enable Windows SMB 1.0 optional features, does not install system drivers, and does not alter core OS files.</li>
+  <li><b>Firewall Transparency:</b> Any firewall rules created are explicitly named <code>PS2 Servers - ...</code> and can be removed instantly with one click in the app or via Windows Firewall.</li>
+  <li><b>Zero Telemetry / No Phone-Home:</b> PS2 Servers does not contact external cloud servers, collects no personal data, contains no advertising, and does not perform background mining.</li>
+  <li><b>Clean Removal:</b> Stop the running servers, delete the folder, and the application is completely gone from your system.</li>
+</ul>
+
+<h2 id="adding-exclusions">5. Adding Exclusions in Windows Security</h2>
+<p>If Windows Defender quarantines your downloaded portable build:</p>
+<ol>
+  <li>Open <b>Windows Security &rarr; Virus &amp; threat protection</b>.</li>
+  <li>Select <b>Manage settings</b> under <i>Virus &amp; threat protection settings</i>.</li>
+  <li>Scroll to <b>Exclusions</b> and click <b>Add or remove exclusions</b>.</li>
+  <li>Select <b>Folder</b> and choose the folder where you extracted PS2 Servers.</li>
+</ol>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

@@ -1,0 +1,167 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compressed Disc Formats · PS2 Servers Docs</title>
+<meta name="description" content="Guide to ISO, CSO, ZSO, and CHD compressed disc formats in PS2 Servers: compression ratios, decoding overhead, and dependencies.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html" class="active"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>Compressed Disc Formats</h1>
+<p class="lead">PS2 Servers supports compressed disc formats, enabling you to store large game libraries in a fraction of the disk space while streaming them seamlessly to your PlayStation 2.</p>
+
+<div class="callout info"><div class="h">Server-Side vs Client-Side Decompression</div>
+There are two ways compressed images are streamed:
+<ul>
+  <li><b>Client-Side Decoding (ZSO):</b> The server transfers compressed LZ4 blocks directly over the network; the PS2's processor decompresses them in RAM. This minimizes network traffic.</li>
+  <li><b>Server-Side Decoding (CHD &amp; CSO):</b> The host PC or router decompresses requested sectors in real time and delivers raw optical disc sectors to the console. The console never knows the file is compressed.</li>
+</ul>
+</div>
+
+<h2 id="formats-matrix">1. Format Comparison Matrix</h2>
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Format</th>
+      <th>Algorithm</th>
+      <th>Typical Storage Reduction</th>
+      <th>Console Decoding</th>
+      <th>Server Decoding Support</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Raw ISO (<code>.iso</code>)</b></td>
+      <td>None (Uncompressed)</td>
+      <td>0%</td>
+      <td>Native</td>
+      <td>Desktop &middot; Core &middot; Edge</td>
+    </tr>
+    <tr>
+      <td><b>ZSO (<code>.zso</code>, <code>.ziso</code>)</b></td>
+      <td>LZ4 (2048-byte blocks)</td>
+      <td>20% &ndash; 45%</td>
+      <td>Native in OPL / RiptOPL</td>
+      <td>Desktop &middot; Core &middot; Edge</td>
+    </tr>
+    <tr>
+      <td><b>CSO (<code>.cso</code>, <code>.ciso</code>)</b></td>
+      <td>Deflate / zlib</td>
+      <td>25% &ndash; 50%</td>
+      <td>Limited / High IOP load</td>
+      <td>Desktop &middot; Core &middot; Edge</td>
+    </tr>
+    <tr>
+      <td><b>CHD (<code>.chd</code>)</b></td>
+      <td>LZMA / FLAC / zlib</td>
+      <td><b>35% &ndash; 65%</b> (Best)</td>
+      <td>None</td>
+      <td>Desktop &middot; Core (via <code>libchdr</code>)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="optional-deps">2. Optional Compression Dependencies</h2>
+<p>PS2 Servers Desktop and Core automatically inspect the Python environment for optional acceleration and decompression modules:</p>
+
+<ul>
+  <li><b><code>libchdr</code></b> &mdash; Required for CHD format decompression. Included in pre-compiled Desktop packages; installable via <code>pip install libchdr</code> in source mode.</li>
+  <li><b><code>lz4</code></b> &mdash; Accelerates ZSO block parsing and verification.</li>
+  <li><b><code>zstandard</code></b> &mdash; Provides Zstandard dictionary acceleration.</li>
+</ul>
+
+<div class="callout good"><div class="h">Desktop Dependency Panel</div>
+In PS2 Servers Desktop, click <b>Settings &rarr; Dependencies</b> to inspect the detected status of all optional compression libraries. If a library is missing, Desktop displays exact installation commands for your OS.
+</div>
+
+<h2 id="creating-compressed-games">3. Compressing Your Disc Images</h2>
+
+<div class="cards">
+  <article class="card">
+    <h3>Compressing to ZSO (Recommended for Console Compatibility)</h3>
+    <p>Use <b>maxcso</b> to compress raw DVD ISOs into high-speed ZSO images:</p>
+    <pre><code>maxcso --format=zso --block=2048 game.iso -o DVD/SLUS_201.74.Game.zso</code></pre>
+  </article>
+
+  <article class="card">
+    <h3>Compressing to CHD (Best Compression Ratio)</h3>
+    <p>Use <b>chdman</b> (from the MAME toolset) to achieve maximum compression for Desktop/Core serving:</p>
+    <pre><code># For DVD games:
+chdman createdvd -i game.iso -o DVD/SLUS_201.74.Game.chd
+
+# For CD games (from CUE/BIN):
+chdman createcd -i game.cue -o CD/SLUS_201.74.Game.chd</code></pre>
+  </article>
+</div>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

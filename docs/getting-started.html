@@ -1,0 +1,226 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Getting Started · PS2 Servers Docs</title>
+<meta name="description" content="Step-by-step guide to connecting your PlayStation 2, configuring network settings, running PS2 Servers, and launching your first game.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html" class="active"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>Getting Started</h1>
+<p class="lead">From zero to streaming your first game over Ethernet in under ten minutes. Follow this guide to prepare your network, organize your disc images, run the server, and connect from your console.</p>
+
+<div class="callout info"><div class="h">Console Loader Prerequisite</div>
+You need a PlayStation 2 with an Ethernet network interface (a Fat console with an original or compatible Network Adapter, or any Slim model) and a homebrew loader such as <b>RiptOPL</b>, <b>Open PS2 Loader (OPL)</b>, or <b>Neutrino / NHDDL</b> booted via Free McBoot (FMCB), Free HD Boot (FHDB), or Modchip.
+</div>
+
+<h2 id="network-topology">1. Connect Your PS2 to the Network</h2>
+<p>Both your server host (PC, router, Raspberry Pi, or NAS) and your PlayStation 2 must share a physical or bridged local network. A wired Ethernet connection is strongly advised; Wi-Fi can cause stuttering during FMV playback and disc reads.</p>
+
+<div class="cards">
+  <article class="card">
+    <h3>Topology A: Local Router or Switch (Recommended)</h3>
+    <p>Plug both your host computer and your PS2 into the same router or Ethernet switch using standard Cat5e or Cat6 cables. Your router handles IP assignment, or you can assign static addresses in the same subnet.</p>
+    <ul>
+      <li><b>PC LAN IP:</b> e.g. <code>192.168.1.100</code></li>
+      <li><b>PS2 IP:</b> e.g. <code>192.168.1.150</code></li>
+      <li><b>Subnet Mask:</b> <code>255.255.255.0</code></li>
+      <li><b>Gateway:</b> <code>192.168.1.1</code></li>
+    </ul>
+  </article>
+
+  <article class="card">
+    <h3>Topology B: Direct Ethernet Cable (PC to PS2)</h3>
+    <p>Connect an Ethernet cable directly between the PC's network jack and the PS2. Modern PC network interfaces support Auto-MDIX (automatic crossover), so a standard patch cable works fine.</p>
+    <ul>
+      <li>Assign your PC's Ethernet adapter a manual static IP: <code>192.168.0.1</code> (Subnet: <code>255.255.255.0</code>).</li>
+      <li>Assign the PS2 a static IP in the same subnet: <code>192.168.0.2</code>.</li>
+      <li>Leave Gateway blank or set to <code>192.168.0.1</code>.</li>
+    </ul>
+  </article>
+</div>
+
+<h2 id="folder-structure">2. Set Up Your Game Directory</h2>
+<p>Create a dedicated folder on your storage drive (for example <code>D:\PS2Games</code> on Windows or <code>/srv/ps2</code> on Linux). Organize it with the standard OPL folder hierarchy:</p>
+
+<pre><code>PS2Games/
+├── CD/         ← CD-based PS2 games (&lt;700 MB ISO images)
+├── DVD/        ← DVD5 and DVD9 PS2 games (&gt;700 MB ISO images)
+├── ART/        ← Cover art, backgrounds, spines, discs (optional)
+├── CFG/        ← Per-game configuration files (optional)
+├── VMC/        ← 8MB Virtual Memory Card files (optional)
+└── CHT/        ← Cheats files (optional)</code></pre>
+
+<div class="callout warn"><div class="h">Folder Case Sensitivity &amp; Disc Naming</div>
+Ensure folder names are in UPPERCASE (<code>DVD</code>, <code>CD</code>, <code>ART</code>). Many loaders (and Linux/Edge servers) are case-sensitive.<br>
+For best compatibility, name your games using the standard OPL startup identifier convention:
+<code>DVD/SLUS_201.74.Rumble Racing.iso</code> or <code>CD/SCUS_971.24.Game.iso</code>.
+</div>
+
+<h2 id="launching-server">3. Start PS2 Servers</h2>
+<div class="steps">
+  <div class="step">
+    <h3>Download and Extract</h3>
+    <p>Download the latest release package from the <a href="releases.html">Releases Page</a>. Extract the portable ZIP to a folder on your host machine. Launch <code>PS2Servers.exe</code> on Windows, or invoke <code>python ps2servers.py</code> from source.</p>
+  </div>
+
+  <div class="step">
+    <h3>Choose Your LAN Interface</h3>
+    <p>In the top bar of PS2 Servers Desktop, ensure the <b>LAN IP</b> dropdown selects the network adapter wired to your PS2. The launcher automatically displays the IP address and helpful setup hints for each card.</p>
+  </div>
+
+  <div class="step">
+    <h3>Select Games Folder &amp; Start</h3>
+    <p>On the server card matching your loader (e.g. <b>SMBv1</b> for standard OPL, or <b>UDPFS</b> for Neutrino/RiptOPL), click <b>Browse</b> and select the parent folder holding your <code>DVD/</code> and <code>CD/</code> subdirectories. Click <b>Start</b>.</p>
+  </div>
+</div>
+
+<div class="callout good"><div class="h">Firewall Notice</div>
+When starting a server for the first time, Windows Defender Firewall may prompt to allow network traffic. Check <b>Private networks</b> and click <b>Allow access</b>. PS2 Servers also provides an automatic firewall rule creator in the application settings.
+</div>
+
+<h2 id="console-setup">4. Configure Network in Your Loader</h2>
+<p>Boot your PlayStation 2, launch your loader, and navigate to <b>Network Settings</b>. Configure the connection to match the values displayed on your running server card:</p>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Setting</th>
+      <th>SMBv1 Mode (Standard OPL)</th>
+      <th>UDPFS Mode (Neutrino / RiptOPL)</th>
+      <th>HTTP Mode</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Protocol / Device</b></td>
+      <td>SMB (ETH)</td>
+      <td>UDPFS (Network Boot)</td>
+      <td>HTTP</td>
+    </tr>
+    <tr>
+      <td><b>Address Type</b></td>
+      <td>IP</td>
+      <td>IP (or Broadcast Discovery)</td>
+      <td>IP</td>
+    </tr>
+    <tr>
+      <td><b>PC IP Address</b></td>
+      <td>Host PC LAN IP (e.g. <code>192.168.1.100</code>)</td>
+      <td>Host PC LAN IP (e.g. <code>192.168.1.100</code>)</td>
+      <td>Host PC LAN IP</td>
+    </tr>
+    <tr>
+      <td><b>Port</b></td>
+      <td><b>1025</b> (Desktop) or <b>1111</b> (Core/Edge)</td>
+      <td><b>62966</b> (Auto data port)</td>
+      <td><b>1100</b> (Explicit match required)</td>
+    </tr>
+    <tr>
+      <td><b>Share Name</b></td>
+      <td><code>games</code></td>
+      <td>N/A (folder tree served directly)</td>
+      <td>Blank or anything</td>
+    </tr>
+    <tr>
+      <td><b>User / Password</b></td>
+      <td>User: <code>guest</code> &middot; Password: <i>(empty)</i></td>
+      <td>None</td>
+      <td>None</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="first-game">5. Launch Your First Game</h2>
+<ol>
+  <li>Save your loader's network configuration to your Memory Card (<code>mc0:</code>).</li>
+  <li>Return to the main menu and press the button to refresh the game list (in OPL/RiptOPL, scroll to the ETH / Netboot tab or press <b>Select</b> / <b>Circle</b>).</li>
+  <li>Your game list should populate with titles from your <code>DVD/</code> and <code>CD/</code> folders.</li>
+  <li>Highlight your game, press <b>X</b> (Cross) or <b>Start</b>, and enjoy!</li>
+</ol>
+
+<h2 id="troubleshooting-faq">Common Questions &amp; Troubleshooting</h2>
+
+<details class="deep"><summary>The game list is empty after connecting. What should I check?</summary>
+<p>Verify that your games folder has the uppercase <code>DVD</code> and <code>CD</code> subfolders and that file extensions are <code>.iso</code>, <code>.zso</code>, or <code>.cso</code>. If using SMBv1, ensure the share name in OPL is exactly <code>games</code>, address type is set to <b>IP</b> (not NetBIOS), and the port matches the displayed card port (1025 or 1111).</p>
+</details>
+
+<details class="deep"><summary>UDPFS games list correctly, but freeze on a black screen when launching.</summary>
+<p>This is commonly caused by multiple network adapters on the host PC (e.g. active Wi-Fi and Ethernet simultaneously). When the PS2 sends data requests, the OS may attempt to respond from the wrong IP. See our detailed <a href="udpfs-diagnostics.html">UDPFS Diagnostics Guide</a> for how to pin the bind address directly to your PS2-facing interface.</p>
+</details>
+
+<details class="deep"><summary>Does PS2 Servers support Virtual Memory Cards (VMC)?</summary>
+<p>Yes. Both SMBv1 and SMB2/3 in PS2 Servers are writable by default. If your loader supports creating and mounting VMC images over the network (such as stock OPL or RiptOPL on SMB), images in <code>VMC/</code> can be written directly over the network.</p>
+</details>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

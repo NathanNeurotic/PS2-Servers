@@ -1,0 +1,188 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PS2 Servers Edge · PS2 Servers Docs</title>
+<meta name="description" content="High-performance native Go server for OpenWrt routers, Raspberry Pi, NAS, and headless systems with embedded Web UI management.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html" class="active"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>PS2 Servers Edge</h1>
+<p class="lead"><b>PS2 Servers Edge</b> is a high-speed, statically linked Go implementation engineered for routers, network-attached storage (NAS), Raspberry Pi, and minimal Linux appliances. It operates with a sub-20 MB RAM footprint and provides a responsive, embedded Web GUI dashboard.</p>
+
+<div class="callout info"><div class="h">Why Edge Exists</div>
+Running a full Python interpreter and desktop UI on an embedded MIPS/ARM router or an old thin client is often impossible due to flash storage and RAM constraints. Edge eliminates all Python dependencies, compiling down to a single compact binary that starts instantaneously and runs 24/7 beside your console.
+</div>
+
+<h2 id="scope">1. Protocol &amp; Feature Scope</h2>
+<p>Edge implements the most critical network-serving protocols for PS2 homebrew:</p>
+
+<div class="cards">
+  <article class="card">
+    <h3>Implemented in Edge</h3>
+    <ul>
+      <li><b>UDPFS Engine:</b> Full read and write support; automatic per-session Standard/Modulo negotiation; multi-console concurrency.</li>
+      <li><b>UDPBD Block Device:</b> Direct sector serving for raw disc images over UDP 48573.</li>
+      <li><b>SMBv1 Server:</b> Guest-authenticated file sharing on TCP 1111 for standard OPL.</li>
+      <li><b>Embedded Web UI:</b> Responsive web management console for LAN monitoring and service control.</li>
+      <li><b>CSO &amp; ZSO Decoding:</b> Decompresses CSO and ZSO disc containers on the fly with a bounded block cache.</li>
+      <li><b>Transfer Telemetry:</b> Structured JSON logging and real-time bandwidth metrics via <code>--metrics</code>.</li>
+    </ul>
+  </article>
+
+  <article class="card">
+    <h3>Excluded from Edge</h3>
+    <ul>
+      <li><b>No SMB2 / SMB3:</b> Edge focuses strictly on lightweight guest SMBv1. For authenticated SMB2/3, run Desktop or Core.</li>
+      <li><b>No HTTP Game Streaming:</b> Edge's web server is dedicated exclusively to the Web UI management dashboard.</li>
+      <li><b>No CHD Decompression:</b> Native <code>libchdr</code> dependencies are omitted to maintain 100% static linking portability across esoteric router toolchains.</li>
+    </ul>
+  </article>
+</div>
+
+<h2 id="webui">2. Embedded Web UI Dashboard</h2>
+<p>Edge includes a built-in web management interface reachable via your browser on port <b>8082</b>.</p>
+
+<pre><code># Start Web UI for local host only:
+ps2servers-edge webui
+
+# Start Web UI accessible across your trusted LAN:
+ps2servers-edge webui --bind 0.0.0.0 --auth-pass 'your-secure-password'</code></pre>
+
+<div class="cards">
+  <article class="card">
+    <h3>Web UI Features</h3>
+    <ul>
+      <li><b>Live Service Overview:</b> View running states of UDPFS, SMB, and UDPBD services.</li>
+      <li><b>Connected Console Monitor:</b> See real-time connected PS2 client IPs, active file handles, and streaming bandwidth.</li>
+      <li><b>Directory Browser:</b> Browse configured games libraries with file size and format validation.</li>
+      <li><b>Service Management:</b> Trigger service restarts seamlessly when installed via systemd or OpenWrt procd.</li>
+    </ul>
+  </article>
+</div>
+
+<div class="callout warn"><div class="h">Web UI Security &amp; LAN Access</div>
+When binding to <code>0.0.0.0</code> for network-wide access, Edge <b>requires</b> an authentication password via <code>--auth-pass</code>. If <code>--insecure</code> is passed, Edge generates a random high-entropy password and logs it to stdout. The Web UI runs over unencrypted HTTP; never expose port 8082 to the internet.
+</div>
+
+<h2 id="quick-commands">3. Core Edge Subcommands</h2>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Subcommand</th>
+      <th>Example Invocation</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>udpfs</code></td>
+      <td><code>ps2servers-edge udpfs --root /srv/ps2</code></td>
+      <td>Serve directory tree over UDPFS (discovery on 62966 + dynamic data port).</td>
+    </tr>
+    <tr>
+      <td><code>smb</code></td>
+      <td><code>ps2servers-edge smb --share games=/srv/ps2 --port 1111</code></td>
+      <td>Serve guest SMBv1 share on TCP port 1111.</td>
+    </tr>
+    <tr>
+      <td><code>udpbd</code></td>
+      <td><code>ps2servers-edge udpbd --image /srv/ps2/game.iso --read-only</code></td>
+      <td>Serve single raw disc image over UDP 48573.</td>
+    </tr>
+    <tr>
+      <td><code>webui</code></td>
+      <td><code>ps2servers-edge webui --bind 0.0.0.0 --auth-pass secret</code></td>
+      <td>Launch web dashboard on port 8082.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="next-steps">4. Next Steps for Edge Operators</h2>
+<div class="cards">
+  <article class="card">
+    <h3><a href="edge-builds.html">Which Build Do I Need? &rarr;</a></h3>
+    <p>Use the 30-second <code>uname -m</code> test to select the exact binary asset for your router, Raspberry Pi, or NAS architecture.</p>
+  </article>
+  <article class="card">
+    <h3><a href="openwrt.html">OpenWrt Router Setup &rarr;</a></h3>
+    <p>Deploy Edge onto your home router with official <code>.ipk</code> packages, external USB drive mounting, and procd service autostart.</p>
+  </article>
+  <article class="card">
+    <h3><a href="edge-manual.html">Edge Operator Manual &rarr;</a></h3>
+    <p>Complete CLI reference of all flags, configuration contracts, UCI schemas, and daemon options.</p>
+  </article>
+</div>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

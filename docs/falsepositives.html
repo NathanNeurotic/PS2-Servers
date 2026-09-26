@@ -1,64 +1,23 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PS2 Servers — download verification and antivirus</title>
-  <meta name="description" content="Verify PS2 Servers downloads, understand expected network behavior, and report antivirus detections for the exact build.">
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <header class="site-header"><div class="container nav">
-    <a class="brand" href="index.html"><span class="brand-mark">PS2</span><span>PS2 Servers</span></a>
-    <nav class="nav-links" aria-label="Primary navigation">
-      <a href="index.html">Home</a><a href="#verification">Verification</a>
-      <a href="#does">Behavior</a><a href="#report">Report</a>
-    </nav>
-  </div></header>
-  <main>
-    <section class="hero"><div class="container">
-      <div class="kicker">Download verification</div>
-      <h1>Antivirus <span>and trust</span></h1>
-      <p class="lede">PS2 Servers is an unsigned, open-source network utility. Its packaging and server behavior can trigger heuristic detections. A detection name alone does not establish whether a file is safe or malicious.</p>
-      <div class="cta-row">
-        <a class="btn" href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/antivirus-transparency.md">Full transparency guide</a>
-        <a class="btn secondary" href="https://github.com/NathanNeurotic/PS2-Servers/releases">Official releases</a>
-      </div>
-    </div></section>
-    <section class="section" id="files"><div class="container">
-      <h2>Portable and single-file downloads</h2>
-      <p>The Windows portable archive contains the executable and its libraries in a folder. It avoids the single-file self-extraction wrapper, but remains unsigned and can still be flagged. Keep the complete extracted folder together.</p>
-      <p>Use the release’s download table for your OS and architecture. Windows has x64 and x86 builds; Linux has x64 packages; macOS has Intel and Apple Silicon packages. Edge is a separate headless executable. Availability depends on the assets that successfully built for that release.</p>
-      <p id="why">Nuitka single-file packages extract and re-execute on launch. That behavior, an unsigned executable, and listening on network ports can contribute to detections; none of those facts verifies an individual downloaded file.</p>
-    </div></section>
-    <section class="section" id="verification"><div class="container">
-      <h2>Verify the exact file</h2>
-      <ol>
-        <li>Download from the project’s GitHub release and record its tag/commit and asset name.</li>
-        <li>Compare SHA-256 against that release’s <code>SHA256SUMS.txt</code>, Desktop <code>.sha256.txt</code> sidecar, or Edge <code>.sha256</code> sidecar.</li>
-        <li>Verify a published artifact attestation using the filename you downloaded.</li>
-      </ol>
-      <div class="terminal"><pre>gh attestation verify PS2Servers-windows-x64-portable.zip -R NathanNeurotic/PS2-Servers</pre></div>
-      <p>Checksums verify integrity and attestations verify build provenance. Neither proves safety or console compatibility. Inspecting and running/building from source is another option. Code signing would not guarantee the absence of detections either.</p>
-    </div></section>
-    <section class="section" id="does"><div class="container">
-      <h2>Expected behavior</h2>
-      <div class="cards">
-        <article class="card"><h3>LAN servers</h3><p>SMBv1 uses TCP 1025 by default in Desktop and 1111 in Core/standalone or Edge, SMB2/3 TCP 1445, HTTP game serving TCP 1100, UDPFS UDP 62966 plus a data socket, and UDPBD UDP 48573. Edge’s optional management dashboard uses TCP 8082 and requires a password for LAN access.</p></article>
-        <article class="card"><h3>Windows setup</h3><p>The app does not enable Windows SMB1 or change Windows optional features. Firewall changes need user action/consent and use <code>PS2 Servers - ...</code> rules. Optional Take port 445 temporarily stops Windows File Sharing. Direct-link setup changes a dedicated interface and serves DHCP; both require elevation.</p></article>
-        <article class="card"><h3>Saved configuration</h3><p>The launcher saves per-user settings, which may include SMB2/3 credentials. Auto-start servers on launch applies when the app opens; it does not create an OS login task. Manually installed services are persistent until removed. Source-mode dependency installation can contact a package index after confirmation.</p></article>
-      </div>
-      <p id="does-not">The project does not add advertising, browser extensions or crypto-mining. Edge offers optional remote service management with authentication and host permissions, as described in the full transparency guide.</p>
-      <p>Before removing the app, stop servers and disable direct link to restore its temporary network changes. Then remove the app folder, optionally its per-user settings, and its firewall rules. Manually installed services/containers need separate cleanup. See <a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/SECURITY.md">Security and cleanup</a>.</p>
-    </div></section>
-    <section class="section" id="report"><div class="container">
-      <h2>Report a detection</h2>
-      <p id="detections">Keep protection enabled while you verify the file. Include the release/commit, asset name, SHA-256, antivirus product/version, full detection name and any vendor report URL. Submit the application sample to the detecting vendor’s review process; do not upload games, saves or private credentials.</p>
-      <p><a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/antivirus-transparency.md#reporting-a-false-positive-to-your-antivirus-vendor">Vendor submission links</a> · <a href="https://github.com/NathanNeurotic/PS2-Servers/issues">Project issue tracker</a></p>
-      <p id="position">PS2 Servers has been submitted to Avast/Gen Threat Labs for false-positive review. This records a submission, not clearance of every current or future build.</p>
-    </div></section>
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Antivirus Transparency &amp; Trust · PS2 Servers Docs</title>
+<meta http-equiv="refresh" content="0; url=antivirus.html">
+<link rel="canonical" href="antivirus.html">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+</header>
+<div class="layout">
+  <main class="content">
+    <div class="callout info">
+      <div class="h">Page Moved</div>
+      This page has moved to the updated <a href="antivirus.html"><b>Antivirus Transparency &amp; Trust Guide</b></a>. Redirecting automatically...
+    </div>
   </main>
-  <footer class="footer"><div class="container"><span>PS2 Servers · <a href="index.html">Project home</a></span><span>Source and exact-build evidence matter.</span></div></footer>
-</body>
-</html>
+</div>
+</body></html>

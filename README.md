@@ -7,6 +7,9 @@
 
 *in collaboration with https://github.com/FatBaldDad/PS2-EtherDrive*
 
+📖 **Documentation Site:** [https://nathanneurotic.github.io/PS2-Servers/](https://nathanneurotic.github.io/PS2-Servers/)  
+🎮 **Console Loader Docs:** [RiptOPL Documentation](https://nathanneurotic.github.io/Open-PS2-Loader/)
+
 
 PS2 Servers runs game and file servers for network-capable PlayStation 2
 homebrew. **Desktop** provides a Tkinter launcher; **Core** runs the same Python

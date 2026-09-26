@@ -1,0 +1,239 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Core CLI Reference · PS2 Servers Docs</title>
+<meta name="description" content="Command-line reference, daemon options, systemd service units, and Docker recipes for PS2 Servers Core.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html" class="active"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>PS2 Servers Core CLI Reference</h1>
+<p class="lead"><b>PS2 Servers Core</b> provides terminal-based server execution without a graphical display. Powered by the full Python engine, it supports automation, daemonization under systemd, container deployment, and extensive debugging telemetry.</p>
+
+<div class="callout info"><div class="h">Command Entry Point</div>
+Whether running from source with <code>python ps2servers.py serve &lt;mode&gt;</code> or invoking a packaged binary like <code>PS2Servers.exe serve &lt;mode&gt;</code>, the subcommands and flags are identical. The internal alias <code>--serve</code> is also supported for backward compatibility with existing scripts.
+</div>
+
+<h2 id="listing-modes">1. Listing Modes &amp; Global Help</h2>
+<pre><code># List available server modes
+python ps2servers.py --list
+
+# Show help for a specific mode
+python ps2servers.py serve udpfs --help
+python ps2servers.py serve smbv1 --help
+python ps2servers.py serve udpbd --help
+python ps2servers.py serve http --help</code></pre>
+
+<h2 id="serve-udpfs">2. <code>serve udpfs</code> Options</h2>
+<pre><code>python ps2servers.py serve udpfs --root-dir /srv/ps2 [options]</code></pre>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Default</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--root-dir PATH</code></td>
+      <td><i>(Required)</i></td>
+      <td>Path to the root games directory (parent of <code>DVD/</code> and <code>CD/</code>).</td>
+    </tr>
+    <tr>
+      <td><code>--bind IP</code></td>
+      <td><code>0.0.0.0</code></td>
+      <td>Binds Core's <b>data socket</b> to a specific PC LAN address (crucial for multi-adapter PCs).</td>
+    </tr>
+    <tr>
+      <td><code>--port PORT</code></td>
+      <td><code>62966</code></td>
+      <td>Discovery UDP port.</td>
+    </tr>
+    <tr>
+      <td><code>--data-port PORT</code></td>
+      <td><code>0</code> (dynamic)</td>
+      <td>Explicit data port for firewalls.</td>
+    </tr>
+    <tr>
+      <td><code>--single-port</code></td>
+      <td><code>false</code></td>
+      <td>Route both discovery and data through port 62966.</td>
+    </tr>
+    <tr>
+      <td><code>--peer-timeout SECS</code></td>
+      <td><code>3600</code></td>
+      <td>Session inactivity timeout in seconds (accepts 60 to 86400).</td>
+    </tr>
+    <tr>
+      <td><code>--read-only</code></td>
+      <td><code>false</code></td>
+      <td>Disallow write operations.</td>
+    </tr>
+    <tr>
+      <td><code>--verbose</code></td>
+      <td><code>false</code></td>
+      <td>Enable high-verbosity packet telemetry and 45-second inactivity diagnostics.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="serve-smbv1">3. <code>serve smbv1</code> Options</h2>
+<pre><code>python ps2servers.py serve smbv1 --share games=/srv/ps2 --port 1111 [options]</code></pre>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Default</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>--share NAME=PATH</code></td>
+      <td><code>games=...</code></td>
+      <td>Define a share name mapped to a directory path. Can be repeated.</td>
+    </tr>
+    <tr>
+      <td><code>--port PORT</code></td>
+      <td><code>1111</code></td>
+      <td>TCP listening port.</td>
+    </tr>
+    <tr>
+      <td><code>--read-only</code></td>
+      <td><code>false</code></td>
+      <td>Disable writes (saves and VMCs).</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="serve-udpbd">4. <code>serve udpbd</code> Options</h2>
+<pre><code>python ps2servers.py serve udpbd /srv/images/game.iso --read-only [options]</code></pre>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Default</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>IMAGE_PATH</code></td>
+      <td><i>(Positional)</i></td>
+      <td>Path to the disc image file.</td>
+    </tr>
+    <tr>
+      <td><code>--port PORT</code></td>
+      <td><code>48573</code></td>
+      <td>UDP port for block device commands.</td>
+    </tr>
+    <tr>
+      <td><code>--bind IP</code></td>
+      <td><code>0.0.0.0</code></td>
+      <td>Interface bind address.</td>
+    </tr>
+    <tr>
+      <td><code>--read-only</code></td>
+      <td><code>false</code></td>
+      <td>Prevent write modifications to the backing image.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="systemd">5. Running Under systemd</h2>
+<p>Create a service unit file at <code>/etc/systemd/system/ps2servers-udpfs.service</code>:</p>
+
+<pre><code>[Unit]
+Description=PS2 Servers UDPFS Service
+After=network.target
+
+[Service]
+Type=simple
+User=ps2games
+ExecStart=/usr/bin/python3 /opt/ps2-servers/ps2servers.py serve udpfs --root-dir /srv/ps2games --read-only
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+<p>Enable and start the service:</p>
+<pre><code>sudo systemctl daemon-reload
+sudo systemctl enable --now ps2servers-udpfs
+sudo journalctl -u ps2servers-udpfs -f</code></pre>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

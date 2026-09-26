@@ -1,0 +1,230 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Editions &amp; Architecture · PS2 Servers Docs</title>
+<meta name="description" content="Comparison and architecture guide for PS2 Servers Desktop, Core, and Edge editions.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html" class="active"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>PS2 Servers Editions &amp; Architecture</h1>
+<p class="lead">PS2 Servers is a unified server ecosystem delivered in three distinct deployment shapes: <b>Desktop</b>, <b>Core</b>, and <b>Edge</b>. Each is engineered for specific operational environments, from standard gaming desktops to resource-constrained embedded routers.</p>
+
+<div class="callout info"><div class="h">One Architecture, Three Shapes</div>
+All three editions share identical protocol wire-specifications and compatibility goals. A PS2 loader running OPL, RiptOPL, or Neutrino interacts seamlessly whether connected to Desktop on Windows, Core on Ubuntu, or Edge on an OpenWrt router.
+</div>
+
+<h2 id="desktop">1. PS2 Servers Desktop</h2>
+<p>Desktop is the graphical workstation package designed for Windows, macOS, and Linux desktop environments. Built with Python and Tkinter, it provides an intuitive multi-card interface for immediate operation.</p>
+
+<div class="cards">
+  <article class="card">
+    <h3>Key Desktop Features</h3>
+    <ul>
+      <li><b>6 Dedicated Server Cards:</b> SMBv1, UDPFS, UDPBD, SMB2, SMB3, and HTTP game streaming.</li>
+      <li><b>Integrated Network Selector:</b> Detects active network interfaces and automatically populates IP setup hints.</li>
+      <li><b>Firewall Helper:</b> Automatic creation and cleanup of Windows Defender Firewall rules for each server port.</li>
+      <li><b>Zero Setup Runtime:</b> Distributed as standalone portable executables with bundled Python; no pre-existing runtime required.</li>
+      <li><b>Compression Engine:</b> Full support for on-the-fly decompression of CHD, CSO, and ZSO disc images when optional native libraries (such as <code>libchdr</code>) are detected.</li>
+    </ul>
+  </article>
+</div>
+
+<h2 id="core">2. PS2 Servers Core</h2>
+<p>Core exposes the full Python server implementations from the terminal without launching a graphical window. It is the premier choice for headless servers, developer workflows, remote SSH sessions, container environments, and CI/CD automated testing.</p>
+
+<pre><code># Serve UDPFS games from a directory
+python ps2servers.py serve udpfs --root-dir /srv/ps2 --read-only
+
+# Serve SMBv1 guest share
+python ps2servers.py serve smbv1 --share games=/srv/ps2 --port 1111
+
+# Serve raw disk image over UDPBD
+python ps2servers.py serve udpbd /srv/images/game.iso --read-only
+
+# Serve HTTP games for OPL-HTTP
+python ps2servers.py serve http --root-dir /srv/ps2 --port 1100</code></pre>
+
+<p>Packaged standalone executables also support identical subcommands: <code>ps2servers.exe serve udpfs ...</code>. Core includes extensive diagnostic flags like <code>--verbose</code>, structured JSON logging, and connection inactivity telemetry.</p>
+
+<h2 id="edge">3. PS2 Servers Edge</h2>
+<p>Edge is a high-speed, native Go rewrite engineered specifically for headless and embedded environments where Python is either unavailable, too heavy, or slow to start. Edge compiles to a compact, statically linked binary with zero shared-library dependencies.</p>
+
+<div class="cards">
+  <article class="card">
+    <h3>Target Environments for Edge</h3>
+    <ul>
+      <li><b>Home Routers &amp; OpenWrt:</b> Run directly on MIPS, ARM, or x86 router hardware beside your console.</li>
+      <li><b>Single Board Computers:</b> Raspberry Pi (Pi 1/2/3/4/5, Zero, Zero 2W), Orange Pi, Rockchip boards.</li>
+      <li><b>NAS Appliances:</b> Synology, QNAP, TrueNAS, unRAID, and Asustor storage servers.</li>
+      <li><b>Minimal Footprint:</b> Consumes under 20 MB of RAM under full gigabit streaming load; suitable for 32MB / 64MB embedded devices.</li>
+      <li><b>Embedded Web UI:</b> Includes a built-in browser management dashboard (<code>webui</code>) for monitoring throughput, clients, and service states.</li>
+    </ul>
+  </article>
+</div>
+
+<h2 id="matrix">Feature &amp; Edition Comparison Matrix</h2>
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Feature</th>
+      <th>Desktop (GUI)</th>
+      <th>Core (CLI)</th>
+      <th>Edge (Go Native)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Language / Runtime</b></td>
+      <td>Python 3.12 (Bundled)</td>
+      <td>Python 3.12 (CLI / Bundled)</td>
+      <td>Go 1.22+ (Static Native Binary)</td>
+    </tr>
+    <tr>
+      <td><b>User Interface</b></td>
+      <td>Desktop Tkinter GUI</td>
+      <td>Terminal / CLI Flags</td>
+      <td>CLI + Embedded Web UI Dashboard</td>
+    </tr>
+    <tr>
+      <td><b>Typical RAM Usage</b></td>
+      <td>60 &ndash; 120 MB</td>
+      <td>40 &ndash; 80 MB</td>
+      <td><b>8 &ndash; 25 MB</b> (Sub-32MB Capable)</td>
+    </tr>
+    <tr>
+      <td><b>UDPFS Protocol</b></td>
+      <td><span class="icon icon-good"></span> Yes (Auto Modulo/Standard)</td>
+      <td><span class="icon icon-good"></span> Yes (Auto Modulo/Standard)</td>
+      <td><span class="icon icon-good"></span> Yes (High-Throughput Native)</td>
+    </tr>
+    <tr>
+      <td><b>SMBv1 Sharing</b></td>
+      <td><span class="icon icon-good"></span> Yes (Port 1025)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 1111)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 1111)</td>
+    </tr>
+    <tr>
+      <td><b>SMB2 / SMB3 Sharing</b></td>
+      <td><span class="icon icon-good"></span> Yes (Port 1445)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 1445)</td>
+      <td><span class="icon icon-bad"></span> No (SMBv1 Only)</td>
+    </tr>
+    <tr>
+      <td><b>UDPBD Block Device</b></td>
+      <td><span class="icon icon-good"></span> Yes (Port 48573)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 48573)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 48573)</td>
+    </tr>
+    <tr>
+      <td><b>HTTP Game Streaming</b></td>
+      <td><span class="icon icon-good"></span> Yes (Port 1100)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 1100)</td>
+      <td><span class="icon icon-bad"></span> No (Web UI is Management Only)</td>
+    </tr>
+    <tr>
+      <td><b>ISO / CSO / ZSO Support</b></td>
+      <td><span class="icon icon-good"></span> Yes</td>
+      <td><span class="icon icon-good"></span> Yes</td>
+      <td><span class="icon icon-good"></span> Yes (CSO/ZSO Decompressed Cache)</td>
+    </tr>
+    <tr>
+      <td><b>CHD Format Support</b></td>
+      <td><span class="icon icon-good"></span> Yes (via <code>libchdr</code>)</td>
+      <td><span class="icon icon-good"></span> Yes (via <code>libchdr</code>)</td>
+      <td><span class="icon icon-bad"></span> No (Excluded from static builds)</td>
+    </tr>
+    <tr>
+      <td><b>OpenWrt / Router Packages</b></td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-good"></span> <b>Yes (Official <code>.ipk</code> packages)</b></td>
+    </tr>
+    <tr>
+      <td><b>Docker &amp; systemd Integration</b></td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-good"></span> Yes</td>
+      <td><span class="icon icon-good"></span> <b>Yes (Minimal scratch image)</b></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="picker">Which Edition Should You Choose?</h2>
+<ul class="checklist">
+  <li><b>Choose Desktop</b> if you are playing on Windows, macOS, or a Linux workstation and want a simple visual launcher with start/stop buttons and automatic configuration saving.</li>
+  <li><b>Choose Core</b> if you have an existing Linux server with Python installed, run games from Docker containers, or want to script headless background services.</li>
+  <li><b>Choose Edge</b> if you want to run servers 24/7 on an OpenWrt router, Raspberry Pi, home NAS, or old low-power hardware without a monitor or desktop environment.</li>
+  <li><b>Choose Desktop/Core</b> if you have disc images in <b>CHD format</b>, or require <b>SMB2/SMB3 authenticated sharing</b> or <b>HTTP game streaming</b>.</li>
+</ul>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

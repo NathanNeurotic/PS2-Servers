@@ -1,0 +1,177 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Protocol Compatibility · PS2 Servers Docs</title>
+<meta name="description" content="Wire specification differences between Python Core and Go Edge, packet structures, and homebrew loader compatibility matrix.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html" class="active"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>Protocol Compatibility &amp; Wire Specs</h1>
+<p class="lead">In-depth technical breakdown of protocol implementations across Desktop/Core (Python) and Edge (Go), packet-level wire specifications, and homebrew client support matrix.</p>
+
+<div class="callout info"><div class="h">Specification Parity</div>
+PS2 Servers maintains 100% wire-protocol parity with canonical specifications: the <b>udpfsd</b> specification by pcm720, the <b>UDPBD</b> block driver specification, and the Microsoft SMBv1 / SMB2 / SMB3 network contracts.
+</div>
+
+<h2 id="client-matrix">1. Console Homebrew Compatibility Matrix</h2>
+<p>Loader support varies by project and version. Review this matrix to match your loader to the correct server mode:</p>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Loader / Application</th>
+      <th>SMBv1</th>
+      <th>SMB2 / SMB3</th>
+      <th>UDPFS</th>
+      <th>UDPBD</th>
+      <th>HTTP</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>RiptOPL</b></td>
+      <td><span class="icon icon-good"></span> Full Support</td>
+      <td><span class="icon icon-good"></span> Full Support</td>
+      <td><span class="icon icon-good"></span> Full Support</td>
+      <td><span class="icon icon-good"></span> Full Support</td>
+      <td><span class="icon icon-good"></span> Full Support</td>
+    </tr>
+    <tr>
+      <td><b>Official OPL (ps2homebrew)</b></td>
+      <td><span class="icon icon-good"></span> Full Support</td>
+      <td><span class="icon icon-bad"></span> Not in stock</td>
+      <td><span class="icon icon-bad"></span> Not in stock</td>
+      <td><span class="icon icon-bad"></span> Not in stock</td>
+      <td><span class="icon icon-bad"></span> Not in stock</td>
+    </tr>
+    <tr>
+      <td><b>Neutrino (Core)</b></td>
+      <td><span class="icon icon-good"></span> via SMB module</td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-good"></span> <b>Native Primary</b></td>
+      <td><span class="icon icon-good"></span> <b>Native Primary</b></td>
+      <td><span class="icon icon-bad"></span> No</td>
+    </tr>
+    <tr>
+      <td><b>NHDDL (Neutrino GUI)</b></td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-good"></span> <b>Native Primary</b></td>
+      <td><span class="icon icon-good"></span> <b>Native Primary</b></td>
+      <td><span class="icon icon-bad"></span> No</td>
+    </tr>
+    <tr>
+      <td><b>Open-PS2-Loader-HTTP (Docmine17)</b></td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-good"></span> <b>Native Primary</b></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="core-vs-edge">2. Core (Python) vs Edge (Go) Wire Differences</h2>
+<p>While both implementations produce compatible network flows, they differ in several low-level operational details:</p>
+
+<div class="cards">
+  <article class="card">
+    <h3>Socket Binding Semantics</h3>
+    <ul>
+      <li><b>Core (Python):</b> Passing <code>--bind IP</code> binds <i>only</i> the dynamically allocated data socket; the discovery listener continues to listen on <code>0.0.0.0</code> (all interfaces) to catch broadcasts.</li>
+      <li><b>Edge (Go):</b> Passing <code>--bind IP</code> binds <b>both</b> the discovery socket and the data socket to that explicit IP.</li>
+    </ul>
+  </article>
+
+  <article class="card">
+    <h3>CSO/ZSO Cache Architectures</h3>
+    <ul>
+      <li><b>Core (Python):</b> Relies on OS page cache and Python's memory view slices for sector buffering.</li>
+      <li><b>Edge (Go):</b> Implements an explicit, fixed-size ring cache for decompressed sector blocks, maintaining predictable sub-20MB memory ceilings on embedded routers.</li>
+    </ul>
+  </article>
+</div>
+
+<h2 id="udpfs-packet-format">3. UDPFS Packet Structure</h2>
+<p>UDPFS packets start with a fixed 16-byte header:</p>
+
+<pre><code>+----------------+----------------+----------------+----------------+
+| Magic (0xF5F6) | Command (16b)  | Sequence (32b) | Length (32b)   |
++----------------+----------------+----------------+----------------+
+| File Handle / Session ID (32b)  | Payload Data (0 - 4096 bytes)   |
++---------------------------------+---------------------------------+</code></pre>
+
+<p>Commands include <code>OPEN</code>, <code>READ</code>, <code>WRITE</code>, <code>CLOSE</code>, <code>READDIR</code>, and <code>STAT</code>. Standard mode limits payload frames to 4096 bytes, aligning cleanly with the PS2 IOP's network buffer allocations.</p>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

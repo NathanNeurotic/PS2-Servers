@@ -1,0 +1,151 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UDPBD Server · PS2 Servers Docs</title>
+<meta name="description" content="Configure UDPBD (UDP Block Device) disc image serving on PS2 Servers for raw sector streaming over local network.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html" class="active"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>UDPBD Server</h1>
+<p class="lead"><b>UDPBD</b> (UDP Block Device) exposes a single disc image as a virtual block device over the local network. Rather than translating filesystem calls, the console sends raw sector read and write commands directly over UDP port <b>48573</b>.</p>
+
+<div class="callout info"><div class="h">Block Device vs Filesystem Protocol</div>
+While <b>UDPFS</b> and <b>SMB</b> serve an entire directory containing multiple games, folders, art, and configurations, <b>UDPBD</b> assigns one raw disk image (ISO or IMG) per server process. The console interacts with the server exactly as if it were a physical optical disc or hard drive plugged directly into the system bus.
+</div>
+
+<h2 id="how-it-works">1. Protocol Overview</h2>
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Parameter</th>
+      <th>Value</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Default Port</b></td>
+      <td>UDP <b>48573</b> (<code>0xBDBD</code>)</td>
+      <td>Standard UDPBD broadcast discovery and data port.</td>
+    </tr>
+    <tr>
+      <td><b>Payload Target</b></td>
+      <td>Single Disc Image</td>
+      <td>Select an <code>.iso</code> or <code>.img</code> file.</td>
+    </tr>
+    <tr>
+      <td><b>Discovery Mechanism</b></td>
+      <td>Broadcast Probe</td>
+      <td>Client broadcasts to <code>255.255.255.255:48573</code>; server replies with capacity and sector size.</td>
+    </tr>
+    <tr>
+      <td><b>Write Support</b></td>
+      <td>Optional</td>
+      <td>Server can run read-only or allow sector modifications.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="setup-steps">2. Running UDPBD</h2>
+
+<div class="cards">
+  <article class="card">
+    <h3>Desktop Launcher</h3>
+    <p>1. Open the <b>UDPBD</b> card in PS2 Servers Desktop.<br>
+    2. Click <b>Browse</b> and choose your target <code>.iso</code> file.<br>
+    3. Click <b>Start</b>. The server immediately begins listening on UDP port 48573.</p>
+  </article>
+
+  <article class="card">
+    <h3>Core Terminal CLI</h3>
+    <pre><code>python ps2servers.py serve udpbd /srv/images/game.iso --read-only</code></pre>
+    <p>Add <code>--bind &lt;PC_IP&gt;</code> to pin the interface, or <code>--port &lt;PORT&gt;</code> if using a non-standard port.</p>
+  </article>
+
+  <article class="card">
+    <h3>Edge Native Server</h3>
+    <pre><code>ps2servers-edge udpbd --image /srv/images/game.iso --read-only</code></pre>
+    <p>Fast Go native implementation with bounded sector caching and minimal CPU overhead.</p>
+  </article>
+</div>
+
+<h2 id="console-setup">3. Console Client Configuration</h2>
+<p>To boot from a UDPBD server, your console loader must include a UDPBD driver:</p>
+<ul>
+  <li><b>Neutrino:</b> Supports UDPBD natively via its network boot driver.</li>
+  <li><b>RiptOPL:</b> Select <b>Network Boot</b> in Game Sources and ensure the UDPBD backend is selected.</li>
+  <li>Ensure your console IP settings belong to the same subnet as the host serving the UDPBD image.</li>
+</ul>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

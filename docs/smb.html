@@ -1,0 +1,166 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SMB Server (v1 / v2 / v3) · PS2 Servers Docs</title>
+<meta name="description" content="Configure SMBv1, SMB2, and SMB3 file sharing for Open PS2 Loader (OPL) and RiptOPL: ports, guest access, credentials, and Virtual Memory Cards (VMC).">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html" class="active"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>SMB Server (v1 / v2 / v3)</h1>
+<p class="lead">Server Message Block (SMB) remains the standard network sharing protocol for <b>Open PS2 Loader (OPL)</b> and <b>RiptOPL</b>. PS2 Servers provides user-space SMBv1, SMB2, and SMB3 server engines that eliminate the need to enable obsolete or insecure Windows OS features.</p>
+
+<div class="callout info"><div class="h">Dialect Rule: Choose What Your Loader Supports</div>
+An SMBv1-only loader cannot connect to an SMB2/3 server simply because both cards point to the same games folder. You must run the server dialect matching your loader's network driver.
+</div>
+
+<h2 id="smbv1">1. SMBv1 for Traditional OPL Clients</h2>
+<p>Standard OPL releases use SMBv1 (dialect <code>NT LM 0.12</code>). Modern operating systems (Windows 10/11, macOS, and current Linux distributions) have disabled SMBv1 by default due to security vulnerabilities in Microsoft's kernel SMB1 driver (such as EternalBlue).</p>
+
+<p><b>PS2 Servers solves this safely:</b> our SMBv1 engine runs entirely in unprivileged <b>user-space</b> on a non-standard port. It does not enable Windows' SMB 1.0 optional feature, does not touch kernel drivers, and leaves your standard Windows File Sharing untouched.</p>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Entry Point</th>
+      <th>Default TCP Port</th>
+      <th>Default Share Name</th>
+      <th>Default Credentials</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Desktop SMBv1 Card</b></td>
+      <td><b>1025</b></td>
+      <td><code>games</code></td>
+      <td>User: <code>guest</code> &middot; Pass: <i>(blank)</i></td>
+    </tr>
+    <tr>
+      <td><b>Core CLI (<code>serve smbv1</code>)</b></td>
+      <td><b>1111</b></td>
+      <td><code>games</code></td>
+      <td>User: <code>guest</code> &middot; Pass: <i>(blank)</i></td>
+    </tr>
+    <tr>
+      <td><b>Edge Go Server (<code>smb</code>)</b></td>
+      <td><b>1111</b></td>
+      <td><code>games</code></td>
+      <td>User: <code>guest</code> &middot; Pass: <i>(blank)</i></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout good"><div class="h">OPL Console Configuration for SMBv1</div>
+In your loader's <b>Network Settings</b>:
+<ul>
+  <li><b>Address type:</b> Set to <code>IP</code> (do not use NetBIOS name).</li>
+  <li><b>IP address:</b> Enter the PC LAN IP shown by the server (e.g. <code>192.168.1.100</code>).</li>
+  <li><b>Port:</b> Set to <b>1025</b> (Desktop) or <b>1111</b> (Core/Edge).</li>
+  <li><b>Share name:</b> Enter <code>games</code>.</li>
+  <li><b>User:</b> <code>guest</code> &middot; <b>Password:</b> <i>(leave empty)</i>.</li>
+</ul>
+</div>
+
+<h2 id="smb2-smb3">2. SMB2 and SMB3 Authenticated Sharing</h2>
+<p>For modern OPL forks (such as RiptOPL with SMB2 support enabled in Game Sources), PS2 Servers includes authenticated SMB2 (up to dialect 2.1) and SMB3 (up to dialect 3.0.2) server cards.</p>
+
+<div class="cards">
+  <article class="card">
+    <h3>SMB2/3 Parameters</h3>
+    <ul>
+      <li><b>Default Port:</b> TCP <b>1445</b> (distinct from standard 445).</li>
+      <li><b>Username:</b> Default <code>ps2</code> (configurable).</li>
+      <li><b>Password:</b> Configurable private password.</li>
+      <li><b>Open Share Mode:</b> Checking <b>No password (anyone on the network can read it)</b> removes password authentication while retaining SMB2/3 packet framing.</li>
+    </ul>
+  </article>
+</div>
+
+<div class="callout warn"><div class="h">Take Port 445 (Admin Option)</div>
+Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (admin)</b> toggle in Desktop attempts to temporarily stop the Windows Server service to free TCP 445. For ordinary PS2 gaming, this is unnecessary: configure your loader with port <b>1445</b> instead.
+</div>
+
+<h2 id="vmc-writes">3. Writes &amp; Virtual Memory Cards (VMC)</h2>
+<p>Both SMBv1 and SMB2/3 in PS2 Servers allow write access by default:</p>
+
+<ul>
+  <li><b>Virtual Memory Cards:</b> Loaders can create and update 8MB <code>.bin</code> files in the <code>VMC/</code> folder directly over the share.</li>
+  <li><b>Per-Game Configuration:</b> Settings saved in OPL are written back to <code>CFG/</code> automatically.</li>
+  <li><b>Read-Only Mode:</b> Ticking <b>Read-only</b> prevents any modifications to the games directory, safeguarding against accidental file tampering.</li>
+</ul>
+
+<div class="callout danger"><div class="h">LAN Security Reminder</div>
+Never forward SMB ports (1025, 1111, 1445, or 445) across your internet router. These servers are designed strictly for private Local Area Networks.
+</div>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

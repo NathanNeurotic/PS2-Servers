@@ -1,0 +1,194 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UDPFS Server · PS2 Servers Docs</title>
+<meta name="description" content="In-depth guide to UDPFS (User Datagram Protocol File System) on PS2 Servers: ports, binding, Auto/Standard/Modulo modes, and on-the-fly decompression.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="PS2 Servers Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nathanneurotic.github.io/PS2-Servers/assets/ps2servers-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    PS2 Servers <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/PS2-Servers" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search servers, protocols, Edge, CLI…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // SERVERS</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Protocols</h4>
+    <a href="udpfs.html" class="active"><span class="icon icon-netboot"></span>UDPFS Server</a>
+    <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
+    <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
+
+    <h4>Edge &amp; Headless</h4>
+    <a href="edge.html"><span class="icon icon-router"></span>Edge Overview &amp; Web UI</a>
+    <a href="edge-builds.html"><span class="icon icon-cpu"></span>Which Build Do I Need?</a>
+    <a href="edge-manual.html"><span class="icon icon-book"></span>Edge Operator Manual</a>
+    <a href="openwrt.html"><span class="icon icon-router"></span>OpenWrt Router Setup</a>
+    <a href="router-status.html"><span class="icon icon-settings"></span>Router &amp; Server Status</a>
+
+    <h4>Operations &amp; Guides</h4>
+    <a href="cli.html"><span class="icon icon-terminal"></span>Core CLI Reference</a>
+    <a href="compression.html"><span class="icon icon-zso"></span>Compressed Disc Formats</a>
+    <a href="protocol-compatibility.html"><span class="icon icon-fork-gaps"></span>Protocol Compatibility</a>
+    <a href="udpfs-diagnostics.html"><span class="icon icon-troubleshoot"></span>UDPFS Diagnostics</a>
+    <a href="antivirus.html"><span class="icon icon-shield"></span>Antivirus &amp; Trust</a>
+    <a href="nbd-ps2client.html"><span class="icon icon-nbd"></span>Planned NBD &amp; ps2client</a>
+
+    <h4>Reference</h4>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+<h1>UDPFS Server</h1>
+<p class="lead"><b>UDPFS</b> (User Datagram Protocol File System) is the modern, lightweight network streaming protocol built specifically for PlayStation 2 homebrew. It eliminates SMB overhead, supports on-the-fly decompression of disc images, and powers network booting in <b>Neutrino</b>, <b>NHDDL</b>, and <b>RiptOPL</b>.</p>
+
+<div class="callout info"><div class="h">Why UDPFS?</div>
+Unlike SMB, which requires TCP state machines, SMB dialect negotiation, session handshakes, and strict authentication trees, UDPFS operates over raw UDP datagrams. The protocol is connection-oriented at the application layer, dramatically reducing CPU and memory overhead on the PS2's Input/Output Processor (IOP).
+</div>
+
+<h2 id="ports-architecture">1. Ports &amp; Network Architecture</h2>
+<p>By default, UDPFS operates in a <b>two-port model</b>:</p>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Socket</th>
+      <th>Port</th>
+      <th>Purpose</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Discovery Port</b></td>
+      <td>UDP <b>62966</b> (<code>0xF5F6</code>)</td>
+      <td>Listens for broadcast discovery probes and initial connection requests from the PS2 console.</td>
+    </tr>
+    <tr>
+      <td><b>Data Port</b></td>
+      <td>Dynamic (or Pinned e.g. <b>62967</b>)</td>
+      <td>Dedicated high-speed socket created for the session to handle file reads, directory listings, and block operations.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout warn"><div class="h">Firewall Configuration for Two-Port Operation</div>
+If you run a firewall with strict port rules, set an explicit <b>Data port</b> (such as <code>62967</code>) on the UDPFS card or use CLI flag <code>--data-port 62967</code>, and allow both UDP 62966 and 62967. Alternatively, CLI flag <code>--single-port</code> forces discovery and data over the single port 62966.
+</div>
+
+<h2 id="bind-issue">2. Resolving "Games List But Fail to Launch"</h2>
+<p>The single most frequent support question is: <i>"My games show up in the menu, but when I click launch, the screen goes black and nothing happens."</i></p>
+
+<p>This is almost always caused by a <b>dual-interface routing issue</b> on the host PC. When a computer has active Wi-Fi and wired Ethernet simultaneously, the operating system's routing table may send UDP data replies out of the Wi-Fi adapter instead of the Ethernet cable connected to the PS2.</p>
+
+<div class="steps">
+  <div class="step">
+    <h3>Identify Your PS2-Facing Network Interface</h3>
+    <p>Look at the <b>LAN IP</b> selector at the top of the PS2 Servers window and ensure you select the adapter physically cabled to your PS2 (for example <code>192.168.1.100</code>).</p>
+  </div>
+  <div class="step">
+    <h3>Pin the UDPFS Bind Address</h3>
+    <p>On the UDPFS server card, locate <b>Bind address (PC)</b> and click the button <b>Use LAN IP</b> (or type that IP directly). <i>Do NOT type 0.0.0.0 or the PS2's IP here; enter the PC's own interface IP.</i></p>
+  </div>
+  <div class="step">
+    <h3>Restart the Server</h3>
+    <p>Click <b>Stop</b> on the UDPFS card, then click <b>Start</b>. Relaunch your game from the console menu.</p>
+  </div>
+</div>
+
+<p>Equivalent command in Core CLI:</p>
+<pre><code>python ps2servers.py serve udpfs --root-dir /srv/ps2 --bind 192.168.1.100</code></pre>
+
+<h2 id="protocol-modes">3. Protocol Modes: Auto, Standard, and Modulo</h2>
+<p>Over the years, different homebrew loaders introduced divergent implementations of the UDPFS protocol:</p>
+
+<ul>
+  <li><b>Standard Mode (upstream udpfsd):</b> Uses 4KB data blocks, separate discovery and data sockets, and sequence-based acknowledgment. Used by modern Neutrino and RiptOPL.</li>
+  <li><b>Modulo Mode (legacy NHDDL):</b> Employs a single socket with modulo-sequence packet pacing and smaller block buffers.</li>
+  <li><b>Auto Mode (Default in PS2 Servers):</b> PS2 Servers dynamically inspects the initial connection probe from the client and automatically adapts its sequencing and protocol mode on a per-session basis.</li>
+</ul>
+
+<div class="callout good"><div class="h">Leave Protocol Mode on Auto</div>
+Keep <b>Protocol mode: Auto</b> selected. Do not check <b>Enforce Modulo mode</b> unless you are explicitly testing an older NHDDL build that fails during the initial handshake. Forcing Modulo mode is never the solution for a network interface binding issue.
+</div>
+
+<h2 id="decompression">4. On-The-Fly Disc Decompression</h2>
+<p>PS2 Servers features transparent real-time disc decompression. You can store your game library in compressed formats and stream them directly as raw DVD/CD images without decompressing them to disk beforehand.</p>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Format</th>
+      <th>Supported Extensions</th>
+      <th>Decompression Behavior</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Raw ISO</b></td>
+      <td><code>.iso</code></td>
+      <td>Streamed directly with zero CPU overhead.</td>
+    </tr>
+    <tr>
+      <td><b>CSO / CISO</b></td>
+      <td><code>.cso</code>, <code>.ciso</code></td>
+      <td>Decompressed on the fly by the server with a bounded sector cache.</td>
+    </tr>
+    <tr>
+      <td><b>ZSO / ZISO</b></td>
+      <td><code>.zso</code>, <code>.ziso</code></td>
+      <td>Decompressed on the fly by the server, or passed directly if the console loader implements LZ4 decoding natively.</td>
+    </tr>
+    <tr>
+      <td><b>CHD</b></td>
+      <td><code>.chd</code></td>
+      <td>Decompressed on the fly using native <code>libchdr</code> in Desktop and Core editions.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="timeouts">5. Idle Timeouts &amp; Concurrency</h2>
+<p>PS2 Servers maintains stateful peer tracking for each active console session:</p>
+<ul>
+  <li><b>Idle Timeout:</b> Defaults to <b>3600 seconds (1 hour)</b>. If a console is powered off or paused for longer than this duration, open file descriptors are cleanly closed. Configurable from 60 to 86400 seconds via CLI flag <code>--peer-timeout</code>.</li>
+  <li><b>Multiple Consoles:</b> Both Python (Desktop/Core) and Go (Edge) implementations support multiple concurrent PS2 consoles playing different games simultaneously from the same shared folder.</li>
+</ul>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>PS2 Servers Documentation</b> &mdash; Desktop GUI, Core CLI and Edge headless network servers for PlayStation 2 homebrew.
+  In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
+  See <a href="credits.html">Credits &amp; Sources</a>.</p>
+  <p class="prov-inline">Sister documentation projects:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

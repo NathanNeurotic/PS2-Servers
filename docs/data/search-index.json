@@ -1,0 +1,980 @@
+[
+  {
+    "title": "PS2 Servers Documentation",
+    "cat": "overview",
+    "text": "PS2 Servers Documentation DESKTOP GUI CORE HEADLESS EDGE GO SERVER UDPFS · SMBV1/2/3 · UDPBD · HTTP OPENWRT & ROUTERS AUTO MODULO & STANDARD ON-THE-FLY DECOMPRESSION Launch your first game Explore server modes About PS2 Servers PS2 Servers provides dedicated, lightweight game and file servers for network-capable PlayStation 2 homebrew (including Open PS2 Loader (OPL) , RiptOPL , Neutrino , and NHDDL ). It is delivered in three deployment editions: Desktop provides a simple click-and-go graphical launcher; Core runs the identical Python servers headlessly from any terminal, script, or container; and Edge is a high-speed, statically linked Go implementation designed for home routers (OpenWrt), Raspberry Pi, NAS appliances, and minimal Linux setups. For the PS2 console loader side, see the companion RiptOPL Documentation . Sister Project: RiptOPL & POPStarter Documentation Looking for console-side loader guides, theme configuration, controller pairing, Neutrino launch arguments, or POPSTARTER VCD setups? Visit the comprehensive RiptOPL Docs and the POPStarter Docs for complete client-side walkthroughs. Six Server Modes Choose the protocol supported by your PS2 loader. A server cannot add a protocol to a client that does not implement it. UDPFS Port: UDP 62966 ( 0xF5F6 ) + dynamic or pinned data port High-speed modern file and disc-image streaming over UDP. Features automatic Standard/Modulo mode negotiation per client, multi-client concurrency, and optional on-the-fly decompression of CHD, CSO, and ZSO images. Works seamlessly with NHDDL, Neutrino, and RiptOPL. Explore UDPFS setup → SMBv1 Port: TCP 1025 (Desktop) · TCP 1111 (Core / Edge) Custom user-space guest file sharing for OPL and legacy SMBv1 clients. Implements the SMBv1 dialect directly in user space without requiring you to enable insecure Windows SMB1 features or expose port 445. Share name defaults to games . Explore SMBv1 guide → SMB2 / SMB3 Port: TCP 1445 Authenticated modern SMB file sharing for newer loaders supporting SMB 2.0.2 through SMB 3.0.2. Run alongside or separately from SMBv1. Provides password protection, writable shares for Virtual Memory Cards (VMC), and optional port 445 admin capture. Explore SMB2/3 configuration → UDPBD Port: UDP 48573 ( 0xBDBD ) Serves one disk image as a raw UDP block device. Discovered automatically via broadcast packets. Designed for loaders with built-in UDPBD block drivers, providing low overhead and direct sector access. Explore UDPBD mode → HTTP Game Str",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — Six Server Modes",
+    "cat": "overview",
+    "text": "Six Server Modes. Choose the protocol supported by your PS2 loader. A server cannot add a protocol to a client that does not implement it.",
+    "url": "index.html#servers"
+  },
+  {
+    "title": "PS2 Servers Documentation — UDPFS",
+    "cat": "overview",
+    "text": "UDPFS. Port: UDP 62966 ( 0xF5F6 ) + dynamic or pinned data port High-speed modern file and disc-image streaming over UDP. Features automatic Standard/Modulo mode negotiation per client, multi-client concurrency, and optional on-the-fly decompression of CHD, CSO, and ZSO images. Works seamlessly with NHDDL, Neutrino, and RiptOPL. Explore UDPFS setup →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — SMBv1",
+    "cat": "overview",
+    "text": "SMBv1. Port: TCP 1025 (Desktop) · TCP 1111 (Core / Edge) Custom user-space guest file sharing for OPL and legacy SMBv1 clients. Implements the SMBv1 dialect directly in user space without requiring you to enable insecure Windows SMB1 features or expose port 445. Share name defaults to games . Explore SMBv1 guide →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — SMB2 / SMB3",
+    "cat": "overview",
+    "text": "SMB2 / SMB3. Port: TCP 1445 Authenticated modern SMB file sharing for newer loaders supporting SMB 2.0.2 through SMB 3.0.2. Run alongside or separately from SMBv1. Provides password protection, writable shares for Virtual Memory Cards (VMC), and optional port 445 admin capture. Explore SMB2/3 configuration →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — UDPBD",
+    "cat": "overview",
+    "text": "UDPBD. Port: UDP 48573 ( 0xBDBD ) Serves one disk image as a raw UDP block device. Discovered automatically via broadcast packets. Designed for loaders with built-in UDPBD block drivers, providing low overhead and direct sector access. Explore UDPBD mode →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — HTTP Game Streaming",
+    "cat": "overview",
+    "text": "HTTP Game Streaming. Port: TCP 1100 (explicit) Experimental game streaming for compatible OPL HTTP loaders (Docmine17 and RiptOPL). Automatically generates games.csv and serves disc images via HTTP Range requests. Supports server-side CHD/CSO decoding and raw ZSO streaming. Explore HTTP streaming →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — Edge & Web UI",
+    "cat": "overview",
+    "text": "Edge & Web UI. Port: UDP 62966 / TCP 1111 / TCP 8082 (Web UI) High-performance native Go binary compiled for OpenWrt routers, Raspberry Pi, ARM NAS, and minimal Linux appliances. Includes an embedded responsive Web GUI for LAN monitoring and service management with sub-32MB memory footprint. Explore Edge & Web UI →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — Three Deployment Shapes",
+    "cat": "overview",
+    "text": "Three Deployment Shapes. Whether you want a simple desktop window with one-click toggles, a scriptable terminal command for automation, or a lightweight daemon on your home router, PS2 Servers has an edition built for your workflow.",
+    "url": "index.html#editions"
+  },
+  {
+    "title": "PS2 Servers Documentation — PS2 Servers Desktop",
+    "cat": "overview",
+    "text": "PS2 Servers Desktop. Target: Windows, macOS, Linux workstations The full graphical application featuring six server cards, integrated Windows Firewall management, live LAN IP selector, automated dependency checks, and persistent configuration saving. Runs self-contained with no Python installation required. Desktop documentation →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — PS2 Servers Core",
+    "cat": "overview",
+    "text": "PS2 Servers Core. Target: Terminal users, servers, Docker containers, systemd Executes the identical Python servers without opening a GUI window. Perfect for headless PC servers, background cron jobs, and CI/CD testing. Accessed via python ps2servers.py serve <mode> or the packaged executable. CLI command reference →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — PS2 Servers Edge",
+    "cat": "overview",
+    "text": "PS2 Servers Edge. Target: OpenWrt routers, Raspberry Pi, NAS, embedded SBCs Statically linked Go binaries tailored for embedded hardware and routers. Consumes minimal memory, runs without Python, and offers an optional password-protected Web management dashboard. Available for MIPS, ARM, x86, and RISC-V. Edge architecture guide →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — What PS2 Servers Solves",
+    "cat": "overview",
+    "text": "What PS2 Servers Solves. No Windows SMB1 security risks — serves SMBv1 via a standalone user-space server on custom ports (1025/1111). Windows File Sharing and SMB1 features remain completely disabled. Automatic Modulo & Standard UDPFS — dynamically detects whether your loader uses the standard or Modulo UDPFS dialect and responds appropriately, eliminating connection deadlocks. On-the-fly decompression — transparently streams compressed CHD, CSO, and ZSO images to the PS2 as standard disc images, saving hundreds of gigabytes of PC storage. Router & NAS native deployment — run your server 24/7 on an OpenWrt router or Raspberry Pi directly beside your console with zero PC required. Comprehensive diagnostic observability — Core and Edge provide structured handoff logs, ARP status probing, and out-of-sequence packet diagnostics to pinpoint network stalls instantly.",
+    "url": "index.html#key-features"
+  },
+  {
+    "title": "PS2 Servers Documentation — Next Steps",
+    "cat": "overview",
+    "text": "Next Steps. ",
+    "url": "index.html#quick-links"
+  },
+  {
+    "title": "PS2 Servers Documentation — Getting Started Guide",
+    "cat": "overview",
+    "text": "Getting Started Guide. Connect your PS2 to your PC or network, configure static IPs, and launch your first game over Ethernet in under 10 minutes.",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — Downloads & Packages",
+    "cat": "overview",
+    "text": "Downloads & Packages. Find the right package for your OS (Windows portable zip, Linux AppImage/tar.gz, macOS arm64/x64, Edge architectures).",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — UDPFS Diagnostics",
+    "cat": "overview",
+    "text": "UDPFS Diagnostics. Games list but fail to launch? Check bind addresses, interface selection, and the 45-second inactivity timeout guide.",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — Antivirus Transparency",
+    "cat": "overview",
+    "text": "Antivirus Transparency. Learn why unsigned network executables get flagged by heuristic scanners and how to verify checksums and attestations.",
+    "url": "index.html"
+  },
+  {
+    "title": "Getting Started",
+    "cat": "start",
+    "text": "Getting Started From zero to streaming your first game over Ethernet in under ten minutes. Follow this guide to prepare your network, organize your disc images, run the server, and connect from your console. Console Loader Prerequisite You need a PlayStation 2 with an Ethernet network interface (a Fat console with an original or compatible Network Adapter, or any Slim model) and a homebrew loader such as RiptOPL , Open PS2 Loader (OPL) , or Neutrino / NHDDL booted via Free McBoot (FMCB), Free HD Boot (FHDB), or Modchip. 1. Connect Your PS2 to the Network Both your server host (PC, router, Raspberry Pi, or NAS) and your PlayStation 2 must share a physical or bridged local network. A wired Ethernet connection is strongly advised; Wi-Fi can cause stuttering during FMV playback and disc reads. Topology A: Local Router or Switch (Recommended) Plug both your host computer and your PS2 into the same router or Ethernet switch using standard Cat5e or Cat6 cables. Your router handles IP assignment, or you can assign static addresses in the same subnet. PC LAN IP: e.g. 192.168.1.100 PS2 IP: e.g. 192.168.1.150 Subnet Mask: 255.255.255.0 Gateway: 192.168.1.1 Topology B: Direct Ethernet Cable (PC to PS2) Connect an Ethernet cable directly between the PC's network jack and the PS2. Modern PC network interfaces support Auto-MDIX (automatic crossover), so a standard patch cable works fine. Assign your PC's Ethernet adapter a manual static IP: 192.168.0.1 (Subnet: 255.255.255.0 ). Assign the PS2 a static IP in the same subnet: 192.168.0.2 . Leave Gateway blank or set to 192.168.0.1 . 2. Set Up Your Game Directory Create a dedicated folder on your storage drive (for example D:\\PS2Games on Windows or /srv/ps2 on Linux). Organize it with the standard OPL folder hierarchy: PS2Games/ ├── CD/ ← CD-based PS2 games (<700 MB ISO images) ├── DVD/ ← DVD5 and DVD9 PS2 games (>700 MB ISO images) ├── ART/ ← Cover art, backgrounds, spines, discs (optional) ├── CFG/ ← Per-game configuration files (optional) ├── VMC/ ← 8MB Virtual Memory Card files (optional) └── CHT/ ← Cheats files (optional) Folder Case Sensitivity & Disc Naming Ensure folder names are in UPPERCASE ( DVD , CD , ART ). Many loaders (and Linux/Edge servers) are case-sensitive. For best compatibility, name your games using the standard OPL startup identifier convention: DVD/SLUS_201.74.Rumble Racing.iso or CD/SCUS_971.24.Game.iso . 3. Start PS2 Servers  Download and Extract Download the latest release package from the Releas",
+    "url": "getting-started.html"
+  },
+  {
+    "title": "Getting Started — 1. Connect Your PS2 to the Network",
+    "cat": "start",
+    "text": "1. Connect Your PS2 to the Network. Both your server host (PC, router, Raspberry Pi, or NAS) and your PlayStation 2 must share a physical or bridged local network. A wired Ethernet connection is strongly advised; Wi-Fi can cause stuttering during FMV playback and disc reads.",
+    "url": "getting-started.html#network-topology"
+  },
+  {
+    "title": "Getting Started — Topology A: Local Router or Switch (Recommended)",
+    "cat": "start",
+    "text": "Topology A: Local Router or Switch (Recommended). Plug both your host computer and your PS2 into the same router or Ethernet switch using standard Cat5e or Cat6 cables. Your router handles IP assignment, or you can assign static addresses in the same subnet. PC LAN IP: e.g. 192.168.1.100 PS2 IP: e.g. 192.168.1.150 Subnet Mask: 255.255.255.0 Gateway: 192.168.1.1",
+    "url": "getting-started.html"
+  },
+  {
+    "title": "Getting Started — Topology B: Direct Ethernet Cable (PC to PS2)",
+    "cat": "start",
+    "text": "Topology B: Direct Ethernet Cable (PC to PS2). Connect an Ethernet cable directly between the PC's network jack and the PS2. Modern PC network interfaces support Auto-MDIX (automatic crossover), so a standard patch cable works fine. Assign your PC's Ethernet adapter a manual static IP: 192.168.0.1 (Subnet: 255.255.255.0 ). Assign the PS2 a static IP in the same subnet: 192.168.0.2 . Leave Gateway blank or set to 192.168.0.1 .",
+    "url": "getting-started.html"
+  },
+  {
+    "title": "Getting Started — 2. Set Up Your Game Directory",
+    "cat": "start",
+    "text": "2. Set Up Your Game Directory. Create a dedicated folder on your storage drive (for example D:\\PS2Games on Windows or /srv/ps2 on Linux). Organize it with the standard OPL folder hierarchy: PS2Games/ ├── CD/ ← CD-based PS2 games (<700 MB ISO images) ├── DVD/ ← DVD5 and DVD9 PS2 games (>700 MB ISO images) ├── ART/ ← Cover art, backgrounds, spines, discs (optional) ├── CFG/ ← Per-game configuration files (optional) ├── VMC/ ← 8MB Virtual Memory Card files (optional) └── CHT/ ← Cheats files (optional) Folder Case Sensitivity & Disc Naming Ensure folder names are in UPPERCASE ( DVD , CD , ART ). Many loaders (and Linux/Edge servers) are case-sensitive. For best compatibility, name your games using the standard OPL startup identifier convention: DVD/SLUS_201.74.Rumble Racing.iso or CD/SCUS_971.24.Game.iso .",
+    "url": "getting-started.html#folder-structure"
+  },
+  {
+    "title": "Getting Started — 3. Start PS2 Servers",
+    "cat": "start",
+    "text": "3. Start PS2 Servers. ",
+    "url": "getting-started.html#launching-server"
+  },
+  {
+    "title": "Getting Started — Download and Extract",
+    "cat": "start",
+    "text": "Download and Extract. Download the latest release package from the Releases Page . Extract the portable ZIP to a folder on your host machine. Launch PS2Servers.exe on Windows, or invoke python ps2servers.py from source.",
+    "url": "getting-started.html"
+  },
+  {
+    "title": "Getting Started — Choose Your LAN Interface",
+    "cat": "start",
+    "text": "Choose Your LAN Interface. In the top bar of PS2 Servers Desktop, ensure the LAN IP dropdown selects the network adapter wired to your PS2. The launcher automatically displays the IP address and helpful setup hints for each card.",
+    "url": "getting-started.html"
+  },
+  {
+    "title": "Getting Started — Select Games Folder & Start",
+    "cat": "start",
+    "text": "Select Games Folder & Start. On the server card matching your loader (e.g. SMBv1 for standard OPL, or UDPFS for Neutrino/RiptOPL), click Browse and select the parent folder holding your DVD/ and CD/ subdirectories. Click Start . Firewall Notice When starting a server for the first time, Windows Defender Firewall may prompt to allow network traffic. Check Private networks and click Allow access . PS2 Servers also provides an automatic firewall rule creator in the application settings.",
+    "url": "getting-started.html"
+  },
+  {
+    "title": "Getting Started — 4. Configure Network in Your Loader",
+    "cat": "start",
+    "text": "4. Configure Network in Your Loader. Boot your PlayStation 2, launch your loader, and navigate to Network Settings . Configure the connection to match the values displayed on your running server card: Setting SMBv1 Mode (Standard OPL) UDPFS Mode (Neutrino / RiptOPL) HTTP Mode Protocol / Device SMB (ETH) UDPFS (Network Boot) HTTP Address Type IP IP (or Broadcast Discovery) IP PC IP Address Host PC LAN IP (e.g. 192.168.1.100 ) Host PC LAN IP (e.g. 192.168.1.100 ) Host PC LAN IP Port 1025 (Desktop) or 1111 (Core/Edge) 62966 (Auto data port) 1100 (Explicit match required) Share Name games N/A (folder tree served directly) Blank or anything User / Password User: guest · Password: (empty) None None",
+    "url": "getting-started.html#console-setup"
+  },
+  {
+    "title": "Getting Started — 5. Launch Your First Game",
+    "cat": "start",
+    "text": "5. Launch Your First Game. Save your loader's network configuration to your Memory Card ( mc0: ). Return to the main menu and press the button to refresh the game list (in OPL/RiptOPL, scroll to the ETH / Netboot tab or press Select / Circle ). Your game list should populate with titles from your DVD/ and CD/ folders. Highlight your game, press X (Cross) or Start , and enjoy!",
+    "url": "getting-started.html#first-game"
+  },
+  {
+    "title": "Getting Started — Common Questions & Troubleshooting",
+    "cat": "start",
+    "text": "Common Questions & Troubleshooting. The game list is empty after connecting. What should I check? Verify that your games folder has the uppercase DVD and CD subfolders and that file extensions are .iso , .zso , or .cso . If using SMBv1, ensure the share name in OPL is exactly games , address type is set to IP (not NetBIOS), and the port matches the displayed card port (1025 or 1111). UDPFS games list correctly, but freeze on a black screen when launching. This is commonly caused by multiple network adapters on the host PC (e.g. active Wi-Fi and Ethernet simultaneously). When the PS2 sends data requests, the OS may attempt to respond from the wrong IP. See our detailed UDPFS Diagnostics Guide for how to pin the bind address directly to your PS2-facing interface. Does PS2 Servers support Virtual Memory Cards (VMC)? Yes. Both SMBv1 and SMB2/3 in PS2 Servers are writable by default. If your loader supports creating and mounting VMC images over the network (such as stock OPL or RiptOPL on SMB), images in VMC/ can be written directly over the network.",
+    "url": "getting-started.html#troubleshooting-faq"
+  },
+  {
+    "title": "Editions & Architecture",
+    "cat": "start",
+    "text": "PS2 Servers Editions & Architecture PS2 Servers is a unified server ecosystem delivered in three distinct deployment shapes: Desktop , Core , and Edge . Each is engineered for specific operational environments, from standard gaming desktops to resource-constrained embedded routers. One Architecture, Three Shapes All three editions share identical protocol wire-specifications and compatibility goals. A PS2 loader running OPL, RiptOPL, or Neutrino interacts seamlessly whether connected to Desktop on Windows, Core on Ubuntu, or Edge on an OpenWrt router. 1. PS2 Servers Desktop Desktop is the graphical workstation package designed for Windows, macOS, and Linux desktop environments. Built with Python and Tkinter, it provides an intuitive multi-card interface for immediate operation. Key Desktop Features 6 Dedicated Server Cards: SMBv1, UDPFS, UDPBD, SMB2, SMB3, and HTTP game streaming. Integrated Network Selector: Detects active network interfaces and automatically populates IP setup hints. Firewall Helper: Automatic creation and cleanup of Windows Defender Firewall rules for each server port. Zero Setup Runtime: Distributed as standalone portable executables with bundled Python; no pre-existing runtime required. Compression Engine: Full support for on-the-fly decompression of CHD, CSO, and ZSO disc images when optional native libraries (such as libchdr ) are detected. 2. PS2 Servers Core Core exposes the full Python server implementations from the terminal without launching a graphical window. It is the premier choice for headless servers, developer workflows, remote SSH sessions, container environments, and CI/CD automated testing. # Serve UDPFS games from a directory python ps2servers.py serve udpfs --root-dir /srv/ps2 --read-only # Serve SMBv1 guest share python ps2servers.py serve smbv1 --share games=/srv/ps2 --port 1111 # Serve raw disk image over UDPBD python ps2servers.py serve udpbd /srv/images/game.iso --read-only # Serve HTTP games for OPL-HTTP python ps2servers.py serve http --root-dir /srv/ps2 --port 1100 Packaged standalone executables also support identical subcommands: ps2servers.exe serve udpfs ... . Core includes extensive diagnostic flags like --verbose , structured JSON logging, and connection inactivity telemetry. 3. PS2 Servers Edge Edge is a high-speed, native Go rewrite engineered specifically for headless and embedded environments where Python is either unavailable, too heavy, or slow to start. Edge compiles to a compact, statically lin",
+    "url": "editions.html"
+  },
+  {
+    "title": "Editions & Architecture — PS2 Servers Editions & Architecture",
+    "cat": "start",
+    "text": "PS2 Servers Editions & Architecture. PS2 Servers is a unified server ecosystem delivered in three distinct deployment shapes: Desktop , Core , and Edge . Each is engineered for specific operational environments, from standard gaming desktops to resource-constrained embedded routers. One Architecture, Three Shapes All three editions share identical protocol wire-specifications and compatibility goals. A PS2 loader running OPL, RiptOPL, or Neutrino interacts seamlessly whether connected to Desktop on Windows, Core on Ubuntu, or Edge on an OpenWrt router.",
+    "url": "editions.html"
+  },
+  {
+    "title": "Editions & Architecture — 1. PS2 Servers Desktop",
+    "cat": "start",
+    "text": "1. PS2 Servers Desktop. Desktop is the graphical workstation package designed for Windows, macOS, and Linux desktop environments. Built with Python and Tkinter, it provides an intuitive multi-card interface for immediate operation.",
+    "url": "editions.html#desktop"
+  },
+  {
+    "title": "Editions & Architecture — Key Desktop Features",
+    "cat": "start",
+    "text": "Key Desktop Features. 6 Dedicated Server Cards: SMBv1, UDPFS, UDPBD, SMB2, SMB3, and HTTP game streaming. Integrated Network Selector: Detects active network interfaces and automatically populates IP setup hints. Firewall Helper: Automatic creation and cleanup of Windows Defender Firewall rules for each server port. Zero Setup Runtime: Distributed as standalone portable executables with bundled Python; no pre-existing runtime required. Compression Engine: Full support for on-the-fly decompression of CHD, CSO, and ZSO disc images when optional native libraries (such as libchdr ) are detected.",
+    "url": "editions.html"
+  },
+  {
+    "title": "Editions & Architecture — 2. PS2 Servers Core",
+    "cat": "start",
+    "text": "2. PS2 Servers Core. Core exposes the full Python server implementations from the terminal without launching a graphical window. It is the premier choice for headless servers, developer workflows, remote SSH sessions, container environments, and CI/CD automated testing. # Serve UDPFS games from a directory python ps2servers.py serve udpfs --root-dir /srv/ps2 --read-only # Serve SMBv1 guest share python ps2servers.py serve smbv1 --share games=/srv/ps2 --port 1111 # Serve raw disk image over UDPBD python ps2servers.py serve udpbd /srv/images/game.iso --read-only # Serve HTTP games for OPL-HTTP python ps2servers.py serve http --root-dir /srv/ps2 --port 1100 Packaged standalone executables also support identical subcommands: ps2servers.exe serve udpfs ... . Core includes extensive diagnostic flags like --verbose , structured JSON logging, and connection inactivity telemetry.",
+    "url": "editions.html#core"
+  },
+  {
+    "title": "Editions & Architecture — 3. PS2 Servers Edge",
+    "cat": "start",
+    "text": "3. PS2 Servers Edge. Edge is a high-speed, native Go rewrite engineered specifically for headless and embedded environments where Python is either unavailable, too heavy, or slow to start. Edge compiles to a compact, statically linked binary with zero shared-library dependencies.",
+    "url": "editions.html#edge"
+  },
+  {
+    "title": "Editions & Architecture — Target Environments for Edge",
+    "cat": "start",
+    "text": "Target Environments for Edge. Home Routers & OpenWrt: Run directly on MIPS, ARM, or x86 router hardware beside your console. Single Board Computers: Raspberry Pi (Pi 1/2/3/4/5, Zero, Zero 2W), Orange Pi, Rockchip boards. NAS Appliances: Synology, QNAP, TrueNAS, unRAID, and Asustor storage servers. Minimal Footprint: Consumes under 20 MB of RAM under full gigabit streaming load; suitable for 32MB / 64MB embedded devices. Embedded Web UI: Includes a built-in browser management dashboard ( webui ) for monitoring throughput, clients, and service states.",
+    "url": "editions.html"
+  },
+  {
+    "title": "Editions & Architecture — Feature & Edition Comparison Matrix",
+    "cat": "start",
+    "text": "Feature & Edition Comparison Matrix. Feature Desktop (GUI) Core (CLI) Edge (Go Native) Language / Runtime Python 3.12 (Bundled) Python 3.12 (CLI / Bundled) Go 1.22+ (Static Native Binary) User Interface Desktop Tkinter GUI Terminal / CLI Flags CLI + Embedded Web UI Dashboard Typical RAM Usage 60 – 120 MB 40 – 80 MB 8 – 25 MB (Sub-32MB Capable) UDPFS Protocol Yes (Auto Modulo/Standard) Yes (Auto Modulo/Standard) Yes (High-Throughput Native) SMBv1 Sharing Yes (Port 1025) Yes (Port 1111) Yes (Port 1111) SMB2 / SMB3 Sharing Yes (Port 1445) Yes (Port 1445) No (SMBv1 Only) UDPBD Block Device Yes (Port 48573) Yes (Port 48573) Yes (Port 48573) HTTP Game Streaming Yes (Port 1100) Yes (Port 1100) No (Web UI is Management Only) ISO / CSO / ZSO Support Yes Yes Yes (CSO/ZSO Decompressed Cache) CHD Format Support Yes (via libchdr ) Yes (via libchdr ) No (Excluded from static builds) OpenWrt / Router Packages No No Yes (Official .ipk packages) Docker & systemd Integration No Yes Yes (Minimal scratch image)",
+    "url": "editions.html#matrix"
+  },
+  {
+    "title": "Editions & Architecture — Which Edition Should You Choose?",
+    "cat": "start",
+    "text": "Which Edition Should You Choose?. Choose Desktop if you are playing on Windows, macOS, or a Linux workstation and want a simple visual launcher with start/stop buttons and automatic configuration saving. Choose Core if you have an existing Linux server with Python installed, run games from Docker containers, or want to script headless background services. Choose Edge if you want to run servers 24/7 on an OpenWrt router, Raspberry Pi, home NAS, or old low-power hardware without a monitor or desktop environment. Choose Desktop/Core if you have disc images in CHD format , or require SMB2/SMB3 authenticated sharing or HTTP game streaming .",
+    "url": "editions.html#picker"
+  },
+  {
+    "title": "Downloads & Releases",
+    "cat": "start",
+    "text": "Downloads & Releases Official release binaries for Windows, Linux, macOS, and embedded architectures. PS2 Servers binaries are compiled directly from source in automated GitHub Actions workflows with cryptographic attestations. Pre-Releases vs Tagged Releases For active development and the latest compatibility improvements (such as UDPFS handoff resilience and Edge Web UI updates), download the newest pre-release on GitHub. A tagged release may represent an earlier milestone. Always inspect the assets table of the release for the exact packages built. Open GitHub Releases Page ↗ Edge Router Build Picker Desktop & Workstation Packages Desktop packages include the Tkinter graphical launcher, the underlying Core CLI, and all server modules. Portable builds keep all libraries extracted in a folder and avoid single-file decompression overhead. Platform Recommended Package Alternative / Legacy Description Windows x64 (64-bit) PS2Servers-windows-x64-portable.zip PS2Servers-windows-x64.zip Recommended for modern Windows 10/11 PCs. Extract anywhere and launch PS2Servers.exe . Windows x86 (32-bit) PS2Servers-windows-x86-portable.zip PS2Servers-windows-x86.zip For 32-bit legacy Windows installations, older netbooks, and thin clients. Linux x86_64 (64-bit) PS2Servers-linux-x64-portable.tar.gz PS2Servers-x86_64.AppImage AppImage offers full desktop menu integration; portable archive works when /tmp has noexec mount flags. macOS Apple Silicon PS2Servers-macos-arm64.zip — Native ARM64 build optimized for Apple M1, M2, M3, and M4 Macs. macOS Intel x64 PS2Servers-macos-x64.zip — Universal binary for Intel-based Macs. Edge Headless & Router Binaries Edge binaries are compact, standalone Go executables compiled for headless hardware, single-board computers, and network routers. They require zero Python runtime. For device family selection, refer to the Edge Build Picker . Target Architecture Binary Asset Name Target Hardware Examples x86_64 (amd64) ps2servers-edge-linux-amd64 Standard PC, Intel/AMD NAS (Synology, QNAP, TrueNAS), Proxmox VM ARM64 (aarch64) ps2servers-edge-linux-arm64 Raspberry Pi 3/4/5 running 64-bit OS, modern ARM NAS, Orange Pi 5 ARMv7 (32-bit) ps2servers-edge-linux-armv7 Raspberry Pi 2, Pi 3/4/5 running 32-bit Raspberry Pi OS, ARMv7 routers ARMv6 ps2servers-edge-linux-armv6 Raspberry Pi 1, Pi Zero, Pi Zero W ARMv5 ps2servers-edge-linux-armv5 Pogoplug, SheevaPlug, Seagate DockStar, legacy Kirkwood NAS MIPS Big-Endian ps2servers-edge-linux-mips Atheros ath79",
+    "url": "releases.html"
+  },
+  {
+    "title": "Downloads & Releases — Desktop & Workstation Packages",
+    "cat": "start",
+    "text": "Desktop & Workstation Packages. Desktop packages include the Tkinter graphical launcher, the underlying Core CLI, and all server modules. Portable builds keep all libraries extracted in a folder and avoid single-file decompression overhead. Platform Recommended Package Alternative / Legacy Description Windows x64 (64-bit) PS2Servers-windows-x64-portable.zip PS2Servers-windows-x64.zip Recommended for modern Windows 10/11 PCs. Extract anywhere and launch PS2Servers.exe . Windows x86 (32-bit) PS2Servers-windows-x86-portable.zip PS2Servers-windows-x86.zip For 32-bit legacy Windows installations, older netbooks, and thin clients. Linux x86_64 (64-bit) PS2Servers-linux-x64-portable.tar.gz PS2Servers-x86_64.AppImage AppImage offers full desktop menu integration; portable archive works when /tmp has noexec mount flags. macOS Apple Silicon PS2Servers-macos-arm64.zip — Native ARM64 build optimized for Apple M1, M2, M3, and M4 Macs. macOS Intel x64 PS2Servers-macos-x64.zip — Universal binary for Intel-based Macs.",
+    "url": "releases.html#desktop-downloads"
+  },
+  {
+    "title": "Downloads & Releases — Edge Headless & Router Binaries",
+    "cat": "start",
+    "text": "Edge Headless & Router Binaries. Edge binaries are compact, standalone Go executables compiled for headless hardware, single-board computers, and network routers. They require zero Python runtime. For device family selection, refer to the Edge Build Picker . Target Architecture Binary Asset Name Target Hardware Examples x86_64 (amd64) ps2servers-edge-linux-amd64 Standard PC, Intel/AMD NAS (Synology, QNAP, TrueNAS), Proxmox VM ARM64 (aarch64) ps2servers-edge-linux-arm64 Raspberry Pi 3/4/5 running 64-bit OS, modern ARM NAS, Orange Pi 5 ARMv7 (32-bit) ps2servers-edge-linux-armv7 Raspberry Pi 2, Pi 3/4/5 running 32-bit Raspberry Pi OS, ARMv7 routers ARMv6 ps2servers-edge-linux-armv6 Raspberry Pi 1, Pi Zero, Pi Zero W ARMv5 ps2servers-edge-linux-armv5 Pogoplug, SheevaPlug, Seagate DockStar, legacy Kirkwood NAS MIPS Big-Endian ps2servers-edge-linux-mips Atheros ath79 home routers, TP-Link, Netgear, GL.iNet MIPS Little-Endian ps2servers-edge-linux-mipsel MediaTek MT7621 routers, Xiaomi, ASUS, ramips target RISC-V 64-bit ps2servers-edge-linux-riscv64 StarFive VisionFive 2, Milk-V, LicheeRV OpenWrt Packages ps2servers-edge_*.ipk Native package archives with procd service and UCI configuration files",
+    "url": "releases.html#edge-downloads"
+  },
+  {
+    "title": "Downloads & Releases — Verifying Checksums & Build Attestations",
+    "cat": "start",
+    "text": "Verifying Checksums & Build Attestations. Integrity can be confirmed against the published SHA-256 checksums, and cryptographic build provenance can be verified via the GitHub CLI: # 1. Verify SHA-256 on Linux/macOS sha256sum -c SHA256SUMS.txt # 1b. Verify SHA-256 in Windows PowerShell Get-FileHash .\\PS2Servers-windows-x64-portable.zip -Algorithm SHA256 # 2. Verify GitHub Actions build attestation gh attestation verify PS2Servers-windows-x64-portable.zip -R NathanNeurotic/PS2-Servers Antivirus Detections on Windows Unsigned executables that bind to network sockets and extract self-contained runtime files are commonly flagged by heuristic antivirus scanners. These are false positives. See our complete Antivirus Transparency & Trust Guide for detailed analysis and exclusion instructions.",
+    "url": "releases.html#verifying-downloads"
+  },
+  {
+    "title": "UDPFS Server",
+    "cat": "protocols",
+    "text": "UDPFS Server UDPFS (User Datagram Protocol File System) is the modern, lightweight network streaming protocol built specifically for PlayStation 2 homebrew. It eliminates SMB overhead, supports on-the-fly decompression of disc images, and powers network booting in Neutrino , NHDDL , and RiptOPL . Why UDPFS? Unlike SMB, which requires TCP state machines, SMB dialect negotiation, session handshakes, and strict authentication trees, UDPFS operates over raw UDP datagrams. The protocol is connection-oriented at the application layer, dramatically reducing CPU and memory overhead on the PS2's Input/Output Processor (IOP). 1. Ports & Network Architecture By default, UDPFS operates in a two-port model : Socket Port Purpose Discovery Port UDP 62966 ( 0xF5F6 ) Listens for broadcast discovery probes and initial connection requests from the PS2 console. Data Port Dynamic (or Pinned e.g. 62967 ) Dedicated high-speed socket created for the session to handle file reads, directory listings, and block operations. Firewall Configuration for Two-Port Operation If you run a firewall with strict port rules, set an explicit Data port (such as 62967 ) on the UDPFS card or use CLI flag --data-port 62967 , and allow both UDP 62966 and 62967. Alternatively, CLI flag --single-port forces discovery and data over the single port 62966. 2. Resolving \"Games List But Fail to Launch\" The single most frequent support question is: \"My games show up in the menu, but when I click launch, the screen goes black and nothing happens.\" This is almost always caused by a dual-interface routing issue on the host PC. When a computer has active Wi-Fi and wired Ethernet simultaneously, the operating system's routing table may send UDP data replies out of the Wi-Fi adapter instead of the Ethernet cable connected to the PS2. Identify Your PS2-Facing Network Interface Look at the LAN IP selector at the top of the PS2 Servers window and ensure you select the adapter physically cabled to your PS2 (for example 192.168.1.100 ). Pin the UDPFS Bind Address On the UDPFS server card, locate Bind address (PC) and click the button Use LAN IP (or type that IP directly). Do NOT type 0.0.0.0 or the PS2's IP here; enter the PC's own interface IP. Restart the Server Click Stop on the UDPFS card, then click Start . Relaunch your game from the console menu. Equivalent command in Core CLI: python ps2servers.py serve udpfs --root-dir /srv/ps2 --bind 192.168.1.100 3. Protocol Modes: Auto, Standard, and Modulo Over the years, ",
+    "url": "udpfs.html"
+  },
+  {
+    "title": "UDPFS Server — 1. Ports & Network Architecture",
+    "cat": "protocols",
+    "text": "1. Ports & Network Architecture. By default, UDPFS operates in a two-port model : Socket Port Purpose Discovery Port UDP 62966 ( 0xF5F6 ) Listens for broadcast discovery probes and initial connection requests from the PS2 console. Data Port Dynamic (or Pinned e.g. 62967 ) Dedicated high-speed socket created for the session to handle file reads, directory listings, and block operations. Firewall Configuration for Two-Port Operation If you run a firewall with strict port rules, set an explicit Data port (such as 62967 ) on the UDPFS card or use CLI flag --data-port 62967 , and allow both UDP 62966 and 62967. Alternatively, CLI flag --single-port forces discovery and data over the single port 62966.",
+    "url": "udpfs.html#ports-architecture"
+  },
+  {
+    "title": "UDPFS Server — 2. Resolving \"Games List But Fail to Launch\"",
+    "cat": "protocols",
+    "text": "2. Resolving \"Games List But Fail to Launch\". The single most frequent support question is: \"My games show up in the menu, but when I click launch, the screen goes black and nothing happens.\" This is almost always caused by a dual-interface routing issue on the host PC. When a computer has active Wi-Fi and wired Ethernet simultaneously, the operating system's routing table may send UDP data replies out of the Wi-Fi adapter instead of the Ethernet cable connected to the PS2.",
+    "url": "udpfs.html#bind-issue"
+  },
+  {
+    "title": "UDPFS Server — Identify Your PS2-Facing Network Interface",
+    "cat": "protocols",
+    "text": "Identify Your PS2-Facing Network Interface. Look at the LAN IP selector at the top of the PS2 Servers window and ensure you select the adapter physically cabled to your PS2 (for example 192.168.1.100 ).",
+    "url": "udpfs.html"
+  },
+  {
+    "title": "UDPFS Server — Pin the UDPFS Bind Address",
+    "cat": "protocols",
+    "text": "Pin the UDPFS Bind Address. On the UDPFS server card, locate Bind address (PC) and click the button Use LAN IP (or type that IP directly). Do NOT type 0.0.0.0 or the PS2's IP here; enter the PC's own interface IP.",
+    "url": "udpfs.html"
+  },
+  {
+    "title": "UDPFS Server — Restart the Server",
+    "cat": "protocols",
+    "text": "Restart the Server. Click Stop on the UDPFS card, then click Start . Relaunch your game from the console menu. Equivalent command in Core CLI: python ps2servers.py serve udpfs --root-dir /srv/ps2 --bind 192.168.1.100",
+    "url": "udpfs.html"
+  },
+  {
+    "title": "UDPFS Server — 3. Protocol Modes: Auto, Standard, and Modulo",
+    "cat": "protocols",
+    "text": "3. Protocol Modes: Auto, Standard, and Modulo. Over the years, different homebrew loaders introduced divergent implementations of the UDPFS protocol: Standard Mode (upstream udpfsd): Uses 4KB data blocks, separate discovery and data sockets, and sequence-based acknowledgment. Used by modern Neutrino and RiptOPL. Modulo Mode (legacy NHDDL): Employs a single socket with modulo-sequence packet pacing and smaller block buffers. Auto Mode (Default in PS2 Servers): PS2 Servers dynamically inspects the initial connection probe from the client and automatically adapts its sequencing and protocol mode on a per-session basis. Leave Protocol Mode on Auto Keep Protocol mode: Auto selected. Do not check Enforce Modulo mode unless you are explicitly testing an older NHDDL build that fails during the initial handshake. Forcing Modulo mode is never the solution for a network interface binding issue.",
+    "url": "udpfs.html#protocol-modes"
+  },
+  {
+    "title": "UDPFS Server — 4. On-The-Fly Disc Decompression",
+    "cat": "protocols",
+    "text": "4. On-The-Fly Disc Decompression. PS2 Servers features transparent real-time disc decompression. You can store your game library in compressed formats and stream them directly as raw DVD/CD images without decompressing them to disk beforehand. Format Supported Extensions Decompression Behavior Raw ISO .iso Streamed directly with zero CPU overhead. CSO / CISO .cso , .ciso Decompressed on the fly by the server with a bounded sector cache. ZSO / ZISO .zso , .ziso Decompressed on the fly by the server, or passed directly if the console loader implements LZ4 decoding natively. CHD .chd Decompressed on the fly using native libchdr in Desktop and Core editions.",
+    "url": "udpfs.html#decompression"
+  },
+  {
+    "title": "UDPFS Server — 5. Idle Timeouts & Concurrency",
+    "cat": "protocols",
+    "text": "5. Idle Timeouts & Concurrency. PS2 Servers maintains stateful peer tracking for each active console session: Idle Timeout: Defaults to 3600 seconds (1 hour) . If a console is powered off or paused for longer than this duration, open file descriptors are cleanly closed. Configurable from 60 to 86400 seconds via CLI flag --peer-timeout . Multiple Consoles: Both Python (Desktop/Core) and Go (Edge) implementations support multiple concurrent PS2 consoles playing different games simultaneously from the same shared folder.",
+    "url": "udpfs.html#timeouts"
+  },
+  {
+    "title": "SMB Server (v1 / v2 / v3)",
+    "cat": "protocols",
+    "text": "SMB Server (v1 / v2 / v3) Server Message Block (SMB) remains the standard network sharing protocol for Open PS2 Loader (OPL) and RiptOPL . PS2 Servers provides user-space SMBv1, SMB2, and SMB3 server engines that eliminate the need to enable obsolete or insecure Windows OS features. Dialect Rule: Choose What Your Loader Supports An SMBv1-only loader cannot connect to an SMB2/3 server simply because both cards point to the same games folder. You must run the server dialect matching your loader's network driver. 1. SMBv1 for Traditional OPL Clients Standard OPL releases use SMBv1 (dialect NT LM 0.12 ). Modern operating systems (Windows 10/11, macOS, and current Linux distributions) have disabled SMBv1 by default due to security vulnerabilities in Microsoft's kernel SMB1 driver (such as EternalBlue). PS2 Servers solves this safely: our SMBv1 engine runs entirely in unprivileged user-space on a non-standard port. It does not enable Windows' SMB 1.0 optional feature, does not touch kernel drivers, and leaves your standard Windows File Sharing untouched. Entry Point Default TCP Port Default Share Name Default Credentials Desktop SMBv1 Card 1025 games User: guest · Pass: (blank) Core CLI ( serve smbv1 ) 1111 games User: guest · Pass: (blank) Edge Go Server ( smb ) 1111 games User: guest · Pass: (blank) OPL Console Configuration for SMBv1 In your loader's Network Settings : Address type: Set to IP (do not use NetBIOS name). IP address: Enter the PC LAN IP shown by the server (e.g. 192.168.1.100 ). Port: Set to 1025 (Desktop) or 1111 (Core/Edge). Share name: Enter games . User: guest · Password: (leave empty) . 2. SMB2 and SMB3 Authenticated Sharing For modern OPL forks (such as RiptOPL with SMB2 support enabled in Game Sources), PS2 Servers includes authenticated SMB2 (up to dialect 2.1) and SMB3 (up to dialect 3.0.2) server cards. SMB2/3 Parameters Default Port: TCP 1445 (distinct from standard 445). Username: Default ps2 (configurable). Password: Configurable private password. Open Share Mode: Checking No password (anyone on the network can read it) removes password authentication while retaining SMB2/3 packet framing. Take Port 445 (Admin Option) Windows File Explorer connects only to TCP 445. The optional Take port 445 (admin) toggle in Desktop attempts to temporarily stop the Windows Server service to free TCP 445. For ordinary PS2 gaming, this is unnecessary: configure your loader with port 1445 instead. 3. Writes & Virtual Memory Cards (VMC) Both SMBv1 and ",
+    "url": "smb.html"
+  },
+  {
+    "title": "SMB Server (v1 / v2 / v3) — 1. SMBv1 for Traditional OPL Clients",
+    "cat": "protocols",
+    "text": "1. SMBv1 for Traditional OPL Clients. Standard OPL releases use SMBv1 (dialect NT LM 0.12 ). Modern operating systems (Windows 10/11, macOS, and current Linux distributions) have disabled SMBv1 by default due to security vulnerabilities in Microsoft's kernel SMB1 driver (such as EternalBlue). PS2 Servers solves this safely: our SMBv1 engine runs entirely in unprivileged user-space on a non-standard port. It does not enable Windows' SMB 1.0 optional feature, does not touch kernel drivers, and leaves your standard Windows File Sharing untouched. Entry Point Default TCP Port Default Share Name Default Credentials Desktop SMBv1 Card 1025 games User: guest · Pass: (blank) Core CLI ( serve smbv1 ) 1111 games User: guest · Pass: (blank) Edge Go Server ( smb ) 1111 games User: guest · Pass: (blank) OPL Console Configuration for SMBv1 In your loader's Network Settings : Address type: Set to IP (do not use NetBIOS name). IP address: Enter the PC LAN IP shown by the server (e.g. 192.168.1.100 ). Port: Set to 1025 (Desktop) or 1111 (Core/Edge). Share name: Enter games . User: guest · Password: (leave empty) .",
+    "url": "smb.html#smbv1"
+  },
+  {
+    "title": "SMB Server (v1 / v2 / v3) — 2. SMB2 and SMB3 Authenticated Sharing",
+    "cat": "protocols",
+    "text": "2. SMB2 and SMB3 Authenticated Sharing. For modern OPL forks (such as RiptOPL with SMB2 support enabled in Game Sources), PS2 Servers includes authenticated SMB2 (up to dialect 2.1) and SMB3 (up to dialect 3.0.2) server cards.",
+    "url": "smb.html#smb2-smb3"
+  },
+  {
+    "title": "SMB Server (v1 / v2 / v3) — SMB2/3 Parameters",
+    "cat": "protocols",
+    "text": "SMB2/3 Parameters. Default Port: TCP 1445 (distinct from standard 445). Username: Default ps2 (configurable). Password: Configurable private password. Open Share Mode: Checking No password (anyone on the network can read it) removes password authentication while retaining SMB2/3 packet framing. Take Port 445 (Admin Option) Windows File Explorer connects only to TCP 445. The optional Take port 445 (admin) toggle in Desktop attempts to temporarily stop the Windows Server service to free TCP 445. For ordinary PS2 gaming, this is unnecessary: configure your loader with port 1445 instead.",
+    "url": "smb.html"
+  },
+  {
+    "title": "SMB Server (v1 / v2 / v3) — 3. Writes & Virtual Memory Cards (VMC)",
+    "cat": "protocols",
+    "text": "3. Writes & Virtual Memory Cards (VMC). Both SMBv1 and SMB2/3 in PS2 Servers allow write access by default: Virtual Memory Cards: Loaders can create and update 8MB .bin files in the VMC/ folder directly over the share. Per-Game Configuration: Settings saved in OPL are written back to CFG/ automatically. Read-Only Mode: Ticking Read-only prevents any modifications to the games directory, safeguarding against accidental file tampering. LAN Security Reminder Never forward SMB ports (1025, 1111, 1445, or 445) across your internet router. These servers are designed strictly for private Local Area Networks.",
+    "url": "smb.html#vmc-writes"
+  },
+  {
+    "title": "UDPBD Server",
+    "cat": "protocols",
+    "text": "UDPBD Server UDPBD (UDP Block Device) exposes a single disc image as a virtual block device over the local network. Rather than translating filesystem calls, the console sends raw sector read and write commands directly over UDP port 48573 . Block Device vs Filesystem Protocol While UDPFS and SMB serve an entire directory containing multiple games, folders, art, and configurations, UDPBD assigns one raw disk image (ISO or IMG) per server process. The console interacts with the server exactly as if it were a physical optical disc or hard drive plugged directly into the system bus. 1. Protocol Overview Parameter Value Notes Default Port UDP 48573 ( 0xBDBD ) Standard UDPBD broadcast discovery and data port. Payload Target Single Disc Image Select an .iso or .img file. Discovery Mechanism Broadcast Probe Client broadcasts to 255.255.255.255:48573 ; server replies with capacity and sector size. Write Support Optional Server can run read-only or allow sector modifications. 2. Running UDPBD  Desktop Launcher 1. Open the UDPBD card in PS2 Servers Desktop. 2. Click Browse and choose your target .iso file. 3. Click Start . The server immediately begins listening on UDP port 48573. Core Terminal CLI python ps2servers.py serve udpbd /srv/images/game.iso --read-only Add --bind <PC_IP> to pin the interface, or --port <PORT> if using a non-standard port. Edge Native Server ps2servers-edge udpbd --image /srv/images/game.iso --read-only Fast Go native implementation with bounded sector caching and minimal CPU overhead. 3. Console Client Configuration To boot from a UDPBD server, your console loader must include a UDPBD driver: Neutrino: Supports UDPBD natively via its network boot driver. RiptOPL: Select Network Boot in Game Sources and ensure the UDPBD backend is selected. Ensure your console IP settings belong to the same subnet as the host serving the UDPBD image.",
+    "url": "udpbd.html"
+  },
+  {
+    "title": "UDPBD Server — 1. Protocol Overview",
+    "cat": "protocols",
+    "text": "1. Protocol Overview. Parameter Value Notes Default Port UDP 48573 ( 0xBDBD ) Standard UDPBD broadcast discovery and data port. Payload Target Single Disc Image Select an .iso or .img file. Discovery Mechanism Broadcast Probe Client broadcasts to 255.255.255.255:48573 ; server replies with capacity and sector size. Write Support Optional Server can run read-only or allow sector modifications.",
+    "url": "udpbd.html#how-it-works"
+  },
+  {
+    "title": "UDPBD Server — 2. Running UDPBD",
+    "cat": "protocols",
+    "text": "2. Running UDPBD. ",
+    "url": "udpbd.html#setup-steps"
+  },
+  {
+    "title": "UDPBD Server — Desktop Launcher",
+    "cat": "protocols",
+    "text": "Desktop Launcher. 1. Open the UDPBD card in PS2 Servers Desktop. 2. Click Browse and choose your target .iso file. 3. Click Start . The server immediately begins listening on UDP port 48573.",
+    "url": "udpbd.html"
+  },
+  {
+    "title": "UDPBD Server — Core Terminal CLI",
+    "cat": "protocols",
+    "text": "Core Terminal CLI. python ps2servers.py serve udpbd /srv/images/game.iso --read-only Add --bind <PC_IP> to pin the interface, or --port <PORT> if using a non-standard port.",
+    "url": "udpbd.html"
+  },
+  {
+    "title": "UDPBD Server — Edge Native Server",
+    "cat": "protocols",
+    "text": "Edge Native Server. ps2servers-edge udpbd --image /srv/images/game.iso --read-only Fast Go native implementation with bounded sector caching and minimal CPU overhead.",
+    "url": "udpbd.html"
+  },
+  {
+    "title": "UDPBD Server — 3. Console Client Configuration",
+    "cat": "protocols",
+    "text": "3. Console Client Configuration. To boot from a UDPBD server, your console loader must include a UDPBD driver: Neutrino: Supports UDPBD natively via its network boot driver. RiptOPL: Select Network Boot in Game Sources and ensure the UDPBD backend is selected. Ensure your console IP settings belong to the same subnet as the host serving the UDPBD image.",
+    "url": "udpbd.html#console-setup"
+  },
+  {
+    "title": "HTTP Game Streaming",
+    "cat": "protocols",
+    "text": "HTTP Game Streaming HTTP Mode serves your PS2 game collection over standard plain HTTP for compatible OPL forks (such as Docmine17's Open-PS2-Loader-HTTP and RiptOPL ). By replacing SMB with standard HTTP Range requests, it eliminates complex network authentication entirely. Experimental Status HTTP game serving is host-tested and functional across compliant clients. Because loader support across diverse hardware remains under active community development, report findings to the project issue tracker. 1. Setting Up HTTP Mode  Start the HTTP Server Card Select your games folder (the parent holding DVD/ and CD/ ) and start the HTTP card. The default port is TCP 1100 . Configure Your Console Loader In OPL Network Settings, configure the following values: Field Required Value Protocol HTTP Address Type IP PC IP Address IP address shown on the running HTTP card Port 1100 (Must be set explicitly) Share Name Blank, or anything (ignored by server) Critical Client Quirk: Set Port Explicitly In the pinned Docmine17 HTTP client, leaving Port set to 0 causes its game-list loader to default to port 8080 while its in-game driver defaults to port 1100 ! The result is that your game list populates, but selecting a game produces an immediate black screen. Always set Port to 1100 explicitly in your loader. 2. What the Server Serves The HTTP server inspects your games folder root, DVD/ , and CD/ , automatically generating two resources: games.csv — Generated on the fly at /games.csv and /<share>/games.csv . Lists startup identifiers, titles, and media types without manual curation. Bare Game ISOs: Disc images are flattened at the web root (e.g. GET /SLUS_201.74.Rumble Racing.iso ) to accommodate the console driver's hardcoded root path. 3. Compressed Format Streaming Format Handling Mechanism .iso Streamed directly via HTTP Range headers. .zso , .ziso Streamed compressed as-is. The PS2 client decompresses LZ4 blocks locally. .chd , .cso Decompressed in real time on the server and advertised to the client as standard .iso . 4. Known Limits & Specifications Read-Only Protocol: The HTTP client driver does not support WebDAV or HTTP PUT; Virtual Memory Cards (VMC) cannot be written over HTTP. Saves require a physical memory card. No Authentication: Never expose port 1100 to the public internet; keep it strictly on your local private subnet. Single-Layer Discs Only: The client driver hardcodes layer1_start = 0 , so dual-layer DVD9 titles will not transition beyond the layer break",
+    "url": "http.html"
+  },
+  {
+    "title": "HTTP Game Streaming — 1. Setting Up HTTP Mode",
+    "cat": "protocols",
+    "text": "1. Setting Up HTTP Mode. ",
+    "url": "http.html#setup"
+  },
+  {
+    "title": "HTTP Game Streaming — Start the HTTP Server Card",
+    "cat": "protocols",
+    "text": "Start the HTTP Server Card. Select your games folder (the parent holding DVD/ and CD/ ) and start the HTTP card. The default port is TCP 1100 .",
+    "url": "http.html"
+  },
+  {
+    "title": "HTTP Game Streaming — Configure Your Console Loader",
+    "cat": "protocols",
+    "text": "Configure Your Console Loader. In OPL Network Settings, configure the following values: Field Required Value Protocol HTTP Address Type IP PC IP Address IP address shown on the running HTTP card Port 1100 (Must be set explicitly) Share Name Blank, or anything (ignored by server) Critical Client Quirk: Set Port Explicitly In the pinned Docmine17 HTTP client, leaving Port set to 0 causes its game-list loader to default to port 8080 while its in-game driver defaults to port 1100 ! The result is that your game list populates, but selecting a game produces an immediate black screen. Always set Port to 1100 explicitly in your loader.",
+    "url": "http.html"
+  },
+  {
+    "title": "HTTP Game Streaming — 2. What the Server Serves",
+    "cat": "protocols",
+    "text": "2. What the Server Serves. The HTTP server inspects your games folder root, DVD/ , and CD/ , automatically generating two resources: games.csv — Generated on the fly at /games.csv and /<share>/games.csv . Lists startup identifiers, titles, and media types without manual curation. Bare Game ISOs: Disc images are flattened at the web root (e.g. GET /SLUS_201.74.Rumble Racing.iso ) to accommodate the console driver's hardcoded root path.",
+    "url": "http.html#architecture"
+  },
+  {
+    "title": "HTTP Game Streaming — 3. Compressed Format Streaming",
+    "cat": "protocols",
+    "text": "3. Compressed Format Streaming. Format Handling Mechanism .iso Streamed directly via HTTP Range headers. .zso , .ziso Streamed compressed as-is. The PS2 client decompresses LZ4 blocks locally. .chd , .cso Decompressed in real time on the server and advertised to the client as standard .iso .",
+    "url": "http.html#compression"
+  },
+  {
+    "title": "HTTP Game Streaming — 4. Known Limits & Specifications",
+    "cat": "protocols",
+    "text": "4. Known Limits & Specifications. Read-Only Protocol: The HTTP client driver does not support WebDAV or HTTP PUT; Virtual Memory Cards (VMC) cannot be written over HTTP. Saves require a physical memory card. No Authentication: Never expose port 1100 to the public internet; keep it strictly on your local private subnet. Single-Layer Discs Only: The client driver hardcodes layer1_start = 0 , so dual-layer DVD9 titles will not transition beyond the layer break. Game List Buffer Limit: The console's receive buffer for games.csv is 8192 bytes (approximately 80–100 titles). Libraries exceeding this count should be categorized or curated.",
+    "url": "http.html#limits"
+  },
+  {
+    "title": "PS2 Servers Edge",
+    "cat": "edge",
+    "text": "PS2 Servers Edge PS2 Servers Edge is a high-speed, statically linked Go implementation engineered for routers, network-attached storage (NAS), Raspberry Pi, and minimal Linux appliances. It operates with a sub-20 MB RAM footprint and provides a responsive, embedded Web GUI dashboard. Why Edge Exists Running a full Python interpreter and desktop UI on an embedded MIPS/ARM router or an old thin client is often impossible due to flash storage and RAM constraints. Edge eliminates all Python dependencies, compiling down to a single compact binary that starts instantaneously and runs 24/7 beside your console. 1. Protocol & Feature Scope Edge implements the most critical network-serving protocols for PS2 homebrew: Implemented in Edge UDPFS Engine: Full read and write support; automatic per-session Standard/Modulo negotiation; multi-console concurrency. UDPBD Block Device: Direct sector serving for raw disc images over UDP 48573. SMBv1 Server: Guest-authenticated file sharing on TCP 1111 for standard OPL. Embedded Web UI: Responsive web management console for LAN monitoring and service control. CSO & ZSO Decoding: Decompresses CSO and ZSO disc containers on the fly with a bounded block cache. Transfer Telemetry: Structured JSON logging and real-time bandwidth metrics via --metrics . Excluded from Edge No SMB2 / SMB3: Edge focuses strictly on lightweight guest SMBv1. For authenticated SMB2/3, run Desktop or Core. No HTTP Game Streaming: Edge's web server is dedicated exclusively to the Web UI management dashboard. No CHD Decompression: Native libchdr dependencies are omitted to maintain 100% static linking portability across esoteric router toolchains. 2. Embedded Web UI Dashboard Edge includes a built-in web management interface reachable via your browser on port 8082 . # Start Web UI for local host only: ps2servers-edge webui # Start Web UI accessible across your trusted LAN: ps2servers-edge webui --bind 0.0.0.0 --auth-pass 'your-secure-password' Web UI Features Live Service Overview: View running states of UDPFS, SMB, and UDPBD services. Connected Console Monitor: See real-time connected PS2 client IPs, active file handles, and streaming bandwidth. Directory Browser: Browse configured games libraries with file size and format validation. Service Management: Trigger service restarts seamlessly when installed via systemd or OpenWrt procd. Web UI Security & LAN Access When binding to 0.0.0.0 for network-wide access, Edge requires an authentication password via --au",
+    "url": "edge.html"
+  },
+  {
+    "title": "PS2 Servers Edge — 1. Protocol & Feature Scope",
+    "cat": "edge",
+    "text": "1. Protocol & Feature Scope. Edge implements the most critical network-serving protocols for PS2 homebrew:",
+    "url": "edge.html#scope"
+  },
+  {
+    "title": "PS2 Servers Edge — Implemented in Edge",
+    "cat": "edge",
+    "text": "Implemented in Edge. UDPFS Engine: Full read and write support; automatic per-session Standard/Modulo negotiation; multi-console concurrency. UDPBD Block Device: Direct sector serving for raw disc images over UDP 48573. SMBv1 Server: Guest-authenticated file sharing on TCP 1111 for standard OPL. Embedded Web UI: Responsive web management console for LAN monitoring and service control. CSO & ZSO Decoding: Decompresses CSO and ZSO disc containers on the fly with a bounded block cache. Transfer Telemetry: Structured JSON logging and real-time bandwidth metrics via --metrics .",
+    "url": "edge.html"
+  },
+  {
+    "title": "PS2 Servers Edge — Excluded from Edge",
+    "cat": "edge",
+    "text": "Excluded from Edge. No SMB2 / SMB3: Edge focuses strictly on lightweight guest SMBv1. For authenticated SMB2/3, run Desktop or Core. No HTTP Game Streaming: Edge's web server is dedicated exclusively to the Web UI management dashboard. No CHD Decompression: Native libchdr dependencies are omitted to maintain 100% static linking portability across esoteric router toolchains.",
+    "url": "edge.html"
+  },
+  {
+    "title": "PS2 Servers Edge — 2. Embedded Web UI Dashboard",
+    "cat": "edge",
+    "text": "2. Embedded Web UI Dashboard. Edge includes a built-in web management interface reachable via your browser on port 8082 . # Start Web UI for local host only: ps2servers-edge webui # Start Web UI accessible across your trusted LAN: ps2servers-edge webui --bind 0.0.0.0 --auth-pass 'your-secure-password'",
+    "url": "edge.html#webui"
+  },
+  {
+    "title": "PS2 Servers Edge — Web UI Features",
+    "cat": "edge",
+    "text": "Web UI Features. Live Service Overview: View running states of UDPFS, SMB, and UDPBD services. Connected Console Monitor: See real-time connected PS2 client IPs, active file handles, and streaming bandwidth. Directory Browser: Browse configured games libraries with file size and format validation. Service Management: Trigger service restarts seamlessly when installed via systemd or OpenWrt procd. Web UI Security & LAN Access When binding to 0.0.0.0 for network-wide access, Edge requires an authentication password via --auth-pass . If --insecure is passed, Edge generates a random high-entropy password and logs it to stdout. The Web UI runs over unencrypted HTTP; never expose port 8082 to the internet.",
+    "url": "edge.html"
+  },
+  {
+    "title": "PS2 Servers Edge — 3. Core Edge Subcommands",
+    "cat": "edge",
+    "text": "3. Core Edge Subcommands. Subcommand Example Invocation Description udpfs ps2servers-edge udpfs --root /srv/ps2 Serve directory tree over UDPFS (discovery on 62966 + dynamic data port). smb ps2servers-edge smb --share games=/srv/ps2 --port 1111 Serve guest SMBv1 share on TCP port 1111. udpbd ps2servers-edge udpbd --image /srv/ps2/game.iso --read-only Serve single raw disc image over UDP 48573. webui ps2servers-edge webui --bind 0.0.0.0 --auth-pass secret Launch web dashboard on port 8082.",
+    "url": "edge.html#quick-commands"
+  },
+  {
+    "title": "PS2 Servers Edge — 4. Next Steps for Edge Operators",
+    "cat": "edge",
+    "text": "4. Next Steps for Edge Operators. ",
+    "url": "edge.html#next-steps"
+  },
+  {
+    "title": "PS2 Servers Edge — Which Build Do I Need?",
+    "cat": "edge",
+    "text": "Which Build Do I Need?. Use the 30-second uname -m test to select the exact binary asset for your router, Raspberry Pi, or NAS architecture.",
+    "url": "edge.html"
+  },
+  {
+    "title": "PS2 Servers Edge — OpenWrt Router Setup",
+    "cat": "edge",
+    "text": "OpenWrt Router Setup. Deploy Edge onto your home router with official .ipk packages, external USB drive mounting, and procd service autostart.",
+    "url": "edge.html"
+  },
+  {
+    "title": "PS2 Servers Edge — Edge Operator Manual",
+    "cat": "edge",
+    "text": "Edge Operator Manual. Complete CLI reference of all flags, configuration contracts, UCI schemas, and daemon options.",
+    "url": "edge.html"
+  },
+  {
+    "title": "Which Edge Build Do I Need?",
+    "cat": "edge",
+    "text": "Which PS2 Servers Edge Build Do I Need? Edge provides compiled native binaries for virtually every CPU architecture in existence. Use this quick reference to choose the exact binary for your server device. Quick Advice for Standard PC Users If you are running Linux on an ordinary 64-bit PC, mini PC, Intel/AMD NAS, or Proxmox VM — download pc-64bit-amd64 and you are done. 1. The 30-Second Answer Log in to a terminal on the device that will host your games (e.g. via SSH) and run: uname -m Match the terminal output to the table below: uname -m Output Download Package Suffix Common Hardware Examples x86_64 pc-64bit-amd64 Modern PCs, mini PCs (Beelink, Intel NUC), Intel/AMD NAS (Synology, QNAP) i386 , i486 , i586 , i686 pc-32bit-i386 Legacy 32-bit PCs, early Intel Atom netbooks, older thin clients aarch64 or arm64 arm64-pi3-pi4-pi5-nas Raspberry Pi 3/4/5 on 64-bit OS, modern ARM NAS, newer 64-bit routers armv7l armv7-pi2-32bit-routers Raspberry Pi 2, Pi 3/4/5 running a 32-bit OS , 32-bit ARM routers armv6l armv6-pi1-pi-zero Raspberry Pi 1, Raspberry Pi Zero, Pi Zero W armv5tel or armv5tejl armv5-pogoplug-sheevaplug-dockstar Pogoplug, SheevaPlug, Seagate DockStar, Kirkwood NAS appliances mips See MIPS Endianness below Most classic home routers (OpenWrt, DD-WRT) mips64 edgerouter-octeon-mips64 Ubiquiti EdgeRouter Lite, EdgeRouter PoE, EdgeRouter 4, EdgeRouter 6P riscv64 riscv64-sbc StarFive VisionFive 2, Milk-V Mars, Sipeed LicheeRV Raspberry Pi Trap: Always Check uname -m Do not assume your Pi OS is 64-bit just because the hardware is a Pi 4 or Pi 5! If you installed the standard 32-bit Raspberry Pi OS image, uname -m outputs armv7l and you must download the armv7 package. Running the arm64 binary on a 32-bit kernel will result in an immediate Exec format error . 2. MIPS Routers: Big-Endian vs Little-Endian The command uname -m outputs mips for both big-endian and little-endian hardware. To determine the correct binary on OpenWrt: opkg print-architecture If the output contains mipsel_... (notice the el ): your device is Little-Endian . → Download router-mips-little-endian-mt7621 (Common for MediaTek MT7621, ramips routers). If the output contains mips_... (without el ): your device is Big-Endian . → Download router-mips-big-endian-ath79 (Common for Qualcomm/Atheros ath79, TP-Link, Netgear). 3. Troubleshooting Execution Errors  cannot execute binary file\" or \"Exec format error\" This error signifies an architecture, endianness, or ABI mismatch. Re-verify uname -m ",
+    "url": "edge-builds.html"
+  },
+  {
+    "title": "Which Edge Build Do I Need? — Which PS2 Servers Edge Build Do I Need?",
+    "cat": "edge",
+    "text": "Which PS2 Servers Edge Build Do I Need?. Edge provides compiled native binaries for virtually every CPU architecture in existence. Use this quick reference to choose the exact binary for your server device. Quick Advice for Standard PC Users If you are running Linux on an ordinary 64-bit PC, mini PC, Intel/AMD NAS, or Proxmox VM — download pc-64bit-amd64 and you are done.",
+    "url": "edge-builds.html"
+  },
+  {
+    "title": "Which Edge Build Do I Need? — 1. The 30-Second Answer",
+    "cat": "edge",
+    "text": "1. The 30-Second Answer. Log in to a terminal on the device that will host your games (e.g. via SSH) and run: uname -m Match the terminal output to the table below: uname -m Output Download Package Suffix Common Hardware Examples x86_64 pc-64bit-amd64 Modern PCs, mini PCs (Beelink, Intel NUC), Intel/AMD NAS (Synology, QNAP) i386 , i486 , i586 , i686 pc-32bit-i386 Legacy 32-bit PCs, early Intel Atom netbooks, older thin clients aarch64 or arm64 arm64-pi3-pi4-pi5-nas Raspberry Pi 3/4/5 on 64-bit OS, modern ARM NAS, newer 64-bit routers armv7l armv7-pi2-32bit-routers Raspberry Pi 2, Pi 3/4/5 running a 32-bit OS , 32-bit ARM routers armv6l armv6-pi1-pi-zero Raspberry Pi 1, Raspberry Pi Zero, Pi Zero W armv5tel or armv5tejl armv5-pogoplug-sheevaplug-dockstar Pogoplug, SheevaPlug, Seagate DockStar, Kirkwood NAS appliances mips See MIPS Endianness below Most classic home routers (OpenWrt, DD-WRT) mips64 edgerouter-octeon-mips64 Ubiquiti EdgeRouter Lite, EdgeRouter PoE, EdgeRouter 4, EdgeRouter 6P riscv64 riscv64-sbc StarFive VisionFive 2, Milk-V Mars, Sipeed LicheeRV Raspberry Pi Trap: Always Check uname -m Do not assume your Pi OS is 64-bit just because the hardware is a Pi 4 or Pi 5! If you installed the standa",
+    "url": "edge-builds.html#thirty-second-answer"
+  },
+  {
+    "title": "Which Edge Build Do I Need? — 2. MIPS Routers: Big-Endian vs Little-Endian",
+    "cat": "edge",
+    "text": "2. MIPS Routers: Big-Endian vs Little-Endian. The command uname -m outputs mips for both big-endian and little-endian hardware. To determine the correct binary on OpenWrt: opkg print-architecture If the output contains mipsel_... (notice the el ): your device is Little-Endian . → Download router-mips-little-endian-mt7621 (Common for MediaTek MT7621, ramips routers). If the output contains mips_... (without el ): your device is Big-Endian . → Download router-mips-big-endian-ath79 (Common for Qualcomm/Atheros ath79, TP-Link, Netgear).",
+    "url": "edge-builds.html#mips-endianness"
+  },
+  {
+    "title": "Which Edge Build Do I Need? — 3. Troubleshooting Execution Errors",
+    "cat": "edge",
+    "text": "3. Troubleshooting Execution Errors. ",
+    "url": "edge-builds.html#binary-troubleshooting"
+  },
+  {
+    "title": "Which Edge Build Do I Need? — cannot execute binary file\" or \"Exec format error\"",
+    "cat": "edge",
+    "text": "cannot execute binary file\" or \"Exec format error\". This error signifies an architecture, endianness, or ABI mismatch. Re-verify uname -m and your C-library/kernel architecture. Trying the alternate MIPS binary is completely harmless.",
+    "url": "edge-builds.html"
+  },
+  {
+    "title": "Which Edge Build Do I Need? — Permission denied\"",
+    "cat": "edge",
+    "text": "Permission denied\". Ensure execute permissions are granted after downloading onto Linux or router storage: chmod +x ./ps2servers-edge",
+    "url": "edge-builds.html"
+  },
+  {
+    "title": "Edge Operator Manual",
+    "cat": "edge",
+    "text": "Edge Operator Manual Complete operational handbook for ps2servers-edge , detailing command-line options, security modes, and configuration parameters across all four subcommands. Invocation Model Edge operates on a one-command-per-process model. To run multiple services concurrently (e.g. UDPFS and the Web UI), invoke each as a distinct background daemon or systemd / procd service. 1. Subcommand: udpfs Serves a games directory tree and optional block devices over the UDPFS protocol. ps2servers-edge udpfs --root /srv/ps2 [flags] Flag Default Description --root PATH (Required) Root folder holding your DVD/ and CD/ collections. --bind IP 0.0.0.0 Local IP address to bind both discovery and data sockets. --port PORT 62966 Discovery UDP port (standard is 62966 / 0xF5F6 ). --data-port PORT 0 (dynamic) Pin a dedicated data port (e.g. 62967 ) for restrictive firewall policies. --single-port false Serve both discovery and data out of the single primary UDP port. --protocol-mode auto Negotiation mode: auto , standard , or modulo . --peer-timeout 1h Inactivity duration before closing peer handles (accepts 1m to 24h ). --read-only false Disallow console file modifications (saves/configs). --no-compression false Diagnostic flag: expose raw compressed containers without decoding. --metrics false Log periodic transfer rate statistics to stdout. 2. Subcommand: smb Serves guest-authenticated SMBv1 shares for standard OPL clients. ps2servers-edge smb --share games=/srv/ps2 --port 1111 [flags] Flag Default Description --share NAME=PATH — Define a share name and target path. May be repeated for multiple shares. --root PATH — Shorthand alias defining the games share directly. --port PORT 1111 TCP listening port. Configure your loader to match this number. --read-only false Prevent writes to the share from connected clients. --status-port PORT -1 (62966) UDP port for router status discovery replies. Set to 0 to disable. 3. Subcommand: udpbd Serves one disc image as a raw block device over UDP port 48573. ps2servers-edge udpbd --image /srv/images/game.iso --read-only [flags] Flag Default Description --image PATH (Required) Path to the target .iso or raw disc image. --port PORT 48573 UDPBD listening port (default 48573 / 0xBDBD ). --bind IP 0.0.0.0 Bind address on the host system. --read-only false Prevent raw block write requests from modifying the backing image. 4. Subcommand: webui Starts the embedded web management dashboard. ps2servers-edge webui --bind 0.0.0.0 --auth-pass 'm",
+    "url": "edge-manual.html"
+  },
+  {
+    "title": "Edge Operator Manual — 1. Subcommand: udpfs",
+    "cat": "edge",
+    "text": "1. Subcommand: udpfs. Serves a games directory tree and optional block devices over the UDPFS protocol. ps2servers-edge udpfs --root /srv/ps2 [flags] Flag Default Description --root PATH (Required) Root folder holding your DVD/ and CD/ collections. --bind IP 0.0.0.0 Local IP address to bind both discovery and data sockets. --port PORT 62966 Discovery UDP port (standard is 62966 / 0xF5F6 ). --data-port PORT 0 (dynamic) Pin a dedicated data port (e.g. 62967 ) for restrictive firewall policies. --single-port false Serve both discovery and data out of the single primary UDP port. --protocol-mode auto Negotiation mode: auto , standard , or modulo . --peer-timeout 1h Inactivity duration before closing peer handles (accepts 1m to 24h ). --read-only false Disallow console file modifications (saves/configs). --no-compression false Diagnostic flag: expose raw compressed containers without decoding. --metrics false Log periodic transfer rate statistics to stdout.",
+    "url": "edge-manual.html#subcommand-udpfs"
+  },
+  {
+    "title": "Edge Operator Manual — 2. Subcommand: smb",
+    "cat": "edge",
+    "text": "2. Subcommand: smb. Serves guest-authenticated SMBv1 shares for standard OPL clients. ps2servers-edge smb --share games=/srv/ps2 --port 1111 [flags] Flag Default Description --share NAME=PATH — Define a share name and target path. May be repeated for multiple shares. --root PATH — Shorthand alias defining the games share directly. --port PORT 1111 TCP listening port. Configure your loader to match this number. --read-only false Prevent writes to the share from connected clients. --status-port PORT -1 (62966) UDP port for router status discovery replies. Set to 0 to disable.",
+    "url": "edge-manual.html#subcommand-smb"
+  },
+  {
+    "title": "Edge Operator Manual — 3. Subcommand: udpbd",
+    "cat": "edge",
+    "text": "3. Subcommand: udpbd. Serves one disc image as a raw block device over UDP port 48573. ps2servers-edge udpbd --image /srv/images/game.iso --read-only [flags] Flag Default Description --image PATH (Required) Path to the target .iso or raw disc image. --port PORT 48573 UDPBD listening port (default 48573 / 0xBDBD ). --bind IP 0.0.0.0 Bind address on the host system. --read-only false Prevent raw block write requests from modifying the backing image.",
+    "url": "edge-manual.html#subcommand-udpbd"
+  },
+  {
+    "title": "Edge Operator Manual — 4. Subcommand: webui",
+    "cat": "edge",
+    "text": "4. Subcommand: webui. Starts the embedded web management dashboard. ps2servers-edge webui --bind 0.0.0.0 --auth-pass 'mypassword' [flags] Flag Default Description --bind IP 127.0.0.1 Listening address. Use 0.0.0.0 to access from other LAN devices. --port PORT 8082 HTTP web server port. --auth-pass PASS (Required for 0.0.0.0) Password required to authenticate in the browser dashboard. --insecure false Auto-generates a temporary random password if none is supplied. --browse-anywhere false Permit directory navigation outside configured game directories. --no-browse false Completely disable the file browser view in the web dashboard.",
+    "url": "edge-manual.html#subcommand-webui"
+  },
+  {
+    "title": "Edge Operator Manual — 5. Inspecting the Configuration Contract",
+    "cat": "edge",
+    "text": "5. Inspecting the Configuration Contract. Edge provides a built-in schema dumper to assist with configuration automation, OpenWrt LuCI generation, and container orchestration: ps2servers-edge --dump-schema",
+    "url": "edge-manual.html#schema"
+  },
+  {
+    "title": "OpenWrt Router Setup",
+    "cat": "edge",
+    "text": "OpenWrt Router Setup Turn your home router into a dedicated, 24/7 PlayStation 2 game server. By running PS2 Servers Edge directly on OpenWrt with a USB storage drive, you can play your entire library over Ethernet with zero PC running. Why an OpenWrt Router Server? Home routers are always powered on, consume less than 5 Watts of electricity, and feature direct gigabit/fast Ethernet switching to your entertainment center. Edge requires under 20 MB of RAM, leaving plenty of headroom for normal routing and Wi-Fi duties. 1. Prerequisites A home router running modern OpenWrt (version 21.02, 22.03, 23.05, or newer). A USB 2.0 or USB 3.0 port on the router. An external USB flash drive, external SSD, or HDD formatted in ext4 , exFAT , or FAT32 . Free internal flash storage (approximately 6–10 MB) to install the package. 2. Mounting USB Storage on OpenWrt Log in to your router via SSH and install the necessary filesystem kernel modules: # Update package list and install storage drivers opkg update opkg install kmod-usb-storage block-mount kmod-fs-ext4 kmod-fs-exfat kmod-fs-vfat e2fsprogs # Identify your connected USB drive partition block info Create a mount point (e.g. /mnt/ps2games ) and enable auto-mounting via /etc/config/fstab or the LuCI web interface under System → Mount Points . 3. Installing the PS2 Servers Edge Package Download the .ipk package matching your router's architecture (e.g. mipsel for MT7621, mips for ath79, or aarch64 for modern ARM routers) from the Releases page : # Transfer package to router /tmp folder via scp, then install: opkg install /tmp/ps2servers-edge_*.ipk 4. Configuring via UCI (/etc/config/ps2servers) The package ships with an integrated OpenWrt UCI configuration file. Edit /etc/config/ps2servers : config ps2servers 'global' option enabled '1' option root_dir '/mnt/ps2games' option read_only '1' config service 'udpfs' option enabled '1' option port '62966' option protocol_mode 'auto' config service 'smb' option enabled '1' option port '1111' option share_name 'games' config service 'webui' option enabled '0' option port '8082' option auth_pass 'changeme' Default Security Profile On OpenWrt, PS2 Servers Edge ships with read_only set to 1 and the Web UI disabled by default to preserve router flash and protect against accidental corruption. Adjust these options in UCI according to your operational needs. 5. Service Control & Monitoring Manage the server via OpenWrt's native procd init system: # Enable service to start on router boo",
+    "url": "openwrt.html"
+  },
+  {
+    "title": "OpenWrt Router Setup — 1. Prerequisites",
+    "cat": "edge",
+    "text": "1. Prerequisites. A home router running modern OpenWrt (version 21.02, 22.03, 23.05, or newer). A USB 2.0 or USB 3.0 port on the router. An external USB flash drive, external SSD, or HDD formatted in ext4 , exFAT , or FAT32 . Free internal flash storage (approximately 6–10 MB) to install the package.",
+    "url": "openwrt.html#prerequisites"
+  },
+  {
+    "title": "OpenWrt Router Setup — 2. Mounting USB Storage on OpenWrt",
+    "cat": "edge",
+    "text": "2. Mounting USB Storage on OpenWrt. Log in to your router via SSH and install the necessary filesystem kernel modules: # Update package list and install storage drivers opkg update opkg install kmod-usb-storage block-mount kmod-fs-ext4 kmod-fs-exfat kmod-fs-vfat e2fsprogs # Identify your connected USB drive partition block info Create a mount point (e.g. /mnt/ps2games ) and enable auto-mounting via /etc/config/fstab or the LuCI web interface under System → Mount Points .",
+    "url": "openwrt.html#storage-setup"
+  },
+  {
+    "title": "OpenWrt Router Setup — 3. Installing the PS2 Servers Edge Package",
+    "cat": "edge",
+    "text": "3. Installing the PS2 Servers Edge Package. Download the .ipk package matching your router's architecture (e.g. mipsel for MT7621, mips for ath79, or aarch64 for modern ARM routers) from the Releases page : # Transfer package to router /tmp folder via scp, then install: opkg install /tmp/ps2servers-edge_*.ipk",
+    "url": "openwrt.html#install-package"
+  },
+  {
+    "title": "OpenWrt Router Setup — 4. Configuring via UCI (/etc/config/ps2servers)",
+    "cat": "edge",
+    "text": "4. Configuring via UCI (/etc/config/ps2servers). The package ships with an integrated OpenWrt UCI configuration file. Edit /etc/config/ps2servers : config ps2servers 'global' option enabled '1' option root_dir '/mnt/ps2games' option read_only '1' config service 'udpfs' option enabled '1' option port '62966' option protocol_mode 'auto' config service 'smb' option enabled '1' option port '1111' option share_name 'games' config service 'webui' option enabled '0' option port '8082' option auth_pass 'changeme' Default Security Profile On OpenWrt, PS2 Servers Edge ships with read_only set to 1 and the Web UI disabled by default to preserve router flash and protect against accidental corruption. Adjust these options in UCI according to your operational needs.",
+    "url": "openwrt.html#uci-config"
+  },
+  {
+    "title": "OpenWrt Router Setup — 5. Service Control & Monitoring",
+    "cat": "edge",
+    "text": "5. Service Control & Monitoring. Manage the server via OpenWrt's native procd init system: # Enable service to start on router boot: /etc/init.d/ps2servers enable # Start the service immediately: /etc/init.d/ps2servers start # Check service status: /etc/init.d/ps2servers status # View live connection logs from your PS2: logread -e ps2servers -f",
+    "url": "openwrt.html#service-control"
+  },
+  {
+    "title": "OpenWrt Router Setup — 6. Connecting From the PS2",
+    "cat": "edge",
+    "text": "6. Connecting From the PS2. Because the router itself is hosting the server, point your loader's PC IP setting directly to your router's LAN gateway address (commonly 192.168.1.1 ): SMBv1: IP 192.168.1.1 · Port 1111 · Share games · User guest UDPFS: IP 192.168.1.1 · Port 62966 · Auto Mode",
+    "url": "openwrt.html#console-connection"
+  },
+  {
+    "title": "Router & Server Status",
+    "cat": "edge",
+    "text": "Router & Server Status PS2 Servers includes a lightweight, broadcast-based status discovery protocol. This allows desktop management tools, monitoring scripts, and client launchers to detect running server instances and query real-time operational telemetry across the local network. Discovery Protocol Summary By broadcasting a small probe packet to UDP port 62966 , any device on the LAN can identify active Edge routers, active server services (SMB, UDPFS, UDPBD), and current streaming throughput without needing SSH credentials. 1. Protocol Specification The status discovery protocol operates over raw UDP datagrams: Field Specification Port UDP 62966 (or configured status port) Probe Format Short magic broadcast query Reply Format JSON / structured telemetry payload containing hostname, version, running subcommands, and active client counts 2. Querying Status from the Terminal You can query any PS2 Servers instance using a simple Python snippet or netcat: python -c \" import socket s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) s.settimeout(2.0) s.sendto(b'PS2S_STATUS_PROBE', ('255.255.255.255', 62966)) try: data, addr = s.recvfrom(2048) print(f'Server reply from {addr}: {data.decode()}') except socket.timeout: print('No server response on LAN') \" 3. Edge Status Configuration In Edge, status replies are enabled by default on the discovery port. If multiple processes share a machine, or if you wish to disable telemetry replies, use the following options: --status-port -1 — Default: uses primary UDPFS port 62966. --status-port 0 — Completely disables status discovery replies on this process. --status-port PORT — Binds status replies to a dedicated custom UDP port.",
+    "url": "router-status.html"
+  },
+  {
+    "title": "Router & Server Status — 1. Protocol Specification",
+    "cat": "edge",
+    "text": "1. Protocol Specification. The status discovery protocol operates over raw UDP datagrams: Field Specification Port UDP 62966 (or configured status port) Probe Format Short magic broadcast query Reply Format JSON / structured telemetry payload containing hostname, version, running subcommands, and active client counts",
+    "url": "router-status.html#protocol-spec"
+  },
+  {
+    "title": "Router & Server Status — 2. Querying Status from the Terminal",
+    "cat": "edge",
+    "text": "2. Querying Status from the Terminal. You can query any PS2 Servers instance using a simple Python snippet or netcat: python -c \" import socket s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) s.settimeout(2.0) s.sendto(b'PS2S_STATUS_PROBE', ('255.255.255.255', 62966)) try: data, addr = s.recvfrom(2048) print(f'Server reply from {addr}: {data.decode()}') except socket.timeout: print('No server response on LAN') \"",
+    "url": "router-status.html#querying-status"
+  },
+  {
+    "title": "Router & Server Status — 3. Edge Status Configuration",
+    "cat": "edge",
+    "text": "3. Edge Status Configuration. In Edge, status replies are enabled by default on the discovery port. If multiple processes share a machine, or if you wish to disable telemetry replies, use the following options: --status-port -1 — Default: uses primary UDPFS port 62966. --status-port 0 — Completely disables status discovery replies on this process. --status-port PORT — Binds status replies to a dedicated custom UDP port.",
+    "url": "router-status.html#edge-configuration"
+  },
+  {
+    "title": "Core CLI Reference",
+    "cat": "operations",
+    "text": "PS2 Servers Core CLI Reference PS2 Servers Core provides terminal-based server execution without a graphical display. Powered by the full Python engine, it supports automation, daemonization under systemd, container deployment, and extensive debugging telemetry. Command Entry Point Whether running from source with python ps2servers.py serve <mode> or invoking a packaged binary like PS2Servers.exe serve <mode> , the subcommands and flags are identical. The internal alias --serve is also supported for backward compatibility with existing scripts. 1. Listing Modes & Global Help # List available server modes python ps2servers.py --list # Show help for a specific mode python ps2servers.py serve udpfs --help python ps2servers.py serve smbv1 --help python ps2servers.py serve udpbd --help python ps2servers.py serve http --help 2. serve udpfs Options python ps2servers.py serve udpfs --root-dir /srv/ps2 [options] Flag Default Description --root-dir PATH (Required) Path to the root games directory (parent of DVD/ and CD/ ). --bind IP 0.0.0.0 Binds Core's data socket to a specific PC LAN address (crucial for multi-adapter PCs). --port PORT 62966 Discovery UDP port. --data-port PORT 0 (dynamic) Explicit data port for firewalls. --single-port false Route both discovery and data through port 62966. --peer-timeout SECS 3600 Session inactivity timeout in seconds (accepts 60 to 86400). --read-only false Disallow write operations. --verbose false Enable high-verbosity packet telemetry and 45-second inactivity diagnostics. 3. serve smbv1 Options python ps2servers.py serve smbv1 --share games=/srv/ps2 --port 1111 [options] Flag Default Description --share NAME=PATH games=... Define a share name mapped to a directory path. Can be repeated. --port PORT 1111 TCP listening port. --read-only false Disable writes (saves and VMCs). 4. serve udpbd Options python ps2servers.py serve udpbd /srv/images/game.iso --read-only [options] Flag Default Description IMAGE_PATH (Positional) Path to the disc image file. --port PORT 48573 UDP port for block device commands. --bind IP 0.0.0.0 Interface bind address. --read-only false Prevent write modifications to the backing image. 5. Running Under systemd Create a service unit file at /etc/systemd/system/ps2servers-udpfs.service : [Unit] Description=PS2 Servers UDPFS Service After=network.target [Service] Type=simple User=ps2games ExecStart=/usr/bin/python3 /opt/ps2-servers/ps2servers.py serve udpfs --root-dir /srv/ps2games --read-only Restart=on-f",
+    "url": "cli.html"
+  },
+  {
+    "title": "Core CLI Reference — PS2 Servers Core CLI Reference",
+    "cat": "operations",
+    "text": "PS2 Servers Core CLI Reference. PS2 Servers Core provides terminal-based server execution without a graphical display. Powered by the full Python engine, it supports automation, daemonization under systemd, container deployment, and extensive debugging telemetry. Command Entry Point Whether running from source with python ps2servers.py serve <mode> or invoking a packaged binary like PS2Servers.exe serve <mode> , the subcommands and flags are identical. The internal alias --serve is also supported for backward compatibility with existing scripts.",
+    "url": "cli.html"
+  },
+  {
+    "title": "Core CLI Reference — 1. Listing Modes & Global Help",
+    "cat": "operations",
+    "text": "1. Listing Modes & Global Help. # List available server modes python ps2servers.py --list # Show help for a specific mode python ps2servers.py serve udpfs --help python ps2servers.py serve smbv1 --help python ps2servers.py serve udpbd --help python ps2servers.py serve http --help",
+    "url": "cli.html#listing-modes"
+  },
+  {
+    "title": "Core CLI Reference — 2. serve udpfs Options",
+    "cat": "operations",
+    "text": "2. serve udpfs Options. python ps2servers.py serve udpfs --root-dir /srv/ps2 [options] Flag Default Description --root-dir PATH (Required) Path to the root games directory (parent of DVD/ and CD/ ). --bind IP 0.0.0.0 Binds Core's data socket to a specific PC LAN address (crucial for multi-adapter PCs). --port PORT 62966 Discovery UDP port. --data-port PORT 0 (dynamic) Explicit data port for firewalls. --single-port false Route both discovery and data through port 62966. --peer-timeout SECS 3600 Session inactivity timeout in seconds (accepts 60 to 86400). --read-only false Disallow write operations. --verbose false Enable high-verbosity packet telemetry and 45-second inactivity diagnostics.",
+    "url": "cli.html#serve-udpfs"
+  },
+  {
+    "title": "Core CLI Reference — 3. serve smbv1 Options",
+    "cat": "operations",
+    "text": "3. serve smbv1 Options. python ps2servers.py serve smbv1 --share games=/srv/ps2 --port 1111 [options] Flag Default Description --share NAME=PATH games=... Define a share name mapped to a directory path. Can be repeated. --port PORT 1111 TCP listening port. --read-only false Disable writes (saves and VMCs).",
+    "url": "cli.html#serve-smbv1"
+  },
+  {
+    "title": "Core CLI Reference — 4. serve udpbd Options",
+    "cat": "operations",
+    "text": "4. serve udpbd Options. python ps2servers.py serve udpbd /srv/images/game.iso --read-only [options] Flag Default Description IMAGE_PATH (Positional) Path to the disc image file. --port PORT 48573 UDP port for block device commands. --bind IP 0.0.0.0 Interface bind address. --read-only false Prevent write modifications to the backing image.",
+    "url": "cli.html#serve-udpbd"
+  },
+  {
+    "title": "Core CLI Reference — 5. Running Under systemd",
+    "cat": "operations",
+    "text": "5. Running Under systemd. Create a service unit file at /etc/systemd/system/ps2servers-udpfs.service : [Unit] Description=PS2 Servers UDPFS Service After=network.target [Service] Type=simple User=ps2games ExecStart=/usr/bin/python3 /opt/ps2-servers/ps2servers.py serve udpfs --root-dir /srv/ps2games --read-only Restart=on-failure RestartSec=5s [Install] WantedBy=multi-user.target Enable and start the service: sudo systemctl daemon-reload sudo systemctl enable --now ps2servers-udpfs sudo journalctl -u ps2servers-udpfs -f",
+    "url": "cli.html#systemd"
+  },
+  {
+    "title": "Compressed Disc Formats",
+    "cat": "operations",
+    "text": "Compressed Disc Formats PS2 Servers supports compressed disc formats, enabling you to store large game libraries in a fraction of the disk space while streaming them seamlessly to your PlayStation 2. Server-Side vs Client-Side Decompression There are two ways compressed images are streamed: Client-Side Decoding (ZSO): The server transfers compressed LZ4 blocks directly over the network; the PS2's processor decompresses them in RAM. This minimizes network traffic. Server-Side Decoding (CHD & CSO): The host PC or router decompresses requested sectors in real time and delivers raw optical disc sectors to the console. The console never knows the file is compressed. 1. Format Comparison Matrix Format Algorithm Typical Storage Reduction Console Decoding Server Decoding Support Raw ISO ( .iso ) None (Uncompressed) 0% Native Desktop · Core · Edge ZSO ( .zso , .ziso ) LZ4 (2048-byte blocks) 20% – 45% Native in OPL / RiptOPL Desktop · Core · Edge CSO ( .cso , .ciso ) Deflate / zlib 25% – 50% Limited / High IOP load Desktop · Core · Edge CHD ( .chd ) LZMA / FLAC / zlib 35% – 65% (Best) None Desktop · Core (via libchdr ) 2. Optional Compression Dependencies PS2 Servers Desktop and Core automatically inspect the Python environment for optional acceleration and decompression modules: libchdr — Required for CHD format decompression. Included in pre-compiled Desktop packages; installable via pip install libchdr in source mode. lz4 — Accelerates ZSO block parsing and verification. zstandard — Provides Zstandard dictionary acceleration. Desktop Dependency Panel In PS2 Servers Desktop, click Settings → Dependencies to inspect the detected status of all optional compression libraries. If a library is missing, Desktop displays exact installation commands for your OS. 3. Compressing Your Disc Images  Compressing to ZSO (Recommended for Console Compatibility) Use maxcso to compress raw DVD ISOs into high-speed ZSO images: maxcso --format=zso --block=2048 game.iso -o DVD/SLUS_201.74.Game.zso Compressing to CHD (Best Compression Ratio) Use chdman (from the MAME toolset) to achieve maximum compression for Desktop/Core serving: # For DVD games: chdman createdvd -i game.iso -o DVD/SLUS_201.74.Game.chd # For CD games (from CUE/BIN): chdman createcd -i game.cue -o CD/SLUS_201.74.Game.chd",
+    "url": "compression.html"
+  },
+  {
+    "title": "Compressed Disc Formats — 1. Format Comparison Matrix",
+    "cat": "operations",
+    "text": "1. Format Comparison Matrix. Format Algorithm Typical Storage Reduction Console Decoding Server Decoding Support Raw ISO ( .iso ) None (Uncompressed) 0% Native Desktop · Core · Edge ZSO ( .zso , .ziso ) LZ4 (2048-byte blocks) 20% – 45% Native in OPL / RiptOPL Desktop · Core · Edge CSO ( .cso , .ciso ) Deflate / zlib 25% – 50% Limited / High IOP load Desktop · Core · Edge CHD ( .chd ) LZMA / FLAC / zlib 35% – 65% (Best) None Desktop · Core (via libchdr )",
+    "url": "compression.html#formats-matrix"
+  },
+  {
+    "title": "Compressed Disc Formats — 2. Optional Compression Dependencies",
+    "cat": "operations",
+    "text": "2. Optional Compression Dependencies. PS2 Servers Desktop and Core automatically inspect the Python environment for optional acceleration and decompression modules: libchdr — Required for CHD format decompression. Included in pre-compiled Desktop packages; installable via pip install libchdr in source mode. lz4 — Accelerates ZSO block parsing and verification. zstandard — Provides Zstandard dictionary acceleration. Desktop Dependency Panel In PS2 Servers Desktop, click Settings → Dependencies to inspect the detected status of all optional compression libraries. If a library is missing, Desktop displays exact installation commands for your OS.",
+    "url": "compression.html#optional-deps"
+  },
+  {
+    "title": "Compressed Disc Formats — 3. Compressing Your Disc Images",
+    "cat": "operations",
+    "text": "3. Compressing Your Disc Images. ",
+    "url": "compression.html#creating-compressed-games"
+  },
+  {
+    "title": "Compressed Disc Formats — Compressing to ZSO (Recommended for Console Compatibility)",
+    "cat": "operations",
+    "text": "Compressing to ZSO (Recommended for Console Compatibility). Use maxcso to compress raw DVD ISOs into high-speed ZSO images: maxcso --format=zso --block=2048 game.iso -o DVD/SLUS_201.74.Game.zso",
+    "url": "compression.html"
+  },
+  {
+    "title": "Compressed Disc Formats — Compressing to CHD (Best Compression Ratio)",
+    "cat": "operations",
+    "text": "Compressing to CHD (Best Compression Ratio). Use chdman (from the MAME toolset) to achieve maximum compression for Desktop/Core serving: # For DVD games: chdman createdvd -i game.iso -o DVD/SLUS_201.74.Game.chd # For CD games (from CUE/BIN): chdman createcd -i game.cue -o CD/SLUS_201.74.Game.chd",
+    "url": "compression.html"
+  },
+  {
+    "title": "Protocol Compatibility",
+    "cat": "operations",
+    "text": "Protocol Compatibility & Wire Specs In-depth technical breakdown of protocol implementations across Desktop/Core (Python) and Edge (Go), packet-level wire specifications, and homebrew client support matrix. Specification Parity PS2 Servers maintains 100% wire-protocol parity with canonical specifications: the udpfsd specification by pcm720, the UDPBD block driver specification, and the Microsoft SMBv1 / SMB2 / SMB3 network contracts. 1. Console Homebrew Compatibility Matrix Loader support varies by project and version. Review this matrix to match your loader to the correct server mode: Loader / Application SMBv1 SMB2 / SMB3 UDPFS UDPBD HTTP RiptOPL Full Support Full Support Full Support Full Support Full Support Official OPL (ps2homebrew) Full Support Not in stock Not in stock Not in stock Not in stock Neutrino (Core) via SMB module No Native Primary Native Primary No NHDDL (Neutrino GUI) No No Native Primary Native Primary No Open-PS2-Loader-HTTP (Docmine17) No No No No Native Primary 2. Core (Python) vs Edge (Go) Wire Differences While both implementations produce compatible network flows, they differ in several low-level operational details: Socket Binding Semantics Core (Python): Passing --bind IP binds only the dynamically allocated data socket; the discovery listener continues to listen on 0.0.0.0 (all interfaces) to catch broadcasts. Edge (Go): Passing --bind IP binds both the discovery socket and the data socket to that explicit IP. CSO/ZSO Cache Architectures Core (Python): Relies on OS page cache and Python's memory view slices for sector buffering. Edge (Go): Implements an explicit, fixed-size ring cache for decompressed sector blocks, maintaining predictable sub-20MB memory ceilings on embedded routers. 3. UDPFS Packet Structure UDPFS packets start with a fixed 16-byte header: +----------------+----------------+----------------+----------------+ | Magic (0xF5F6) | Command (16b) | Sequence (32b) | Length (32b) | +----------------+----------------+----------------+----------------+ | File Handle / Session ID (32b) | Payload Data (0 - 4096 bytes) | +---------------------------------+---------------------------------+ Commands include OPEN , READ , WRITE , CLOSE , READDIR , and STAT . Standard mode limits payload frames to 4096 bytes, aligning cleanly with the PS2 IOP's network buffer allocations.",
+    "url": "protocol-compatibility.html"
+  },
+  {
+    "title": "Protocol Compatibility — Protocol Compatibility & Wire Specs",
+    "cat": "operations",
+    "text": "Protocol Compatibility & Wire Specs. In-depth technical breakdown of protocol implementations across Desktop/Core (Python) and Edge (Go), packet-level wire specifications, and homebrew client support matrix. Specification Parity PS2 Servers maintains 100% wire-protocol parity with canonical specifications: the udpfsd specification by pcm720, the UDPBD block driver specification, and the Microsoft SMBv1 / SMB2 / SMB3 network contracts.",
+    "url": "protocol-compatibility.html"
+  },
+  {
+    "title": "Protocol Compatibility — 1. Console Homebrew Compatibility Matrix",
+    "cat": "operations",
+    "text": "1. Console Homebrew Compatibility Matrix. Loader support varies by project and version. Review this matrix to match your loader to the correct server mode: Loader / Application SMBv1 SMB2 / SMB3 UDPFS UDPBD HTTP RiptOPL Full Support Full Support Full Support Full Support Full Support Official OPL (ps2homebrew) Full Support Not in stock Not in stock Not in stock Not in stock Neutrino (Core) via SMB module No Native Primary Native Primary No NHDDL (Neutrino GUI) No No Native Primary Native Primary No Open-PS2-Loader-HTTP (Docmine17) No No No No Native Primary",
+    "url": "protocol-compatibility.html#client-matrix"
+  },
+  {
+    "title": "Protocol Compatibility — 2. Core (Python) vs Edge (Go) Wire Differences",
+    "cat": "operations",
+    "text": "2. Core (Python) vs Edge (Go) Wire Differences. While both implementations produce compatible network flows, they differ in several low-level operational details:",
+    "url": "protocol-compatibility.html#core-vs-edge"
+  },
+  {
+    "title": "Protocol Compatibility — Socket Binding Semantics",
+    "cat": "operations",
+    "text": "Socket Binding Semantics. Core (Python): Passing --bind IP binds only the dynamically allocated data socket; the discovery listener continues to listen on 0.0.0.0 (all interfaces) to catch broadcasts. Edge (Go): Passing --bind IP binds both the discovery socket and the data socket to that explicit IP.",
+    "url": "protocol-compatibility.html"
+  },
+  {
+    "title": "Protocol Compatibility — CSO/ZSO Cache Architectures",
+    "cat": "operations",
+    "text": "CSO/ZSO Cache Architectures. Core (Python): Relies on OS page cache and Python's memory view slices for sector buffering. Edge (Go): Implements an explicit, fixed-size ring cache for decompressed sector blocks, maintaining predictable sub-20MB memory ceilings on embedded routers.",
+    "url": "protocol-compatibility.html"
+  },
+  {
+    "title": "Protocol Compatibility — 3. UDPFS Packet Structure",
+    "cat": "operations",
+    "text": "3. UDPFS Packet Structure. UDPFS packets start with a fixed 16-byte header: +----------------+----------------+----------------+----------------+ | Magic (0xF5F6) | Command (16b) | Sequence (32b) | Length (32b) | +----------------+----------------+----------------+----------------+ | File Handle / Session ID (32b) | Payload Data (0 - 4096 bytes) | +---------------------------------+---------------------------------+ Commands include OPEN , READ , WRITE , CLOSE , READDIR , and STAT . Standard mode limits payload frames to 4096 bytes, aligning cleanly with the PS2 IOP's network buffer allocations.",
+    "url": "protocol-compatibility.html#udpfs-packet-format"
+  },
+  {
+    "title": "UDPFS Diagnostics",
+    "cat": "operations",
+    "text": "UDPFS Handoff & Diagnostics Step-by-step diagnostic methodologies for troubleshooting UDPFS connection issues, interpreting server log prefixes, and utilizing the 45-second inactivity telemetry report. Observability First A server log that simply goes quiet cannot tell you what failed on its own. PS2 Servers Core includes active network-probing diagnostics that distinguish between console IOP crashes, driver read errors, and packet routing stalls. 1. Decoding Server Log Prefixes Every incoming packet logged in PS2 Servers Core begins with a client endpoint prefix: [192.168.1.150:62966] Discovery probe received (seq=0) [192.168.1.150:62966] Session created -> data socket assigned 62967 [192.168.1.150:62967] OPEN DVD/SLUS_201.74.Rumble Racing.iso (flags=1) Client IP Changes During Launch If you see the IP change midway through booting (e.g. from 192.168.1.150 during game browsing to 192.168.0.10 on launch), the launched loader or game-specific configuration has a different static IP configured in its network driver. Ensure static IPs match across all configuration screens. Repeated Discovery (seq=0 Loops) If the server logs repeated seq=0 probes without advancing to data reads, the console is broadcasting discovery packets but cannot receive the server's reply. Check that the server's reply is not routed out of a secondary network interface (Wi-Fi). 2. The 45-Second Inactivity Diagnostic When a console with active open files stops communicating for 45 seconds, PS2 Servers Core sends an active ARP probe and evaluates the network interface, printing one of three definitive diagnostic verdicts: Verdict 1: \"Still sending\" Meaning: The console is continuing to transmit UDP packets, but they are out of sequence or corrupted. Cause: Packet loss or high latency on the network path. Ensure the connection is wired and that no conflicting UDP traffic saturates the link. Verdict 2: \"Still answers ARP\" Meaning: The PS2's network adapter is fully alive and responding to low-level link layer probes, but the game loader driver has ceased requesting data. Cause: Neutrino and OPL drivers halt completely after a single unrecoverable disc read error. The log lines immediately preceding this message identify the exact sector or file that caused the failure (e.g. bad disc dump, unsupported compression container). Verdict 3: \"No longer answers ARP\" Meaning: The PS2 hardware is completely unresponsive on the network link. Cause: The console's Input/Output Processor (IOP) crashed, t",
+    "url": "udpfs-diagnostics.html"
+  },
+  {
+    "title": "UDPFS Diagnostics — UDPFS Handoff & Diagnostics",
+    "cat": "operations",
+    "text": "UDPFS Handoff & Diagnostics. Step-by-step diagnostic methodologies for troubleshooting UDPFS connection issues, interpreting server log prefixes, and utilizing the 45-second inactivity telemetry report. Observability First A server log that simply goes quiet cannot tell you what failed on its own. PS2 Servers Core includes active network-probing diagnostics that distinguish between console IOP crashes, driver read errors, and packet routing stalls.",
+    "url": "udpfs-diagnostics.html"
+  },
+  {
+    "title": "UDPFS Diagnostics — 1. Decoding Server Log Prefixes",
+    "cat": "operations",
+    "text": "1. Decoding Server Log Prefixes. Every incoming packet logged in PS2 Servers Core begins with a client endpoint prefix: [192.168.1.150:62966] Discovery probe received (seq=0) [192.168.1.150:62966] Session created -> data socket assigned 62967 [192.168.1.150:62967] OPEN DVD/SLUS_201.74.Rumble Racing.iso (flags=1)",
+    "url": "udpfs-diagnostics.html#log-prefixes"
+  },
+  {
+    "title": "UDPFS Diagnostics — Client IP Changes During Launch",
+    "cat": "operations",
+    "text": "Client IP Changes During Launch. If you see the IP change midway through booting (e.g. from 192.168.1.150 during game browsing to 192.168.0.10 on launch), the launched loader or game-specific configuration has a different static IP configured in its network driver. Ensure static IPs match across all configuration screens.",
+    "url": "udpfs-diagnostics.html"
+  },
+  {
+    "title": "UDPFS Diagnostics — Repeated Discovery (seq=0 Loops)",
+    "cat": "operations",
+    "text": "Repeated Discovery (seq=0 Loops). If the server logs repeated seq=0 probes without advancing to data reads, the console is broadcasting discovery packets but cannot receive the server's reply. Check that the server's reply is not routed out of a secondary network interface (Wi-Fi).",
+    "url": "udpfs-diagnostics.html"
+  },
+  {
+    "title": "UDPFS Diagnostics — 2. The 45-Second Inactivity Diagnostic",
+    "cat": "operations",
+    "text": "2. The 45-Second Inactivity Diagnostic. When a console with active open files stops communicating for 45 seconds, PS2 Servers Core sends an active ARP probe and evaluates the network interface, printing one of three definitive diagnostic verdicts:",
+    "url": "udpfs-diagnostics.html#inactivity-telemetry"
+  },
+  {
+    "title": "UDPFS Diagnostics — Verdict 1: \"Still sending\"",
+    "cat": "operations",
+    "text": "Verdict 1: \"Still sending\". Meaning: The console is continuing to transmit UDP packets, but they are out of sequence or corrupted. Cause: Packet loss or high latency on the network path. Ensure the connection is wired and that no conflicting UDP traffic saturates the link.",
+    "url": "udpfs-diagnostics.html"
+  },
+  {
+    "title": "UDPFS Diagnostics — Verdict 2: \"Still answers ARP\"",
+    "cat": "operations",
+    "text": "Verdict 2: \"Still answers ARP\". Meaning: The PS2's network adapter is fully alive and responding to low-level link layer probes, but the game loader driver has ceased requesting data. Cause: Neutrino and OPL drivers halt completely after a single unrecoverable disc read error. The log lines immediately preceding this message identify the exact sector or file that caused the failure (e.g. bad disc dump, unsupported compression container).",
+    "url": "udpfs-diagnostics.html"
+  },
+  {
+    "title": "UDPFS Diagnostics — Verdict 3: \"No longer answers ARP\"",
+    "cat": "operations",
+    "text": "Verdict 3: \"No longer answers ARP\". Meaning: The PS2 hardware is completely unresponsive on the network link. Cause: The console's Input/Output Processor (IOP) crashed, the network adapter lost power, or the console was reset or turned off.",
+    "url": "udpfs-diagnostics.html"
+  },
+  {
+    "title": "UDPFS Diagnostics — 3. Step-by-Step Resolution Workflow",
+    "cat": "operations",
+    "text": "3. Step-by-Step Resolution Workflow. Pin the PC Bind Address: On the UDPFS card, click Use LAN IP to bind data packets directly to your PS2-facing Ethernet interface. Test a Known-Good ISO: Always test with an uncompressed, 1:1 Redump-verified .iso image before troubleshooting compressed ZSO/CSO/CHD containers. Verify Port Pairing: If running with a manual firewall, ensure both discovery port 62966 and your data port (e.g. 62967 ) are permitted in UDP rules. Run Core in Verbose Mode: For deep troubleshooting, launch from the terminal: python ps2servers.py serve udpfs --root-dir /srv/ps2 --bind 192.168.1.100 --verbose",
+    "url": "udpfs-diagnostics.html#checklist"
+  },
+  {
+    "title": "Antivirus Transparency & Trust",
+    "cat": "operations",
+    "text": "Antivirus Transparency & Trust PS2 Servers is a 100% open-source, community-driven network utility. Because it binds to local network sockets, handles raw datagrams, and is packaged without commercial code-signing certificates, heuristic antivirus engines may flag downloaded binaries as false positives. Core Trust Statement A generic detection label (such as Win32/Wacatac or Generic.Malware ) does not prove that a binary contains malicious code; it indicates that an automated heuristic rule matched patterns common to binary packers. Every line of source code in PS2 Servers is publicly auditable on GitHub. 1. Why Heuristics Flag PS2 Servers  Self-Extracting Packaging (Nuitka / PyInstaller) Single-file desktop executables bundle the Python interpreter, runtime DLLs, and server scripts into a compressed archive. When run, the stub extracts these files into a temporary directory ( %TEMP% ) and launches an unprivileged child process. Heuristic engines often flag any unpacker stub that extracts and executes code. Network Socket Binding PS2 Servers listens on low-level TCP and UDP ports (such as SMB port 1025/1111 and UDPFS port 62966). Software that opens network listener sockets without a commercially purchased digital signature is routinely treated with suspicion by heuristic algorithms. Lack of Commercial Code Signing Microsoft and commercial antivirus vendors give high trust ratings to executables signed with Extended Validation (EV) certificates. EV certificates cost hundreds of dollars annually and require corporate registration, which is prohibitive for free open-source hobbyist software. 2. Portable Builds: The Recommended Choice To reduce false positives, we provide portable archives ( PS2Servers-windows-x64-portable.zip ). The portable package contains all libraries and executables pre-extracted in a standard folder. Because portable builds do not use runtime self-extraction wrappers, they trigger significantly fewer heuristic alarms and launch noticeably faster. 3. How to Verify Downloaded Files Never bypass security warnings blindly. You can verify that your download has not been tampered with through cryptographic proofs: Compare SHA-256 Checksums: Verify that the hash of your file matches the official SHA256SUMS.txt attached to the GitHub release. Verify GitHub Build Attestations: Confirm that the file was built directly from our source repository by GitHub Actions: gh attestation verify PS2Servers-windows-x64-portable.zip -R NathanNeurotic/PS2-Ser",
+    "url": "antivirus.html"
+  },
+  {
+    "title": "Antivirus Transparency & Trust — 1. Why Heuristics Flag PS2 Servers",
+    "cat": "operations",
+    "text": "1. Why Heuristics Flag PS2 Servers. ",
+    "url": "antivirus.html#why-flagged"
+  },
+  {
+    "title": "Antivirus Transparency & Trust — Self-Extracting Packaging (Nuitka / PyInstaller)",
+    "cat": "operations",
+    "text": "Self-Extracting Packaging (Nuitka / PyInstaller). Single-file desktop executables bundle the Python interpreter, runtime DLLs, and server scripts into a compressed archive. When run, the stub extracts these files into a temporary directory ( %TEMP% ) and launches an unprivileged child process. Heuristic engines often flag any unpacker stub that extracts and executes code.",
+    "url": "antivirus.html"
+  },
+  {
+    "title": "Antivirus Transparency & Trust — Network Socket Binding",
+    "cat": "operations",
+    "text": "Network Socket Binding. PS2 Servers listens on low-level TCP and UDP ports (such as SMB port 1025/1111 and UDPFS port 62966). Software that opens network listener sockets without a commercially purchased digital signature is routinely treated with suspicion by heuristic algorithms.",
+    "url": "antivirus.html"
+  },
+  {
+    "title": "Antivirus Transparency & Trust — Lack of Commercial Code Signing",
+    "cat": "operations",
+    "text": "Lack of Commercial Code Signing. Microsoft and commercial antivirus vendors give high trust ratings to executables signed with Extended Validation (EV) certificates. EV certificates cost hundreds of dollars annually and require corporate registration, which is prohibitive for free open-source hobbyist software.",
+    "url": "antivirus.html"
+  },
+  {
+    "title": "Antivirus Transparency & Trust — 2. Portable Builds: The Recommended Choice",
+    "cat": "operations",
+    "text": "2. Portable Builds: The Recommended Choice. To reduce false positives, we provide portable archives ( PS2Servers-windows-x64-portable.zip ). The portable package contains all libraries and executables pre-extracted in a standard folder. Because portable builds do not use runtime self-extraction wrappers, they trigger significantly fewer heuristic alarms and launch noticeably faster.",
+    "url": "antivirus.html#portable-builds"
+  },
+  {
+    "title": "Antivirus Transparency & Trust — 3. How to Verify Downloaded Files",
+    "cat": "operations",
+    "text": "3. How to Verify Downloaded Files. Never bypass security warnings blindly. You can verify that your download has not been tampered with through cryptographic proofs: Compare SHA-256 Checksums: Verify that the hash of your file matches the official SHA256SUMS.txt attached to the GitHub release. Verify GitHub Build Attestations: Confirm that the file was built directly from our source repository by GitHub Actions: gh attestation verify PS2Servers-windows-x64-portable.zip -R NathanNeurotic/PS2-Servers Run Directly From Source: If you prefer not to execute pre-compiled binaries, clone the repository and run via Python directly: git clone https://github.com/NathanNeurotic/PS2-Servers.git cd PS2-Servers python ps2servers.py",
+    "url": "antivirus.html#verifying-authenticity"
+  },
+  {
+    "title": "Antivirus Transparency & Trust — 4. Expected System Behavior",
+    "cat": "operations",
+    "text": "4. Expected System Behavior. PS2 Servers strictly adheres to the following security principles: No Kernel Modifications: Does not enable Windows SMB 1.0 optional features, does not install system drivers, and does not alter core OS files. Firewall Transparency: Any firewall rules created are explicitly named PS2 Servers - ... and can be removed instantly with one click in the app or via Windows Firewall. Zero Telemetry / No Phone-Home: PS2 Servers does not contact external cloud servers, collects no personal data, contains no advertising, and does not perform background mining. Clean Removal: Stop the running servers, delete the folder, and the application is completely gone from your system.",
+    "url": "antivirus.html#expected-behavior"
+  },
+  {
+    "title": "Antivirus Transparency & Trust — 5. Adding Exclusions in Windows Security",
+    "cat": "operations",
+    "text": "5. Adding Exclusions in Windows Security. If Windows Defender quarantines your downloaded portable build: Open Windows Security → Virus & threat protection . Select Manage settings under Virus & threat protection settings . Scroll to Exclusions and click Add or remove exclusions . Select Folder and choose the folder where you extracted PS2 Servers.",
+    "url": "antivirus.html#adding-exclusions"
+  },
+  {
+    "title": "Planned Features: NBD & ps2client",
+    "cat": "operations",
+    "text": "Planned Features: NBD & ps2client Architectural vision for extending PS2 Servers with Network Block Device (NBD) capabilities and ps2client developer instrumentation. Roadmap Feature This specification defines planned integrations currently undergoing prototyping and architectural evaluation. 1. The Two Directions of NBD The standard Linux Network Block Device (NBD) protocol enables block devices to be served over TCP port 10809 . Within the PS2 ecosystem, this serves two transformative workflows: Direction 1: PS2 HDD Export to PC (Internal HDD Management) The PS2 console boots a dedicated NBD server ELF, exposing its internal APA / exFAT 3.5\" or 2.5\" hard drive over Ethernet. A PC mounts the PS2's internal drive as a native block device using WinNBD (Windows) or nbd-client (Linux). Key Benefit: Allows users to copy ISOs, manage partitions, and backup saves at full 100Mbps Ethernet speeds without ever having to physically unscrew the network adapter or risk damaging 24-year-old IDE/SATA connector pins. Direction 2: PC Block Image Export to PS2 PS2 Servers serves raw disc images and virtual drives over standard NBD (TCP 10809) as an alternative to UDPBD. Loaders with an NBD client driver mount remote PC storage directly with TCP flow control. 2. ps2client Integration ps2client is the standard CLI utility for communicating with ps2link over Ethernet for homebrew developers. Integrating ps2client into the PS2 Servers Desktop launcher will allow: One-click remote execution of ELFs directly on the console over LAN. Live in-app streaming of PS2 kernel `printf` debugging logs (TTY output). Remote console reboot and power management.",
+    "url": "nbd-ps2client.html"
+  },
+  {
+    "title": "Planned Features: NBD & ps2client — 1. The Two Directions of NBD",
+    "cat": "operations",
+    "text": "1. The Two Directions of NBD. The standard Linux Network Block Device (NBD) protocol enables block devices to be served over TCP port 10809 . Within the PS2 ecosystem, this serves two transformative workflows:",
+    "url": "nbd-ps2client.html#two-directions-nbd"
+  },
+  {
+    "title": "Planned Features: NBD & ps2client — Direction 1: PS2 HDD Export to PC (Internal HDD Management)",
+    "cat": "operations",
+    "text": "Direction 1: PS2 HDD Export to PC (Internal HDD Management). The PS2 console boots a dedicated NBD server ELF, exposing its internal APA / exFAT 3.5\" or 2.5\" hard drive over Ethernet. A PC mounts the PS2's internal drive as a native block device using WinNBD (Windows) or nbd-client (Linux). Key Benefit: Allows users to copy ISOs, manage partitions, and backup saves at full 100Mbps Ethernet speeds without ever having to physically unscrew the network adapter or risk damaging 24-year-old IDE/SATA connector pins.",
+    "url": "nbd-ps2client.html"
+  },
+  {
+    "title": "Planned Features: NBD & ps2client — Direction 2: PC Block Image Export to PS2",
+    "cat": "operations",
+    "text": "Direction 2: PC Block Image Export to PS2. PS2 Servers serves raw disc images and virtual drives over standard NBD (TCP 10809) as an alternative to UDPBD. Loaders with an NBD client driver mount remote PC storage directly with TCP flow control.",
+    "url": "nbd-ps2client.html"
+  },
+  {
+    "title": "Planned Features: NBD & ps2client — 2. ps2client Integration",
+    "cat": "operations",
+    "text": "2. ps2client Integration. ps2client is the standard CLI utility for communicating with ps2link over Ethernet for homebrew developers. Integrating ps2client into the PS2 Servers Desktop launcher will allow: One-click remote execution of ELFs directly on the console over LAN. Live in-app streaming of PS2 kernel `printf` debugging logs (TTY output). Remote console reboot and power management.",
+    "url": "nbd-ps2client.html#ps2client"
+  },
+  {
+    "title": "Credits & Sources",
+    "cat": "reference",
+    "text": "Credits, Sources & Acknowledgments PS2 Servers is built on the collective achievements, reverse engineering efforts, and code contributions of the PlayStation 2 homebrew development community. Core Contributors & Collaborators  NathanNeurotic (Ripto) Creator and maintainer of PS2 Servers (Desktop, Core, Edge), the RiptOPL loader fork, and comprehensive PlayStation 2 documentation systems. FatBaldDad Author of PS2-EtherDrive . In direct collaboration, co-architecting unified server foundations, networking standards, and hardware testing methodologies. Upstream Projects & Specifications  pcm720 Pioneer of the udpfsd protocol specification and original server implementation, establishing high-speed UDP-based network game loading on the PS2. ps2homebrew Team The maintainers of the canonical Open-PS2-Loader repository and the open-source ps2sdk toolchain. darkladark (dnunezx) Author of LUNA (Lightweight Unified Neutrino Access) and key contributor to Neutrino network loading, Modulo protocol integration, and RiptOPL improvements. Docmine17 Creator of Open-PS2-Loader-HTTP , introducing ISO streaming via standard HTTP Range headers. Maximus32 Creator of the modular Neutrino external game loader core and driver architecture. uyjulian Longtime contributor to OPL network drivers, lwIP integration, and high-performance SMB protocol improvements. Open-Source Technologies Python Software Foundation — Python 3 runtime and Tkinter GUI engine. Go (Golang) Project — High-concurrency static binary compilation for Edge. OpenWrt Project — Embedded Linux router operating system and package ecosystem. libchdr — Fast, portable CHD compressed disc image decoding. maxcso & LZ4 — High-speed compressed ZSO disc image containers.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — Credits, Sources & Acknowledgments",
+    "cat": "reference",
+    "text": "Credits, Sources & Acknowledgments. PS2 Servers is built on the collective achievements, reverse engineering efforts, and code contributions of the PlayStation 2 homebrew development community.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — Core Contributors & Collaborators",
+    "cat": "reference",
+    "text": "Core Contributors & Collaborators. ",
+    "url": "credits.html#collaborators"
+  },
+  {
+    "title": "Credits & Sources — NathanNeurotic (Ripto)",
+    "cat": "reference",
+    "text": "NathanNeurotic (Ripto). Creator and maintainer of PS2 Servers (Desktop, Core, Edge), the RiptOPL loader fork, and comprehensive PlayStation 2 documentation systems.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — FatBaldDad",
+    "cat": "reference",
+    "text": "FatBaldDad. Author of PS2-EtherDrive . In direct collaboration, co-architecting unified server foundations, networking standards, and hardware testing methodologies.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — Upstream Projects & Specifications",
+    "cat": "reference",
+    "text": "Upstream Projects & Specifications. ",
+    "url": "credits.html#upstream-pioneers"
+  },
+  {
+    "title": "Credits & Sources — pcm720",
+    "cat": "reference",
+    "text": "pcm720. Pioneer of the udpfsd protocol specification and original server implementation, establishing high-speed UDP-based network game loading on the PS2.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — ps2homebrew Team",
+    "cat": "reference",
+    "text": "ps2homebrew Team. The maintainers of the canonical Open-PS2-Loader repository and the open-source ps2sdk toolchain.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — darkladark (dnunezx)",
+    "cat": "reference",
+    "text": "darkladark (dnunezx). Author of LUNA (Lightweight Unified Neutrino Access) and key contributor to Neutrino network loading, Modulo protocol integration, and RiptOPL improvements.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — Docmine17",
+    "cat": "reference",
+    "text": "Docmine17. Creator of Open-PS2-Loader-HTTP , introducing ISO streaming via standard HTTP Range headers.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — Maximus32",
+    "cat": "reference",
+    "text": "Maximus32. Creator of the modular Neutrino external game loader core and driver architecture.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — uyjulian",
+    "cat": "reference",
+    "text": "uyjulian. Longtime contributor to OPL network drivers, lwIP integration, and high-performance SMB protocol improvements.",
+    "url": "credits.html"
+  },
+  {
+    "title": "Credits & Sources — Open-Source Technologies",
+    "cat": "reference",
+    "text": "Open-Source Technologies. Python Software Foundation — Python 3 runtime and Tkinter GUI engine. Go (Golang) Project — High-concurrency static binary compilation for Edge. OpenWrt Project — Embedded Linux router operating system and package ecosystem. libchdr — Fast, portable CHD compressed disc image decoding. maxcso & LZ4 — High-speed compressed ZSO disc image containers.",
+    "url": "credits.html#open-source-libraries"
+  }
+]
