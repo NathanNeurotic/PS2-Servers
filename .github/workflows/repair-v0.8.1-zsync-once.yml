@@ -1,0 +1,43 @@
+name: One-shot v0.8.1 zsync repair
+
+on:
+  push:
+    branches:
+      - release-repair/v0.8.1-zsync
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    name: Attach v0.8.1 zsync metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download published AppImage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download v0.8.1 --repo "$GITHUB_REPOSITORY" --pattern 'PS2Servers-x86_64.AppImage'
+
+      - name: Verify embedded update information
+        shell: bash
+        run: |
+          set -euo pipefail
+          readelf -p .upd_info PS2Servers-x86_64.AppImage | grep -F 'gh-releases-zsync|NathanNeurotic|PS2-Servers|latest|PS2Servers-x86_64.AppImage.zsync'
+
+      - name: Generate and attach zsync metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y zsync >/dev/null
+          zsyncmake -u PS2Servers-x86_64.AppImage PS2Servers-x86_64.AppImage
+          test -s PS2Servers-x86_64.AppImage.zsync
+          sha256sum PS2Servers-x86_64.AppImage.zsync > PS2Servers-x86_64.AppImage.zsync.sha256.txt
+          gh release upload v0.8.1 --repo "$GITHUB_REPOSITORY" \
+            PS2Servers-x86_64.AppImage.zsync \
+            PS2Servers-x86_64.AppImage.zsync.sha256.txt \
+            --clobber
