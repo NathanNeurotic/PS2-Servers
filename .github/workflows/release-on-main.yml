@@ -31,7 +31,9 @@ jobs:
             asset_name: PS2Servers-windows-x86.zip
             portable_asset: PS2Servers-windows-x86-portable.zip
             win_arch: x86
-          - os: ubuntu-latest
+          # Keep Linux artifacts compatible with older supported distributions.
+          # ubuntu-latest can move to a newer glibc and silently raise the runtime floor.
+          - os: ubuntu-22.04
             asset_name: PS2Servers-linux-x64
             portable_asset: PS2Servers-linux-x64-portable.tar.gz
           - os: macos-latest
