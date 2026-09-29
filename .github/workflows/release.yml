@@ -329,6 +329,14 @@ jobs:
             -u "$UPDATE_INFO" "$APPDIR" \
             "$GITHUB_WORKSPACE/out/PS2Servers-x86_64.AppImage"
           chmod +x "out/PS2Servers-x86_64.AppImage"
+
+          # appimagetool invokes zsyncmake from the current working directory,
+          # so the generated .zsync lands at the repository root even though
+          # the AppImage itself is written under out/. Move it beside the
+          # AppImage before checksumming/uploading.
+          if [ -f "PS2Servers-x86_64.AppImage.zsync" ]; then
+            mv "PS2Servers-x86_64.AppImage.zsync" "out/PS2Servers-x86_64.AppImage.zsync"
+          fi
           test -f "out/PS2Servers-x86_64.AppImage.zsync"
           ls -la "out/PS2Servers-x86_64.AppImage" "out/PS2Servers-x86_64.AppImage.zsync"
 
