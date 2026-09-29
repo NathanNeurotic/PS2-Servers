@@ -279,7 +279,9 @@ jobs:
           mkdir -p "$APPDIR/usr/bin"
           cp -a "$dist"/. "$APPDIR/usr/bin/"
           test -x "$APPDIR/usr/bin/PS2Servers"
-          sudo apt-get install -y imagemagick libfuse2 >/dev/null 2>&1 || true
+          # zsync provides zsyncmake, which appimagetool uses to generate the
+          # delta-update metadata file when -u is supplied.
+          sudo apt-get install -y imagemagick libfuse2 zsync >/dev/null 2>&1 || true
           if command -v convert >/dev/null 2>&1; then
             convert launcher/assets/theme/LOGO.png -resize 256x256 "$APPDIR/ps2servers.png" \
               || cp launcher/assets/theme/LOGO.png "$APPDIR/ps2servers.png"
@@ -312,11 +314,23 @@ jobs:
           echo "${APPIMAGETOOL_SHA256}  ${TOOL}" | sha256sum -c -
           chmod +x "$TOOL"
           mkdir -p out
+          # Embed AppImageUpdate metadata. Stable builds follow GitHub's latest
+          # stable release; prerelease builds stay on the prerelease channel.
+          UPDATE_CHANNEL="latest"
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            UPDATE_CHANNEL="latest-pre"
+          fi
+          UPDATE_INFO="gh-releases-zsync|NathanNeurotic|PS2-Servers|${UPDATE_CHANNEL}|PS2Servers-x86_64.AppImage.zsync"
+
           # --appimage-extract-and-run runs the tool without needing FUSE on the runner.
-          ARCH=x86_64 "$TOOL" --appimage-extract-and-run "$APPDIR" \
+          # appimagetool -u embeds UPDATE_INFO and invokes zsyncmake to create
+          # PS2Servers-x86_64.AppImage.zsync next to the AppImage.
+          ARCH=x86_64 "$TOOL" --appimage-extract-and-run \
+            -u "$UPDATE_INFO" "$APPDIR" \
             "$GITHUB_WORKSPACE/out/PS2Servers-x86_64.AppImage"
           chmod +x "out/PS2Servers-x86_64.AppImage"
-          ls -la "out/PS2Servers-x86_64.AppImage"
+          test -f "out/PS2Servers-x86_64.AppImage.zsync"
+          ls -la "out/PS2Servers-x86_64.AppImage" "out/PS2Servers-x86_64.AppImage.zsync"
 
       - name: Write AppImage checksum
         if: runner.os == 'Linux' && matrix.portable_asset != ''
@@ -326,11 +340,15 @@ jobs:
           import hashlib
           from pathlib import Path
 
-          asset = Path("out") / "PS2Servers-x86_64.AppImage"
-          if asset.exists():
-              digest = hashlib.sha256(asset.read_bytes()).hexdigest()
-              asset.with_name(asset.name + ".sha256.txt").write_text(
-                  f"{digest}  {asset.name}\n", encoding="utf-8")
+          for name in (
+              "PS2Servers-x86_64.AppImage",
+              "PS2Servers-x86_64.AppImage.zsync",
+          ):
+              asset = Path("out") / name
+              if asset.exists():
+                  digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+                  asset.with_name(asset.name + ".sha256.txt").write_text(
+                      f"{digest}  {asset.name}\n", encoding="utf-8")
 
       - name: Write portable asset checksum
         if: matrix.portable_asset != ''
@@ -401,6 +419,8 @@ jobs:
           path: |
             out/PS2Servers-x86_64.AppImage
             out/PS2Servers-x86_64.AppImage.sha256.txt
+            out/PS2Servers-x86_64.AppImage.zsync
+            out/PS2Servers-x86_64.AppImage.zsync.sha256.txt
 
   # The source archive was built only for rolling pre-releases, so tagged
   # releases never carried one -- while the shared notes told readers to "use
@@ -553,7 +573,7 @@ jobs:
           # preceding sentence ending cleanly rather than with a trailing space.
           appimage=""
           if [ -f PS2Servers-x86_64.AppImage ]; then
-            appimage=" On Linux you can also take \`PS2Servers-x86_64.AppImage\` for desktop and menu shortcuts (via AppImageLauncher)."
+            appimage=" On Linux you can also take \`PS2Servers-x86_64.AppImage\` for desktop and menu shortcuts (via AppImageLauncher); it includes AppImageUpdate metadata. The adjacent \`.zsync\` file is updater metadata, not another app to launch."
           fi
           cd ..
 
