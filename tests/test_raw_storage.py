@@ -267,3 +267,13 @@ class RawStorageTests(unittest.TestCase):
         chunks = [device.read(1024) for _ in range(128)]
         self.assertEqual(b"".join(chunks), backend.data)
         self.assertEqual(backend.calls, [(0, 65536), (65536, 65536)])
+
+    def test_reads_stop_at_request_boundary_including_empty_requests(self):
+        backend = AlignedBackend()
+        device = raw_storage.RawDevice("test", backend)
+        device.seek(0, 1)
+        self.assertEqual(device.read(1024), backend.data[:512])
+        self.assertEqual(device.read(1), b"")
+        device.seek(0, 0)
+        self.assertEqual(device.read(1), b"")
+        self.assertEqual(backend.calls, [(0, 4096)])

@@ -46,7 +46,8 @@ class RawDevice:
     def read(self, count):
         if count < 0:
             raise ValueError("Negative read size")
-        count = min(count, self.size - self._position)
+        limit = self.size if self._request_end is None else self._request_end
+        count = min(count, limit - self._position)
         if not count:
             return b""
         alignment = self._backend.sector_size
