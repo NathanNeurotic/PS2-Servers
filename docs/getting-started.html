@@ -72,6 +72,21 @@
 You need a PlayStation 2 with an Ethernet network interface (a Fat console with an original or compatible Network Adapter, or any Slim model) and a homebrew loader such as <b>RiptOPL</b>, <b>Open PS2 Loader (OPL)</b>, or <b>Neutrino / NHDDL</b> booted via Free McBoot (FMCB), Free HD Boot (FHDB), or Modchip.
 </div>
 
+<h2 id="choose-server">Before You Start: Choose the Right Protocol</h2>
+<p>The server and the console loader must support the <b>same protocol</b>. UDPFS and UDPBD are not interchangeable. Choose the <b>type of data</b> you want to serve first:</p>
+<table data-sortable>
+<thead><tr><th>Desktop mode</th><th>What to select on the server PC</th><th>PS2-side requirement</th></tr></thead>
+<tbody>
+<tr><td><a href="udpfs.html"><b>UDPFS</b></a></td><td>Library <b>folder</b> containing <code>DVD/</code> and <code>CD/</code></td><td>UDPFS-enabled client such as compatible Neutrino, NHDDL, or RiptOPL</td></tr>
+<tr><td><a href="smb.html"><b>SMBv1</b></a></td><td>Shared library <b>folder</b></td><td>SMBv1/ETH-enabled loader and matching host IP, share, and TCP port</td></tr>
+<tr><td><a href="smb.html#smb2-smb3"><b>SMB2 / SMB3</b></a></td><td>Shared library <b>folder</b></td><td>Loader explicitly supporting SMB2/3; SMBv1-only clients cannot use it</td></tr>
+<tr><td><a href="http.html"><b>HTTP</b></a></td><td>Library <b>folder</b></td><td>Compatible HTTP game loader, with exactly matching TCP port</td></tr>
+<tr><td><a href="udpbd.html"><b>UDPBD</b></a></td><td><b>One block-image file</b>, e.g. <code>game.iso</code> or <code>disk.img</code>; <b>not a folder</b></td><td>UDPBD driver that understands the file's block layout</td></tr>
+</tbody></table>
+<div class="callout warn"><div class="h">Want a Folder of Games? Do Not Select UDPBD</div>
+UDPBD exposes one image as raw sectors. It does not make a <code>DVD/</code> library browsable. Use <a href="udpfs.html">UDPFS</a> or <a href="smb.html">SMB</a> for a library, and choose that same protocol on the PS2. If the loader reports <code>mass0:</code> or "cannot open folder", see the <a href="udpbd.html#troubleshooting">UDPBD troubleshooting guide</a> instead of guessing which device is behind the label.
+</div>
+
 <h2 id="network-topology">1. Connect Your PS2 to the Network</h2>
 <p>Both your server host (PC, router, Raspberry Pi, or NAS) and your PlayStation 2 must share a physical or bridged local network. A wired Ethernet connection is strongly advised; Wi-Fi can cause stuttering during FMV playback and disc reads.</p>
 
@@ -98,8 +113,8 @@ You need a PlayStation 2 with an Ethernet network interface (a Fat console with 
   </article>
 </div>
 
-<h2 id="folder-structure">2. Set Up Your Game Directory</h2>
-<p>Create a dedicated folder on your storage drive (for example <code>D:\PS2Games</code> on Windows or <code>/srv/ps2</code> on Linux). Organize it with the standard OPL folder hierarchy:</p>
+<h2 id="folder-structure">2. Prepare Your Library or Block Image</h2>
+<p><b>For UDPFS, SMB, and HTTP:</b> create a dedicated game-library folder (for example <code>D:\PS2Games</code> on Windows or <code>/srv/ps2</code> on Linux) and organize it with the standard OPL hierarchy:</p>
 
 <pre><code>PS2Games/
 ├── CD/         ← CD-based PS2 games (&lt;700 MB ISO images)
@@ -115,6 +130,8 @@ For best compatibility, name your games using the standard OPL startup identifie
 <code>DVD/SLUS_201.74.Rumble Racing.iso</code> or <code>CD/SCUS_971.24.Game.iso</code>.
 </div>
 
+<p><b>For UDPBD:</b> do <b>not</b> select this library directory. Select <b>one image file</b> in the UDPBD card instead. Its internal format must match what the console-side block driver expects. Enable <b>Read-only</b> for your first test. See the <a href="udpbd.html#setup-steps">UDPBD setup steps</a>.</p>
+
 <h2 id="launching-server">3. Start PS2 Servers</h2>
 <div class="steps">
   <div class="step">
@@ -128,13 +145,18 @@ For best compatibility, name your games using the standard OPL startup identifie
   </div>
 
   <div class="step">
-    <h3>Select Games Folder &amp; Start</h3>
-    <p>On the server card matching your loader (e.g. <b>SMBv1</b> for standard OPL, or <b>UDPFS</b> for Neutrino/RiptOPL), click <b>Browse</b> and select the parent folder holding your <code>DVD/</code> and <code>CD/</code> subdirectories. Click <b>Start</b>.</p>
+    <h3>Select the Right Path &amp; Start</h3>
+    <p>On <b>UDPFS / SMB / HTTP</b>, browse to the parent folder containing <code>DVD/</code> and <code>CD/</code>. On <b>UDPBD</b>, browse to a <b>single image file</b>; do not choose the game-library folder. Press <b>Start</b>, then check Terminal for the image/root path and a successful listening message.</p>
   </div>
 </div>
 
 <div class="callout good"><div class="h">Firewall Notice</div>
 When starting a server for the first time, Windows Defender Firewall may prompt to allow network traffic. Check <b>Private networks</b> and click <b>Allow access</b>. PS2 Servers also provides an automatic firewall rule creator in the application settings.
+</div>
+
+<div class="callout info"><div class="h">External-drive access</div>
+<p>After selecting a folder or image file, click <b>Check access</b> on the server card. The results appear in a dialog and the Terminal log. Folder checks verify listing only; image checks verify reading and, unless read-only is selected, a writable open without writing data. Actual game reads and saves still need testing.</p>
+<p>On Linux, check parent-directory access and mount ownership/permissions; NTFS/exFAT mount options can control access. On Windows, check the target's Security permissions for your account. This check does not open raw disks, reformat drives, or change permissions.</p>
 </div>
 
 <h2 id="console-setup">4. Configure Network in Your Loader</h2>
@@ -189,7 +211,12 @@ When starting a server for the first time, Windows Defender Firewall may prompt 
   </tbody>
 </table>
 
+<div class="callout info"><div class="h">UDPBD Is Not Configured Like SMB or UDPFS</div>
+UDPBD clients normally discover the server by broadcast on <b>UDP 48573</b>. There is no SMB share, username, or password. The PS2 still needs its own working IP configuration. The Desktop <b>LAN IP</b> selector provides hints; it does not bind all server sockets. See <a href="udpbd.html#console-setup">UDPBD console setup</a>.
+</div>
+
 <h2 id="first-game">5. Launch Your First Game</h2>
+<p>These game-list steps apply to <b>filesystem/game-library protocols</b> such as UDPFS, SMB, and compatible HTTP clients. <b>UDPBD exposes a block device</b> and does not provide a <code>DVD/</code> directory listing.</p>
 <ol>
   <li>Save your loader's network configuration to your Memory Card (<code>mc0:</code>).</li>
   <li>Return to the main menu and press the button to refresh the game list (in OPL/RiptOPL, scroll to the ETH / Netboot tab or press <b>Select</b> / <b>Circle</b>).</li>
@@ -198,6 +225,12 @@ When starting a server for the first time, Windows Defender Firewall may prompt 
 </ol>
 
 <h2 id="troubleshooting-faq">Common Questions &amp; Troubleshooting</h2>
+<details class="deep"><summary>My loader says "cannot open folder" or displays "mass0:" while using UDPBD.</summary>
+<p><code>mass0:</code> may be a logical device/mount identifier used by that loader; the label alone does not prove it is a physical USB device. Verify the console-side backend genuinely supports UDPBD, the server is serving <b>one image file</b> rather than a folder, and the client understands that image's format. If you expected to browse a collection of ISO files, use UDPFS or SMB at <b>both ends</b>. <a href="udpbd.html#troubleshooting">Read the UDPBD diagnosis checklist</a>.</p>
+</details>
+<details class="deep"><summary>The server is running but there is no connection. Which IP and port?</summary>
+<p>The PC and PS2 need <b>different IP addresses</b> on a reachable local network. SMB uses the actual displayed TCP port and share; HTTP requires its configured TCP port; UDPFS discovers via UDP 62966 plus an optional data port; UDPBD uses UDP 48573 broadcast discovery. Allow the corresponding traffic through the host firewall, and verify that broadcasts can cross your current switch/router configuration.</p>
+</details>
 
 <details class="deep"><summary>The game list is empty after connecting. What should I check?</summary>
 <p>Verify that your games folder has the uppercase <code>DVD</code> and <code>CD</code> subfolders and that file extensions are <code>.iso</code>, <code>.zso</code>, or <code>.cso</code>. If using SMBv1, ensure the share name in OPL is exactly <code>games</code>, address type is set to <b>IP</b> (not NetBIOS), and the port matches the displayed card port (1025 or 1111).</p>

@@ -65,77 +65,86 @@
     <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
   </nav>
   <main class="content">
-<h1>UDPBD Server</h1>
-<p class="lead"><b>UDPBD</b> (UDP Block Device) exposes a single disc image as a virtual block device over the local network. Rather than translating filesystem calls, the console sends raw sector read and write commands directly over UDP port <b>48573</b>.</p>
+<h1>UDPBD: Single Block Image Setup</h1>
+<p class="lead"><b>UDPBD</b> serves the raw sectors of <b>one disk-image file</b> to a compatible PlayStation 2 client over <b>UDP 48573</b> (<code>0xBDBD</code>). It is not UDPFS: there is no directory listing or network share name.</p>
 
-<div class="callout info"><div class="h">Block Device vs Filesystem Protocol</div>
-While <b>UDPFS</b> and <b>SMB</b> serve an entire directory containing multiple games, folders, art, and configurations, <b>UDPBD</b> assigns one raw disk image (ISO or IMG) per server process. The console interacts with the server exactly as if it were a physical optical disc or hard drive plugged directly into the system bus.
+<div class="callout warn"><div class="h">Choose the Right Mode Before You Start</div>
+If your goal is to browse and launch <b>many games</b> from a folder such as <code>D:\PS2Games\DVD\</code>, choose <a href="udpfs.html">UDPFS</a> or <a href="smb.html">SMB</a>, <b>not UDPBD</b>. UDPBD exposes one image as a block device, and the <b>PS2 client</b> decides how to interpret that image. Providing an ISO file does not automatically turn its contents into a browsable <code>DVD/</code> directory.
 </div>
 
-<h2 id="how-it-works">1. Protocol Overview</h2>
-<table data-sortable>
-  <thead>
-    <tr>
-      <th>Parameter</th>
-      <th>Value</th>
-      <th>Notes</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><b>Default Port</b></td>
-      <td>UDP <b>48573</b> (<code>0xBDBD</code>)</td>
-      <td>Standard UDPBD broadcast discovery and data port.</td>
-    </tr>
-    <tr>
-      <td><b>Payload Target</b></td>
-      <td>Single Disc Image</td>
-      <td>Select an <code>.iso</code> or <code>.img</code> file.</td>
-    </tr>
-    <tr>
-      <td><b>Discovery Mechanism</b></td>
-      <td>Broadcast Probe</td>
-      <td>Client broadcasts to <code>255.255.255.255:48573</code>; server replies with capacity and sector size.</td>
-    </tr>
-    <tr>
-      <td><b>Write Support</b></td>
-      <td>Optional</td>
-      <td>Server can run read-only or allow sector modifications.</td>
-    </tr>
-  </tbody>
-</table>
-
-<h2 id="setup-steps">2. Running UDPBD</h2>
-
-<div class="cards">
-  <article class="card">
-    <h3>Desktop Launcher</h3>
-    <p>1. Open the <b>UDPBD</b> card in PS2 Servers Desktop.<br>
-    2. Click <b>Browse</b> and choose your target <code>.iso</code> file.<br>
-    3. Click <b>Start</b>. The server immediately begins listening on UDP port 48573.</p>
-  </article>
-
-  <article class="card">
-    <h3>Core Terminal CLI</h3>
-    <pre><code>python ps2servers.py serve udpbd /srv/images/game.iso --read-only</code></pre>
-    <p>Add <code>--bind &lt;PC_IP&gt;</code> to pin the interface, or <code>--port &lt;PORT&gt;</code> if using a non-standard port.</p>
-  </article>
-
-  <article class="card">
-    <h3>Edge Native Server</h3>
-    <pre><code>ps2servers-edge udpbd --image /srv/images/game.iso --read-only</code></pre>
-    <p>Fast Go native implementation with bounded sector caching and minimal CPU overhead.</p>
-  </article>
-</div>
-
-<h2 id="console-setup">3. Console Client Configuration</h2>
-<p>To boot from a UDPBD server, your console loader must include a UDPBD driver:</p>
+<h2 id="requirements">1. What You Need</h2>
 <ul>
-  <li><b>Neutrino:</b> Supports UDPBD natively via its network boot driver.</li>
-  <li><b>RiptOPL:</b> Select <b>Network Boot</b> in Game Sources and ensure the UDPBD backend is selected.</li>
-  <li>Ensure your console IP settings belong to the same subnet as the host serving the UDPBD image.</li>
+  <li>A PS2 with working Ethernet and a compatible <b>UDPBD block-device driver</b> in the exact loader/build you are using. UDPFS support by itself is <b>not</b> UDPBD support.</li>
+  <li>The PS2 and server PC on a network where UDP broadcast and replies can pass. Put them on the same broadcast LAN for a first test; routed networks may drop discovery.</li>
+  <li>One valid raw disk image, such as <code>D:\PS2Images\game.iso</code> or <code>/srv/images/disk.img</code>, <b>whose internal format your client expects</b>. An optical ISO, filesystem image, and partitioned hard-drive image are not interchangeable merely because UDPBD can expose their sectors.</li>
+  <li>Firewall permission for <b>UDP 48573</b>. Do not forward this unauthenticated service to the internet.</li>
 </ul>
 
+<h2 id="protocol-details">2. Protocol and Path Reference</h2>
+<table data-sortable>
+<thead><tr><th>Setting</th><th>UDPBD value</th><th>Explanation</th></tr></thead>
+<tbody>
+<tr><td>Desktop card</td><td><b>UDPBD</b></td><td>Do not choose the UDPFS card unless your loader is using UDPFS</td></tr>
+<tr><td>Backing storage</td><td><b>One file</b>, not a folder</td><td>One block image per server; stop and change it to serve another image</td></tr>
+<tr><td>UDP port</td><td><b>48573</b> (<code>0xBDBD</code>)</td><td>Discovery and sector traffic; the Python Desktop/Core server uses this fixed port</td></tr>
+<tr><td>Discovery</td><td>Broadcast</td><td>The console-side UDPBD driver discovers the host; there is no SMB-style share, username, or password</td></tr>
+<tr><td>Writes</td><td>Supported when permitted</td><td>Prefer <b>Read-only</b> for first tests to prevent changes to the backing image</td></tr>
+<tr><td>PC LAN IP</td><td>Host network-interface address</td><td>Different from the PS2's IP; the Desktop selector shows hints but does not change every socket binding</td></tr>
+</tbody></table>
+
+<h2 id="setup-steps">3. Start the Server</h2>
+<div class="cards">
+<article class="card">
+<h3>Desktop (Windows / Linux / macOS)</h3>
+<ol>
+<li>Download and open <a href="releases.html">PS2 Servers Desktop</a>.</li>
+<li>Check the <b>LAN IP</b> selector. Choose the PC's interface connected to the PS2.</li>
+<li>On the <b>UDPBD</b> card, select <b>Disk image</b> &rarr; <b>Browse</b> and choose one <code>.iso</code> or <code>.img</code> <b>file</b>, not <code>DVD/</code>, <code>CD/</code> or their parent.</li>
+<li>Enable <b>Read-only</b> under advanced settings for an initial test, then click <b>Start</b>.</li>
+<li>Open <b>Terminal</b> and confirm it reports the selected image and listening port <b>48573</b>.</li>
+</ol>
+</article>
+<article class="card">
+<h3>Core CLI (Python)</h3>
+<pre><code>python ps2servers.py serve udpbd "/srv/images/disk.img" --read-only
+# Optional: bind specifically to the PC's PS2-facing LAN IP
+python ps2servers.py serve udpbd "/srv/images/disk.img" --read-only --bind 192.168.1.100</code></pre>
+<p>The current Python UDPBD implementation accepts <code>--bind</code>, but <b>not <code>--port</code></b>: it listens on fixed UDP 48573. The image filename is positional, not a directory root.</p>
+</article>
+<article class="card">
+<h3>Edge (Go / NAS / OpenWrt)</h3>
+<pre><code>ps2servers-edge udpbd --image /srv/images/disk.img --read-only</code></pre>
+<p>Edge also provides a <code>--port</code> flag, but its default is 48573. Only change it if the console client supports that exact custom port; otherwise automatic UDPBD discovery may fail.</p>
+</article>
+</div>
+
+<h2 id="console-setup">4. Configure the PS2 Client</h2>
+<ol>
+<li>Configure the PS2's own Ethernet IP/subnet (for example host <code>192.168.1.100</code>, PS2 <code>192.168.1.150</code>, mask <code>255.255.255.0</code>); avoid duplicate addresses.</li>
+<li>Verify your loader build includes a <b>UDPBD</b> backend and select <b>that</b> backend. Names and launch paths vary by loader and release; a menu labeled <b>UDPFS</b> or generic <b>Network</b> does not establish UDPBD support.</li>
+<li>Allow broadcast discovery on the LAN. The standard UDPBD driver discovers UDP 48573 automatically; you do not enter an SMB share or UDPFS port.</li>
+<li>Check whether your client expects an <b>optical disc image</b> or a <b>filesystem/partitioned block image</b>. Only browse folders if that client can mount the image's filesystem.</li>
+<li>Attempt an initial read or mount while watching the server Terminal. Do not use a successful device-name display as the only test.</li>
+</ol>
+<p>If you are configuring RiptOPL, also consult the <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL loader documentation</a> for its current per-device settings and supported build. Server configuration cannot supply a missing loader driver.</p>
+
+<h2 id="troubleshooting">5. Troubleshooting: Cannot Open Folder, <code>mass0:</code>, or No Image</h2>
+<details class="deep"><summary>The loader says "cannot open folder" and displays <code>mass0:</code>.</summary>
+<p><b>Do not assume <code>mass0:</code> means a physical USB drive.</b> It may be a client-side logical device or mount name. The message alone neither proves that UDPBD discovery succeeded nor shows what filesystem the loader attempted. Check the active loader backend, the supplied image format, and whether the client is trying to enumerate folders from a raw block device. If you want a folder of ISOs, configure <b>UDPFS or SMB at both ends</b> instead. Include the exact loader version and screenshot in a bug report; the mapping of <code>mass0:</code> is client-specific and must be verified in that loader's code.</p>
+</details>
+<details class="deep"><summary>The server is running but the PS2 never sees it.</summary>
+<p>Confirm the PS2 IP/network mask, cable/switch, host LAN interface, and firewall rule for UDP <b>48573</b>. Broadcast normally stays within a LAN; guest Wi-Fi, VLANs, VPNs and routed subnets can isolate devices. Check for a <code>UDPBD_CMD_INFO from ...</code> line while the client probes. No such line means the server has not observed a valid INFO probe; it does not yet establish why.</p>
+</details>
+<details class="deep"><summary>Discovery works, but a game or folder will not open.</summary>
+<p>A <code>UDPBD_CMD_INFO</code> line only establishes a received discovery request. Enable <b>Verbose logging</b> to check whether sector reads arrive, then confirm the selected file's contents match the client's expected block layout. A raw ISO is not automatically a multi-game directory. Also check read permissions, server I/O errors, and client/backend compatibility. Compare the same file through the client mode it was designed for.</p>
+</details>
+<details class="deep"><summary>The UDPBD server reports "cannot open" or "address already in use".</summary>
+<p><b>Cannot open:</b> verify the selected image actually exists, the server has read access, and it is a regular disk-image file rather than a folder. <b>Address already in use:</b> stop the other UDPBD process on UDP 48573. Start read-only when testing; an unprotected image can be modified by a client.</p>
+</details>
+<div class="callout info"><div class="h">Useful Details for a Support Report</div>
+Include the PS2 model, loader name/build, Desktop/Core/Edge version, selected protocol card, redacted host and PS2 IP/subnet, image type and size (not the copyrighted game file), whether you used a direct cable or router, and the few Terminal lines around discovery and the failed operation. Never share network passwords or private configuration files.
+</div>
+<p>For ordinary multi-game libraries, return to the <a href="getting-started.html#choose-server">protocol picker</a>, <a href="udpfs.html">UDPFS guide</a>, or <a href="smb.html">SMB guide</a>.</p>
 </main>
   <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
 </div>

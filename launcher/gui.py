@@ -17,7 +17,7 @@ import tkinter as tk
 import webbrowser
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
-from . import status_dot
+from . import status_dot, path_access
 
 
 def _direct_link_supported():
@@ -354,6 +354,12 @@ class ServerCard(ttk.LabelFrame):
         for f in primary:
             row = self._add_field(self, f, row)
 
+        if any(f.kind in ("folder", "file") for f in shown):
+            self.access_btn = ttk.Button(self, text="Check access",
+                                         command=self._check_access)
+            self.access_btn.grid(row=row, column=1, sticky="w", padx=6, pady=4)
+            row += 1
+
         if advanced:
             self.adv_btn = ttk.Button(self, text="Advanced ▸", width=14,
                                       command=self._toggle_advanced)
@@ -499,6 +505,40 @@ class ServerCard(ttk.LabelFrame):
                 else filedialog.askopenfilename(parent=self))
         if path:
             var.set(path)
+
+    def _check_access(self):
+        values = self.values()
+        targets = [(f.label, values[f.key], f.kind)
+                   for f in self.server.fields
+                   if f.kind in ("folder", "file") and values.get(f.key)]
+        if not targets:
+            messagebox.showinfo("Check access", "Select a file or folder first.",
+                                parent=self)
+            return
+        read_only = (self.server.key == "http"
+                     or bool(values.get("read_only")))
+        results = queue.Queue()
+        self.access_btn.config(state="disabled")
+
+        def check():
+            reports = []
+            for label, path, kind in targets:
+                _, report = path_access.check_path(path, kind, read_only)
+                reports.append(f"{label}:\n{report}")
+            results.put("\n\n".join(reports))
+
+        def finish():
+            try:
+                report = results.get_nowait()
+            except queue.Empty:
+                self.after(100, finish)
+                return
+            self.access_btn.config(state="normal")
+            self.app._append_log(self.server.key, f"[access] {report}\n")
+            messagebox.showinfo("Access check results", report, parent=self)
+
+        threading.Thread(target=check, daemon=True, name="path-access").start()
+        self.after(100, finish)
 
     # -- values / config --------------------------------------------------- #
     def values(self):
