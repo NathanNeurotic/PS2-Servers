@@ -307,6 +307,8 @@ class Conn:
         self.max_disk_ms = self.max_send_ms = 0.0
         self.last_warning = float("-inf")
         self.last_read = None
+        self.smb2_requests = self.smb2_errors = 0
+        self.smb2_dialect = "SMB2/3"
 
     def warning(self, message):
         # Bound repeated error/slow-read output; counters still include every event.
@@ -342,14 +344,21 @@ class Conn:
         if not final and interval < 5.0:
             return
         rate = (self.bytes_read - self.sample_bytes) / max(interval, 0.001) / 1048576
-        activity(self.peer, "final" if final else "activity",
+        if self.smb2_requests:
+            activity(self.peer, self.smb2_dialect, "final" if final else "activity",
+                     f"requests={self.smb2_requests} errors={self.smb2_errors}")
+        if self.requests or self.reads:
+            self.smb1_summary(now, rate, final)
+        self.sample_time, self.sample_bytes = now, self.bytes_read
+        self.max_disk_ms = self.max_send_ms = 0.0
+
+    def smb1_summary(self, now, rate, final):
+        activity(self.peer, "SMBv1", "final" if final else "activity",
                  f"uptime={now-self.started:.0f}s requests={self.requests} reads={self.reads} writes={self.writes} "
                  f"MiB={self.bytes_read/1048576:.2f} rate={rate:.2f}MiB/s "
                  f"files={len(self.files)} searches={len(self.searches)} errors={self.errors} "
                  f"short={self.short_reads} slow_disk={self.slow_reads} slow_send={self.slow_sends} "
                  f"disk_max_ms={self.max_disk_ms:.1f} send_max_ms={self.max_send_ms:.1f}")
-        self.sample_time, self.sample_bytes = now, self.bytes_read
-        self.max_disk_ms = self.max_send_ms = 0.0
 
     def send(self, message):
         started = time.monotonic()
@@ -1169,7 +1178,7 @@ def serve_conn(server, sock, addr):
     conn = Conn(server)
     conn.sock = sock
     conn.peer = f"{addr[0]}:{addr[1]}"
-    activity(conn.peer, "connected", "SMBv1", "read-only" if server.read_only else "writable")
+    activity(conn.peer, "connected", "read-only" if server.read_only else "writable")
     try:
         while True:
             msg = recv_msg(sock)
@@ -1179,15 +1188,21 @@ def serve_conn(server, sock, addr):
                 continue  # keep-alive
             if len(msg) >= 64 and msg[0:4] == SMB2_MAGIC:
                 r2 = Smb2Req(msg)
+                conn.smb2_requests += 1
                 handler = SMB2_HANDLERS.get(r2.cmd)
                 if handler is None:
+                    conn.smb2_errors += 1
                     hdr = pack_smb2_hdr(r2.cmd, status=STATUS_NOT_IMPLEMENTED, message_id=r2.message_id, session_id=r2.session_id)
                     conn.send(hdr)
                     continue
                 if r2.cmd == 0x0000:
                     body, status = handler(conn, r2, smb_version=server.smb_version)
+                    dialect = struct.unpack_from("<H", body, 4)[0]
+                    conn.smb2_dialect = "SMB3.0" if dialect == 0x0300 else "SMB2.0.2"
                 else:
                     body, status = handler(conn, r2)
+                if status != STATUS_SUCCESS:
+                    conn.smb2_errors += 1
                 hdr = pack_smb2_hdr(r2.cmd, status=status, message_id=r2.message_id, session_id=conn.uid or r2.session_id)
                 conn.send(hdr + body)
                 continue

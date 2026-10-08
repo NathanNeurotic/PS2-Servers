@@ -122,6 +122,16 @@ class DiagnosticsTests(unittest.TestCase):
                 self.conn.send(b"reply")
         self.assertEqual(self.conn.slow_sends, 1)
 
+    def test_smb2_summary_does_not_attribute_traffic_to_smb1(self):
+        self.conn.smb2_requests = 3
+        self.conn.smb2_dialect = "SMB3.0"
+        with patch.object(smb, "activity") as log:
+            self.conn.summary(final=True)
+        self.assertEqual(log.call_count, 1)
+        self.assertIn("SMB3.0", str(log.call_args))
+        self.assertNotIn("SMBv1", str(log.call_args))
+        self.assertIn("requests=3", str(log.call_args))
+
     def test_default_diagnostics_visible_without_verbose(self):
         output = io.StringIO()
         with patch.object(smb, "VERBOSE", False), contextlib.redirect_stderr(output):
