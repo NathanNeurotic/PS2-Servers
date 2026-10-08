@@ -192,7 +192,7 @@ class VirtualExfatTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = pathlib.Path(self.temp.name) / 'games'
+        self.root = (pathlib.Path(self.temp.name) / 'games').resolve()
         self.root.mkdir()
         (self.root / 'DVD').mkdir()
         self.payload = bytes(i % 251 for i in range(70000))
@@ -258,6 +258,19 @@ class VirtualExfatTests(unittest.TestCase):
         if len(list(self.root.glob('*'))) == 3:
             self.skipTest('case-insensitive host filesystem')
         with self.assertRaises(ValueError):
+            virtual_exfat.VirtualExfat(self.root)
+
+    def test_reparse_points_are_refused_before_traversal(self):
+        original = pathlib.Path.lstat
+
+        def info(path):
+            actual = original(path)
+            if path.name == 'DVD':
+                return types.SimpleNamespace(st_mode=actual.st_mode,
+                    st_file_attributes=0x400)
+            return actual
+
+        with patch.object(pathlib.Path, 'lstat', info), self.assertRaises(ValueError):
             virtual_exfat.VirtualExfat(self.root)
 
     @unittest.skipUnless(shutil.which('fsck.exfat'), 'requires exfatprogs independent validator')

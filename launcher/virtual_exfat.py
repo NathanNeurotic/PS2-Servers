@@ -141,8 +141,9 @@ class VirtualExfat:
         if depth > 64:
             raise ValueError("Virtual exFAT folder nesting exceeds 64 levels")
         info = path.lstat()
-        if stat.S_ISLNK(info.st_mode) or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
-            raise ValueError(f"Virtual exFAT excludes symlinks and special files: {path}")
+        if (stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400
+                or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))):
+            raise ValueError(f"Virtual exFAT excludes symlinks, reparse points and special files: {path}")
         node = Node(path, stat.S_ISDIR(info.st_mode), info)
         self._nodes.append(node)
         if len(self._nodes) > 100000:
