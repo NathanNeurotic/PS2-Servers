@@ -17,7 +17,7 @@ import tkinter as tk
 import webbrowser
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
-from . import status_dot, path_access
+from . import status_dot, path_access, raw_storage
 
 
 def _direct_link_supported():
@@ -354,7 +354,7 @@ class ServerCard(ttk.LabelFrame):
         for f in primary:
             row = self._add_field(self, f, row)
 
-        if any(f.kind in ("folder", "file") for f in shown):
+        if any(f.kind in ("folder", "file", "device") for f in shown):
             self.access_btn = ttk.Button(self, text="Check access",
                                          command=self._check_access)
             self.access_btn.grid(row=row, column=1, sticky="w", padx=6, pady=4)
@@ -460,12 +460,14 @@ class ServerCard(ttk.LabelFrame):
             ttk.Combobox(parent, textvariable=var, values=labels,
                          state="readonly", width=18).grid(
                 row=row, column=1, sticky="w", padx=6, pady=2)
-        elif f.kind in ("folder", "file"):
+        elif f.kind in ("folder", "file", "device"):
             var = tk.StringVar(value="")
             ttk.Entry(parent, textvariable=var).grid(
                 row=row, column=1, sticky="ew", padx=6, pady=2)
-            ttk.Button(parent, text="Browse…", width=10,
-                       command=lambda v=var, k=f.kind: self._browse(v, k)).grid(
+            action = (lambda v=var: self._select_device(v)) if f.kind == "device" else (
+                lambda v=var, k=f.kind: self._browse(v, k))
+            ttk.Button(parent, text="Select drive" if f.kind == "device" else "Browse…",
+                       command=action).grid(
                 row=row, column=2, sticky="e", padx=4, pady=2)
         else:  # text
             var = tk.StringVar(value=str(f.default or ""))
@@ -510,9 +512,9 @@ class ServerCard(ttk.LabelFrame):
         values = self.values()
         targets = [(f.label, values[f.key], f.kind)
                    for f in self.server.fields
-                   if f.kind in ("folder", "file") and values.get(f.key)]
+                   if f.kind in ("folder", "file", "device") and values.get(f.key)]
         if not targets:
-            messagebox.showinfo("Check access", "Select a file or folder first.",
+            messagebox.showinfo("Check access", "Select a file, folder, or raw drive first.",
                                 parent=self)
             return
         read_only = (self.server.key == "http"
@@ -539,6 +541,51 @@ class ServerCard(ttk.LabelFrame):
 
         threading.Thread(target=check, daemon=True, name="path-access").start()
         self.after(100, finish)
+
+    def _select_device(self, var):
+        results = queue.Queue()
+
+        def scan():
+            try:
+                results.put((raw_storage.list_devices(), None))
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                results.put(([], str(error)))
+
+        def show():
+            try:
+                devices, error = results.get_nowait()
+            except queue.Empty:
+                self.after(100, show)
+                return
+            if error or not devices:
+                messagebox.showinfo("Raw drives", error or
+                    "No drives found. You can enter a device path manually. "
+                    "Windows boot/system disks are excluded from this list.", parent=self)
+                return
+            dialog = tk.Toplevel(self)
+            dialog.title("Select raw drive — read-only")
+            dialog.transient(self.winfo_toplevel())
+            ttk.Label(dialog, text="Entire disk and partition layouts differ. "
+                      "Select the target your PS2 client expects. Unmounted targets are recommended.").pack(padx=12, pady=8)
+            choices = tk.Listbox(dialog, width=80, height=min(12, len(devices)))
+            choices.pack(fill="both", expand=True, padx=12)
+            scrollbar = ttk.Scrollbar(dialog, orient="horizontal", command=choices.xview)
+            scrollbar.pack(fill="x", padx=12)
+            choices.configure(xscrollcommand=scrollbar.set)
+            for path, description in devices:
+                choices.insert("end", f"{path} — {description}")
+
+            def choose():
+                selection = choices.curselection()
+                if selection:
+                    var.set(devices[selection[0]][0])
+                    self.vars["image_file"].set("")
+                    dialog.destroy()
+
+            ttk.Button(dialog, text="Use selected drive", command=choose).pack(pady=10)
+
+        threading.Thread(target=scan, daemon=True, name="raw-drive-list").start()
+        self.after(100, show)
 
     # -- values / config --------------------------------------------------- #
     def values(self):
@@ -1925,6 +1972,13 @@ class LauncherApp:
         card = self.cards[key]
         server = REGISTRY[key]
         values = card.values()
+
+        if key == "udpbd":
+            try:
+                server.build_argv(values)
+            except ValueError as error:
+                messagebox.showerror("UDPBD target", str(error))
+                return
 
         missing = [f.label for f in server.fields
                    if f.required and not values.get(f.key)]

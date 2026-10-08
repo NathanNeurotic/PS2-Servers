@@ -61,7 +61,7 @@ ADMIN_ABOUT_TEXT = """
 
 Administrator rights
 
-PS2 Servers is designed to start normally without administrator rights. Normal custom-port SMB mode, UDPFS, UDPBD, browsing folders, and reading logs do not need the whole launcher to run elevated.
+PS2 Servers is designed to start normally without administrator rights. Normal custom-port SMB mode, UDPFS, UDPBD image files, browsing folders, and reading logs do not need the whole launcher to run elevated. Windows raw-device reads require administrator rights.
 
 Administrator rights are requested only when Windows requires them:
 
@@ -291,7 +291,7 @@ def _apply_gui_review_fixes(gui):
         status.grid(row=0, column=0, sticky="w", padx=(0, 12), pady=(0, 4))
         note = gui.ttk.Label(
             frame,
-            text="Normal launch stays non-admin. Elevate only for firewall changes or advanced port 445.",
+            text="Normal launch stays non-admin. Elevate for firewall changes, advanced port 445, or Windows raw-drive reads.",
             style="Admin.TLabel")
         note.grid(row=0, column=1, sticky="ew", pady=(0, 4))
         button = gui.ttk.Button(frame, text="Restart as administrator",
@@ -321,8 +321,9 @@ def _apply_gui_review_fixes(gui):
         if not gui.messagebox.askyesno(
                 "Restart as administrator?",
                 "Restart PS2 Servers as administrator?\n\n"
-                "Use this only when you need to manage Windows Firewall rules "
-                "or use advanced SMB port 445 mode. Normal servers do not need it."):
+                "Use this only when you need to manage Windows Firewall rules, "
+                "use advanced SMB port 445 mode, or read a Windows raw drive. "
+                "Ordinary image/folder servers do not need it."):
             return
         app._save()
         if gui.elevate.relaunch_as_admin():

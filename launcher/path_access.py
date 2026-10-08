@@ -26,11 +26,21 @@ def check_path(path, kind, read_only=False):
     Folder checks enumerate entries without recursively reading game files.
     File checks read one byte and, when requested, attempt a non-truncating
     writable open. Neither test guarantees that subsequent reads/writes succeed.
-    Raw devices are deliberately not opened by this file/folder check.
+    Device fields use a separate, explicitly read-only capacity/read probe.
     """
     if not path:
         return False, "Select a file or folder first."
     try:
+        if kind == "device":
+            from .raw_storage import open_raw_device
+            device = open_raw_device(path)
+            try:
+                device.read(512)
+                return True, (f"{path}\nRaw-device read succeeded ({device.size} bytes). "
+                              "Always read-only; saves/VMC writes are disabled."
+                              + ("\n" + device.mount_warning if getattr(device, "mount_warning", "") else ""))
+            finally:
+                device.close()
         info = os.stat(path)
         if kind == "folder":
             if not stat.S_ISDIR(info.st_mode):
@@ -46,6 +56,12 @@ def check_path(path, kind, read_only=False):
         with open(path, "rb", buffering=0) as target:
             target.read(1)
     except (OSError, ValueError) as error:
+        if kind == "device" and isinstance(error, PermissionError):
+            guidance = ("Use Restart as administrator for Windows raw-device reads."
+                        if platform.system() == "Windows" else
+                        "Use an account with read permission on this block device, "
+                        "or run the Core raw-device command with sudo.")
+            return False, f"{path}\n{error}\n{guidance} No permissions were changed."
         return False, _failure(path, error)
 
     report = f"{path}\nFile read succeeded ({info.st_size} bytes)."

@@ -20,6 +20,8 @@ import os
 import socket
 import struct
 import sys
+import stat
+import errno
 
 # --------------------------------------------------------------------------- #
 # Protocol constants (from udpbd.h)
@@ -73,6 +75,17 @@ def unpack_block_type(datagram, offset=2):
 # --------------------------------------------------------------------------- #
 class BlockDevice:
     def __init__(self, path, read_only=False):
+        if path.startswith(("\\\\.\\", "\\\\?\\")):
+            raise ValueError("Use --raw-device for a Windows disk/volume")
+        try:
+            mode = os.stat(path).st_mode
+            raw = stat.S_ISBLK(mode)
+            if not raw and not stat.S_ISREG(mode):
+                raise ValueError("Image target must be a regular file")
+        except OSError:
+            raw = False  # Preserve the actual open error below.
+        if raw:
+            raise ValueError("Use --raw-device for a Linux disk/partition")
         self.path = path
         self.read_only = read_only
         try:
@@ -86,9 +99,13 @@ class BlockDevice:
             print("Warning: cannot open '{}' for writing: {}. Serving read-only; "
                   "saves / VMC writes will fail.".format(path, write_error),
                   file=sys.stderr)
-        self._f.seek(0, os.SEEK_END)
-        self.size = self._f.tell()
-        self._f.seek(0)
+        try:
+            self._f.seek(0, os.SEEK_END)
+            self.size = self._f.tell()
+            self._f.seek(0)
+        except BaseException:
+            self._f.close()
+            raise
 
     def sector_count(self):
         return self.size // SECTOR_SIZE
@@ -173,6 +190,8 @@ class UdpbdServer:
     def _handle_read(self, addr, datagram):
         _, cmdid, _ = unpack_header(datagram)
         _, sector_nr, sector_count = struct.unpack_from("<HIH", datagram, 0)
+        if getattr(self.bd, "is_raw", False) and sector_nr + sector_count > self.bd.sector_count():
+            raise OSError(errno.EINVAL, "Read request exceeds raw-device capacity")
         if self.verbose:
             print("UDPBD_CMD_READ(cmdid={}, start={}, count={})".format(
                 cmdid, sector_nr, sector_count))
@@ -181,7 +200,10 @@ class UdpbdServer:
         self._set_block_shift_for_sectors(sector_count)
         blocks_left = sector_count * self._blocks_per_sector
         self._total_read += blocks_left * self._block_size
-        self.bd.seek(sector_nr)
+        if getattr(self.bd, "is_raw", False):
+            self.bd.seek(sector_nr, sector_count)
+        else:
+            self.bd.seek(sector_nr)
 
         cmdpkt = 1
         while blocks_left > 0:
@@ -298,8 +320,10 @@ class UdpbdServer:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="UDPBD server -- serve a disk image to a PS2 over UDP (OPL).")
-    parser.add_argument("image", help="disk image / block device to serve")
+        description="UDPBD server -- serve an image or read-only raw device to a PS2 over UDP (OPL).")
+    parser.add_argument("image", nargs="?", help="disk image file to serve")
+    parser.add_argument("--raw-device", metavar="DEVICE",
+                        help="Linux disk/partition or Windows raw disk/volume; always read-only")
     parser.add_argument("-r", "--read-only", action="store_true",
                         help="serve the image read-only (no saves / VMC writes)")
     parser.add_argument("-i", "--bind", default="", metavar="IP",
@@ -308,14 +332,34 @@ def main(argv=None):
                         help="log every read/write command")
     args = parser.parse_args(argv)
 
+    if bool(args.image) == bool(args.raw_device):
+        parser.error("Select exactly one image file or --raw-device")
+    target = args.raw_device or args.image
+
     try:
-        device = BlockDevice(args.image, read_only=args.read_only)
-    except OSError as e:
-        print("Error: cannot open '{}': {}".format(args.image, e))
+        if args.raw_device:
+            # Also supports invoking this standalone script outside the repo root.
+            root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if root not in sys.path:
+                sys.path.insert(0, root)
+            from launcher.raw_storage import open_raw_device
+            device = open_raw_device(target)
+            if device.mount_warning:
+                print(device.mount_warning)
+            print("Raw device is read-only: saves / VMC writes are disabled. "
+                  "Do not modify its filesystem on the host while serving it.")
+        else:
+            device = BlockDevice(target, read_only=args.read_only)
+    except (OSError, ValueError) as e:
+        print("Error: cannot open '{}': {}".format(target, e))
         if isinstance(e, PermissionError):
             print("Check access to this target and its parent directories. For a "
                   "file on an external drive, check the drive's mount permissions. "
                   "Raw devices require separate device access permissions.")
+            if args.raw_device:
+                print("Windows raw reads require administrator rights. On Linux, "
+                      "use an account with read access to the selected block device "
+                      "or run the Core command with sudo. Do not grant world-write access.")
         return 1
 
     try:
