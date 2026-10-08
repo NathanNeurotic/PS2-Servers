@@ -55,3 +55,30 @@ Writable serving does not add a VMC implementation to a loader.
 Use a known-good ISO and verify listing, launching, and saving separately on the
 chosen loader. Host SMB unit tests and Edge/Python wire comparisons run in CI;
 those tests do not establish compatibility with every SMB dialect/client pair.
+
+## SMBv1 session diagnostics
+
+SMBv1 now prints connection/disconnection events, the first read of each opened
+file, and activity summaries without enabling Verbose logging. The Desktop
+Terminal captures these lines; Core/standalone prints them to stderr.
+
+During activity, summaries are emitted at most once every five seconds, after
+a response completes. They include session uptime, request/read/write counts,
+MiB served, interval read throughput, open files/searches, protocol/connection
+errors, unexpected short reads, and slow disk-read/response-send counts. A final
+summary is printed on disconnect. An idle session or an operation that has not
+returned does not produce a heartbeat; silence alone does not establish a hang.
+
+Disk time measures seek/read on the host. Send time measures the socket send,
+which can reflect client/network backpressure and is not a packet-loss counter.
+Operations taking at least 250 ms generate a warning, as do reads shorter than
+the expected bytes before the file's known EOF. Repeated warnings are limited
+to one per five seconds per connection; aggregate counters include all events.
+Normal EOF and the existing SMBv1 read-size cap are not short-read errors.
+Verbose logging remains available for detailed setup/open/browse tracing.
+
+For delayed loading, capture the terminal around the event and record the exact
+PS2-Servers build, OPL build, game/Game ID, PS2 model, VMC/PADEMU states, host disk
+and wired/Wi-Fi topology. Keep the same ISO, server, settings and route when
+comparing OPL builds. A simulated aged-session host test does not establish
+multi-hour gameplay stability; that still requires a physical PS2 reproduction.
