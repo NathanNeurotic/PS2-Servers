@@ -22,6 +22,9 @@ class RawDevice:
         self._backend = backend
         self.size = backend.size
         self._position = 0
+        self._request_end = None
+        self._cached_start = 0
+        self._cached_data = b""
         if self.size <= 0 or self.size % 512 or self.size // 512 > 0xFFFFFFFF:
             backend.close()
             raise ValueError("Device capacity must be positive, 512-byte aligned, "
@@ -30,11 +33,15 @@ class RawDevice:
     def sector_count(self):
         return self.size // 512
 
-    def seek(self, sector):
+    def seek(self, sector, sector_count=None):
         position = sector * 512
         if not 0 <= position <= self.size:
             raise OSError(errno.EINVAL, "Sector is outside this device")
         self._position = position
+        self._request_end = None if sector_count is None else position + sector_count * 512
+        if self._request_end is not None and not position <= self._request_end <= self.size:
+            raise OSError(errno.EINVAL, "Read request exceeds raw-device capacity")
+        self._cached_data = b""  # Every UDPBD request seeks; never retain across requests.
 
     def read(self, count):
         if count < 0:
@@ -43,14 +50,26 @@ class RawDevice:
         if not count:
             return b""
         alignment = self._backend.sector_size
-        start = self._position // alignment * alignment
-        end = min(self.size, ((self._position + count + alignment - 1)
-                              // alignment) * alignment)
-        data = self._backend.read_at(start, end - start)
-        if len(data) != end - start:
-            raise OSError(errno.EIO, "Short raw-device read; drive may be disconnected")
-        offset = self._position - start
-        result = data[offset:offset + count]
+        pieces = []
+        position = self._position
+        while position < self._position + count:
+            cached_end = self._cached_start + len(self._cached_data)
+            if not self._cached_start <= position < cached_end:
+                self._cached_start = position // alignment * alignment
+                # Read ahead only within this request, bounded to 64 KiB.
+                request_end = self._request_end or (self._cached_start + alignment)
+                aligned_end = min(self.size, ((request_end + alignment - 1) // alignment) * alignment)
+                size = min(65536, aligned_end - self._cached_start)
+                self._cached_data = self._backend.read_at(self._cached_start, size)
+                if len(self._cached_data) != size:
+                    self._cached_data = b""
+                    raise OSError(errno.EIO, "Short raw-device read; drive may be disconnected")
+                cached_end = self._cached_start + len(self._cached_data)
+            size = min(self._position + count - position, cached_end - position)
+            offset = position - self._cached_start
+            pieces.append(self._cached_data[offset:offset + size])
+            position += size
+        result = b"".join(pieces)
         self._position += len(result)
         return result
 
@@ -182,42 +201,95 @@ def open_raw_device(path):
         backend = _WindowsDevice(path)
     else:
         raise ValueError("Raw-device serving is supported on Linux and Windows only")
-    return RawDevice(path, backend)
+    device = RawDevice(path, backend)
+    device.mount_warning = mount_warning(path)
+    return device
+
+
+def _metadata():
+    """Read OS metadata only; include hidden system targets for mount checks."""
+    if platform.system() == "Windows":
+        command = r"""[Console]::OutputEncoding = [Text.UTF8Encoding]::new();
+$items = @(Get-Disk | ForEach-Object {
+    $disk = $_
+    $parts = @(Get-Partition -DiskNumber $disk.Number -ErrorAction Stop)
+    $mounts = @($parts | ForEach-Object { $_.AccessPaths } | Where-Object { $_ -and $_ -notmatch 'Volume\{' })
+    [pscustomobject]@{path=('\\.\PhysicalDrive'+$disk.Number); kind='Disk'; model=$disk.FriendlyName; size=$disk.Size; mounts=$mounts; fs=''; system=($disk.IsBoot -or $disk.IsSystem)}
+    foreach ($part in $parts) {
+        if ($part.DriveLetter) {
+            $volume = $part | Get-Volume -ErrorAction Stop
+            [pscustomobject]@{path=('\\.\'+$part.DriveLetter+':'); kind='Volume'; model=($disk.FriendlyName+' / '+$volume.FileSystemLabel); size=$part.Size; mounts=@($part.AccessPaths | Where-Object { $_ -and $_ -notmatch 'Volume\{' }); fs=$volume.FileSystemType; system=($disk.IsBoot -or $disk.IsSystem)}
+        }
+    }
+})
+ConvertTo-Json -InputObject $items -Depth 4 -Compress"""
+        argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                "$ErrorActionPreference='Stop'; " + command]
+        flags = 0x08000000
+    elif platform.system() == "Linux":
+        argv = ["lsblk", "--json", "--tree", "--bytes", "--output",
+                "PATH,TYPE,SIZE,MODEL,FSTYPE,MOUNTPOINTS"]
+        flags = 0
+    else:
+        raise ValueError("Raw-device metadata requires Linux or Windows")
+    completed = subprocess.run(argv, capture_output=True, timeout=20, creationflags=flags)
+    if completed.returncode:
+        raise OSError(completed.stderr.decode("utf-8", "replace").strip())
+    data = json.loads(completed.stdout.decode("utf-8-sig") or "[]")
+    if platform.system() == "Windows":
+        return data if isinstance(data, list) else [data]
+    records = []
+
+    def visit(item, model=""):
+        model = item.get("model") or model
+        mounts = [m for m in item.get("mountpoints", []) if m]
+        for child in item.get("children", []):
+            mounts.extend(visit(child, model))
+        if item.get("type") in ("disk", "part", "loop") and int(item.get("size") or 0):
+            records.append(dict(path=item["path"], kind="Partition" if item["type"] == "part"
+                                else "Disk", model=model, size=int(item["size"]),
+                                fs=item.get("fstype") or "", mounts=sorted(set(mounts)),
+                                system=False))
+        return mounts
+
+    for item in data.get("blockdevices", []):
+        visit(item)
+    return records
 
 
 def list_devices():
-    """List device identity/capacity metadata without reading device contents."""
-    if platform.system() == "Windows":
-        command = ("[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); "
-                   "Get-Disk | Select-Object Number,FriendlyName,Size,IsBoot,IsSystem "
-                   "| ConvertTo-Json -Compress")
-        completed = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
-            capture_output=True, timeout=20, creationflags=0x08000000)
-        if completed.returncode:
-            raise OSError(completed.stderr.decode("utf-8", "replace").strip())
-        disks = json.loads(completed.stdout.decode("utf-8-sig") or "[]") or []
-        if isinstance(disks, dict):
-            disks = [disks]
-        return [(rf"\\.\PhysicalDrive{disk['Number']}",
-                 f"{disk['FriendlyName']} — {int(disk['Size']) // (1024**3)} GiB")
-                for disk in disks if not disk["IsBoot"] and not disk["IsSystem"]]
-    if platform.system() == "Linux":
-        devices = []
-        for name in sorted(os.listdir("/sys/class/block")):
-            root = os.path.join("/sys/class/block", name)
-            if name.startswith(("loop", "ram", "zram", "sr")):
-                continue
-            try:
-                with open(os.path.join(root, "size")) as source:
-                    size = int(source.read().strip()) * 512
-                if not size:
-                    continue
-                partition = os.path.exists(os.path.join(root, "partition"))
-                devices.append(("/dev/" + name,
-                                f"{'Partition' if partition else 'Disk'} — "
-                                f"{size // (1024**3)} GiB"))
-            except (OSError, ValueError):
-                continue
-        return devices
-    return []
+    """List selectable identity, layout, filesystem and mount metadata."""
+    devices = []
+    for item in _metadata():
+        if item.get("system"):
+            continue
+        mounts = item.get("mounts") or []
+        if isinstance(mounts, str):
+            mounts = [mounts]
+        description = (f"{item['kind']} / {item.get('model') or 'Unknown model'} / "
+                       f"{int(item['size']) // (1024**3)} GiB / "
+                       f"{item.get('fs') or 'filesystem unknown'} / "
+                       + ("MOUNTED: " + ", ".join(mounts) if mounts else "unmounted"))
+        devices.append((item["path"], description))
+    return devices
+
+
+def mount_warning(path):
+    """Warn for a selected mounted target, including child partitions of a disk."""
+    try:
+        target = os.path.realpath(path) if platform.system() == "Linux" else path.casefold()
+        for item in _metadata():
+            candidate = os.path.realpath(item["path"]) if platform.system() == "Linux" else item["path"].casefold()
+            if candidate == target:
+                mounts = item.get("mounts") or []
+                if isinstance(mounts, str):
+                    mounts = [mounts]
+                if mounts:
+                    return ("WARNING: Target or a child partition is mounted at "
+                            + ", ".join(mounts) + ". Unmount before serving where possible; "
+                            "stop host applications from modifying it. Read-only access "
+                            "does not provide a filesystem snapshot.")
+                return ""
+        return "WARNING: Mount state is unknown for this target. Verify it is quiescent before serving."
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        return f"WARNING: Could not check mount state ({error}). Verify the target is quiescent before serving."

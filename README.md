@@ -132,9 +132,14 @@ check. No check changes a drive's format or grants device access.
 ### UDPBD raw disks and partitions (Linux / Windows)
 
 Clear **Disk image**, then use **Select drive** beside **Raw drive (read-only)**.
-The selector shows device paths and capacities; Windows boot/system disks are
-excluded. A device path can also be entered manually. Click **Check access**
-before **Start**. Raw mode always disables writes, regardless of the Read-only
+The selector distinguishes whole disks from partitions/volumes and shows
+model, capacity, filesystem where available, and mount points. Windows volumes
+with drive letters are selectable alongside physical disks; boot/system disks
+and their volumes are excluded. Linux metadata uses `lsblk` (util-linux). A device path can also be entered manually. Click **Check access**
+before **Start**. Mounted targets and disks with mounted child partitions produce
+a warning at access-check time and server startup. If metadata is unavailable,
+mount state is reported as unknown. Prefer an unmounted target; these checks
+are advisory and do not lock the filesystem. Raw mode always disables writes, regardless of the Read-only
 checkbox, so it cannot provide VMC saves.
 
 Linux Core example (replace the device with your actual disk or partition):
@@ -165,7 +170,9 @@ it, and stop the server before disconnecting it. The server does not lock,
 dismount, format, or modify the device.
 
 Capacity comes from the opened device handle, and native sector alignment is
-handled before UDPBD packetization. Devices at or above 2 TiB are rejected
+handled before UDPBD packetization. A buffer bounded to 64 KiB avoids
+repeated overlapping reads within a request and is discarded on each new
+request; it is not a filesystem snapshot. Devices at or above 2 TiB are rejected
 because this UDPBD protocol advertises a 32-bit count of 512-byte sectors.
 This feature still requires real-drive and console validation; host tests do
 not establish loader/filesystem compatibility. Edge and UDPFS are unchanged.

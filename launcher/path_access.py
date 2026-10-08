@@ -37,7 +37,8 @@ def check_path(path, kind, read_only=False):
             try:
                 device.read(512)
                 return True, (f"{path}\nRaw-device read succeeded ({device.size} bytes). "
-                              "Always read-only; saves/VMC writes are disabled.")
+                              "Always read-only; saves/VMC writes are disabled."
+                              + ("\n" + device.mount_warning if getattr(device, "mount_warning", "") else ""))
             finally:
                 device.close()
         info = os.stat(path)

@@ -200,7 +200,10 @@ class UdpbdServer:
         self._set_block_shift_for_sectors(sector_count)
         blocks_left = sector_count * self._blocks_per_sector
         self._total_read += blocks_left * self._block_size
-        self.bd.seek(sector_nr)
+        if getattr(self.bd, "is_raw", False):
+            self.bd.seek(sector_nr, sector_count)
+        else:
+            self.bd.seek(sector_nr)
 
         cmdpkt = 1
         while blocks_left > 0:
@@ -341,6 +344,8 @@ def main(argv=None):
                 sys.path.insert(0, root)
             from launcher.raw_storage import open_raw_device
             device = open_raw_device(target)
+            if device.mount_warning:
+                print(device.mount_warning)
             print("Raw device is read-only: saves / VMC writes are disabled. "
                   "Do not modify its filesystem on the host while serving it.")
         else:

@@ -566,9 +566,12 @@ class ServerCard(ttk.LabelFrame):
             dialog.title("Select raw drive — read-only")
             dialog.transient(self.winfo_toplevel())
             ttk.Label(dialog, text="Entire disk and partition layouts differ. "
-                      "Select the target your PS2 client expects.").pack(padx=12, pady=8)
+                      "Select the target your PS2 client expects. Unmounted targets are recommended.").pack(padx=12, pady=8)
             choices = tk.Listbox(dialog, width=80, height=min(12, len(devices)))
             choices.pack(fill="both", expand=True, padx=12)
+            scrollbar = ttk.Scrollbar(dialog, orient="horizontal", command=choices.xview)
+            scrollbar.pack(fill="x", padx=12)
+            choices.configure(xscrollcommand=scrollbar.set)
             for path, description in devices:
                 choices.insert("end", f"{path} — {description}")
 

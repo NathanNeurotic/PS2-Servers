@@ -114,12 +114,17 @@ class RawStorageTests(unittest.TestCase):
         self.assertTrue(backend.closed)
 
     def test_device_list_hides_windows_boot_and_system_disks(self):
-        output = b'[{"Number":0,"FriendlyName":"OS","Size":1000,"IsBoot":true,"IsSystem":true},{"Number":2,"FriendlyName":"Games","Size":4294967296,"IsBoot":false,"IsSystem":false}]'
-        result = types.SimpleNamespace(returncode=0, stdout=output, stderr=b"")
-        with patch.object(raw_storage.platform, "system", return_value="Windows"), \
-                patch.object(raw_storage.subprocess, "run", return_value=result):
+        records = [dict(path="OS", kind="Disk", size=1000, system=True),
+                   dict(path=r"\\.\PhysicalDrive2", kind="Disk", model="Games", size=4294967296,
+                        system=False, mounts=["E:"], fs=""),
+                   dict(path=r"\\.\E:", kind="Volume", model="Games", size=4294967296,
+                        system=False, mounts=["E:"], fs="exFAT")]
+        with patch.object(raw_storage, "_metadata", return_value=records):
             devices = raw_storage.list_devices()
-        self.assertEqual(devices, [(r"\\.\PhysicalDrive2", "Games — 4 GiB")])
+        self.assertEqual([path for path, _ in devices], [r"\\.\PhysicalDrive2", r"\\.\E:"])
+        self.assertIn("Volume", devices[1][1])
+        self.assertIn("exFAT", devices[1][1])
+        self.assertIn("MOUNTED: E:", devices[0][1])
 
     def test_windows_open_requests_read_only_and_aligned_native_io(self):
         api = Mock()
@@ -212,3 +217,53 @@ class RawStorageTests(unittest.TestCase):
         self.assertGreater(len(packets), 1)
         self.assertEqual(b"".join(packet[6:] for packet in packets),
                          backend.data[1536:1536 + 17 * 512])
+        self.assertEqual(backend.calls, [(0, 12288)])
+
+    def test_buffer_reuses_sector_and_is_invalidated_on_next_request(self):
+        backend = AlignedBackend()
+        device = raw_storage.RawDevice("test", backend)
+        device.seek(0)
+        self.assertEqual(device.read(1408) + device.read(1408), backend.data[:2816])
+        self.assertEqual(backend.calls, [(0, 4096)])
+        backend.data = b"z" * backend.size
+        device.seek(0)
+        self.assertEqual(device.read(512), b"z" * 512)
+        self.assertEqual(backend.calls, [(0, 4096), (0, 4096)])
+
+    def test_linux_disk_mounts_include_nested_child_partitions(self):
+        import json
+        data = {"blockdevices": [{"path": "/dev/test", "type": "disk", "size": 8192,
+                "model": "USB Games", "mountpoints": [None], "children": [
+                {"path": "/dev/test1", "type": "part", "size": 4096,
+                 "fstype": "exfat", "mountpoints": ["/games"]}]}]}
+        result = types.SimpleNamespace(returncode=0, stdout=json.dumps(data).encode(), stderr=b"")
+        with patch.object(raw_storage.platform, "system", return_value="Linux"), \
+                patch.object(raw_storage.subprocess, "run", return_value=result):
+            devices = raw_storage.list_devices()
+            self.assertIn("USB Games", devices[0][1])
+            self.assertIn("exfat", devices[0][1])
+            self.assertIn("/games", raw_storage.mount_warning("/dev/test"))
+            self.assertIn("/games", raw_storage.mount_warning("/dev/test1"))
+
+    def test_unknown_mount_status_is_not_reported_as_unmounted(self):
+        with patch.object(raw_storage, "_metadata", side_effect=OSError("missing tool")):
+            self.assertIn("Could not check mount state", raw_storage.mount_warning("test"))
+        with patch.object(raw_storage, "_metadata", return_value=[]):
+            self.assertIn("unknown", raw_storage.mount_warning("test"))
+
+    def test_windows_metadata_command_uses_valid_raw_paths(self):
+        result = types.SimpleNamespace(returncode=0, stdout=b"[]", stderr=b"")
+        with patch.object(raw_storage.platform, "system", return_value="Windows"), \
+                patch.object(raw_storage.subprocess, "run", return_value=result) as run:
+            self.assertEqual(raw_storage._metadata(), [])
+        command = run.call_args.args[0][-1]
+        self.assertIn("'" + chr(92) * 2 + "." + chr(92) + "PhysicalDrive'", command)
+        self.assertNotIn("'" + chr(92) * 4, command)
+
+    def test_request_buffer_is_bounded_on_512_byte_devices(self):
+        backend = AlignedBackend(sector_size=512)
+        device = raw_storage.RawDevice("test", backend)
+        device.seek(0, 256)
+        chunks = [device.read(1024) for _ in range(128)]
+        self.assertEqual(b"".join(chunks), backend.data)
+        self.assertEqual(backend.calls, [(0, 65536), (65536, 65536)])

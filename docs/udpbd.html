@@ -120,7 +120,7 @@ python ps2servers.py serve udpbd "/srv/images/disk.img" --read-only --bind 192.1
 
 <h2 id="console-setup">4. Configure the PS2 Client</h2>
 <div class="callout info"><div class="h">Desktop/Core: Read-only Raw Drives</div>
-<p>Clear <b>Disk image</b>, then use <b>Select drive</b> beside <b>Raw drive (read-only)</b>, or enter a device path. Use <b>Check access</b> before starting. The selector lists disks and Linux partitions; Windows boot/system disks are excluded. Windows volume paths such as <code>\\.\E:</code> can be entered manually without a trailing slash.</p>
+<p>Clear <b>Disk image</b>, then use <b>Select drive</b> beside <b>Raw drive (read-only)</b>, or enter a device path. Use <b>Check access</b> before starting. The selector shows disks, Linux partitions and Windows volumes with drive letters, including model, capacity, filesystem and mount points. Windows boot/system disks and their volumes are excluded. Windows volume paths such as <code>\\.\E:</code> also work when entered manually without a trailing slash. Mounted targets and disks with mounted child partitions produce advisory warnings; unknown mount state is reported explicitly. Prefer an unmounted target. Linux discovery requires <code>lsblk</code>.</p>
 <pre><code># Linux: replace with your actual disk/partition; read permission is required
 python ps2servers.py serve udpbd --raw-device /dev/disk/by-id/YOUR-DRIVE
 # Windows: run from an administrator terminal; replace the disk number
