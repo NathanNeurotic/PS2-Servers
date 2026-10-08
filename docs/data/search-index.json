@@ -692,7 +692,7 @@
   {
     "title": "Core CLI Reference — 4. serve udpbd Options",
     "cat": "operations",
-    "text": "4. serve udpbd Options. python ps2servers.py serve udpbd /srv/images/game.iso --read-only [options] Flag Default Description IMAGE_PATH (Positional) Path to the disc image file. --port PORT 48573 UDP port for block device commands. --bind IP 0.0.0.0 Interface bind address. --read-only false Prevent write modifications to the backing image.",
+    "text": "4. serve udpbd Options. python ps2servers.py serve udpbd /srv/images/game.iso --read-only [options]. IMAGE_PATH is a positional path to a single block-image file (not a DVD/ folder). Python UDPBD listens on fixed UDP port 48573 and does not accept --port (Edge separately supports --port). --bind IP selects a host interface; --read-only protects the image. UDPBD uses broadcast discovery, not UDPFS. For mass0: / cannot open folder, see the UDPBD troubleshooting guide.",
     "url": "cli.html#serve-udpbd"
   },
   {
