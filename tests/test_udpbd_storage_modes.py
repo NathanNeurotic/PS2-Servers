@@ -142,6 +142,51 @@ class WritableRawTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             UDPBD.main(['--raw-device', '/dev/test', '--raw-write'])
 
+    def test_windows_child_locks_precede_disk_open_and_release_on_close(self):
+        api = Mock()
+        api.CreateFileW.side_effect = [101, 102, 103]
+        commands = []
+
+        def ioctl(handle, command, source, source_size, output, size, returned, overlapped):
+            commands.append((handle, command))
+            if command == 0x7405c:
+                output.raw = struct.pack('<q', 32768)
+            elif command == 0x70000:
+                output.raw = struct.pack('<qIIII', 1, 0, 1, 1, 4096)
+            returned._obj.value = size
+            return True
+
+        api.DeviceIoControl.side_effect = ioctl
+        with patch.object(ctypes, 'WinDLL', return_value=api, create=True):
+            device = raw_storage._WindowsDevice(r'\\.\PhysicalDrive2', writable=True,
+                exclusive=True, volumes=[r'\\?\Volume{one}', r'\\?\Volume{two}'])
+        self.assertEqual(commands[:4], [(101, 0x90018), (101, 0x90020),
+                                        (102, 0x90018), (102, 0x90020)])
+        self.assertEqual(api.CreateFileW.call_args.args[1], 0xc0000000)
+        device.flush()
+        api.FlushFileBuffers.assert_called_once_with(103)
+        device.close()
+        self.assertEqual([c.args[0] for c in api.CloseHandle.call_args_list], [103, 101, 102])
+
+    def test_linux_backend_writable_exclusive_flags_and_native_sync(self):
+        backend_io = types.SimpleNamespace(ioctl=Mock(side_effect=[
+            struct.pack('=Q', 32768), struct.pack('=I', 4096)]))
+        with patch.dict('sys.modules', {'fcntl': backend_io}), \
+                patch.object(raw_storage.os, 'O_NONBLOCK', 0x800, create=True), \
+                patch.object(raw_storage.os, 'open', return_value=77) as opener, \
+                patch.object(raw_storage.os, 'fstat', return_value=types.SimpleNamespace(st_mode=0o060000)), \
+                patch.object(raw_storage.os, 'pwrite', return_value=4096, create=True) as writer, \
+                patch.object(raw_storage.os, 'fsync') as sync, \
+                patch.object(raw_storage.os, 'close'):
+            device = raw_storage._LinuxDevice('/dev/test', writable=True, exclusive=True)
+            self.assertEqual(opener.call_args.args[1],
+                raw_storage.os.O_RDWR | raw_storage.os.O_NONBLOCK | raw_storage.os.O_EXCL)
+            self.assertEqual(device.write_at(4096, b'x' * 4096), 4096)
+            writer.assert_called_once_with(77, b'x' * 4096, 4096)
+            device.flush()
+            sync.assert_called_once_with(77)
+            device.close()
+
 
 class VirtualExfatTests(unittest.TestCase):
     def setUp(self):
@@ -217,6 +262,13 @@ class VirtualExfatTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which('fsck.exfat'), 'requires exfatprogs independent validator')
     def test_image_passes_independent_exfat_filesystem_check(self):
+        # Force a multi-cluster root directory, not only the single-cluster case.
+        for i in range(300):
+            (self.root / f'long-name-for-directory-chain-{i:04d}.txt').touch()
+        self.device.close()
+        self.device = virtual_exfat.VirtualExfat(self.root)
+        self.addCleanup(self.device.close)
+        self.assertGreater(self.device.root.clusters, 1)
         image = pathlib.Path(self.temp.name) / 'virtual.img'
         # fsck checks the partition volume, rather than the enclosing MBR disk.
         d = self.device
@@ -226,3 +278,10 @@ class VirtualExfatTests(unittest.TestCase):
                 f.write(d.read(65536))
         result = subprocess.run(['fsck.exfat', '-n', str(image)], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # Negative control: the validator must reject two invalid boot sectors.
+        with image.open('r+b') as f:
+            for offset in (3, 12 * 512 + 3):
+                f.seek(offset)
+                f.write(b'BROKEN  ')
+        invalid = subprocess.run(['fsck.exfat', '-n', str(image)], capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(invalid.returncode, 0, invalid.stdout + invalid.stderr)

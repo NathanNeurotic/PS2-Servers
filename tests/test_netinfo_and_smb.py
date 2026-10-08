@@ -41,6 +41,8 @@ def _probe_values(server):
             values[f.key] = f.default or (f.choices[0][0] if f.choices else "")
         elif f.default:
             values[f.key] = f.default
+    if server.key == "udpbd":
+        values["virtual_folder"] = ""  # probe the image mode, not two targets
     return values
 
 

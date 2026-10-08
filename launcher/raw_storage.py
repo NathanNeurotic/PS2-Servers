@@ -290,11 +290,18 @@ def open_raw_device(path, writable=False, exclusive=False):
     if system == "Linux":
         if record:
             for mount in sorted(record.get("mounts") or [], key=len, reverse=True):
-                subprocess.run(["umount", "--", mount], check=True, capture_output=True, timeout=30)
+                try:
+                    subprocess.run(["umount", "--", mount], check=True, capture_output=True, timeout=30)
+                except subprocess.CalledProcessError as error:
+                    detail = error.stderr.decode("utf-8", "replace").strip()
+                    raise OSError(errno.EBUSY, f"Cannot unmount {mount}: {detail}. "
+                                  "Previously unmounted filesystems remain unmounted.") from error
             if _exclusive_target(path).get("mounts"):
                 raise OSError(errno.EBUSY, "Target still has mounted filesystems")
         backend = _LinuxDevice(path, writable=writable, exclusive=exclusive)
     elif system == "Windows":
+        if record and record.get("kind") == "Disk" and record.get("mounts") and not record.get("volumes"):
+            raise ValueError("Cannot identify mounted Windows volumes; exclusive access refused")
         backend = _WindowsDevice(path, writable=writable, exclusive=exclusive,
                                  volumes=record.get("volumes", ()) if record else ())
     else:
@@ -334,6 +341,11 @@ $items = @(Get-Disk | ForEach-Object {
     }
     $mounts = @($parts | ForEach-Object { $_.AccessPaths } | Where-Object { $_ -and $_ -notmatch 'Volume\{' })
     $volumes = @($parts | ForEach-Object { $_.AccessPaths } | Where-Object { $_ -match '^\\\\\?\\Volume\{' } | ForEach-Object { $_.TrimEnd('\') })
+    foreach ($part in $parts) {
+        if ($part.DriveLetter -and -not @($part.AccessPaths | Where-Object { $_ -match '^\\\\\?\\Volume\{' }).Count) {
+            $volumes += ('\\.\'+$part.DriveLetter+':')
+        }
+    }
     [pscustomobject]@{path=('\\.\PhysicalDrive'+$disk.Number); kind='Disk'; model=$disk.FriendlyName; size=$disk.Size; mounts=$mounts; volumes=$volumes; fs=''; system=($disk.IsBoot -or $disk.IsSystem)}
     foreach ($part in $parts) {
         if ($part.DriveLetter) {
