@@ -815,12 +815,12 @@ def h_read_andx(conn, r):
     maxcount_high = struct.unpack_from("<H", p, 14)[0]
     off_high = struct.unpack_from("<I", p, 20)[0] if len(p) >= 24 else 0
     maxcount = maxcount_low | (maxcount_high << 16)
-    of = conn.files.get(fid)
-    if of is None or of.fh is None:
-        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
     offset = off_low | (off_high << 32)
     requested = min(maxcount, 0xFFFF) if maxcount else 0
-    conn.last_read = (fid, os.path.basename(of.path), offset, requested)
+    of = conn.files.get(fid)
+    conn.last_read = (fid, os.path.basename(of.path) if of else None, offset, requested)
+    if of is None or of.fh is None:
+        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
     started = time.monotonic()
     of.fh.seek(offset)
     chunk = of.fh.read(requested)

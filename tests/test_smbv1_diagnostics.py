@@ -3,6 +3,8 @@ import contextlib
 import io
 import os
 import struct
+import socket
+import threading
 import tempfile
 import types
 import unittest
@@ -78,6 +80,46 @@ class DiagnosticsTests(unittest.TestCase):
         with patch.object(smb.time, "monotonic", side_effect=lambda: clock[0]), patch.object(smb, "activity"):
             self.conn.send(b"reply")
         self.assertEqual(sent, [b"\x00\x00\x00\x05reply"])
+        self.assertEqual(self.conn.slow_sends, 1)
+
+    def test_connection_error_reply_and_lifecycle_diagnostics(self):
+        client, server = socket.socketpair()
+        client.settimeout(2)
+        output = io.StringIO()
+        worker = threading.Thread(target=smb.serve_conn,
+                                  args=(self.conn.server, server, ("127.0.0.1", 1234)))
+        with contextlib.redirect_stderr(output):
+            worker.start()
+            try:
+                p = bytearray(24)
+                struct.pack_into("<H", p, 4, 99)
+                struct.pack_into("<H", p, 10, 64)
+                request = smb.pack_header(smb.SMB_COM_READ_ANDX, 0, 0, 0, 0, 1) + smb.build_body(p, b"")
+                smb.send_msg(client, request)
+                reply = smb.recv_msg(client)
+                self.assertEqual(reply[5] | (struct.unpack_from("<H", reply, 7)[0] << 16),
+                                 smb.STATUS_OBJECT_NAME_NOT_FOUND)
+            finally:
+                client.close()
+                worker.join(2)
+        self.assertFalse(worker.is_alive())
+        text = output.getvalue()
+        self.assertIn("connected", text)
+        self.assertIn("requests=1", text)
+        self.assertIn("errors=1", text)
+        self.assertIn("status=0xc0000034", text)
+        self.assertIn("last_read=(99, None, 0, 64)", text)
+        self.assertIn("disconnected", text)
+
+    def test_failed_send_still_records_duration(self):
+        clock = [10.0]
+        def sendall(data):
+            clock[0] += .4
+            raise ConnectionResetError("test reset")
+        self.conn.sock = types.SimpleNamespace(sendall=sendall)
+        with patch.object(smb.time, "monotonic", side_effect=lambda: clock[0]), patch.object(smb, "activity"):
+            with self.assertRaises(ConnectionResetError):
+                self.conn.send(b"reply")
         self.assertEqual(self.conn.slow_sends, 1)
 
     def test_default_diagnostics_visible_without_verbose(self):
