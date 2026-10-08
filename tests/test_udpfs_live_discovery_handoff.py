@@ -170,6 +170,8 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
                 server = _make_server()
                 sess = _make_active_session(addr)
                 server._reset_session_state(sess, CORE.PROFILE_PENDING)
+                sess.tx_seq_nr_acked = 41
+                sess.tx_buffer = [(10, b"queued-data")]
                 sess.discovery_sequence = 0
                 sess.ingress = CORE.SOCKET_DATA
                 server._local = threading.local()
@@ -181,6 +183,13 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
                 server._handle_data(control, addr)
                 self.assertEqual(sess.protocol_profile, CORE.PROFILE_PENDING)
                 self.assertFalse(sess.first_data_seen)
+                if control_flags:
+                    self.assertEqual(sess.tx_seq_nr_acked, 0)
+                    self.assertEqual(server._sent, [])
+                else:
+                    self.assertEqual(sess.tx_seq_nr_acked, 0xFFF)
+                    self.assertEqual(server._sent,
+                                     [(server.dsock, b"queued-data", addr)])
                 consumed, _ = _exercise_payload_data(
                     server, sess, addr, request_sequence)
                 self.assertEqual(sess.protocol_profile, expected_profile)
