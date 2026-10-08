@@ -507,16 +507,16 @@ class ServerCard(ttk.LabelFrame):
             var.set(path)
 
     def _check_access(self):
-        targets = [(f.label, self.vars[f.key].get(), f.kind)
+        values = self.values()
+        targets = [(f.label, values[f.key], f.kind)
                    for f in self.server.fields
-                   if f.kind in ("folder", "file") and f.key in self.vars
-                   and self.vars[f.key].get()]
+                   if f.kind in ("folder", "file") and values.get(f.key)]
         if not targets:
             messagebox.showinfo("Check access", "Select a file or folder first.",
                                 parent=self)
             return
         read_only = (self.server.key == "http"
-                     or bool(self.values().get("read_only")))
+                     or bool(values.get("read_only")))
         results = queue.Queue()
         self.access_btn.config(state="disabled")
 
