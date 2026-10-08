@@ -109,6 +109,11 @@ def log(*a):
         print("  [smb]", *a, file=sys.stderr, flush=True)
 
 
+def activity(*args):
+    """Session diagnostics are visible without per-request verbose logging."""
+    print("  [smb]", *args, file=sys.stderr, flush=True)
+
+
 def to_filetime(unix_ts):
     """Windows FILETIME: 100ns ticks since 1601-01-01 UTC."""
     if unix_ts <= 0:
@@ -262,10 +267,11 @@ class Share:
 
 
 class OpenFile:
-    __slots__ = ("path", "fh", "is_dir", "size")
+    __slots__ = ("path", "fh", "is_dir", "size", "diagnostic_reported")
 
     def __init__(self, path, is_dir):
         self.path = path
+        self.diagnostic_reported = False
         self.is_dir = is_dir
         self.size = 0 if is_dir else os.path.getsize(path)
         self.fh = None
@@ -293,6 +299,69 @@ class Conn:
         self.trees = {}  # tid -> Share or "IPC"
         self.files = {}  # fid -> OpenFile
         self.searches = {}  # sid -> (entries list, cursor)
+        self.peer = "unknown"
+        self.started = self.sample_time = time.monotonic()
+        self.requests = self.reads = self.writes = self.bytes_read = self.errors = 0
+        self.short_reads = self.slow_reads = self.slow_sends = 0
+        self.sample_bytes = 0
+        self.max_disk_ms = self.max_send_ms = 0.0
+        self.last_warning = float("-inf")
+        self.last_read = None
+
+    def warning(self, message):
+        # Bound repeated error/slow-read output; counters still include every event.
+        now = time.monotonic()
+        if now - self.last_warning >= 5.0:
+            activity(self.peer, message)
+            self.last_warning = now
+
+    def record_read(self, fid, of, offset, requested, length, elapsed):
+        self.reads += 1
+        self.bytes_read += length
+        disk_ms = elapsed * 1000.0
+        self.max_disk_ms = max(self.max_disk_ms, disk_ms)
+        expected = min(requested, max(0, of.size - offset))
+        short = length < expected
+        slow = elapsed >= 0.250
+        if not of.diagnostic_reported or short or slow:
+            details = (f"fid={fid} file={os.path.basename(of.path)!r} offset={offset} "
+                       f"requested={requested} returned={length} disk_ms={disk_ms:.1f}")
+        if not of.diagnostic_reported:
+            activity(self.peer, "reading", details, f"size={of.size}")
+            of.diagnostic_reported = True
+        if short:
+            self.short_reads += 1
+            self.warning("SHORT READ " + details)
+        if slow:
+            self.slow_reads += 1
+            self.warning("SLOW DISK READ " + details)
+
+    def summary(self, final=False):
+        now = time.monotonic()
+        interval = now - self.sample_time
+        if not final and interval < 5.0:
+            return
+        rate = (self.bytes_read - self.sample_bytes) / max(interval, 0.001) / 1048576
+        activity(self.peer, "final" if final else "activity",
+                 f"uptime={now-self.started:.0f}s requests={self.requests} reads={self.reads} writes={self.writes} "
+                 f"MiB={self.bytes_read/1048576:.2f} rate={rate:.2f}MiB/s "
+                 f"files={len(self.files)} searches={len(self.searches)} errors={self.errors} "
+                 f"short={self.short_reads} slow_disk={self.slow_reads} slow_send={self.slow_sends} "
+                 f"disk_max_ms={self.max_disk_ms:.1f} send_max_ms={self.max_send_ms:.1f}")
+        self.sample_time, self.sample_bytes = now, self.bytes_read
+        self.max_disk_ms = self.max_send_ms = 0.0
+
+    def send(self, message):
+        started = time.monotonic()
+        try:
+            send_msg(self.sock, message)
+        finally:
+            elapsed = time.monotonic() - started
+            self.max_send_ms = max(self.max_send_ms, elapsed * 1000.0)
+            if elapsed >= 0.250:
+                self.slow_sends += 1
+                self.warning(f"SLOW RESPONSE SEND duration_ms={elapsed*1000:.1f}")
+        self.summary()
 
     def alloc_fid(self):
         self.next_fid = (self.next_fid + 1) & 0xFFFF or 0x1000
@@ -750,9 +819,13 @@ def h_read_andx(conn, r):
     if of is None or of.fh is None:
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
     offset = off_low | (off_high << 32)
+    requested = min(maxcount, 0xFFFF) if maxcount else 0
+    conn.last_read = (fid, os.path.basename(of.path), offset, requested)
+    started = time.monotonic()
     of.fh.seek(offset)
-    chunk = of.fh.read(min(maxcount, 0xFFFF) if maxcount else 0)
+    chunk = of.fh.read(requested)
     n = len(chunk)
+    conn.record_read(fid, of, offset, requested, n, time.monotonic() - started)
     DATA_OFFSET = 59  # == sizeof(ReadAndXResponse_t); data immediately follows ByteCount
     params = struct.pack(
         "<BBHHHHHHI6s",
@@ -1094,7 +1167,9 @@ HANDLERS = {
 
 def serve_conn(server, sock, addr):
     conn = Conn(server)
-    log("connect from", addr)
+    conn.sock = sock
+    conn.peer = f"{addr[0]}:{addr[1]}"
+    activity(conn.peer, "connected", "SMBv1", "read-only" if server.read_only else "writable")
     try:
         while True:
             msg = recv_msg(sock)
@@ -1107,22 +1182,26 @@ def serve_conn(server, sock, addr):
                 handler = SMB2_HANDLERS.get(r2.cmd)
                 if handler is None:
                     hdr = pack_smb2_hdr(r2.cmd, status=STATUS_NOT_IMPLEMENTED, message_id=r2.message_id, session_id=r2.session_id)
-                    send_msg(sock, hdr)
+                    conn.send(hdr)
                     continue
                 if r2.cmd == 0x0000:
                     body, status = handler(conn, r2, smb_version=server.smb_version)
                 else:
                     body, status = handler(conn, r2)
                 hdr = pack_smb2_hdr(r2.cmd, status=status, message_id=r2.message_id, session_id=conn.uid or r2.session_id)
-                send_msg(sock, hdr + body)
+                conn.send(hdr + body)
                 continue
             if len(msg) < 33 or msg[0:4] != SMB_MAGIC:
                 continue
             r = Req(msg)
+            conn.requests += 1
+            if r.cmd == SMB_COM_WRITE_ANDX:
+                conn.writes += 1
             handler = HANDLERS.get(r.cmd)
             if handler is None:
-                log("unhandled cmd 0x%02x" % r.cmd)
-                send_msg(sock, pack_header(r.cmd, STATUS_NOT_IMPLEMENTED, r.tid, r.pid, r.uid, r.mid)
+                conn.errors += 1
+                conn.warning(f"unsupported command=0x{r.cmd:02x}")
+                conn.send(pack_header(r.cmd, STATUS_NOT_IMPLEMENTED, r.tid, r.pid, r.uid, r.mid)
                          + build_body(b"", b""))
                 continue
             result = handler(conn, r)
@@ -1133,19 +1212,24 @@ def serve_conn(server, sock, addr):
             uid = result[3] if len(result) >= 4 and result[3] is not None else r.uid
             tid = result[4] if len(result) >= 5 and result[4] is not None else r.tid
             if status != STATUS_SUCCESS or params is None:
-                send_msg(sock, pack_header(r.cmd, status, r.tid, r.pid, r.uid, r.mid) + build_body(b"", b""))
+                conn.errors += 1
+                conn.warning(f"command=0x{r.cmd:02x} status=0x{status:08x} last_read={conn.last_read!r}")
+                conn.send(pack_header(r.cmd, status, r.tid, r.pid, r.uid, r.mid) + build_body(b"", b""))
                 continue
             hdr = pack_header(r.cmd, status, tid, r.pid, uid, r.mid)
-            send_msg(sock, hdr + build_body(params, data))
+            conn.send(hdr + build_body(params, data))
     except (ConnectionError, OSError) as e:
-        log("conn error", e)
+        conn.errors += 1
+        activity(conn.peer, "connection error", type(e).__name__, str(e),
+                 f"last_read={conn.last_read!r}")
     finally:
+        conn.summary(final=True)
         conn.cleanup()
         try:
             sock.close()
         except OSError:
             pass
-        log("disconnect", addr)
+        activity(conn.peer, "disconnected")
 
 
 # --------------------------------------------------------------------------------------------
