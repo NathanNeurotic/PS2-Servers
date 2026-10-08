@@ -137,6 +137,11 @@ For best compatibility, name your games using the standard OPL startup identifie
 When starting a server for the first time, Windows Defender Firewall may prompt to allow network traffic. Check <b>Private networks</b> and click <b>Allow access</b>. PS2 Servers also provides an automatic firewall rule creator in the application settings.
 </div>
 
+<div class="callout info"><div class="h">External-drive access</div>
+<p>After selecting a folder or image file, click <b>Check access</b> on the server card. The results appear in a dialog and the Terminal log. Folder checks verify listing only; image checks verify reading and, unless read-only is selected, a writable open without writing data. Actual game reads and saves still need testing.</p>
+<p>On Linux, check parent-directory access and mount ownership/permissions; NTFS/exFAT mount options can control access. On Windows, check the target's Security permissions for your account. This check does not open raw disks, reformat drives, or change permissions.</p>
+</div>
+
 <h2 id="console-setup">4. Configure Network in Your Loader</h2>
 <p>Boot your PlayStation 2, launch your loader, and navigate to <b>Network Settings</b>. Configure the connection to match the values displayed on your running server card:</p>
 
