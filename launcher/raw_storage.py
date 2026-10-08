@@ -213,7 +213,16 @@ def _metadata():
         command = r"""[Console]::OutputEncoding = [Text.UTF8Encoding]::new();
 $items = @(Get-Disk | ForEach-Object {
     $disk = $_
-    $parts = @(Get-Partition -DiskNumber $disk.Number -ErrorAction Stop)
+    try {
+        $parts = @(Get-Partition -DiskNumber $disk.Number -ErrorAction Stop)
+    } catch {
+        if ($_.CategoryInfo.Category -eq 'ObjectNotFound' -and
+            $_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*,Get-Partition') {
+            $parts = @()
+        } else {
+            throw
+        }
+    }
     $mounts = @($parts | ForEach-Object { $_.AccessPaths } | Where-Object { $_ -and $_ -notmatch 'Volume\{' })
     [pscustomobject]@{path=('\\.\PhysicalDrive'+$disk.Number); kind='Disk'; model=$disk.FriendlyName; size=$disk.Size; mounts=$mounts; fs=''; system=($disk.IsBoot -or $disk.IsSystem)}
     foreach ($part in $parts) {

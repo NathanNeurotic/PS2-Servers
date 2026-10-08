@@ -3,6 +3,7 @@
 import ctypes
 import importlib.util
 import pathlib
+import platform
 import stat
 import struct
 import types
@@ -259,6 +260,53 @@ class RawStorageTests(unittest.TestCase):
         command = run.call_args.args[0][-1]
         self.assertIn("'" + chr(92) * 2 + "." + chr(92) + "PhysicalDrive'", command)
         self.assertNotIn("'" + chr(92) * 4, command)
+
+    @unittest.skipUnless(platform.system() == "Windows", "requires PowerShell")
+    def test_windows_partitionless_disk_preserves_remaining_inventory(self):
+        records = self._run_windows_inventory("CmdletizationQuery_NotFound", "ObjectNotFound")
+        self.assertEqual([item["kind"] for item in records], ["Disk", "Disk", "Volume"])
+        self.assertEqual(records[0]["mounts"], [])
+        self.assertEqual(records[2]["fs"], "exFAT")
+
+    @unittest.skipUnless(platform.system() == "Windows", "requires PowerShell")
+    def test_windows_inventory_does_not_hide_provider_or_access_errors(self):
+        for error_id, category in (("AccessDenied", "PermissionDenied"),
+                                   ("OtherMissingObject", "ObjectNotFound")):
+            with self.subTest(error_id=error_id), self.assertRaises(OSError):
+                self._run_windows_inventory(error_id, category)
+
+    def _run_windows_inventory(self, error_id, category):
+        # Execute the production PowerShell script with synthetic storage cmdlets;
+        # no real disks or volumes are queried or opened.
+        prefix = r"""
+function Get-Disk {
+    [pscustomobject]@{Number=0; FriendlyName='Empty'; Size=1048576; IsBoot=$false; IsSystem=$false}
+    [pscustomobject]@{Number=1; FriendlyName='Games'; Size=2097152; IsBoot=$false; IsSystem=$false}
+}
+function Get-Partition {
+    [CmdletBinding()] param($DiskNumber)
+    if ($DiskNumber -eq 0) {
+        $errorRecord = [Management.Automation.ErrorRecord]::new(
+            [InvalidOperationException]::new('Synthetic storage error'),
+            'ERROR_ID', [Management.Automation.ErrorCategory]::CATEGORY, $null)
+        $PSCmdlet.ThrowTerminatingError($errorRecord)
+    }
+    [pscustomobject]@{DriveLetter='E'; Size=1048576; AccessPaths=@('E:\')}
+}
+function Get-Volume {
+    [CmdletBinding()] param([Parameter(ValueFromPipeline=$true)] $Partition)
+    process { [pscustomobject]@{FileSystemLabel='Games'; FileSystemType='exFAT'} }
+}
+""".replace("ERROR_ID", error_id).replace("CATEGORY", category)
+        original_run = raw_storage.subprocess.run
+
+        def run_synthetic(argv, **kwargs):
+            argv = list(argv)
+            argv[-1] = prefix + argv[-1]
+            return original_run(argv, **kwargs)
+
+        with patch.object(raw_storage.subprocess, "run", side_effect=run_synthetic):
+            return raw_storage._metadata()
 
     def test_request_buffer_is_bounded_on_512_byte_devices(self):
         backend = AlignedBackend(sector_size=512)
