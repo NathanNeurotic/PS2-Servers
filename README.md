@@ -107,6 +107,28 @@ executable accepts the same `serve` commands. `--serve` remains an alias.
 Use this entry point for UDPFS to get the same automatic compatibility engine
 as Desktop; `udpfs_server/udpfs_server.py` is the underlying legacy engine.
 
+## External-drive access
+
+Select the mounted games folder or image file, then click **Check access** on
+the server card. Results appear in a dialog and the Terminal log. The check
+runs without changing permissions or drive contents.
+
+For folders, it verifies directory listing only; it does not claim that every
+game is readable or that saves/VMC writes work. For image files, it reads one
+byte and checks a non-truncating writable open unless **Read-only** is selected.
+It writes no test data. HTTP checks remain read-only.
+
+On Linux, a file on a mounted external drive needs access through its parent
+directories and the mount's ownership/permissions. NTFS/exFAT mount options can
+control access; changing file permissions alone may not resolve it. On Windows,
+check the target's Security permissions for the account running PS2 Servers.
+A missing path may mean the drive is disconnected or mounted under a different
+name. A writable-open failure can also mean the filesystem is read-only.
+
+This action checks ordinary files and folders. It does not validate or open raw
+disks/partitions, change a drive's format, or grant device access. Raw block
+serving is a separate operation from sharing files on a mounted drive.
+
 ## UDPFS: games list but fail to launch
 
 On PCs with multiple network interfaces, automatic routing may select a reply
