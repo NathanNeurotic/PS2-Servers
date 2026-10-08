@@ -119,6 +119,8 @@ class VirtualExfat:
         self._chains = [(self.bitmap_cluster, bitmap_clusters),
                         (self.upcase_cluster, upcase_clusters)]
         self._chains += [(n.cluster, n.clusters) for n in self._nodes if n.directory]
+        self._chains.sort()
+        self._chain_starts = [start for start, _ in self._chains]
         self._extents = []
         self._add_extent(self.upcase_cluster, len(upcase), upcase)
         for node in self._nodes:
@@ -236,10 +238,11 @@ class VirtualExfat:
             if i < 2:
                 values[i - first] = (0xfffffff8, 0xffffffff)[i]
             else:
-                for start, length in self._chains:
-                    if start <= i < start + length:
+                chain = bisect.bisect_right(self._chain_starts, i) - 1
+                if chain >= 0:
+                    start, length = self._chains[chain]
+                    if i < start + length:
                         values[i - first] = i + 1 if i < start + length - 1 else 0xffffffff
-                        break
         data = struct.pack('<' + 'I' * len(values), *values)
         return data[offset % 4:offset % 4 + count]
 

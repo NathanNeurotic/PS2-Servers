@@ -10,6 +10,17 @@ permissions:
   contents: read
 
 jobs:
+  windows-storage:
+    name: Windows raw and virtual storage tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Exercise native APIs and real PowerShell script with synthetic storage
+        run: python -m unittest tests.test_raw_storage tests.test_udpbd_storage_modes -v
+
   python-checks:
     name: Python checks
     runs-on: ubuntu-latest
