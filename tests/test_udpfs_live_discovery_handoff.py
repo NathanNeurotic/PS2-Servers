@@ -160,6 +160,41 @@ def _make_active_session(addr, *, quiet_seconds=0.3, handle_id=1):
 
 
 class LiveDiscoveryHandoffTests(unittest.TestCase):
+    def test_control_packet_before_first_request_does_not_choose_protocol(self):
+        for control_flags, request_sequence, expected_profile in (
+                (1, 0, CORE.PROFILE_STANDARD), (1, 1, CORE.PROFILE_MODULO),
+                (0, 0, CORE.PROFILE_STANDARD), (0, 1, CORE.PROFILE_MODULO)):
+            with self.subTest(control_flags=control_flags,
+                              request_sequence=request_sequence):
+                addr = ("192.0.2.10", 5000)
+                server = _make_server()
+                sess = _make_active_session(addr)
+                server._reset_session_state(sess, CORE.PROFILE_PENDING)
+                sess.tx_seq_nr_acked = 41
+                sess.tx_buffer = [(10, b"queued-data")]
+                sess.discovery_sequence = 0
+                sess.ingress = CORE.SOCKET_DATA
+                server._local = threading.local()
+                server._local.session = sess
+                # Control packets carry a sequence, but it is not the sequence
+                # of the client's first filesystem request.
+                control = (CORE.Header(packet_type=CORE.PacketType.DATA, seq_nr=0).pack()
+                           + struct.pack("<I", control_flags << 12))
+                server._handle_data(control, addr)
+                self.assertEqual(sess.protocol_profile, CORE.PROFILE_PENDING)
+                self.assertFalse(sess.first_data_seen)
+                if control_flags:
+                    self.assertEqual(sess.tx_seq_nr_acked, 0)
+                    self.assertEqual(server._sent, [])
+                else:
+                    self.assertEqual(sess.tx_seq_nr_acked, 0xFFF)
+                    self.assertEqual(server._sent,
+                                     [(server.dsock, b"queued-data", addr)])
+                consumed, _ = _exercise_payload_data(
+                    server, sess, addr, request_sequence)
+                self.assertEqual(sess.protocol_profile, expected_profile)
+                self.assertEqual(len(consumed), 1)
+
     def test_active_stream_recent_seq0_preserves_session(self):
         """ACTIVE + seq0 + quiet<1s -> canonical INFORM, no reset, state preserved."""
         addr = ("192.0.2.10", 5000)
