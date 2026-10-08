@@ -94,6 +94,8 @@ def relaunch_as_admin():
             exe, params, cwd = frozen_self_exe(), "", None
         else:  # from source: re-run `python -m launcher` from the repo root
             exe, params, cwd = sys.executable, "-m launcher", REPO_ROOT
+        from .single_instance import restart_args
+        params = " ".join([params] + restart_args()).strip()
         # ShellExecuteW returns a value > 32 on success.
         rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, cwd, 1)
         if rc > 32:

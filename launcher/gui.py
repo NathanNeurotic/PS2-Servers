@@ -1060,7 +1060,7 @@ class LauncherApp:
             row=0, column=3, sticky="e")
         ttk.Button(footer, text="Restart", command=self.restart_app).grid(
             row=0, column=4, sticky="e", padx=(8, 0))
-        ttk.Button(footer, text="Exit", command=self.exit_app).grid(
+        ttk.Button(footer, text="Quit", command=self.exit_app).grid(
             row=0, column=5, sticky="e", padx=(8, 0))
 
     def _build_about_tab(self):
@@ -2786,7 +2786,7 @@ class LauncherApp:
         self.exit_app(confirm=False)
 
     def exit_app(self, confirm=True):
-        if confirm and not self._confirm_app_shutdown("Exit PS2 Servers?"):
+        if confirm and not self._confirm_app_shutdown("Quit PS2 Servers and stop all servers?"):
             return
         self._shutdown_app()
 
@@ -2803,9 +2803,10 @@ class LauncherApp:
         self._shutdown_app()
 
     def _restart_command(self):
+        from .single_instance import restart_args
         if is_frozen():
-            return [frozen_self_exe()]
-        return [sys.executable, "-m", "launcher"]
+            return [frozen_self_exe()] + restart_args()
+        return [sys.executable, "-m", "launcher"] + restart_args()
 
     def reset_settings(self):
         """Factory reset: delete the saved settings and restart into defaults.

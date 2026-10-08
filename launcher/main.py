@@ -38,19 +38,23 @@ def main(argv=None):
     if "--selfcheck" in argv:
         return _selfcheck()
 
-    app_icon.set_windows_app_id()
-    try:
-        from . import gui
-    except ImportError as e:  # Tkinter not present in this Python build
-        print("GUI unavailable ({}). Servers on this machine:".format(e))
-        if platform.system() == "Linux":
-            print("(Tk is bundled in the packaged download. Running from source? "
-                  "Install your distro's Tk package, e.g. "
-                  "'sudo apt install python3-tk' or 'sudo dnf install python3-tkinter'.)")
-        _print_list()
-        return 1
-    _apply_gui_review_fixes(gui)
-    return gui.run_gui()
+    from .single_instance import DesktopInstance
+    with DesktopInstance(restarting="--desktop-restart" in argv) as instance:
+        if not instance.acquired:
+            return 1
+        app_icon.set_windows_app_id()
+        try:
+            from . import gui
+        except ImportError as e:  # Tkinter not present in this Python build
+            print("GUI unavailable ({}). Servers on this machine:".format(e))
+            if platform.system() == "Linux":
+                print("(Tk is bundled in the packaged download. Running from source? "
+                      "Install your distro's Tk package, e.g. "
+                      "'sudo apt install python3-tk' or 'sudo dnf install python3-tkinter'.)")
+            _print_list()
+            return 1
+        _apply_gui_review_fixes(gui)
+        return gui.run_gui()
 
 
 ADMIN_ABOUT_TEXT = """
