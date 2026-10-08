@@ -56,7 +56,13 @@ def check_server_argv_nuitka_safe():
                 values[field.key] = server.default_port or 1111
             else:
                 values[field.key] = "X"
-        argv = server.build_argv(values)
+        if key == "udpbd":
+            # Image and raw-device fields are mutually exclusive. Exercise both.
+            image_values = dict(values, raw_device="")
+            raw_values = dict(values, image_file="")
+            argv = server.build_argv(image_values) + server.build_argv(raw_values)
+        else:
+            argv = server.build_argv(values)
         for arg in argv:
             if arg in ("-c", "-m"):
                 errors.append(
