@@ -375,6 +375,9 @@ class LauncherModeLaunchTests(unittest.TestCase):
                 values['root_dir'] = '/games'
             if key == 'smbv1':
                 values['games_folder'] = '/games'
+            # UDPBD requires one of two alternative targets.
+            if key == 'udpbd':
+                values['image_file'] = '/dummy.iso'
             with self.subTest(mode=key):
                 self.assertIsInstance(server.build_argv(values), list)
 

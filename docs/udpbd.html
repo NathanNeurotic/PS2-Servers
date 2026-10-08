@@ -66,7 +66,7 @@
   </nav>
   <main class="content">
 <h1>UDPBD: Single Block Image Setup</h1>
-<p class="lead"><b>UDPBD</b> serves the raw sectors of <b>one disk-image file</b> to a compatible PlayStation 2 client over <b>UDP 48573</b> (<code>0xBDBD</code>). It is not UDPFS: there is no directory listing or network share name.</p>
+<p class="lead"><b>UDPBD</b> serves the raw sectors of <b>one disk-image file</b>, or a <b>read-only Linux/Windows disk or partition</b> in Desktop/Core, to a compatible PlayStation 2 client over <b>UDP 48573</b> (<code>0xBDBD</code>). There is no directory listing or network share name.</p>
 
 <div class="callout warn"><div class="h">Choose the Right Mode Before You Start</div>
 If your goal is to browse and launch <b>many games</b> from a folder such as <code>D:\PS2Games\DVD\</code>, choose <a href="udpfs.html">UDPFS</a> or <a href="smb.html">SMB</a>, <b>not UDPBD</b>. UDPBD exposes one image as a block device, and the <b>PS2 client</b> decides how to interpret that image. Providing an ISO file does not automatically turn its contents into a browsable <code>DVD/</code> directory.
@@ -85,7 +85,7 @@ If your goal is to browse and launch <b>many games</b> from a folder such as <co
 <thead><tr><th>Setting</th><th>UDPBD value</th><th>Explanation</th></tr></thead>
 <tbody>
 <tr><td>Desktop card</td><td><b>UDPBD</b></td><td>Do not choose the UDPFS card unless your loader is using UDPFS</td></tr>
-<tr><td>Backing storage</td><td><b>One file</b>, not a folder</td><td>One block image per server; stop and change it to serve another image</td></tr>
+<tr><td>Backing storage</td><td><b>One image or raw target</b>, not a folder</td><td>Raw targets are read-only and available in Desktop/Core; stop before changing the target</td></tr>
 <tr><td>UDP port</td><td><b>48573</b> (<code>0xBDBD</code>)</td><td>Discovery and sector traffic; the Python Desktop/Core server uses this fixed port</td></tr>
 <tr><td>Discovery</td><td>Broadcast</td><td>The console-side UDPBD driver discovers the host; there is no SMB-style share, username, or password</td></tr>
 <tr><td>Writes</td><td>Supported when permitted</td><td>Prefer <b>Read-only</b> for first tests to prevent changes to the backing image</td></tr>
@@ -119,6 +119,15 @@ python ps2servers.py serve udpbd "/srv/images/disk.img" --read-only --bind 192.1
 </div>
 
 <h2 id="console-setup">4. Configure the PS2 Client</h2>
+<div class="callout info"><div class="h">Desktop/Core: Read-only Raw Drives</div>
+<p>Clear <b>Disk image</b>, then use <b>Select drive</b> beside <b>Raw drive (read-only)</b>, or enter a device path. Use <b>Check access</b> before starting. The selector lists disks and Linux partitions; Windows boot/system disks are excluded. Windows volume paths such as <code>\\.\E:</code> can be entered manually without a trailing slash.</p>
+<pre><code># Linux: replace with your actual disk/partition; read permission is required
+python ps2servers.py serve udpbd --raw-device /dev/disk/by-id/YOUR-DRIVE
+# Windows: run from an administrator terminal; replace the disk number
+python ps2servers.py serve udpbd --raw-device '\\.\PhysicalDrive2'</code></pre>
+<p>Windows raw reads require administrator rights; Desktop offers <b>Restart as administrator</b>. Linux needs read access to the block-device node, or an explicitly elevated Core command. Raw targets always reject writes/VMC saves and must be smaller than 2 TiB. Whole disks include a partition table; partitions/volumes have a different sector-zero layout. The PS2 client must understand the selected layout.</p>
+<p>All sectors of the selected target are exposed through UDPBD. Stop host applications from modifying the device while serving it, and stop the server before disconnecting it. The application does not lock, dismount, or format devices. Real-drive and console compatibility remain unverified. This option does not change Edge or UDPFS.</p>
+</div>
 <ol>
 <li>Configure the PS2's own Ethernet IP/subnet (for example host <code>192.168.1.100</code>, PS2 <code>192.168.1.150</code>, mask <code>255.255.255.0</code>); avoid duplicate addresses.</li>
 <li>Verify your loader build includes a <b>UDPBD</b> backend and select <b>that</b> backend. Names and launch paths vary by loader and release; a menu labeled <b>UDPFS</b> or generic <b>Network</b> does not establish UDPBD support.</li>

@@ -331,7 +331,11 @@ def _udpfs_argv(v):
 
 
 def _udpbd_argv(v):
-    args = [v["image_file"]]
+    image = v.get("image_file")
+    raw = v.get("raw_device")
+    if bool(image) == bool(raw):
+        raise ValueError("Select exactly one disk image or raw drive; clear the other field.")
+    args = ["--raw-device", raw] if raw else [image]
     if v.get("read_only"):
         args.append("-r")
     if v.get("verbose"):
@@ -502,7 +506,7 @@ HTTP = ServerDef(
 UDPBD = ServerDef(
     key="udpbd",
     label="UDPBD server",
-    blurb="Serve a single disk image as a block device over UDP. Largely superseded by UDPFS.",
+    blurb="Serve one disk image or a read-only raw disk/partition over UDP.",
     recommendation="Legacy — prefer UDPFS",
     recommendation_kind="legacy",
     runtime="python",
@@ -511,7 +515,10 @@ UDPBD = ServerDef(
     module_file=_repo("udpbd_server", "udpbd_server.py"),
     module_dir=_repo("udpbd_server"),
     fields=[
-        Field("image_file", "Disk image", "file", required=True),
+        Field("image_file", "Disk image", "file",
+              help="Choose an image file, or clear this field and select a raw drive below."),
+        Field("raw_device", "Raw drive (read-only)", "device",
+              help="Shares all sectors of a Linux disk/partition or Windows disk/volume. Raw writes and VMC saves are disabled. Do not edit the drive on the host while serving it."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
     ],

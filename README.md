@@ -125,9 +125,50 @@ check the target's Security permissions for the account running PS2 Servers.
 A missing path may mean the drive is disconnected or mounted under a different
 name. A writable-open failure can also mean the filesystem is read-only.
 
-This action checks ordinary files and folders. It does not validate or open raw
-disks/partitions, change a drive's format, or grant device access. Raw block
-serving is a separate operation from sharing files on a mounted drive.
+Ordinary file/folder checks do not open raw disks. On the UDPBD card, the
+separate **Raw drive (read-only)** field has a device-specific capacity/read
+check. No check changes a drive's format or grants device access.
+
+### UDPBD raw disks and partitions (Linux / Windows)
+
+Clear **Disk image**, then use **Select drive** beside **Raw drive (read-only)**.
+The selector shows device paths and capacities; Windows boot/system disks are
+excluded. A device path can also be entered manually. Click **Check access**
+before **Start**. Raw mode always disables writes, regardless of the Read-only
+checkbox, so it cannot provide VMC saves.
+
+Linux Core example (replace the device with your actual disk or partition):
+
+```sh
+python ps2servers.py serve udpbd --raw-device /dev/disk/by-id/YOUR-DRIVE
+```
+
+Use an account with read access to that device, or run the Core command with
+`sudo`. File permissions inside a mounted filesystem do not grant access to
+its block-device node. Do not grant world-write access.
+
+Windows Core example, from an administrator terminal:
+
+```powershell
+python ps2servers.py serve udpbd --raw-device '\\.\PhysicalDrive2'
+```
+
+Windows also accepts a volume path such as `\\.\E:` without a trailing slash.
+Desktop can use its existing **Restart as administrator** action when a raw
+read is denied. Ordinary image-file/folder sharing still works without elevation.
+
+A whole disk includes its partition table; a partition/volume starts at that
+partition's first sector. Choose the layout your PS2 client expects. Raw mode
+exposes all sectors of the selected target over the existing unauthenticated
+UDPBD service. Stop host applications from modifying that target while serving
+it, and stop the server before disconnecting it. The server does not lock,
+dismount, format, or modify the device.
+
+Capacity comes from the opened device handle, and native sector alignment is
+handled before UDPBD packetization. Devices at or above 2 TiB are rejected
+because this UDPBD protocol advertises a 32-bit count of 512-byte sectors.
+This feature still requires real-drive and console validation; host tests do
+not establish loader/filesystem compatibility. Edge and UDPFS are unchanged.
 
 ## UDPFS: games list but fail to launch
 

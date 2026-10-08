@@ -95,6 +95,7 @@ INCLUDE_PACKAGES = [
 ]
 
 INCLUDE_MODULES = [
+    "launcher.raw_storage",
     "argparse",
     "collections",
     "ctypes",
