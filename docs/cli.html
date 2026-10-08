@@ -182,12 +182,12 @@ python ps2servers.py serve http --help</code></pre>
     <tr>
       <td><code>IMAGE_PATH</code></td>
       <td><i>(Positional)</i></td>
-      <td>Path to the disc image file.</td>
+      <td>Path to one block-image file, <b>not</b> a <code>DVD/</code> library folder; its contents must match the PS2 client expectations.</td>
     </tr>
     <tr>
-      <td><code>--port PORT</code></td>
+      <td><b>UDP port (fixed)</b></td>
       <td><code>48573</code></td>
-      <td>UDP port for block device commands.</td>
+      <td>Python UDPBD uses fixed UDP port 48573; <code>--port</code> is <b>not supported</b> here (Edge is separate).</td>
     </tr>
     <tr>
       <td><code>--bind IP</code></td>
@@ -201,6 +201,8 @@ python ps2servers.py serve http --help</code></pre>
     </tr>
   </tbody>
 </table>
+
+<p>UDPBD uses broadcast discovery and is <b>not</b> UDPFS. For client setup and <code>mass0:</code> / "cannot open folder" diagnostics, see <a href="udpbd.html#troubleshooting">the UDPBD guide</a>.</p>
 
 <h2 id="systemd">5. Running Under systemd</h2>
 <p>Create a service unit file at <code>/etc/systemd/system/ps2servers-udpfs.service</code>:</p>
