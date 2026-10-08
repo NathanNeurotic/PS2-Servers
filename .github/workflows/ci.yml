@@ -41,6 +41,9 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q launcher smbv1_server smb2_server udpbd_server udpfs_server http_server ps2servers.py
 
+      - name: Install independent exFAT validator
+        run: sudo apt-get update -qq && sudo apt-get install -y exfatprogs
+
       - name: Run the Python test suite
         # Discovery, not a hand-written list. This step used to name exactly one
         # module -- tests.test_packaging_data_files -- so 23 of the 26 modules
