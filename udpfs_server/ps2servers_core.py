@@ -343,8 +343,8 @@ class AutoUdpfsServer(UdpfsServer):
         # That map was correct only while the packet object stayed alive, and
         # any path that skipped its pop -- an early return in _handle_data --
         # left an entry that a later object could match by reusing the id, so a
-        # reply would go out of the wrong socket. ACK/NACK packets never reach
-        # _handle_data at all, so the value is simply unused for them.
+        # reply would go out of the wrong socket. Control packets are queued too;
+        # their sequence numbers must not decide the client's protocol profile.
         sess.queue.put((data, addr, ingress))
 
     def _handle_data(self, data: bytes, addr):
@@ -393,7 +393,7 @@ class AutoUdpfsServer(UdpfsServer):
                         f"[{addr[0]}:{addr[1]}] seq0 discovery resolved to replacement "
                         f"session: old_expected={old_expected} first_data={hdr.seq_nr}")
 
-            if sess.protocol_profile == PROFILE_PENDING:
+            if sess.protocol_profile == PROFILE_PENDING and payload_size > 0:
                 profile = classify_profile(sess.discovery_sequence, hdr.seq_nr)
                 sess.protocol_profile = profile
                 sess.response_socket = ingress

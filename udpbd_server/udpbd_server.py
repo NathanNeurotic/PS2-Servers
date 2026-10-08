@@ -78,9 +78,14 @@ class BlockDevice:
         try:
             mode = "rb" if read_only else "r+b"
             self._f = open(path, mode, buffering=0)
-        except OSError:
+        except OSError as write_error:
+            if read_only:
+                raise
             self.read_only = True
             self._f = open(path, "rb", buffering=0)
+            print("Warning: cannot open '{}' for writing: {}. Serving read-only; "
+                  "saves / VMC writes will fail.".format(path, write_error),
+                  file=sys.stderr)
         self._f.seek(0, os.SEEK_END)
         self.size = self._f.tell()
         self._f.seek(0)
@@ -303,14 +308,14 @@ def main(argv=None):
                         help="log every read/write command")
     args = parser.parse_args(argv)
 
-    if not os.path.exists(args.image):
-        print("Error: '{}' not found".format(args.image))
-        return 1
-
     try:
         device = BlockDevice(args.image, read_only=args.read_only)
     except OSError as e:
         print("Error: cannot open '{}': {}".format(args.image, e))
+        if isinstance(e, PermissionError):
+            print("Check access to this target and its parent directories. For a "
+                  "file on an external drive, check the drive's mount permissions. "
+                  "Raw devices require separate device access permissions.")
         return 1
 
     try:
