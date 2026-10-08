@@ -57,10 +57,12 @@ def check_server_argv_nuitka_safe():
             else:
                 values[field.key] = "X"
         if key == "udpbd":
-            # Image and raw-device fields are mutually exclusive. Exercise both.
-            image_values = dict(values, raw_device="")
-            raw_values = dict(values, image_file="")
-            argv = server.build_argv(image_values) + server.build_argv(raw_values)
+            # All three storage modes are exclusive; writable raw is explicit.
+            image_values = dict(values, raw_device="", virtual_folder="", exclusive=False, raw_write=False)
+            raw_values = dict(values, image_file="", virtual_folder="", read_only=False)
+            virtual_values = dict(values, image_file="", raw_device="", exclusive=False, raw_write=False)
+            argv = (server.build_argv(image_values) + server.build_argv(raw_values)
+                    + server.build_argv(virtual_values))
         else:
             argv = server.build_argv(values)
         for arg in argv:

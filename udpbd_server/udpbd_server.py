@@ -22,6 +22,7 @@ import struct
 import sys
 import stat
 import errno
+import subprocess
 
 # --------------------------------------------------------------------------- #
 # Protocol constants (from udpbd.h)
@@ -141,6 +142,7 @@ class UdpbdServer:
         self._total_read = 0
         self._total_write = 0
         self._write_left = 0
+        self._write_owner = None
 
         self._block_shift = None
         self._set_block_shift(5)  # default 128-byte blocks, matching upstream
@@ -224,7 +226,17 @@ class UdpbdServer:
                 cmdid, sector_nr, sector_count))
         if self.bd.read_only:
             print("Warning: write requested on a read-only image -- ignoring")
-        self.bd.seek(sector_nr)
+        self._write_left = 0
+        self._write_owner = (addr, cmdid)
+        try:
+            if getattr(self.bd, "is_raw", False):
+                self.bd.seek(sector_nr, sector_count)
+            else:
+                self.bd.seek(sector_nr)
+        except OSError:
+            reply = pack_header(CMD_WRITE_DONE, cmdid, (cmdid + 1) & 0xFF)
+            self.sock.sendto(reply + struct.pack("<i", -1), addr)
+            return
         self._write_left = sector_count * SECTOR_SIZE
         self._total_write += self._write_left
 
@@ -237,6 +249,8 @@ class UdpbdServer:
             if self.verbose:
                 print("Dropping unsolicited WRITE_RDMA from {}".format(addr[0]))
             return
+        if getattr(self, "_write_owner", None) != (addr, cmdid):
+            return  # a different peer/command cannot contribute to this write
         block_shift, block_count = unpack_block_type(datagram)
         size = block_count * (1 << (block_shift + 2))
         if len(datagram) < 6 + size:
@@ -248,6 +262,8 @@ class UdpbdServer:
         size = min(size, self._write_left)  # never write past the requested region
         try:
             self.bd.write(datagram[6:6 + size])
+            if size == self._write_left and hasattr(self.bd, "flush"):
+                self.bd.flush()  # acknowledge only after the native flush succeeds
         except OSError as e:
             # disk full / I/O error / permission: abort the write and tell the
             # client it failed, rather than letting the exception kill the server.
@@ -320,10 +336,16 @@ class UdpbdServer:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="UDPBD server -- serve an image or read-only raw device to a PS2 over UDP (OPL).")
+        description="UDPBD server -- serve an image, raw device or virtual exFAT folder to a PS2.")
     parser.add_argument("image", nargs="?", help="disk image file to serve")
     parser.add_argument("--raw-device", metavar="DEVICE",
-                        help="Linux disk/partition or Windows raw disk/volume; always read-only")
+                        help="Linux disk/partition or Windows raw disk/volume; read-only by default")
+    parser.add_argument("--virtual-exfat", metavar="FOLDER",
+                        help="serve a host folder as a read-only virtual exFAT disk")
+    parser.add_argument("--exclusive", action="store_true",
+                        help="unmount/lock a raw target for the server lifetime (required for writes)")
+    parser.add_argument("--raw-write", action="store_true",
+                        help="enable raw writes/VMC saves; requires --raw-device --exclusive")
     parser.add_argument("-r", "--read-only", action="store_true",
                         help="serve the image read-only (no saves / VMC writes)")
     parser.add_argument("-i", "--bind", default="", metavar="IP",
@@ -332,25 +354,34 @@ def main(argv=None):
                         help="log every read/write command")
     args = parser.parse_args(argv)
 
-    if bool(args.image) == bool(args.raw_device):
-        parser.error("Select exactly one image file or --raw-device")
-    target = args.raw_device or args.image
+    if sum(bool(v) for v in (args.image, args.raw_device, args.virtual_exfat)) != 1:
+        parser.error("Select exactly one image file, --raw-device or --virtual-exfat")
+    if args.exclusive and not args.raw_device:
+        parser.error("--exclusive requires --raw-device")
+    if args.raw_write and (not args.raw_device or not args.exclusive or args.read_only):
+        parser.error("--raw-write requires --raw-device --exclusive and cannot use --read-only")
+    target = args.raw_device or args.virtual_exfat or args.image
 
     try:
-        if args.raw_device:
+        if args.raw_device or args.virtual_exfat:
             # Also supports invoking this standalone script outside the repo root.
             root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             if root not in sys.path:
                 sys.path.insert(0, root)
-            from launcher.raw_storage import open_raw_device
-            device = open_raw_device(target)
-            if device.mount_warning:
-                print(device.mount_warning)
-            print("Raw device is read-only: saves / VMC writes are disabled. "
-                  "Do not modify its filesystem on the host while serving it.")
+            if args.virtual_exfat:
+                from launcher.virtual_exfat import VirtualExfat
+                device = VirtualExfat(target)
+                print("Virtual exFAT is read-only; restart after changing the folder. VMC writes are disabled.")
+            else:
+                from launcher.raw_storage import open_raw_device
+                device = open_raw_device(target, writable=args.raw_write, exclusive=args.exclusive)
+                if device.mount_warning:
+                    print(device.mount_warning)
+                print("Raw device: " + ("READ/WRITE — exclusive access; VMC writes enabled." if args.raw_write
+                      else "read-only; VMC writes disabled."))
         else:
             device = BlockDevice(target, read_only=args.read_only)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
         print("Error: cannot open '{}': {}".format(target, e))
         if isinstance(e, PermissionError):
             print("Check access to this target and its parent directories. For a "

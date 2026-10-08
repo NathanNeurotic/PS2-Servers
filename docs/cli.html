@@ -202,7 +202,7 @@ python ps2servers.py serve http --help</code></pre>
   </tbody>
 </table>
 
-<p>Use either positional <code>IMAGE_PATH</code> or <code>--raw-device DEVICE</code>, never both. Raw-device mode supports Linux disks/partitions and Windows physical disks/volumes, always read-only. It requires device read permissions (administrator on Windows), disables VMC writes, and rejects capacities at or above 2 TiB. See <a href="udpbd.html#console-setup">raw-drive setup and limits</a>.</p>
+<p>Select exactly one positional <code>IMAGE_PATH</code>, <code>--raw-device DEVICE</code>, or <code>--virtual-exfat FOLDER</code>. Raw mode defaults to read-only. <code>--exclusive</code> unmounts/locks a raw target; <code>--raw-write</code> requires exclusive access and enables writes/VMC saves. Virtual exFAT is always read-only and requires no raw-device privileges. All modes use UDP 48573. Raw and virtual targets must be smaller than 2 TiB. See <a href="udpbd.html#console-setup">storage modes and limits</a>.</p>
 <p>UDPBD uses broadcast discovery and is <b>not</b> UDPFS. For client setup and <code>mass0:</code> / "cannot open folder" diagnostics, see <a href="udpbd.html#troubleshooting">the UDPBD guide</a>.</p>
 
 <h2 id="systemd">5. Running Under systemd</h2>

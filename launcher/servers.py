@@ -333,9 +333,18 @@ def _udpfs_argv(v):
 def _udpbd_argv(v):
     image = v.get("image_file")
     raw = v.get("raw_device")
-    if bool(image) == bool(raw):
-        raise ValueError("Select exactly one disk image or raw drive; clear the other field.")
-    args = ["--raw-device", raw] if raw else [image]
+    virtual = v.get("virtual_folder")
+    if sum(bool(target) for target in (image, raw, virtual)) != 1:
+        raise ValueError("Select exactly one disk image, raw drive or virtual exFAT folder; clear the other fields.")
+    if v.get("exclusive") and not raw:
+        raise ValueError("Exclusive access requires a raw drive.")
+    if v.get("raw_write") and (not raw or not v.get("exclusive") or v.get("read_only")):
+        raise ValueError("Raw writes require a raw drive and Exclusive access, with Read-only disabled.")
+    args = ["--raw-device", raw] if raw else ["--virtual-exfat", virtual] if virtual else [image]
+    if v.get("exclusive"):
+        args.append("--exclusive")
+    if v.get("raw_write"):
+        args.append("--raw-write")
     if v.get("read_only"):
         args.append("-r")
     if v.get("verbose"):
@@ -506,7 +515,7 @@ HTTP = ServerDef(
 UDPBD = ServerDef(
     key="udpbd",
     label="UDPBD server",
-    blurb="Serve one disk image or a read-only raw disk/partition over UDP.",
+    blurb="Serve a disk image, raw disk/partition or virtual exFAT folder over UDP.",
     recommendation="Legacy — prefer UDPFS",
     recommendation_kind="legacy",
     runtime="python",
@@ -517,8 +526,14 @@ UDPBD = ServerDef(
     fields=[
         Field("image_file", "Disk image", "file",
               help="Choose an image file, or clear this field and select a raw drive below."),
-        Field("raw_device", "Raw drive (read-only)", "device",
-              help="Shares all sectors of a Linux disk/partition or Windows disk/volume. Raw writes and VMC saves are disabled. Do not edit the drive on the host while serving it."),
+        Field("raw_device", "Raw drive", "device",
+              help="Shares all sectors. Read-only by default. Clear image and virtual-folder fields before selecting this mode."),
+        Field("virtual_folder", "Virtual exFAT folder", "folder",
+              help="Read-only virtual disk over ordinary files. Keep the folder unchanged while serving; restart to refresh its contents. Clear image and raw-drive fields."),
+        Field("exclusive", "Exclusive raw access", "bool", default=False, advanced=True,
+              help="Unmount Linux filesystems or lock/dismount Windows volumes before serving. Busy, system or unknown targets are refused. Linux mounts remain unmounted after stopping."),
+        Field("raw_write", "Enable raw writes / VMC", "bool", default=False, advanced=True,
+              help="Requires Exclusive raw access. Gives the PS2 write access to all sectors; use only a dedicated game drive on a trusted LAN. Failed writes may be partial."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
     ],

@@ -93,7 +93,6 @@ class TheInitScriptParsesUnderAPosixShell(unittest.TestCase):
 
     def test_dash_or_sh_accepts_the_committed_init(self):
         import shutil
-        import tempfile
 
         rel = os.path.join("packaging", "openwrt", "files",
                            "ps2servers-edge.init").replace(os.sep, "/")
@@ -110,13 +109,10 @@ class TheInitScriptParsesUnderAPosixShell(unittest.TestCase):
         if shell is None:
             self.skipTest("no POSIX shell available")
 
-        with tempfile.NamedTemporaryFile(suffix=".init", delete=False) as handle:
-            handle.write(data)
-            temp = handle.name
-        self.addCleanup(os.unlink, temp)
-
-        result = subprocess.run([shell, "-n", temp], capture_output=True,
-                                text=True, timeout=60)
+        # stdin also works when a Windows host invokes a Linux/WSL shell;
+        # a Windows temporary-file path is not meaningful inside that shell.
+        result = subprocess.run([shell, "-n"], input=data,
+                                capture_output=True, timeout=60)
         self.assertEqual(result.returncode, 0,
                          f"{shell} -n rejected the committed init script:\n"
                          f"{result.stderr}")

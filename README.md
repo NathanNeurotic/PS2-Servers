@@ -25,7 +25,7 @@ does not add that protocol to a PS2 application.
 | SMBv1 | TCP 1025 in Desktop; 1111 in Core/standalone | Guest file sharing for OPL and other SMBv1 clients |
 | SMBv2 / SMBv3 | TCP 1445 | Authenticated file sharing for clients that support these dialects; not a replacement for SMBv1 in an SMBv1-only loader |
 | HTTP | TCP 1100 | Experimental game streaming for compatible OPL HTTP clients; see [HTTP setup and validation](docs/HTTP.md) |
-| UDPBD | UDP 48573 (`0xBDBD`) | One disk image served as a block device for UDPBD clients |
+| UDPBD | UDP 48573 (`0xBDBD`) | Image, raw drive or virtual exFAT folder served as a block device |
 
 Desktop has six server cards. Edge provides UDPFS, SMBv1, UDPBD, and a separate
 HTTP **management dashboard**; it does not provide the HTTP game server or SMB2/3.
@@ -40,8 +40,8 @@ See [editions](docs/EDITIONS.md) and [Edge setup](docs/EDGE.md).
    executable on Linux, or the `.app` on macOS. Keep a portable build's files together.
 3. Choose the **protocol your PS2 client actually supports**. For **UDPFS, SMB,
    or HTTP**, choose the parent folder of `DVD/` and `CD/` (e.g.
-   `D:/PS2Games`). For **UDPBD**, select **one image file**, not a folder:
-   this is a block-device server, not a multi-game directory server.
+   `D:/PS2Games`). For **UDPBD**, select one image, raw drive, or **Virtual exFAT folder**.
+   Virtual exFAT presents a `DVD/` and `CD/` library as a read-only disk.
 4. Check that the selected **LAN IP** belongs to the PC interface connected to
    the PS2. Click **Start**, then use the displayed address, port, and share in
    your loader. The LAN IP selector supplies setup hints; it does not bind servers.
@@ -50,7 +50,7 @@ For SMBv1, use address type **IP**, the PC's LAN IP, the displayed port (normall
 1025 in Desktop), share `games`, user `guest`, and an empty password. UDPFS and UDPBD require
 a loader build with that protocol; discovery does not configure the PS2's own IP.
 HTTP requires an explicit matching port on the console; follow [the HTTP guide](docs/HTTP.md).
-**UDPBD uses UDP 48573 broadcast discovery and exposes a single block image**.
+**UDPBD uses UDP 48573 broadcast discovery and exposes a single block device**.
 The Python UDPBD server uses this fixed port (no `--port` flag); it does not
 list games in `DVD/` or `CD/`. A client-side `mass0:` label or "cannot open
 folder" message does not prove the physical device or identify the failure.
@@ -126,12 +126,12 @@ A missing path may mean the drive is disconnected or mounted under a different
 name. A writable-open failure can also mean the filesystem is read-only.
 
 Ordinary file/folder checks do not open raw disks. On the UDPBD card, the
-separate **Raw drive (read-only)** field has a device-specific capacity/read
+separate **Raw drive** field has a device-specific capacity/read
 check. No check changes a drive's format or grants device access.
 
 ### UDPBD raw disks and partitions (Linux / Windows)
 
-Clear **Disk image**, then use **Select drive** beside **Raw drive (read-only)**.
+Clear **Disk image**, then use **Select drive** beside **Raw drive**.
 The selector distinguishes whole disks from partitions/volumes and shows
 model, capacity, filesystem where available, and mount points. Windows volumes
 with drive letters are selectable alongside physical disks; boot/system disks
@@ -139,8 +139,9 @@ and their volumes are excluded. Linux metadata uses `lsblk` (util-linux). A devi
 before **Start**. Mounted targets and disks with mounted child partitions produce
 a warning at access-check time and server startup. If metadata is unavailable,
 mount state is reported as unknown. Prefer an unmounted target; these checks
-are advisory and do not lock the filesystem. Raw mode always disables writes, regardless of the Read-only
-checkbox, so it cannot provide VMC saves.
+are advisory unless **Exclusive raw access** is enabled. Raw mode defaults to read-only.
+For VMC saves, explicitly enable **Exclusive raw access** and **Enable raw writes / VMC**,
+with **Read-only** disabled. Busy, boot/system, or unknown targets are refused.
 
 Linux Core example (replace the device with your actual disk or partition):
 
@@ -166,8 +167,8 @@ A whole disk includes its partition table; a partition/volume starts at that
 partition's first sector. Choose the layout your PS2 client expects. Raw mode
 exposes all sectors of the selected target over the existing unauthenticated
 UDPBD service. Stop host applications from modifying that target while serving
-it, and stop the server before disconnecting it. The server does not lock,
-dismount, format, or modify the device.
+it, and stop the server before disconnecting it. The server never formats a target.
+Writes are enabled only by the explicit raw-write option described below.
 
 Capacity comes from the opened device handle, and native sector alignment is
 handled before UDPBD packetization. A buffer bounded to 64 KiB avoids
@@ -176,6 +177,59 @@ request; it is not a filesystem snapshot. Devices at or above 2 TiB are rejected
 because this UDPBD protocol advertises a 32-bit count of 512-byte sectors.
 This feature still requires real-drive and console validation; host tests do
 not establish loader/filesystem compatibility. Edge and UDPFS are unchanged.
+
+### Exclusive raw access and VMC saves
+
+```sh
+# Read-only with automatic unmount/lock:
+python ps2servers.py serve udpbd --raw-device /dev/disk/by-id/YOUR-DRIVE --exclusive
+# Explicit write access for a dedicated game drive:
+python ps2servers.py serve udpbd --raw-device /dev/disk/by-id/YOUR-DRIVE --exclusive --raw-write
+```
+
+The same flags work on Windows with `--raw-device '\\.\E:'` or a physical-disk
+path. Windows locks each affected filesystem volume before dismounting it and
+holds the handles until the server stops. If a lock fails, serving does not
+start; no forced dismount is attempted. Closing the handles releases the locks.
+Linux unmounts the selected target's filesystems, then opens the block device
+with `O_EXCL`. Failed unmounts, remaining mounts, or a busy device abort startup.
+Linux mounts remain unmounted after shutdown or a partially failed startup;
+remount them explicitly when finished. Mounted boot/system targets are rejected.
+Exclusive access requires device write/admin privileges even for some read-only
+Windows lock operations. **Check access** remains a read-only probe and never
+unmounts, locks, or tests writes.
+
+Raw writes allow the UDPBD client to modify every exposed sector. Use a dedicated
+non-system drive and a trusted LAN: UDPBD has no authentication or encryption.
+Native-sector read/modify/write preserves neighboring bytes; write bounds are
+checked and native buffers are flushed before success is acknowledged. An I/O
+failure or interrupted transfer may leave a partial write; this is not a
+transactional storage protocol. VMC compatibility still needs PS2 validation.
+
+### Virtual exFAT folder
+
+```sh
+python ps2servers.py serve udpbd --virtual-exfat /srv/PS2Games
+```
+
+In Desktop, clear **Disk image** and **Raw drive**, then select **Virtual exFAT
+folder**, containing the `DVD/`, `CD/`, and other folders your loader expects.
+This creates a read-only virtual disk with an MBR and one exFAT partition. It
+works over ordinary host files on Windows, Linux, or macOS without raw-device
+privileges, formatting, dismounting, or a full image copy. File payloads are read
+on demand; filesystem metadata and layout are fixed at startup. Keep the source
+folder unchanged while serving. Changed file size, identity, or modification
+time causes a read error rather than silently serving the stale layout. Restart
+to refresh the library. Symlinks, special files, invalid exFAT names, and case
+collisions are refused. Limits: 100000 entries, 64 directory levels, and a total
+virtual disk smaller than 2 TiB. VMC writes are disabled in this mode.
+
+Virtual exFAT is independently implemented from the
+[Microsoft exFAT specification](https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification).
+CI checks generated volumes with `fsck.exfat` from exfatprogs; real-console game
+listing and launch are separate validation gates. The established
+[udpbd-vexfat](https://github.com/awaken1ng/udpbd-vexfat) server provides the
+comparison for this folder-to-block-device mode; its implementation is not copied.
 
 ## UDPFS: games list but fail to launch
 

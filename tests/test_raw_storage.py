@@ -111,7 +111,7 @@ class RawStorageTests(unittest.TestCase):
         with patch.object(raw_storage, "open_raw_device", return_value=device):
             usable, report = path_access.check_path("test", "device", False)
         self.assertTrue(usable)
-        self.assertIn("Always read-only", report)
+        self.assertIn("access check is read-only", report)
         self.assertTrue(backend.closed)
 
     def test_device_list_hides_windows_boot_and_system_disks(self):

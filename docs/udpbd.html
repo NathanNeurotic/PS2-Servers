@@ -65,11 +65,11 @@
     <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
   </nav>
   <main class="content">
-<h1>UDPBD: Single Block Image Setup</h1>
-<p class="lead"><b>UDPBD</b> serves the raw sectors of <b>one disk-image file</b>, or a <b>read-only Linux/Windows disk or partition</b> in Desktop/Core, to a compatible PlayStation 2 client over <b>UDP 48573</b> (<code>0xBDBD</code>). There is no directory listing or network share name.</p>
+<h1>UDPBD: Block Device and Virtual exFAT Setup</h1>
+<p class="lead"><b>UDPBD</b> serves the raw sectors of <b>one disk-image file</b>, a <b>Linux/Windows raw disk or partition</b>, or a <b>read-only virtual exFAT folder</b> in Desktop/Core, to a compatible PlayStation 2 client over <b>UDP 48573</b> (<code>0xBDBD</code>). There is no directory listing or network share name.</p>
 
 <div class="callout warn"><div class="h">Choose the Right Mode Before You Start</div>
-If your goal is to browse and launch <b>many games</b> from a folder such as <code>D:\PS2Games\DVD\</code>, choose <a href="udpfs.html">UDPFS</a> or <a href="smb.html">SMB</a>, <b>not UDPBD</b>. UDPBD exposes one image as a block device, and the <b>PS2 client</b> decides how to interpret that image. Providing an ISO file does not automatically turn its contents into a browsable <code>DVD/</code> directory.
+If your goal is to browse and launch <b>many games</b> from a folder such as <code>D:\PS2Games\DVD\</code>, choose <a href="udpfs.html">UDPFS</a>, <a href="smb.html">SMB</a>, or UDPBD <b>Virtual exFAT folder</b> with an exFAT-capable client. UDPBD exposes one image as a block device, and the <b>PS2 client</b> decides how to interpret that image. Providing an ISO file does not automatically turn its contents into a browsable <code>DVD/</code> directory.
 </div>
 
 <h2 id="requirements">1. What You Need</h2>
@@ -85,7 +85,7 @@ If your goal is to browse and launch <b>many games</b> from a folder such as <co
 <thead><tr><th>Setting</th><th>UDPBD value</th><th>Explanation</th></tr></thead>
 <tbody>
 <tr><td>Desktop card</td><td><b>UDPBD</b></td><td>Do not choose the UDPFS card unless your loader is using UDPFS</td></tr>
-<tr><td>Backing storage</td><td><b>One image or raw target</b>, not a folder</td><td>Raw targets are read-only and available in Desktop/Core; stop before changing the target</td></tr>
+<tr><td>Backing storage</td><td><b>One image, raw target or virtual exFAT folder</b></td><td>Raw targets default to read-only; virtual folders are always read-only. Stop before changing the target</td></tr>
 <tr><td>UDP port</td><td><b>48573</b> (<code>0xBDBD</code>)</td><td>Discovery and sector traffic; the Python Desktop/Core server uses this fixed port</td></tr>
 <tr><td>Discovery</td><td>Broadcast</td><td>The console-side UDPBD driver discovers the host; there is no SMB-style share, username, or password</td></tr>
 <tr><td>Writes</td><td>Supported when permitted</td><td>Prefer <b>Read-only</b> for first tests to prevent changes to the backing image</td></tr>
@@ -120,13 +120,21 @@ python ps2servers.py serve udpbd "/srv/images/disk.img" --read-only --bind 192.1
 
 <h2 id="console-setup">4. Configure the PS2 Client</h2>
 <div class="callout info"><div class="h">Desktop/Core: Read-only Raw Drives</div>
-<p>Clear <b>Disk image</b>, then use <b>Select drive</b> beside <b>Raw drive (read-only)</b>, or enter a device path. Use <b>Check access</b> before starting. The selector shows disks, Linux partitions and Windows volumes with drive letters, including model, capacity, filesystem and mount points. Windows boot/system disks and their volumes are excluded. Windows volume paths such as <code>\\.\E:</code> also work when entered manually without a trailing slash. Mounted targets and disks with mounted child partitions produce advisory warnings; unknown mount state is reported explicitly. Prefer an unmounted target. Linux discovery requires <code>lsblk</code>.</p>
+<p>Clear <b>Disk image</b>, then use <b>Select drive</b> beside <b>Raw drive</b>, or enter a device path. Use <b>Check access</b> before starting. The selector shows disks, Linux partitions and Windows volumes with drive letters, including model, capacity, filesystem and mount points. Windows boot/system disks and their volumes are excluded. Windows volume paths such as <code>\\.\E:</code> also work when entered manually without a trailing slash. Mounted targets and disks with mounted child partitions produce advisory warnings; unknown mount state is reported explicitly. Prefer an unmounted target. Linux discovery requires <code>lsblk</code>.</p>
 <pre><code># Linux: replace with your actual disk/partition; read permission is required
 python ps2servers.py serve udpbd --raw-device /dev/disk/by-id/YOUR-DRIVE
 # Windows: run from an administrator terminal; replace the disk number
 python ps2servers.py serve udpbd --raw-device '\\.\PhysicalDrive2'</code></pre>
-<p>Windows raw reads require administrator rights; Desktop offers <b>Restart as administrator</b>. Linux needs read access to the block-device node, or an explicitly elevated Core command. Raw targets always reject writes/VMC saves and must be smaller than 2 TiB. Whole disks include a partition table; partitions/volumes have a different sector-zero layout. The PS2 client must understand the selected layout.</p>
-<p>All sectors of the selected target are exposed through UDPBD. Stop host applications from modifying the device while serving it, and stop the server before disconnecting it. The application does not lock, dismount, or format devices. Real-drive and console compatibility remain unverified. This option does not change Edge or UDPFS.</p>
+<p>Windows raw reads require administrator rights; Desktop offers <b>Restart as administrator</b>. Linux needs read access to the block-device node, or an explicitly elevated Core command. Raw targets default to rejecting writes/VMC saves and must be smaller than 2 TiB. Whole disks include a partition table; partitions/volumes have a different sector-zero layout. The PS2 client must understand the selected layout.</p>
+<p>All sectors of the selected target are exposed through UDPBD. Stop host applications from modifying the device while serving it, and stop the server before disconnecting it. The default mode does not lock or dismount devices. Exclusive mode locks/unmounts as described below. Devices are never formatted. Real-drive and console compatibility remain unverified. This option does not change Edge or UDPFS.</p>
+<h3>Exclusive raw access and writes</h3>
+<p>Enable <b>Exclusive raw access</b> (<code>--exclusive</code>) to unmount Linux filesystems and exclusively claim the device, or lock then dismount affected Windows volumes. Locks remain held until shutdown. Busy, boot/system and unknown targets abort startup. Windows never force-dismounts a volume when locking fails. Linux filesystems remain unmounted afterward; remount them explicitly. Startup failure may leave some Linux mounts unmounted. <b>Check access</b> never locks, dismounts or tests writes.</p>
+<p>For VMC saves, explicitly enable <b>Enable raw writes / VMC</b> (<code>--raw-write</code>) with Exclusive access enabled and Read-only disabled. Use only a dedicated non-system game drive on a trusted LAN: UDPBD has no authentication, and a client can write every exposed sector. Writes are bounded, native-sector aligned and flushed before acknowledgement, but an interrupted/failed write can be partial. Real-drive and PS2 VMC behavior remain experimental.</p>
+<pre><code>python ps2servers.py serve udpbd --raw-device /dev/disk/by-id/YOUR-DRIVE --exclusive --raw-write</code></pre>
+<h3>Virtual exFAT folder</h3>
+<p>Clear the image and raw-drive fields, then select <b>Virtual exFAT folder</b>. This exposes ordinary files through an MBR disk with one exFAT partition; no disk formatting, full image copy, raw-device privileges or unmounting is required. The client must support exFAT. Contents are read lazily with metadata frozen at startup. Keep the folder unchanged and restart to refresh it. Changed file identity, size or modification time causes a read error. Symlinks, special files, invalid names and case collisions are rejected. Limits: 100000 entries, 64 directory levels, virtual disk smaller than 2 TiB. This mode is read-only and cannot save VMCs.</p>
+<pre><code>python ps2servers.py serve udpbd --virtual-exfat /srv/PS2Games</code></pre>
+<p>Generated volumes are checked with the independent <code>fsck.exfat</code> validator in CI. PS2 game listing, launch and gameplay require separate hardware validation.</p>
 </div>
 <ol>
 <li>Configure the PS2's own Ethernet IP/subnet (for example host <code>192.168.1.100</code>, PS2 <code>192.168.1.150</code>, mask <code>255.255.255.0</code>); avoid duplicate addresses.</li>
@@ -139,7 +147,7 @@ python ps2servers.py serve udpbd --raw-device '\\.\PhysicalDrive2'</code></pre>
 
 <h2 id="troubleshooting">5. Troubleshooting: Cannot Open Folder, <code>mass0:</code>, or No Image</h2>
 <details class="deep"><summary>The loader says "cannot open folder" and displays <code>mass0:</code>.</summary>
-<p><b>Do not assume <code>mass0:</code> means a physical USB drive.</b> It may be a client-side logical device or mount name. The message alone neither proves that UDPBD discovery succeeded nor shows what filesystem the loader attempted. Check the active loader backend, the supplied image format, and whether the client is trying to enumerate folders from a raw block device. If you want a folder of ISOs, configure <b>UDPFS or SMB at both ends</b> instead. Include the exact loader version and screenshot in a bug report; the mapping of <code>mass0:</code> is client-specific and must be verified in that loader's code.</p>
+<p><b>Do not assume <code>mass0:</code> means a physical USB drive.</b> It may be a client-side logical device or mount name. The message alone neither proves that UDPBD discovery succeeded nor shows what filesystem the loader attempted. Check the active loader backend, the supplied image format, and whether the client is trying to enumerate folders from a raw block device. For a folder of ISOs, use UDPFS/SMB or Virtual exFAT with an exFAT-capable UDPBD client. Include the exact loader version and screenshot in a bug report; the mapping of <code>mass0:</code> is client-specific and must be verified in that loader's code.</p>
 </details>
 <details class="deep"><summary>The server is running but the PS2 never sees it.</summary>
 <p>Confirm the PS2 IP/network mask, cable/switch, host LAN interface, and firewall rule for UDP <b>48573</b>. Broadcast normally stays within a LAN; guest Wi-Fi, VLANs, VPNs and routed subnets can isolate devices. Check for a <code>UDPBD_CMD_INFO from ...</code> line while the client probes. No such line means the server has not observed a valid INFO probe; it does not yet establish why.</p>

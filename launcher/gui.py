@@ -563,7 +563,7 @@ class ServerCard(ttk.LabelFrame):
                     "Windows boot/system disks are excluded from this list.", parent=self)
                 return
             dialog = tk.Toplevel(self)
-            dialog.title("Select raw drive — read-only")
+            dialog.title("Select raw drive")
             dialog.transient(self.winfo_toplevel())
             ttk.Label(dialog, text="Entire disk and partition layouts differ. "
                       "Select the target your PS2 client expects. Unmounted targets are recommended.").pack(padx=12, pady=8)
@@ -580,6 +580,7 @@ class ServerCard(ttk.LabelFrame):
                 if selection:
                     var.set(devices[selection[0]][0])
                     self.vars["image_file"].set("")
+                    self.vars["virtual_folder"].set("")
                     dialog.destroy()
 
             ttk.Button(dialog, text="Use selected drive", command=choose).pack(pady=10)
