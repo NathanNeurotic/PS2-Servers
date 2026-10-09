@@ -40,7 +40,7 @@ work and validation limits. Upstream licenses and provenance are preserved.
    `ART/<hash>_RA.png` icons. Share this same folder through your usual game
    server. Treat the pairing file as access to the account-progress browser;
    remove it and restart to revoke and replace the capability.
-4. Start RetroAchievements and use **Open account and achievements**. Sign in
+4. Start RetroAchievements and use **Open achievement account (shared engine)**. Sign in
    on the local page, then enter the Web API key from your RA account settings
    for the library, progress and leaderboard views. The password is used for
    login and is not saved. Sign out on that page to remove the saved login token.
@@ -97,7 +97,7 @@ the console never receives an RA login token, password or Web API key.
 ## Desktop library and streaming
 
 **Manage game library** opens a native desktop window for searching installed
-CD/DVD images, editing catalogue metadata, importing local images, downloading
+PS2 CD/DVD images and PS1 POPS VCDs, editing catalogue metadata, importing local images, downloading
 user-provided image links, importing Caduceus JSON/SQLite catalogues and making
 catalogue backups. Existing catalogue records are preserved during import, and
 a database snapshot is saved first. Backups contain catalogue metadata, not
@@ -110,11 +110,30 @@ an existing destination. Cancelled and failed transfers remove their partial
 file. Selecting a different library folder does not move existing files or
 change a running game server's configuration.
 
-**Check RA compatibility** hashes ISO images using the pinned rcheevos PS2 hash
-implementation and compares them with the RA hash catalogue. Sign in and enter
-your Web API key first. Hashes are cached against file size and timestamps;
-the remote catalogue refreshes daily. API errors do not become unsupported
-results. Compressed-image scanning is not yet implemented.
+**Check RA compatibility** hashes PS2 ISOs using the pinned rcheevos PS2
+implementation. For POPStarter `POPS/*.VCD`, PS2-Servers reads the CD user
+data directly and uses the PS1 executable hash algorithm matching the RiptOPL
+PS1 integration (without extracting a VCD). The catalogue queries both
+PlayStation 1 (system 12) and PlayStation 2 (system 21) achievement hashes.
+Sign in and enter your Web API key first. Hashes are cached against file size
+and timestamps; the remote index refreshes daily and a prior PS2-only cache
+is refreshed before PS1 checks. Either API request failing leaves the old
+catalogue intact rather than incorrectly reporting unsupported games.
+Compressed-image compatibility scans are not yet implemented.
+
+VCDs are imported to `POPS/`, never `CD/` or `DVD/`. PS1 artwork identity is
+the VCD filename, not the PS2 serial; importing a VCD does not alter existing
+custom artwork, POPStarter modules or game contents. Only valid ISO9660 VCDs
+are accepted. PS1 telemetry remains dependent on the matching RA-enabled
+console loader and its supported USB POPStarter launch conditions.
+
+The RetroAchievements tab now shows the live console game when the managed
+engine's packet counters actually advance. It shows a stalled connection when
+packets stop for 15 seconds and distinguishes an unreachable engine or a
+console awaiting tracking. Session polling runs outside the GUI thread and
+does not query the game's storage backend or touch game-serving hot paths.
+This is passive **RA telemetry** detection, not yet a general SMB/UDPFS
+active-game monitor.
 
 Set **OBS export folder** to write the upstream live text labels and
 `data.json` for OBS. Leave it empty to disable file export. The folder is
