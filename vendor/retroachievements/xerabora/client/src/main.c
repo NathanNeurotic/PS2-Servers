@@ -31,6 +31,8 @@
 #include "protocol.h"
 #include "ra.h"
 #include "raweb.h"
+#include "rc_hash.h"
+#include "rc_consoles.h"
 #ifdef XERABORA_GUI
 #include "ui.h"
 #endif
@@ -61,6 +63,7 @@ static void usage(void)
            "  --ui-file PATH     serve the page from this HTML file instead of the\n"
            "                     built-in copy: edit, refresh, see\n"
            "  --obs DIR          write stream labels and data.json into DIR as things change\n"
+           "  --hash-file PATH   print the RetroAchievements PS2 image hash and exit\n"
            "  --hashes ID        print the image hashes RA knows for a game and exit\n"
            "  --port N           UDP port to listen on (default %d)\n"
            "  --game SERIAL=HASH remember an image hash for a game serial\n"
@@ -731,6 +734,14 @@ int main(int argc, char **argv)
             log_set_trace(1);
         } else if (strcmp(argv[i], "--ui-port") == 0 && i + 1 < argc) {
             ui_port = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--hash-file") == 0 && i + 1 < argc) {
+            char hash[33];
+            if (!rc_hash_generate_from_file(hash, RC_CONSOLE_PLAYSTATION_2, argv[++i])) {
+                fprintf(stderr, "Could not identify a PS2 executable in this image.\n");
+                return 1;
+            }
+            printf("%s\n", hash);
+            return 0;
         } else if (strcmp(argv[i], "--obs") == 0 && i + 1 < argc) {
             webui_set_obs_dir(argv[++i]);
         } else if (strcmp(argv[i], "--no-ui") == 0) {

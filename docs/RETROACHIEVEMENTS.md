@@ -55,7 +55,12 @@ loader's networking implementation or claim that all game transports work.
 | Paired `CADA1` account library and achievement pages | No | Yes | UDP 18198 |
 | Enriched `RAU1` achievement-title notices | No | Yes | Sent to console UDP 18195 |
 
-The account page is never opened to the LAN. Windows setup adds the relevant
+The account page is never opened to the LAN. **View achievements on other
+devices** optionally enables a separate read-only viewer at
+`http://<PC LAN IP>:18199/`. Devices on that network can view your profile and
+progress; login, logout, settings and shutdown requests remain local-only.
+Foreign browser origins and non-IP Host headers are rejected. This viewer is
+off by default. Windows setup adds the relevant
 UDP port rules; Linux users should allow the corresponding UDP ports on their
 trusted LAN. RA service calls use outbound HTTPS. Caduceus replies are padded
 to the console's 64-byte DMA alignment, at least 128 bytes and at most 960 bytes.
@@ -68,6 +73,33 @@ being cached as an unsupported image. A first uncached check may require retryin
 after the asynchronous lookup completes. API work is bounded and runs outside
 the engine's telemetry loop. Account requests require the share pairing key;
 the console never receives an RA login token, password or Web API key.
+
+## Desktop library and streaming
+
+**Manage game library** opens a native desktop window for searching installed
+CD/DVD images, editing catalogue metadata, importing local images, downloading
+user-provided image links, importing Caduceus JSON/SQLite catalogues and making
+catalogue backups. Existing catalogue records are preserved during import, and
+a database snapshot is saved first. Backups contain catalogue metadata, not
+game images, covers, credentials or saves. Catalogue deletion never removes
+game files.
+
+Choose the same OPL folder as the game-server tab. Imports and downloads stage
+files with a `.part` suffix, publish only complete images, and refuse to replace
+an existing destination. Cancelled and failed transfers remove their partial
+file. Selecting a different library folder does not move existing files or
+change a running game server's configuration.
+
+**Check RA compatibility** hashes ISO images using the pinned rcheevos PS2 hash
+implementation and compares them with the RA hash catalogue. Sign in and enter
+your Web API key first. Hashes are cached against file size and timestamps;
+the remote catalogue refreshes daily. API errors do not become unsupported
+results. Compressed-image scanning is not yet implemented.
+
+Set **OBS export folder** to write the upstream live text labels and
+`data.json` for OBS. Leave it empty to disable file export. The folder is
+created when the service starts; it should be writable and dedicated to these
+labels.
 
 ## Credentials and packaging
 

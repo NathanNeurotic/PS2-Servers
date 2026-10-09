@@ -355,6 +355,11 @@ class ServerCard(ttk.LabelFrame):
                 row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
             row += 1
 
+        if self.server.key == "retroachievements":
+            ttk.Button(self, text="Manage game library…", command=self._open_game_library).grid(
+                row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
+            row += 1
+
         # primary fields, then advanced fields (hidden behind a toggle).
         # windows_only fields (e.g. take-445, which pauses LanmanServer) are
         # dropped off Windows: their mechanism cannot work there, and showing a
@@ -405,6 +410,15 @@ class ServerCard(ttk.LabelFrame):
     def _open_achievement_account(self):
         from launcher.achievements import account_url
         webbrowser.open_new_tab(account_url())
+
+    def _open_game_library(self):
+        from launcher.library_gui import LibraryWindow
+        current = getattr(self, "_library_window", None)
+        if current is not None and current.winfo_exists():
+            current.lift()
+            return
+        folder = self.vars.get("games_folder")
+        self._library_window = LibraryWindow(self, folder.get() if folder else "")
 
     def _refresh_tab_dot(self, running):
         """Mark this server's tab up or down.
