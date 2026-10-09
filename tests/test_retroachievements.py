@@ -184,6 +184,7 @@ class WireTests(unittest.TestCase):
         card.server = servers.RETROACHIEVEMENTS
         card.field_widgets = {"mode": mock.Mock()}
         card._active_values = {"mode": "caduceus"}
+        card._running_label.return_value = "Running"
         card.app.current_ip.return_value = "192.168.1.2"
         gui.ServerCard.refresh_status(card, True)
         card.field_widgets["mode"].config.assert_called_with(state="disabled")
