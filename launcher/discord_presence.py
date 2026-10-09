@@ -30,24 +30,30 @@ def public_game_title(value):
 
 
 class DesktopActivity:
-    """Default to allowlisted server modes; game names require separate opt-in."""
+    """Allowlisted server activity; title sharing requires explicit consent."""
     def __init__(self, show_uptime=False):
         self.lock = threading.Lock()
         self.modes = ()
         self.show_uptime = show_uptime
         self.started = int(time.time())
         self.game = ""
+        self.game_identity = None
         self.game_started = None
 
-    def update(self, modes, show_uptime=False, session=None, show_game=False):
+    def update(self, modes, show_uptime=False, game=None, show_game=False):
         names = tuple(sorted({key for key in modes if key in MODE_NAMES}))
-        active = bool(show_game and "retroachievements" in names
-                      and isinstance(session, dict) and session.get("state") == "playing")
-        title = public_game_title(session.get("title")) if active else ""
+        verified = (show_game and "retroachievements" in names
+                    and isinstance(game, dict) and game.get("state") == "playing"
+                    and isinstance(game.get("session"), int)
+                    and not isinstance(game.get("session"), bool)
+                    and game["session"] > 0)
+        title = public_game_title(game.get("title")) if verified else ""
+        identity = (game["session"], title) if title else None
         with self.lock:
             self.modes = names
             self.show_uptime = bool(show_uptime)
-            if title != self.game:
+            if identity != self.game_identity:
+                self.game_identity = identity
                 self.game = title
                 self.game_started = int(time.time()) if title else None
 
@@ -57,12 +63,13 @@ class DesktopActivity:
             result = {"type": 0, "name": "PS2-Servers", "details": ", ".join(names) if names else "Ready to serve games",
                       "state": "Serving PlayStation 2 games" if names else "Desktop launcher", "instance": False}
             if self.game:
-                result["details"] = ("Playing " + self.game)[:128]
-                result["state"] = "PlayStation 2 · RetroAchievements"
+                result["details"] = self.game
+                result["state"] = "Playing on PlayStation 2"
                 result["timestamps"] = {"start": self.game_started}
             elif self.show_uptime:
                 result["timestamps"] = {"start": self.started}
             return result
+
 
 def frame(opcode, value):
     data = json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
