@@ -140,6 +140,14 @@ modes when RA is stopped, stale or untracked; raw paths, IP addresses,
 credentials and account identities are never supplied to Discord. The optional
 activity timer follows the verified game session while one is playing.
 
+Use **Live achievements (native view)** for a read-only in-app overview of
+account status, console telemetry, the currently loaded achievement set,
+measured achievement progress, recent events and live leaderboard trackers.
+The overview reads only the local managed engine from a background thread;
+it does not provide account sign-in or replace the full embedded account page.
+It displays a loaded set as **not verified playing** unless the separate
+packet-validated console session monitor confirms the active game.
+
 The RetroAchievements tab now shows the live console game when the managed
 engine's packet counters actually advance. It shows a stalled connection when
 packets stop for 15 seconds and distinguishes an unreachable engine or a
