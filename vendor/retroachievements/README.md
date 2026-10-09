@@ -15,11 +15,14 @@ Local xeRAbora changes:
 - A PS2-Servers-owned profile directory selected through the child's environment.
 - DPAPI-protected Windows credentials/API keys and private POSIX secret files.
 - Account HTTP listener fixed to loopback and its requested port.
+- Reject foreign Host/Origin headers, cross-site requests and oversized fields.
 - Fail on telemetry/account port conflicts instead of adopting another process.
 - Keep the managed service alive after closing its account page.
 - Exit when the supervising process exits, including abrupt Windows termination.
 - Optional browser suppression for automated tests.
 - A writable, DMA-sized reset-notice buffer.
+- In Caduceus mode, let the companion send the enriched unlock notice first,
+  so the console's duplicate-ID filter does not discard its achievement title.
 
 The build identifies the engine as `0.1.0-alpha.16+ps2servers`, preserving its
 upstream provenance. `launcher/caduceus.py` supplies the additional Caduceus

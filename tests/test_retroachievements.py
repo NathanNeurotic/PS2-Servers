@@ -25,7 +25,8 @@ class WireTests(unittest.TestCase):
 
     def test_malformed_hash_lookup_is_not_unsupported(self):
         account = caduceus.Account(Path("unused"), lambda: {})
-        for body in (b'[]', b'{"Success":true}', b'{"Success":false,"GameID":0}'):
+        for body in (b'[]', b'{"Success":true}', b'{"Success":false,"GameID":0}',
+                     b'{"Success":true,"GameID":"invalid"}', b'{"Success":true,"GameID":true}'):
             response = mock.MagicMock()
             response.__enter__.return_value.read.return_value = body
             with mock.patch.object(caduceus, "open_remote", return_value=response):
@@ -171,6 +172,15 @@ class NativeEngineTests(unittest.TestCase):
                     state = json.load(response)
                 self.assertFalse(state["login"]["ok"])
                 self.assertFalse(state["lan"]["on"])
+                for headers in ({"Origin": "https://example.com"},
+                                {"Host": "example.com"},
+                                {"Sec-Fetch-Site": "cross-site"}):
+                    request = urllib.request.Request(
+                        "http://127.0.0.1:{}/state".format(ui_port), headers=headers)
+                    with self.assertRaises(urllib.error.HTTPError) as forbidden:
+                        urllib.request.urlopen(request, timeout=3)
+                    self.assertEqual(forbidden.exception.code, 403)
+                    forbidden.exception.close()
                 conflict = subprocess.run([str(engine_path()), "--port", str(port), "--no-ui", "--no-sound"],
                                           env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
                 self.assertEqual(conflict.returncode, 1, "A busy telemetry port must fail instead of adopting another client")

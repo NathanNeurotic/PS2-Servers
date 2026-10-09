@@ -137,7 +137,10 @@ class Account:
             data = json.loads(response.read(65536))
         if not isinstance(data, dict) or not data.get("Success") or "GameID" not in data:
             raise ValueError("Hash lookup failed")
-        return number(data.get("GameID"))
+        value = data["GameID"]
+        if isinstance(value, bool) or not re.fullmatch(r"[0-9]{1,8}", str(value)):
+            raise ValueError("Hash lookup returned an invalid game ID")
+        return int(value)
 
     def game(self, game_id):
         return self.request("API_GetGameInfoAndUserProgress", u=self.user(), g=game_id)
