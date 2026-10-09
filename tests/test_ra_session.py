@@ -9,7 +9,7 @@ from launcher.ra_session import SessionPoller, SessionTracker, safe_title
 def payload(packets, title="Test Game", connected=True, signed_in=True):
     return {"console": {"connected": connected, "packets": packets},
             "login": {"ok": signed_in},
-            "game": {"title": title}}
+            "game": {"title": title, "serial": "P123456789abcde"}}
 
 
 class SessionTests(unittest.TestCase):
@@ -33,6 +33,16 @@ class SessionTests(unittest.TestCase):
         active = session.observe(payload(101, title="New \n Game"), now=21)
         self.assertEqual(active["title"], "New Game")
         self.assertEqual(session.observe(payload(1, title="Another"), now=22)["state"], "connected")
+
+    def test_different_checked_game_does_not_spoof_now_playing(self):
+        session = SessionTracker()
+        state = payload(4)
+        state["game"]["serial"] = ""  # loaded set is not the streaming image
+        self.assertEqual(session.observe(state, now=10)["state"], "connected")
+        state["console"]["packets"] = 5
+        self.assertEqual(session.observe(state, now=11)["state"], "connected")
+        state["game"]["serial"] = "P123456789abcde"
+        self.assertEqual(session.observe(state, now=12)["state"], "playing")
 
     def test_offline_bad_payload_does_not_report_playing(self):
         session = SessionTracker()
