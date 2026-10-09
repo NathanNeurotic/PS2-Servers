@@ -93,6 +93,17 @@ def bootstrap_owner():
             lambda: kernel.CloseHandle(handle) if handle else None)
 
 
+def engine_environment(profile, mode):
+    """Manage the native client without launching a second desktop window.
+
+    The account interface is available from PS2-Servers' explicit button.
+    Do not reuse a parent shell's browser-launch preference.
+    """
+    return dict(os.environ, PS2SERVERS_RA_PROFILE=str(profile),
+                PS2SERVERS_RA_PARENT=str(os.getpid()),
+                PS2SERVERS_RA_MODE=mode, PS2SERVERS_RA_NO_BROWSER="1")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="RetroAchievements for real PS2 consoles")
     parser.add_argument("--mode", choices=("xerabora", "caduceus"), default="xerabora")
@@ -111,8 +122,7 @@ def main(argv=None):
         lease = claim_service(profile)
     except OSError:
         parser.error("RetroAchievements is already running for this profile.")
-    env = dict(os.environ, PS2SERVERS_RA_PROFILE=str(profile), PS2SERVERS_RA_PARENT=str(os.getpid()),
-               PS2SERVERS_RA_MODE=args.mode)
+    env = engine_environment(profile, args.mode)
     ui_port = available_account_port()
     command = [str(binary), "--port", "18194", "--ui-port", str(ui_port)]
     if args.no_sound:
