@@ -53,6 +53,14 @@ class SetupWizardTests(unittest.TestCase):
         self.assertIn('guide_status in ("dismissed", "completed")', source)
         self.assertIn("on_close=self._on_ps2_setup_guide_closed", source)
 
+    def test_guide_included_in_packaged_desktop(self):
+        build = ast.parse((ROOT / "build" / "build.py").read_text(encoding="utf-8"))
+        modules = next(node.value for node in build.body
+                       if isinstance(node, ast.Assign)
+                       and any(isinstance(t, ast.Name) and t.id == "INCLUDE_MODULES"
+                               for t in node.targets))
+        self.assertIn("launcher.setup_guide", ast.literal_eval(modules))
+
     def test_close_callback_distinguishes_finish_from_dismissal(self):
         module = ast.parse(WIZARD.read_text(encoding="utf-8"))
         guide = next(n for n in module.body if isinstance(n, ast.ClassDef)

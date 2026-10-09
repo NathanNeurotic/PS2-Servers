@@ -101,6 +101,7 @@ INCLUDE_MODULES = [
     "launcher.achievement_viewer",
     "launcher.game_library",
     "launcher.library_gui",
+    "launcher.setup_guide",
     "launcher.achievement_loader",
     "launcher.discord_presence",
     "sqlite3",
