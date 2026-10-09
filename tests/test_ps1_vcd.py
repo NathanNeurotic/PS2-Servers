@@ -113,6 +113,16 @@ class VcdTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Library.install(source, game_root, "DVD")
 
+    def test_mutated_vcd_cannot_publish_a_hash(self):
+        image, _ = self.image()
+        def changed(path):
+            with open(path, "ab") as stream:
+                stream.write(b"changed during the scan")
+            return "a" * 32
+        with mock.patch("launcher.ps1_vcd.hash_vcd", side_effect=changed):
+            with self.assertRaisesRegex(ValueError, "changed during hashing"):
+                hash_image(image)
+
     def test_invalid_download_cannot_install_vcd(self):
         folder = self.root / "games"
         with self.assertRaises(ValueError):
