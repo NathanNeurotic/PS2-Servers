@@ -148,18 +148,18 @@ class Catalog:
             raise FileExistsError("Image already exists in the library: {}".format(target))
         # x+b uses O_EXCL: no old file can be clobbered, including on exFAT/FAT.
         # This operation is separate from game serving; stop transfers before importing.
+        created = False
         try:
             with image.open("rb") as inp, target.open("xb") as out:
+                created = True
                 shutil.copyfileobj(inp, out, 1024 * 1024)
                 out.flush()
                 os.fsync(out.fileno())
             if target.stat().st_size != image.stat().st_size:
                 raise OSError("Transferred size differs from source.")
         except BaseException:
-            try:
-                target.unlink()
-            except FileNotFoundError:
-                pass
+            if created:
+                target.unlink(missing_ok=True)
             raise
         self.upsert(target, media)
         return target
@@ -178,17 +178,24 @@ class Catalog:
             from PIL import Image, ImageOps, UnidentifiedImageError
         except ImportError as exc:
             raise RuntimeError("Cover conversion requires Pillow; install Pillow to use artwork import.") from exc
-        with Image.open(source) as src:
-            if src.width > 10000 or src.height > 10000 or src.width * src.height > 50_000_000:
-                raise ValueError("Artwork dimensions exceed safety limits.")
-            src.load()
-            img = ImageOps.exif_transpose(src).convert("RGB")
-            # 8-bit palette PNG, as required by the RiptOPL artwork pipeline.
-            img = img.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
-            with target.open("xb") as out:
-                img.save(out, format="PNG", optimize=True)
-                out.flush()
-                os.fsync(out.fileno())
+        created = False
+        try:
+            with Image.open(source) as src:
+                if src.width > 10000 or src.height > 10000 or src.width * src.height > 50_000_000:
+                    raise ValueError("Artwork dimensions exceed safety limits.")
+                src.load()
+                img = ImageOps.exif_transpose(src).convert("RGB")
+                # 8-bit palette PNG, as required by the RiptOPL artwork pipeline.
+                img = img.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
+                with target.open("xb") as out:
+                    created = True
+                    img.save(out, format="PNG", optimize=True)
+                    out.flush()
+                    os.fsync(out.fileno())
+        except BaseException:
+            if created:
+                target.unlink(missing_ok=True)
+            raise
         return target
 
     def export_json(self, destination):
@@ -238,18 +245,18 @@ class Catalog:
         fd, temp_name = tempfile.mkstemp(prefix=".ps2library-", suffix=".sqlite", dir=target.parent)
         os.close(fd)
         temporary = Path(temp_name)
+        created = False
         try:
             with sqlite3.connect(str(temporary)) as output:
                 self.db.backup(output)
             with temporary.open("rb") as inp, target.open("xb") as out:
+                created = True
                 shutil.copyfileobj(inp, out)
                 out.flush()
                 os.fsync(out.fileno())
         except BaseException:
-            try:
-                target.unlink()
-            except FileNotFoundError:
-                pass
+            if created:
+                target.unlink(missing_ok=True)
             raise
         finally:
             temporary.unlink(missing_ok=True)
