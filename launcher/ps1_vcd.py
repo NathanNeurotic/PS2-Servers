@@ -29,7 +29,7 @@ class VcdImage:
             if self.size < VCD_HEADER + RAW_SECTOR * 17:
                 raise ValueError("Truncated POPStarter VCD image.")
             descriptor = self.read(16 * ISO_SECTOR, ISO_SECTOR)
-            if descriptor[:7] != b"\\x01CD001\\x01":
+            if descriptor[:7] != b"\x01CD001\x01":
                 raise ValueError("VCD has no valid ISO9660 primary descriptor.")
         except BaseException:
             self.file.close()
@@ -62,7 +62,7 @@ class VcdImage:
 
     def root(self):
         descriptor = self.read(16 * ISO_SECTOR, ISO_SECTOR)
-        if descriptor[:7] != b"\\x01CD001\\x01":
+        if descriptor[:7] != b"\x01CD001\x01":
             raise ValueError("Invalid VCD ISO9660 descriptor.")
         record = descriptor[156:190]
         return self.extent(record)
@@ -102,7 +102,7 @@ class VcdImage:
         return None
 
     def path_extent(self, name):
-        pieces = [piece for piece in name.replace("/", "\\\\").split("\\\\") if piece]
+        pieces = [piece for piece in name.replace("/", "\\").split("\\") if piece]
         if not pieces or len(pieces) > 16 or any(
                 piece in (".", "..") or len(piece) >= 64 for piece in pieces):
             return None
@@ -119,7 +119,7 @@ class VcdImage:
             contents = self.read(cnf[0] * ISO_SECTOR, min(cnf[1], ISO_SECTOR - 1))
             text = contents.decode("latin-1")
             # BOOT, not BOOT2; the latter identifies PS2 games.
-            match = re.search(r"(?m)^BOOT[ \\t]*=[ \\t]*(?:cdrom:)?\\\\*([^;\\s]+)", text)
+            match = re.search(r"(?m)^BOOT[ \t]*=[ \t]*(?:cdrom:)?\\*([^;\s]+)", text)
             if match:
                 name = match.group(1)
                 if len(name) < 96 and self.path_extent(name):
