@@ -100,6 +100,7 @@ INCLUDE_MODULES = [
     "launcher.ra_session",
     "launcher.ra_notifications",
     "launcher.ra_sounds",
+    "launcher.ra_compressed_hash",
     "launcher.ra_overview",
     "launcher.ra_setup",
     "launcher.ps1_vcd",
