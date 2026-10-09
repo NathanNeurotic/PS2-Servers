@@ -1,4 +1,4 @@
-"""Optional Discord desktop IPC activity, isolated from console telemetry."""
+"""Optional Discord desktop IPC activity, using verified, explicitly shared RA titles."""
 import ctypes
 import json
 import os
@@ -24,19 +24,45 @@ class DesktopActivity:
         self.modes = ()
         self.show_uptime = show_uptime
         self.started = int(time.time())
+        self.game_title = ""
+        self.game_session = None
+        self.game_started = None
 
-    def update(self, modes, show_uptime=False):
+    def update(self, modes, show_uptime=False, game=None, show_game=False):
         with self.lock:
             self.modes = tuple(sorted({key for key in modes if key in MODE_NAMES}))
             self.show_uptime = bool(show_uptime)
+            # Only an opt-in verified RA session can supply a public game title.
+            # Never include serial, IP, share paths or RA account details.
+            title = ""
+            session = None
+            if (show_game and "retroachievements" in self.modes and
+                    isinstance(game, dict) and game.get("state") == "playing"):
+                candidate = game.get("title")
+                identifier = game.get("session")
+                if isinstance(candidate, str) and isinstance(identifier, int) and not isinstance(identifier, bool) and identifier > 0:
+                    candidate = " ".join(candidate.split())[:96]
+                    # Refuse accidental file paths/URLs, IPs and control chars.
+                    if (candidate and not any(c in candidate for c in ("\\", "/", "\\x00")) and
+                            "://" not in candidate and not re.search(r"\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b", candidate)):
+                        title, session = candidate, identifier
+            if session is None:
+                self.game_title, self.game_session, self.game_started = "", None, None
+            else:
+                if session != self.game_session or title != self.game_title:
+                    self.game_started = int(time.time())
+                self.game_title, self.game_session = title, session
 
     def snapshot(self):
         with self.lock:
             names = [MODE_NAMES[key] for key in self.modes]
             result = {"type": 0, "name": "PS2-Servers", "details": ", ".join(names) if names else "Ready to serve games",
                       "state": "Serving PlayStation 2 games" if names else "Desktop launcher", "instance": False}
+            if self.game_title:
+                result["details"] = self.game_title
+                result["state"] = "Playing on PlayStation 2"
             if self.show_uptime:
-                result["timestamps"] = {"start": self.started}
+                result["timestamps"] = {"start": self.game_started if self.game_title else self.started}
             return result
 
 def frame(opcode, value):
