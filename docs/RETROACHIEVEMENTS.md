@@ -16,6 +16,9 @@ adds the independently implemented CADQ/CADA companion services and enriched
 achievement notices; it does not launch the Caduceus Electron desktop app or
 change the underlying achievement evaluator. The console must still use a
 matching loader. Stop RetroAchievements before switching compatibility modes.
+The managed service does not automatically open the upstream-derived account
+window; use **Open achievement account (shared engine)** when you want to view
+or configure it.
 
 **A standalone PS2-Servers implementation of the telemetry receiver, RA client
 and account UI does not exist yet.** The current code is integration and
