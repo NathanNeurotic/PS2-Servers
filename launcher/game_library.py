@@ -322,7 +322,12 @@ def hash_image(path):
     path = Path(path)
     if path.suffix.lower() == ".vcd":
         from launcher.ps1_vcd import hash_vcd
-        return hash_vcd(path)
+        before = path.stat()
+        result = hash_vcd(path)
+        after = path.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise ValueError("The VCD changed during hashing; retry the scan.")
+        return result
     if path.suffix.lower() != ".iso":
         raise ValueError("Achievement compatibility scanning currently requires a PS2 ISO or PS1 VCD.")
     before = path.stat()
