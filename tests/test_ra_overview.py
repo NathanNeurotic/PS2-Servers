@@ -62,6 +62,18 @@ class OverviewTests(unittest.TestCase):
         self.assertEqual(len(result["unlocks"]), 16)
         self.assertLessEqual(len(result["rows"][0][1]), 100)
 
+    def test_stopped_managed_engine_never_reads_an_unrelated_local_listener(self):
+        # No Tk window required: exercise the worker with a fake owner.
+        import queue
+        owner = mock.Mock()
+        owner._stop.is_set.side_effect = [False, True]
+        owner._queue = queue.Queue(maxsize=2)
+        owner.app.is_running.return_value = False
+        with mock.patch.object(ra_overview, "fetch_engine_state") as fetch:
+            ra_overview.OverviewWindow._run(owner)
+        fetch.assert_not_called()
+        self.assertIsNone(owner._queue.get_nowait())
+
     def test_fetch_refuses_oversize_status(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = b"a" * (1024 * 1024 + 1)
