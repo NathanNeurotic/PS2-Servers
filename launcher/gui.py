@@ -1290,6 +1290,12 @@ class LauncherApp:
             b_col = 0
         ttk.Button(behavior, text="Desktop settings…", command=self._desktop_settings).grid(
             row=b_row, column=b_col, sticky="w", padx=(6 if b_col == 0 else 0, 12), pady=6)
+        b_col += 1
+        if b_col >= 3:
+            b_row += 1
+            b_col = 0
+        ttk.Button(behavior, text="PS2 setup guide…", command=self._open_ps2_setup_guide).grid(
+            row=b_row, column=b_col, sticky="w", padx=(6 if b_col == 0 else 0, 12), pady=6)
 
         text_frame = ttk.Frame(about)
         about.rowconfigure(row, weight=1)
@@ -1321,6 +1327,15 @@ class LauncherApp:
         text.config(state="disabled")
 
         self.nb.add(about, text="ABOUT")
+
+    def _open_ps2_setup_guide(self):
+        from .setup_guide import SetupGuide
+        existing = getattr(self, "_ps2_setup_guide", None)
+        if existing is not None and existing.winfo_exists():
+            existing.lift()
+            existing.focus_set()
+            return
+        self._ps2_setup_guide = SetupGuide(self.root, self.current_ip())
 
     def _open_url(self, url):
         try:
