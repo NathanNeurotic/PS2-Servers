@@ -44,7 +44,7 @@ class DesktopActivity:
                     candidate = " ".join(candidate.split())[:96]
                     # Refuse accidental file paths/URLs, IPs and control chars.
                     if (candidate and not any(c in candidate for c in ("\\", "/", "\\x00")) and
-                            "://" not in candidate and not re.search(r"\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b", candidate)):
+                            "://" not in candidate and not re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", candidate)):
                         title, session = candidate, identifier
             if session is None:
                 self.game_title, self.game_session, self.game_started = "", None, None
@@ -241,7 +241,12 @@ class Presence:
                         elif opcode == 2 or value.get("evt") == "ERROR":
                             raise OSError("Discord IPC disconnected")
                     activity = self.activity_provider() if self.activity_provider else None
-                    if activity != last and (activity is None or not sent or time.monotonic() - sent >= 15):
+                    removing_game = (isinstance(last, dict) and
+                        last.get("state") == "Playing on PlayStation 2" and
+                        (not isinstance(activity, dict) or
+                         activity.get("state") != "Playing on PlayStation 2"))
+                    if activity != last and (activity is None or not sent or removing_game or
+                                             time.monotonic() - sent >= 15):
                         self.publish(activity)
                         last, sent = activity, time.monotonic()
             except Exception:
