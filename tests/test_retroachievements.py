@@ -16,9 +16,28 @@ import urllib.request
 
 from launcher import caduceus, servers, windows_setup
 from launcher.achievements import engine_path, available_account_port, claim_service
+from launcher import achievements
 
 
 class WireTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows onefile bootstrap lifetime")
+    def test_bootstrap_owner_uses_a_held_process_identity(self):
+        owner = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        close = lambda: None
+        try:
+            with mock.patch.object(achievements, "is_frozen", return_value=True), \
+                    mock.patch.dict(os.environ, {"NUITKA_ONEFILE_PARENT": str(owner.pid)}):
+                alive, close = achievements.bootstrap_owner()
+            self.assertTrue(alive())
+            owner.terminate()
+            owner.wait(timeout=5)
+            self.assertFalse(alive())
+        finally:
+            close()
+            if owner.poll() is None:
+                owner.terminate()
+                owner.wait(timeout=5)
+
     def test_account_port_can_change_without_sharing_a_listener(self):
         with socket.socket() as occupied:
             if os.name == "nt":

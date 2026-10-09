@@ -4,6 +4,7 @@ RA credentials belong to the engine's private profile, never launcher.json or
 command line arguments. The native engine exits if this supervisor disappears.
 """
 import argparse
+import ctypes
 import os
 from pathlib import Path
 import signal
@@ -74,6 +75,24 @@ def available_account_port():
         return probe.getsockname()[1]
 
 
+def bootstrap_owner():
+    """Hold the Windows onefile bootstrap identity until this service exits."""
+    pid = os.environ.get("NUITKA_ONEFILE_PARENT", "")
+    if os.name != "nt" or not is_frozen() or not pid.isdecimal():
+        return lambda: True, lambda: None
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.OpenProcess(0x00100000, False, int(pid))  # SYNCHRONIZE
+    return (lambda: bool(handle) and kernel.WaitForSingleObject(handle, 0) == 258,
+            lambda: kernel.CloseHandle(handle) if handle else None)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="RetroAchievements for real PS2 consoles")
     parser.add_argument("--mode", choices=("xerabora", "caduceus"), default="xerabora")
@@ -100,6 +119,7 @@ def main(argv=None):
     for name in ("SIGINT", "SIGTERM"):
         signal.signal(getattr(signal, name), lambda *_: stopped.set())
     bridge = None
+    owner_alive, close_owner = bootstrap_owner()
     try:
         (profile / "account-port").write_text(str(ui_port), encoding="ascii")
         if args.mode == "caduceus":
@@ -110,7 +130,7 @@ def main(argv=None):
         print("Account, achievements and leaderboards: {}".format(account_url()), flush=True)
         with subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as engine:
-            while engine.poll() is None and not stopped.wait(0.25):
+            while engine.poll() is None and not stopped.wait(0.25) and owner_alive():
                 pass
             if engine.poll() is None:
                 engine.terminate()
@@ -125,6 +145,7 @@ def main(argv=None):
             bridge.close()
         (profile / "account-port").unlink(missing_ok=True)
         lease.close()
+        close_owner()
 
 
 if __name__ == "__main__":

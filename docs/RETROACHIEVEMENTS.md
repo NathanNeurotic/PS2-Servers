@@ -35,6 +35,11 @@ selects a free local port when necessary, including immediate Windows restarts.
 Use the account button or the URL printed in the terminal to reach it. Closing the account page leaves the
 service running; stop it with the RetroAchievements tab or **Stop all**.
 
+If sharing that folder through UDPBD virtual exFAT, start RetroAchievements
+first so the pairing file is included in the virtual disk's frozen inventory.
+Restart the virtual disk server after adding pairing files or downloaded
+artwork; it does not pick up new files while running.
+
 Upstream Caduceus documents an SMB loading problem in the console loader.
 Start physical validation with a supported USB/disc launch. Sharing games and
 receiving RA telemetry are separate functions; PS2-Servers does not repair the
