@@ -17,6 +17,9 @@ import warnings
 from launcher.config import config_dir
 
 IMAGE_TYPES = {".iso", ".chd", ".cso", ".zso"}
+PS1_TYPES = {".vcd"}
+MEDIA_TYPES = {"CD": IMAGE_TYPES, "DVD": IMAGE_TYPES, "POPS": PS1_TYPES}
+RA_CONSOLES = (21, 12)  # PlayStation 2, PlayStation 1
 
 
 def web_url(value):
@@ -224,11 +227,11 @@ class Library:
     def installed(folder):
         root = Path(folder)
         result = []
-        for kind in ("CD", "DVD"):
+        for kind, extensions in MEDIA_TYPES.items():
             directory = root / kind
             if directory.is_dir():
                 for path in directory.iterdir():
-                    if path.is_file() and path.suffix.lower() in IMAGE_TYPES:
+                    if path.is_file() and path.suffix.lower() in extensions:
                         stat = path.stat()
                         result.append({"path": str(path), "name": path.name, "kind": kind, "size": stat.st_size,
                                        "stamp": "{}:{}:{}".format(stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)})
@@ -237,8 +240,8 @@ class Library:
     @staticmethod
     def install(source, folder, kind="DVD", name=None, cancel=None, progress=None):
         source = Path(source)
-        if source.suffix.lower() not in IMAGE_TYPES or not source.is_file():
-            raise ValueError("Choose an ISO, CHD, CSO or ZSO image.")
+        if source.suffix.lower() not in MEDIA_TYPES.get(kind, set()) or not source.is_file():
+            raise ValueError("Choose a PS2 image for CD/DVD or a PS1 VCD for POPS.")
         before = source.stat()
         return Library.transfer(source.open("rb"), folder, kind, name or source.name,
                                 before.st_size, cancel, progress, source=source, stamp=before, validate_image=True)
@@ -255,11 +258,11 @@ class Library:
     def transfer(stream, folder, kind, name, total=None, cancel=None, progress=None, source=None, stamp=None, validate_image=False):
         temporary = None
         try:
-            if kind not in ("CD", "DVD"):
-                raise ValueError("Select CD or DVD.")
+            if kind not in MEDIA_TYPES:
+                raise ValueError("Select CD, DVD or POPS.")
             name = safe_name(name)
-            if Path(name).suffix.lower() not in IMAGE_TYPES:
-                raise ValueError("The installed file must be an ISO, CHD, CSO or ZSO image.")
+            if Path(name).suffix.lower() not in MEDIA_TYPES[kind]:
+                raise ValueError("CD/DVD require a PS2 image; POPS requires a PS1 VCD.")
             directory = Path(folder) / kind
             directory.mkdir(parents=True, exist_ok=True)
             destination = directory / name
@@ -292,6 +295,9 @@ class Library:
                     if suffix == ".iso":
                         image.seek(16 * 2048 + 1)
                         valid = image.read(5) == b"CD001"
+                    elif suffix == ".vcd":
+                        image.seek(0x100000 + 16 * 2352 + 24 + 1)
+                        valid = image.read(5) == b"CD001"
                     else:
                         magic = {".chd": b"MComprHD", ".cso": b"CISO", ".zso": b"ZISO"}[suffix]
                         valid = image.read(len(magic)) == magic
@@ -314,8 +320,11 @@ class Library:
 def hash_image(path):
     from launcher.achievements import engine_path
     path = Path(path)
+    if path.suffix.lower() == ".vcd":
+        from launcher.ps1_vcd import hash_vcd
+        return hash_vcd(path)
     if path.suffix.lower() != ".iso":
-        raise ValueError("Achievement compatibility scanning currently requires a PS2 ISO.")
+        raise ValueError("Achievement compatibility scanning currently requires a PS2 ISO or PS1 VCD.")
     before = path.stat()
     result = subprocess.run([str(engine_path()), "--hash-file", str(path.resolve())],
                             capture_output=True, timeout=120,
@@ -352,10 +361,18 @@ class Compatibility:
                 self.load_index(json.loads(self.index_file.read_text("utf-8")))
             except (OSError, ValueError, TypeError, KeyError):
                 pass
-        if not force and self.index and time.time() - self.index["at"] < 86400:
+        if not force and self.index and set(self.index.get("consoles", ())) == set(RA_CONSOLES) \
+                and time.time() - self.index["at"] < 86400:
             return
-        games = self.account.request("API_GetGameList", i=21, h=1, f=1)
-        index = {"at": time.time(), "games": games}
+        # Both systems must load successfully before publishing a combined
+        # index. Old PS2-only caches are refreshed, not used to label PS1 NO.
+        games = []
+        for console in RA_CONSOLES:
+            entries = self.account.request("API_GetGameList", i=console, h=1, f=1)
+            if not isinstance(entries, list):
+                raise ValueError("Invalid RetroAchievements console catalogue.")
+            games.extend(dict(entry, console_id=console) for entry in entries)
+        index = {"at": time.time(), "consoles": list(RA_CONSOLES), "games": games}
         self.load_index(index)
         with tempfile.NamedTemporaryFile(dir=self.library.directory, suffix=".part", mode="w", encoding="utf-8", delete=False) as file:
             temporary = Path(file.name)
@@ -383,8 +400,8 @@ class Compatibility:
 
     def check(self, path):
         path = Path(path).resolve()
-        if path.suffix.lower() != ".iso":
-            return {"status": "unsupported", "message": "Compatibility scanning requires an ISO."}
+        if path.suffix.lower() not in {".iso", ".vcd"}:
+            return {"status": "unsupported", "message": "Compatibility scanning requires a PS2 ISO or PS1 VCD."}
         stat = path.stat()
         stamp = "{}:{}:{}".format(stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
         # API failures propagate; they must never turn into an unsupported result.
