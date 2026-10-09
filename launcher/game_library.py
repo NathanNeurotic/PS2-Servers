@@ -57,7 +57,7 @@ class Library:
     def __init__(self, directory=None):
         self.directory = Path(directory or Path(config_dir()) / "library")
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.database = self.directory / "catalog.sqlite3"
+        self.database = self.directory / "achievement-catalog.sqlite3"
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("""CREATE TABLE IF NOT EXISTS games (

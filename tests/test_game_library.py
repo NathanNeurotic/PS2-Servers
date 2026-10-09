@@ -23,6 +23,19 @@ class LibraryTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_general_and_achievement_catalogues_coexist(self):
+        from launcher import library_catalog
+        common = self.root / "shared-library"
+        common.mkdir()
+        with library_catalog.Catalog(common / "catalog.sqlite3") as general:
+            achievements = Library(common)
+            achievements.save_game({"title": "Achievement catalogue title"})
+            self.assertEqual(general.list_games(), [])
+            self.assertEqual(achievements.games()[0]["title"], "Achievement catalogue title")
+            self.assertNotEqual(general.path, achievements.database)
+        with library_catalog.Catalog(common / "catalog.sqlite3") as general:
+            self.assertEqual(general.list_games(), [])
+
     def test_caduceus_import_preserves_existing_and_backups_committed_data(self):
         self.library.save_game({"title": "Existing", "downloadUrl": "https://example.com/game.iso"})
         source = self.root / "catalog.json"
