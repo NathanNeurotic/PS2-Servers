@@ -137,7 +137,8 @@ def main(argv=None):
             from launcher.caduceus import Bridge
             bridge = Bridge(profile, args.games_folder, account_port=ui_port)
             bridge.start()
-        print("RetroAchievements: {} mode; softcore only.".format(args.mode), flush=True)
+        print("RetroAchievements: {} console compatibility; softcore only.".format(args.mode), flush=True)
+        print("Desktop engine: bundled PS2-Servers-managed xeRAbora/rcheevos; this is not a separate Caduceus engine.", flush=True)
         print("Account, achievements and leaderboards: {}".format(account_url()), flush=True)
         with subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as engine:
