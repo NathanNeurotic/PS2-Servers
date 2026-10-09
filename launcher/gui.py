@@ -260,8 +260,12 @@ def _needs_admin(key, values, setup_needed):
 
 def opl_hint(key, ip, values):
     if key == "retroachievements":
-        return ("Achievements-enabled OPL: PC IP {} · UDP 18194 · "
-                "Use Open account and achievements · softcore only").format(ip)
+        mode = values.get("mode") or "xerabora"
+        mode = dict(servers.RA_MODE_CHOICES).get(mode, mode)
+        compatibility = "Caduceus" if mode == "caduceus" else "xeRAbora"
+        return ("{} console protocol · PC IP {} · UDP 18194 · "
+                "PS2-Servers-managed xeRAbora-derived engine · softcore only").format(
+                    compatibility, ip)
     if key in ("smbv1", "smbv2", "smbv3"):
         port = "445" if values.get("take_445") else str(values.get("port") or 1025)
         # Read back what this card is actually running, not what the defaults
@@ -351,7 +355,7 @@ class ServerCard(ttk.LabelFrame):
         row += 1
 
         if self.server.key == "retroachievements":
-            ttk.Button(self, text="Open account and achievements",
+            ttk.Button(self, text="Open achievement account (shared engine)",
                        command=self._open_achievement_account).grid(
                 row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
             row += 1
@@ -488,9 +492,10 @@ class ServerCard(ttk.LabelFrame):
             # unknown value, and the server exits rather than guessing.
             labels = [label for label, _ in f.choices]
             var = tk.StringVar(value=str(f.default or (labels[0] if labels else "")))
-            ttk.Combobox(parent, textvariable=var, values=labels,
-                         state="readonly", width=18).grid(
-                row=row, column=1, sticky="w", padx=6, pady=2)
+            choice = ttk.Combobox(parent, textvariable=var, values=labels,
+                                  state="readonly", width=18)
+            choice.grid(row=row, column=1, sticky="w", padx=6, pady=2)
+            self.field_widgets[f.key] = choice
         elif f.kind in ("folder", "file", "device"):
             var = tk.StringVar(value="")
             ttk.Entry(parent, textvariable=var).grid(
@@ -694,6 +699,11 @@ class ServerCard(ttk.LabelFrame):
         else:
             self.status.config(text=DOT_RUNNING + " Stopped", foreground=COLOR_STOPPED)
         self.toggle_btn.config(text="Stop" if running else "Start")
+        if self.server.key == "retroachievements":
+            # Mode selects launch-time wire compatibility; it cannot hot-switch.
+            mode_selector = self.field_widgets.get("mode")
+            if mode_selector is not None:
+                mode_selector.config(state="disabled" if running else "readonly")
         if running:
             hint_values = self._active_values if self._active_values is not None else self.values()
             self.hint.config(text=opl_hint(self.server.key, self.app.current_ip(),
