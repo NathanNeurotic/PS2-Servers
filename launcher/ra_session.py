@@ -10,6 +10,8 @@ import time
 import urllib.error
 import urllib.request
 
+from .ra_notifications import UnlockTracker
+
 
 def safe_title(text):
     return " ".join(str(text or "").split())[:96]
@@ -99,6 +101,8 @@ class SessionPoller:
         self.fetch = fetch or self._fetch
         self.period = period
         self.tracker = SessionTracker()
+        self.unlock_tracker = UnlockTracker()
+        self._unlocks = []
         self._stop = threading.Event()
         self._enabled = threading.Event()
         self._thread = None
@@ -116,10 +120,19 @@ class SessionPoller:
             self._enabled.set()
         else:
             self._enabled.clear()
+            with self._lock:
+                self._unlocks.clear()
 
     def snapshot(self):
         with self._lock:
             return dict(self._result)
+
+    def take_unlocks(self):
+        """Drain the capped worker queue on Tk's thread without I/O."""
+        with self._lock:
+            events = self._unlocks[:]
+            self._unlocks.clear()
+            return events
 
     def _fetch(self):
         if self.url is None:
@@ -139,23 +152,36 @@ class SessionPoller:
             if not self._enabled.is_set():
                 if was_enabled:
                     self.tracker.reset()
+                    self.unlock_tracker.reset()
                     with self._lock:
+                        self._unlocks.clear()
                         self._result = {"state": "stopped", "text": "RA stopped"}
                 was_enabled = False
                 self._stop.wait(0.2)
                 continue
             was_enabled = True
             try:
-                snapshot = self.tracker.observe(self.fetch())
+                engine_state = self.fetch()
+                snapshot = self.tracker.observe(engine_state)
+                events = self.unlock_tracker.observe(engine_state, snapshot)
             except (OSError, ValueError, TypeError, urllib.error.URLError):
                 snapshot = self.tracker.observe(None)
+                self.unlock_tracker.reset()
+                events = []
             with self._lock:
-                self._result = snapshot
+                # A stop during an in-flight HTTP read must never publish
+                # stale unlocks into the subsequent service session.
+                if self._enabled.is_set():
+                    self._result = snapshot
+                    self._unlocks.extend(events)
+                    del self._unlocks[:-8]
             self._stop.wait(self.period)
 
     def close(self):
         self._stop.set()
         self._enabled.clear()
+        with self._lock:
+            self._unlocks.clear()
         if self._thread is not None:
             self._thread.join(timeout=3)
             self._thread = None
