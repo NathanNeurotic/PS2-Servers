@@ -540,4 +540,41 @@ UDPBD = ServerDef(
     _build_argv=_udpbd_argv,
 )
 
-REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, HTTP, UDPBD)}
+RA_MODE_CHOICES = (("xeRAbora", "xerabora"), ("Caduceus", "caduceus"))
+
+
+def _achievements_argv(values):
+    mode = values.get("mode") or "xerabora"
+    mode = dict(RA_MODE_CHOICES).get(mode, mode)
+    if mode not in ("xerabora", "caduceus"):
+        raise ValueError("Select xeRAbora or Caduceus mode.")
+    args = ["--mode", mode]
+    if mode == "caduceus":
+        folder = str(values.get("games_folder") or "").strip()
+        if not folder or not os.path.isdir(folder):
+            raise ValueError("Caduceus needs the existing OPL games folder for console pairing and artwork.")
+        args += ["--games-folder", folder]
+    if values.get("no_sound"):
+        args.append("--no-sound")
+    return args
+
+
+RETROACHIEVEMENTS = ServerDef(
+    key="retroachievements", label="RetroAchievements",
+    blurb="Track and unlock RetroAchievements with an achievements-enabled OPL. "
+          "Start here, then sign in on the account page. Runs alongside your game server.",
+    recommendation="Experimental — softcore only; console testing required",
+    recommendation_kind="legacy", runtime="python", default_port=18194,
+    module_file=_repo("launcher", "achievements.py"), module_dir=_repo("launcher"),
+    fields=[
+        Field("mode", "Console mode", "choice", default="xerabora", choices=RA_MODE_CHOICES,
+              help="xeRAbora uses the shared telemetry protocol. Caduceus also enables "
+                   "its compatibility queries, title notifications and paired console progress browser."),
+        Field("games_folder", "OPL games folder (Caduceus)", "folder",
+              help="The folder already shared with OPL. Caduceus writes ART/CADUCEUS.KEY "
+                   "and small achievement icons here. Other modes do not need this folder."),
+        Field("no_sound", "Mute achievement sounds", "bool", default=False),
+    ], _build_argv=_achievements_argv,
+)
+
+REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, HTTP, UDPBD, RETROACHIEVEMENTS)}

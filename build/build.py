@@ -92,9 +92,12 @@ if _missing:
 INCLUDE_PACKAGES = [
     "compressed_iso",
     "lz4",
+    "PIL",
 ]
 
 INCLUDE_MODULES = [
+    "launcher.achievements",
+    "launcher.caduceus",
     "launcher.raw_storage",
     "launcher.virtual_exfat",
     "argparse",
@@ -174,6 +177,8 @@ def _write_build_id():
 
 def main():
     system = platform.system()
+    from build_achievements import build as build_achievements
+    build_achievements()
     _write_build_id()
     out = (release_metadata.WINDOWS_EXE_NAME if system == "Windows"
            else release_metadata.EXECUTABLE_BASENAME)
@@ -181,6 +186,7 @@ def main():
 
     cmd = [
         sys.executable, "-m", "nuitka",
+        "--user-package-configuration-file=" + os.path.join(ROOT, "build", "achievements.nuitka-package.config.yml"),
         "--enable-plugin=tk-inter",
         "--assume-yes-for-downloads",
         # The launcher re-executes this same binary with '--serve <key> ...'

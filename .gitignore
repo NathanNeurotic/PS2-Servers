@@ -21,3 +21,7 @@ launcher/_build_id.py
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Reproducible RetroAchievements toolchain and native build output
+/build/.ra-tools/
+/build/native/

@@ -78,7 +78,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y patchelf python3-tk
+          sudo apt-get install -y patchelf python3-tk libcurl4-openssl-dev
 
       - name: Install Python build dependencies
         if: matrix.macos_arch != 'x86_64'

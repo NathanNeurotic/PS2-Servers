@@ -1,0 +1,18 @@
+{
+  "xerabora": {
+    "repository": "https://github.com/hacan359/xerabora",
+    "commit": "357d00e930c7921984f69650706bea69d56f32ef"
+  },
+  "rcheevos": {
+    "repository": "https://github.com/RetroAchievements/rcheevos",
+    "commit": "f1417fbf2236936e8334533628b2948dfa4a46d0"
+  },
+  "caduceus": {
+    "repository": "https://github.com/Rian6/caduceus",
+    "commit": "311f4eabc4ddaad649cbd0d60859f27d0ffcbbfc"
+  },
+  "caduceus-opl": {
+    "repository": "https://github.com/Rian6/caduceus-opl",
+    "commit": "cc1713a893a976c9b26ae1dd9975c200a461edfe"
+  }
+}

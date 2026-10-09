@@ -202,7 +202,10 @@ PS2 Servers is open source. Packaged releases are built from the public GitHub r
 Unsigned Windows network tools can still trigger antivirus heuristics. That does not prove the file is malicious, but users should not have to rely on trust alone. The source, release checksums, and security notes exist for verification.
 """
 
+ABOUT_TEXT += "\nRetroAchievements runs the bundled xeRAbora/rcheevos engine alongside a game server. Select xeRAbora or Caduceus for your achievements-enabled OPL. Sign in through the local account page; passwords are never launcher settings. Softcore only. Caduceus also provides its paired console progress browser.\n"
+
 TAB_TITLES = {
+    "retroachievements": "RetroAchievements",
     "smbv1": "SMBv1",
     "smbv2": "SMBv2",
     "smbv3": "SMBv3",
@@ -255,6 +258,9 @@ def _needs_admin(key, values, setup_needed):
 
 
 def opl_hint(key, ip, values):
+    if key == "retroachievements":
+        return ("Achievements-enabled OPL: PC IP {} · UDP 18194 · "
+                "Account page http://127.0.0.1:18196/ · softcore only").format(ip)
     if key in ("smbv1", "smbv2", "smbv3"):
         port = "445" if values.get("take_445") else str(values.get("port") or 1025)
         # Read back what this card is actually running, not what the defaults
@@ -342,6 +348,12 @@ class ServerCard(ttk.LabelFrame):
             self.status.config(text="n/a on this OS", foreground=COLOR_ERROR)
             self.toggle_btn.config(state="disabled")
         row += 1
+
+        if self.server.key == "retroachievements":
+            ttk.Button(self, text="Open account and achievements",
+                       command=lambda: webbrowser.open_new_tab("http://127.0.0.1:18196/")).grid(
+                row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
+            row += 1
 
         # primary fields, then advanced fields (hidden behind a toggle).
         # windows_only fields (e.g. take-445, which pauses LanmanServer) are
@@ -1974,11 +1986,11 @@ class LauncherApp:
         server = REGISTRY[key]
         values = card.values()
 
-        if key == "udpbd":
+        if key in ("udpbd", "retroachievements"):
             try:
                 server.build_argv(values)
             except ValueError as error:
-                messagebox.showerror("UDPBD target", str(error))
+                messagebox.showerror(server.label, str(error))
                 return
 
         missing = [f.label for f in server.fields

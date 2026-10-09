@@ -5,3 +5,4 @@ Nuitka==4.2.2
 ordered-set==4.1.0
 zstandard==0.25.0
 lz4==4.4.5
+Pillow==11.3.0

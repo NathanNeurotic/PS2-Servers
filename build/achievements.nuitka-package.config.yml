@@ -1,0 +1,8 @@
+- module-name: 'launcher'
+  dlls:
+    - from_filenames:
+        relative_path: '../build/native'
+        prefixes:
+          - 'ps2ra'
+      dest_path: 'native'
+      executable: 'yes'

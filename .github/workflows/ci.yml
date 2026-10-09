@@ -10,6 +10,34 @@ permissions:
   contents: read
 
 jobs:
+  achievements-engine:
+    name: RetroAchievements engine (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, target: windows-x64, win_arch: x64}
+          - {os: windows-latest, target: windows-x86, win_arch: x86}
+          - {os: ubuntu-22.04, target: linux-x64}
+          - {os: macos-latest, target: macos-arm64}
+          - {os: macos-latest, target: macos-x64, mac_arch: x86_64}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Build pinned achievement engine
+        env:
+          WINDOWS_TARGET_ARCH: ${{ matrix.win_arch }}
+          MACOS_TARGET_ARCH: ${{ matrix.mac_arch }}
+        run: python build/build_achievements.py
+      - name: Exercise native discovery, credential protection and companion wire protocols
+        run: python -m unittest tests.test_retroachievements -v
+
   windows-storage:
     name: Windows raw and virtual storage tests
     runs-on: windows-latest

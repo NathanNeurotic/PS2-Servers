@@ -54,6 +54,8 @@ def check_server_argv_nuitka_safe():
                 values[field.key] = True
             elif field.kind == "port":
                 values[field.key] = server.default_port or 1111
+            elif field.kind == "choice":
+                values[field.key] = field.default or field.choices[0][1]
             else:
                 values[field.key] = "X"
         if key == "udpbd":
@@ -63,6 +65,9 @@ def check_server_argv_nuitka_safe():
             virtual_values = dict(values, image_file="", raw_device="", exclusive=False, raw_write=False)
             argv = (server.build_argv(image_values) + server.build_argv(raw_values)
                     + server.build_argv(virtual_values))
+        elif key == "retroachievements":
+            argv = (server.build_argv(dict(values, mode="xerabora")) +
+                    server.build_argv(dict(values, mode="caduceus", games_folder=str(ROOT))))
         else:
             argv = server.build_argv(values)
         for arg in argv:
