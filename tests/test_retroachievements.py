@@ -14,7 +14,7 @@ import unittest
 from unittest import mock
 import urllib.request
 
-from launcher import caduceus, servers, windows_setup
+from launcher import caduceus, gui, servers, windows_setup
 from launcher.achievements import engine_path, available_account_port, claim_service
 from launcher import achievements
 
@@ -163,6 +163,34 @@ class WireTests(unittest.TestCase):
         self.assertEqual([p for _, p, _ in windows_setup.server_ports("retroachievements", {"mode": "caduceus"})],
                          [18194, 18197, 18198])
         self.assertEqual([p for _, p, _ in windows_setup.server_ports("retroachievements", {"mode": "xerabora"})], [18194])
+
+    def test_compatibility_selection_discloses_shared_runtime(self):
+        server = servers.RETROACHIEVEMENTS
+        mode = next(field for field in server.fields if field.key == "mode")
+        self.assertIn("NOT a separate desktop engine", mode.help)
+        for label, expected in (("xeRAbora", "xeRAbora"), ("Caduceus", "Caduceus")):
+            with self.subTest(label=label):
+                argv = server.build_argv({
+                    "mode": label,
+                    "games_folder": str(self.root / "games"),
+                })
+                self.assertEqual(argv[:2], ["--mode", label.lower()])
+                hint = gui.opl_hint("retroachievements", "192.168.1.2", {"mode": label})
+                self.assertIn(expected + " console protocol", hint)
+                self.assertIn("xeRAbora-derived engine", hint)
+
+    def test_running_mode_selector_is_locked_until_stop(self):
+        card = mock.Mock()
+        card.server = servers.RETROACHIEVEMENTS
+        card.field_widgets = {"mode": mock.Mock()}
+        card._active_values = {"mode": "caduceus"}
+        card.app.current_ip.return_value = "192.168.1.2"
+        gui.ServerCard.refresh_status(card, True)
+        card.field_widgets["mode"].config.assert_called_with(state="disabled")
+        self.assertIn("Caduceus console protocol",
+                      card.hint.config.call_args.kwargs["text"])
+        gui.ServerCard.refresh_status(card, False)
+        card.field_widgets["mode"].config.assert_called_with(state="readonly")
 
     def test_mode_validation_and_no_credentials_in_launcher_fields(self):
         server = servers.RETROACHIEVEMENTS
