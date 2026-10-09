@@ -267,7 +267,14 @@ def main():
     env["PYTHONPATH"] = extra + os.pathsep + existing if existing else extra
 
     print("Running:\n  " + " \\\n  ".join(cmd) + "\n")
-    return subprocess.call(cmd, cwd=ROOT, env=env)
+    result = subprocess.call(cmd, cwd=ROOT, env=env)
+    if result:
+        return result
+    # Exercise the distributed executable from an empty working directory:
+    # source-only tests cannot detect missing bundled helpers or onefile
+    # bootstrap processes retaining the achievement service after Stop.
+    return subprocess.call([sys.executable, os.path.join(ROOT, "tools", "check_achievements_package.py")],
+                           cwd=ROOT)
 
 
 if __name__ == "__main__":
