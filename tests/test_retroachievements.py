@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -14,10 +15,28 @@ from unittest import mock
 import urllib.request
 
 from launcher import caduceus, servers, windows_setup
-from launcher.achievements import engine_path
+from launcher.achievements import engine_path, available_account_port, claim_service
 
 
 class WireTests(unittest.TestCase):
+    def test_account_port_can_change_without_sharing_a_listener(self):
+        with socket.socket() as occupied:
+            if os.name == "nt":
+                occupied.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            occupied.bind(("127.0.0.1", 18196))
+            occupied.listen()
+            self.assertNotEqual(available_account_port(), 18196)
+
+    def test_profile_cannot_have_two_supervisors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lease = claim_service(Path(directory))
+            try:
+                with self.assertRaises(OSError):
+                    claim_service(Path(directory))
+            finally:
+                lease.close()
+            claim_service(Path(directory)).close()
+
     def test_remote_redirects_are_not_followed(self):
         request = urllib.request.Request("https://retroachievements.org/API/test.php?y=secret")
         self.assertIsNone(caduceus.NoRedirect().redirect_request(
@@ -130,6 +149,66 @@ class WireTests(unittest.TestCase):
 
 @unittest.skipUnless(engine_path().is_file(), "build the native achievement engine first")
 class NativeEngineTests(unittest.TestCase):
+    def test_supervisor_restart_and_mode_switch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            games = root / "games"
+            games.mkdir()
+            env = dict(os.environ, LOCALAPPDATA=directory, APPDATA=directory,
+                       XDG_CONFIG_HOME=directory, HOME=directory, PS2SERVERS_RA_NO_BROWSER="1")
+            entry = Path(__file__).resolve().parents[1] / "ps2servers.py"
+            for mode in ("xerabora", "caduceus"):
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console, open(root / "run.log", "w+b") as log:
+                    console.bind(("127.0.0.1", 0))
+                    console.settimeout(0.2)
+                    command = [sys.executable, str(entry), "--serve", "retroachievements",
+                               "--mode", mode, "--no-sound", "--games-folder", str(games)]
+                    proc = subprocess.Popen(command, env=env, stdout=log, stderr=log)
+                    try:
+                        deadline = time.monotonic() + 10
+                        while True:
+                            console.sendto(("RAP1 127.0.0.1 " + str(console.getsockname()[1])).encode(),
+                                           ("127.0.0.1", 18194))
+                            try:
+                                packet, _ = console.recvfrom(1024)
+                                if packet.startswith(b"RAO1 OK"):
+                                    break
+                            except (socket.timeout, ConnectionResetError):
+                                pass
+                            if time.monotonic() > deadline or proc.poll() is not None:
+                                log.seek(0)
+                                self.fail(log.read().decode(errors="replace"))
+                        port_file = next(root.rglob("account-port"))
+                        port = int(port_file.read_text("ascii"))
+                        try:
+                            with urllib.request.urlopen("http://127.0.0.1:{}/state".format(port), timeout=3) as response:
+                                self.assertFalse(json.load(response)["lan"]["on"])
+                        except OSError as error:
+                            log.seek(0)
+                            self.fail("{} port {}: {}\n{}".format(mode, port, error, log.read().decode(errors="replace")))
+                        duplicate = subprocess.run(command, env=env, capture_output=True, timeout=5)
+                        self.assertNotEqual(duplicate.returncode, 0)
+                        self.assertIn(b"already running", duplicate.stderr)
+                        if mode == "caduceus":
+                            key = (games / "ART/CADUCEUS.KEY").read_text("ascii")
+                            console.sendto(("CADA1 1 G 0 0 0 " + key).encode(), ("127.0.0.1", 18198))
+                            self.assertEqual(console.recvfrom(1024)[0].rstrip(b"\0"), b"CADB1 1 OFFLINE")
+                    finally:
+                        proc.terminate()
+                        proc.wait(timeout=10)
+                    deadline = time.monotonic() + 10
+                    while True:
+                        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                            if os.name == "nt":
+                                probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                            try:
+                                probe.bind(("0.0.0.0", 18194))
+                                break
+                            except OSError:
+                                if time.monotonic() > deadline:
+                                    self.fail("Engine retained the telemetry port after its supervisor exited")
+                        time.sleep(0.05)
+
     def test_private_profile_key_protection_and_native_discovery(self):
         with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
             profile = Path(directory)

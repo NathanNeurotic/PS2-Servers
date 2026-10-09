@@ -260,7 +260,7 @@ def _needs_admin(key, values, setup_needed):
 def opl_hint(key, ip, values):
     if key == "retroachievements":
         return ("Achievements-enabled OPL: PC IP {} · UDP 18194 · "
-                "Account page http://127.0.0.1:18196/ · softcore only").format(ip)
+                "Use Open account and achievements · softcore only").format(ip)
     if key in ("smbv1", "smbv2", "smbv3"):
         port = "445" if values.get("take_445") else str(values.get("port") or 1025)
         # Read back what this card is actually running, not what the defaults
@@ -351,7 +351,7 @@ class ServerCard(ttk.LabelFrame):
 
         if self.server.key == "retroachievements":
             ttk.Button(self, text="Open account and achievements",
-                       command=lambda: webbrowser.open_new_tab("http://127.0.0.1:18196/")).grid(
+                       command=self._open_achievement_account).grid(
                 row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
             row += 1
 
@@ -401,6 +401,10 @@ class ServerCard(ttk.LabelFrame):
         self.hint.grid(row=row, column=0, columnspan=3, sticky="w",
                        padx=4, pady=(4, 0))
         bind_wraplength(self.hint, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
+
+    def _open_achievement_account(self):
+        from launcher.achievements import account_url
+        webbrowser.open_new_tab(account_url())
 
     def _refresh_tab_dot(self, running):
         """Mark this server's tab up or down.

@@ -953,7 +953,24 @@ int main(int argc, char **argv)
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons((unsigned short)port);
 
-    if (sock == SOCK_INVALID || bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    int bound = 0;
+    if (sock != SOCK_INVALID) {
+#ifdef _WIN32
+        int exclusive = 1;
+        setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                   (const char *)&exclusive, sizeof(exclusive));
+#endif
+        /* A terminated supervisor's engine may need one polling interval to
+           observe its death. Allow that handover without sharing the socket. */
+        for (i = 0; i < 20 && owner_alive(); i++) {
+            if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+                bound = 1;
+                break;
+            }
+            platform_sleep_ms(100);
+        }
+    }
+    if (!bound) {
         /* Almost always another copy still running. The console half is off
            for this run, said plainly; the interface and the library keep
            working. */
@@ -1023,7 +1040,9 @@ int main(int argc, char **argv)
         log_detail("listening on UDP port %d", port);
 
     while (!g_stop && !webui_quit_requested()) {
-        if (!owner_alive()) break;
+        /* Abrupt supervisor termination already discarded its work. Exit now
+           so a mode switch does not retain the sockets during retry draining. */
+        if (!owner_alive()) return 0;
         struct sockaddr_in from;
         socklen_t fromlen = sizeof(from);
         const char *head = (const char *)pkt;

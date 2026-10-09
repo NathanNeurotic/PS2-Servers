@@ -147,8 +147,9 @@ class Account:
 
 
 class Bridge:
-    def __init__(self, profile, folder):
+    def __init__(self, profile, folder, account_port=18196):
         self.profile, self.art = Path(profile), Path(folder) / "ART"
+        self.account_port = account_port
         self.key = pairing_key(self.art)
         self.stop = threading.Event()
         self.state = {}
@@ -206,7 +207,7 @@ class Bridge:
         seen = set()
         while not self.stop.is_set():
             try:
-                with urllib.request.urlopen("http://127.0.0.1:18196/events", timeout=3) as stream:
+                with urllib.request.urlopen("http://127.0.0.1:{}/events".format(self.account_port), timeout=3) as stream:
                     for line in stream:
                         if self.stop.is_set():
                             return

@@ -30,7 +30,9 @@ memory snapshots.
    in RA's catalogue does not establish that a particular ISO hash is supported.
 
 Close other achievement clients first: only one receiver can own UDP 18194.
-Starting a second copy fails explicitly. Closing the account page leaves the
+Starting a second copy fails explicitly. The account page prefers TCP 18196 but
+selects a free local port when necessary, including immediate Windows restarts.
+Use the account button or the URL printed in the terminal to reach it. Closing the account page leaves the
 service running; stop it with the RetroAchievements tab or **Stop all**.
 
 Upstream Caduceus documents an SMB loading problem in the console loader.
@@ -43,7 +45,7 @@ loader's networking implementation or claim that all game transports work.
 | Function | xeRAbora | Caduceus | Inbound PC port |
 | --- | --- | --- | --- |
 | Discovery, game hash, watch list, memory snapshots, unlock evaluation | Yes | Yes | UDP 18194 |
-| Local account, live achievements, library and leaderboards | Yes | Yes | TCP 18196, loopback only |
+| Local account, live achievements, library and leaderboards | Yes | Yes | TCP 18196 when available, otherwise a free loopback port |
 | `CADQ1` / `CADQ2` compatibility and session-readiness replies | No | Yes | UDP 18197 |
 | Paired `CADA1` account library and achievement pages | No | Yes | UDP 18198 |
 | Enriched `RAU1` achievement-title notices | No | Yes | Sent to console UDP 18195 |

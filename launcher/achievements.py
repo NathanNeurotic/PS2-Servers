@@ -7,6 +7,7 @@ import argparse
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -33,6 +34,46 @@ def profile_dir():
     return directory
 
 
+def account_url():
+    try:
+        port = int((profile_dir() / "account-port").read_text("ascii"))
+        if 1024 <= port <= 65535:
+            return "http://127.0.0.1:{}/".format(port)
+    except (OSError, ValueError):
+        pass
+    return "http://127.0.0.1:18196/"
+
+
+def claim_service(profile):
+    lease = open(profile / "service.lock", "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            if not lease.tell():
+                lease.write(b"\0")
+                lease.flush()
+            lease.seek(0)
+            msvcrt.locking(lease.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lease
+    except BaseException:
+        lease.close()
+        raise
+
+
+def available_account_port():
+    with socket.socket() as probe:
+        if os.name == "nt":
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        try:
+            probe.bind(("127.0.0.1", 18196))
+        except OSError:
+            probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="RetroAchievements for real PS2 consoles")
     parser.add_argument("--mode", choices=("xerabora", "caduceus"), default="xerabora")
@@ -45,9 +86,14 @@ def main(argv=None):
     if args.mode == "caduceus" and (not args.games_folder or not args.games_folder.is_dir()):
         parser.error("Caduceus needs the existing OPL games folder for its ART/CADUCEUS.KEY pairing file.")
     profile = profile_dir()
+    try:
+        lease = claim_service(profile)
+    except OSError:
+        parser.error("RetroAchievements is already running for this profile.")
     env = dict(os.environ, PS2SERVERS_RA_PROFILE=str(profile), PS2SERVERS_RA_PARENT=str(os.getpid()),
                PS2SERVERS_RA_MODE=args.mode)
-    command = [str(binary), "--port", "18194", "--ui-port", "18196"]
+    ui_port = available_account_port()
+    command = [str(binary), "--port", "18194", "--ui-port", str(ui_port)]
     if args.no_sound:
         command.append("--no-sound")
     stopped = threading.Event()
@@ -55,12 +101,13 @@ def main(argv=None):
         signal.signal(getattr(signal, name), lambda *_: stopped.set())
     bridge = None
     try:
+        (profile / "account-port").write_text(str(ui_port), encoding="ascii")
         if args.mode == "caduceus":
             from launcher.caduceus import Bridge
-            bridge = Bridge(profile, args.games_folder)
+            bridge = Bridge(profile, args.games_folder, account_port=ui_port)
             bridge.start()
         print("RetroAchievements: {} mode; softcore only.".format(args.mode), flush=True)
-        print("Account, achievements and leaderboards: http://127.0.0.1:18196/", flush=True)
+        print("Account, achievements and leaderboards: {}".format(account_url()), flush=True)
         with subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as engine:
             while engine.poll() is None and not stopped.wait(0.25):
@@ -76,6 +123,8 @@ def main(argv=None):
     finally:
         if bridge:
             bridge.close()
+        (profile / "account-port").unlink(missing_ok=True)
+        lease.close()
 
 
 if __name__ == "__main__":
