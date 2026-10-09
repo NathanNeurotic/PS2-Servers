@@ -77,7 +77,7 @@ class UnlockTrackerTests(unittest.TestCase):
 
 class SessionPollerUnlockTests(unittest.TestCase):
     def test_worker_queue_is_bounded_and_drained_on_ui_thread(self):
-        state = {"packet": 1, "events": []}
+        state = {"packet": 1, "events": [event(101)]}
         signal = threading.Event()
         def fetch():
             state["packet"] += 1
@@ -91,8 +91,7 @@ class SessionPollerUnlockTests(unittest.TestCase):
         while monitor.snapshot()["state"] != "playing" and time.monotonic() < deadline:
             time.sleep(.01)
         self.assertEqual(monitor.snapshot()["state"], "playing")
-        # Initialize the unlock baseline with a previously unlocked item.
-        state["events"] = [event(101)]
+        # First playing snapshot already baselined achievement 101.
         time.sleep(.05)
         self.assertEqual(monitor.take_unlocks(), [])
         state["events"] = [event(102), event(101)]
