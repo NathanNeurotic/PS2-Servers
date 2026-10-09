@@ -1,0 +1,129 @@
+"""Passive, bounded RA session polling; never runs network I/O on the Tk thread.
+
+A running achievement process is not proof that the console is connected.
+Only advancing console packet counters keep a game session in 'playing'.
+No file scanning and no calls into SMB/UDPFS hot paths are needed.
+"""
+import json
+import threading
+import time
+import urllib.error
+import urllib.request
+
+
+def safe_title(text):
+    return " ".join(str(text or "").split())[:96]
+
+
+class SessionTracker:
+    """Classify the xeRAbora-compatible /state snapshot without false activity."""
+
+    def __init__(self, stale_seconds=15):
+        self.stale_seconds = stale_seconds
+        self.last_packets = None
+        self.last_advance = None
+
+    def reset(self):
+        self.last_packets = None
+        self.last_advance = None
+
+    def observe(self, state, now=None):
+        now = time.monotonic() if now is None else now
+        if not isinstance(state, dict):
+            self.reset()
+            return {"state": "unreachable", "text": "RA engine unavailable"}
+        login = state.get("login") if isinstance(state.get("login"), dict) else {}
+        console = state.get("console") if isinstance(state.get("console"), dict) else {}
+        game = state.get("game") if isinstance(state.get("game"), dict) else {}
+        connected = console.get("connected") is True
+        packets = console.get("packets")
+        if not isinstance(packets, int) or isinstance(packets, bool) or packets < 0:
+            packets = None
+        if not connected:
+            self.reset()
+            return {"state": "listening", "text": (
+                "RA signed in · Waiting for PS2" if login.get("ok")
+                else "RA sign-in required · Waiting for PS2")}
+        if packets is not None and packets != self.last_packets:
+            self.last_packets = packets
+            self.last_advance = now
+        if (packets is not None and self.last_advance is not None and
+                now - self.last_advance >= self.stale_seconds):
+            return {"state": "stalled", "text": "PS2 telemetry stalled · Check connection"}
+        if packets is None:
+            # Legacy engine reports connection without a count; do not assert
+            # that snapshots are advancing.
+            return {"state": "connected", "text": "PS2 connected · Telemetry unverified"}
+        title = safe_title(game.get("title"))
+        if not title:
+            return {"state": "connected", "text": "PS2 connected · Awaiting tracked game"}
+        return {"state": "playing", "title": title, "packets": packets,
+                "text": "Now playing: {} · {} packets".format(title, packets)}
+
+
+class SessionPoller:
+    def __init__(self, url=None, fetch=None, period=1.5):
+        self.url = url
+        self.fetch = fetch or self._fetch
+        self.period = period
+        self.tracker = SessionTracker()
+        self._stop = threading.Event()
+        self._enabled = threading.Event()
+        self._thread = None
+        self._lock = threading.Lock()
+        self._result = {"state": "stopped", "text": "RA stopped"}
+
+    def start(self):
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._run, daemon=True,
+                                            name="PS2-Servers RA session")
+            self._thread.start()
+
+    def set_running(self, running):
+        if running:
+            self._enabled.set()
+        else:
+            self._enabled.clear()
+
+    def snapshot(self):
+        with self._lock:
+            return dict(self._result)
+
+    def _fetch(self):
+        if self.url is None:
+            from launcher.achievements import account_url
+            url = account_url() + "state"
+        else:
+            url = self.url
+        with urllib.request.urlopen(url, timeout=2) as response:
+            data = response.read(1024 * 1024 + 1)
+        if len(data) > 1024 * 1024:
+            raise ValueError("RA status reply exceeded limit.")
+        return json.loads(data)
+
+    def _run(self):
+        was_enabled = False
+        while not self._stop.is_set():
+            if not self._enabled.is_set():
+                if was_enabled:
+                    self.tracker.reset()
+                    with self._lock:
+                        self._result = {"state": "stopped", "text": "RA stopped"}
+                was_enabled = False
+                self._stop.wait(0.2)
+                continue
+            was_enabled = True
+            try:
+                snapshot = self.tracker.observe(self.fetch())
+            except (OSError, ValueError, TypeError, urllib.error.URLError):
+                snapshot = self.tracker.observe(None)
+            with self._lock:
+                self._result = snapshot
+            self._stop.wait(self.period)
+
+    def close(self):
+        self._stop.set()
+        self._enabled.clear()
+        if self._thread is not None:
+            self._thread.join(timeout=3)
+            self._thread = None
