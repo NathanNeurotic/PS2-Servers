@@ -38,7 +38,10 @@ def check(command):
             if mode == "caduceus":
                 args += ["--games-folder", str(folder)]
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            with open(root / "process.log", "w+b") as log, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
+            # The onefile child can retain stdout briefly after releasing its
+            # service resources. Keep this delete-on-close file outside the
+            # profile directory so Windows cleanup does not race that handle.
+            with tempfile.TemporaryFile() as log, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
                 console.bind(("127.0.0.1", 0))
                 console.settimeout(0.3)
                 proc = subprocess.Popen(args, env=env, cwd=temporary, stdout=log, stderr=log,
