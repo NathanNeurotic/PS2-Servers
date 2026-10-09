@@ -112,7 +112,7 @@ class LibraryPanel(ttk.Frame):
             self.root_file.write_text(root, encoding="utf-8")
             self._scan()
 
-    def _root(self):
+    def _games_root(self):
         root = library_catalog.require_directory(self.path.get().strip())
         self.root_file.parent.mkdir(parents=True, exist_ok=True)
         self.root_file.write_text(str(root), encoding="utf-8")
@@ -168,7 +168,7 @@ class LibraryPanel(ttk.Frame):
 
     def _scan(self):
         try:
-            root = self._root()
+            root = self._games_root()
         except (OSError, ValueError) as exc:
             messagebox.showerror("Games root", str(exc))
             return
@@ -176,7 +176,7 @@ class LibraryPanel(ttk.Frame):
 
     def _import_image(self):
         try:
-            root = self._root()
+            root = self._games_root()
         except (OSError, ValueError) as exc:
             messagebox.showerror("Games root", str(exc))
             return
@@ -209,7 +209,7 @@ class LibraryPanel(ttk.Frame):
 
     def _repair_art(self):
         try:
-            root = self._root()
+            root = self._games_root()
         except (OSError, ValueError) as exc:
             messagebox.showerror("Games root", str(exc))
             return
@@ -244,7 +244,7 @@ class LibraryPanel(ttk.Frame):
 
     def _import_art(self):
         try:
-            root = self._root()
+            root = self._games_root()
         except (OSError, ValueError) as exc:
             messagebox.showerror("Games root", str(exc))
             return

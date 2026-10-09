@@ -2,6 +2,7 @@
 
 Runs offline and does not start any game server or make external RA requests.
 """
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -107,7 +108,7 @@ class LibraryCatalogTests(unittest.TestCase):
                 db.backup_sqlite(backup)
             with self.assertRaises(FileExistsError):
                 db.backup_sqlite(self.database)
-        with sqlite3.connect(backup) as connection:
+        with closing(sqlite3.connect(backup)) as connection:
             self.assertEqual(connection.execute("SELECT count(*) FROM games").fetchone()[0], 1)
         self.assertTrue(self.database.exists())
         self.assertTrue(backup.exists())
