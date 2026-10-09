@@ -35,7 +35,7 @@ STEPS = (
      "UDPBD: use the UDPBD device, not a DVD/CD directory listing.\n\n"
      "Always use the actual values displayed in PS2-Servers."),
     ("Test without changing storage",
-     "Begin with one known-good, uncompressed PS2 ISO.\n\n"
+     "For your first test, begin with one known-good, uncompressed PS2 ISO.\n\n"
      "Confirm the game list appears, launch once, and observe server logs. "
      "If UDPFS lists games but launch fails, set its data bind address "
      "to the server's PS2-facing LAN IP and restart that server.\n\n"
