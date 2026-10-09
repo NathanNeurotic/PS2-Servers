@@ -21,6 +21,15 @@ def count(value):
     return max(0, value) if type(value) is int else 0
 
 
+def filter_achievements(rows, query="", status="All"):
+    """Pure local search/filter; never makes RA Web API requests."""
+    needle = str(query or "").strip().casefold()[:120]
+    return [row for row in rows
+            if (status == "All" or row[2] == status)
+            and (not needle or needle in row[0].casefold()
+                 or needle in row[1].casefold())]
+
+
 def view_model(state, verified=None):
     """Pure adapter for the upstream /state JSON, with no false 'playing' claim."""
     if not isinstance(state, dict):
@@ -100,6 +109,10 @@ class OverviewWindow(tk.Toplevel):
         self._stop = threading.Event()
         self._queue = queue.Queue(maxsize=2)
         self._last_rows = {}
+        self._all_rows = []
+        self.search = tk.StringVar(value="")
+        self.achievement_state = tk.StringVar(value="All")
+        self.achievement_count = tk.StringVar(value="No achievements loaded")
         self.account = tk.StringVar(value="Loading local achievement status…")
         self.connection = tk.StringVar(value="")
         self.game = tk.StringVar(value="")
@@ -126,8 +139,18 @@ class OverviewWindow(tk.Toplevel):
         notebook.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         panel = ttk.Frame(notebook)
         notebook.add(panel, text="Achievements")
-        panel.rowconfigure(0, weight=1)
+        panel.rowconfigure(1, weight=1)
         panel.columnconfigure(0, weight=1)
+        filters = ttk.Frame(panel, padding=(0, 0, 0, 8))
+        filters.grid(row=0, column=0, columnspan=2, sticky="ew")
+        ttk.Label(filters, text="Find").pack(side="left", padx=(0, 6))
+        ttk.Entry(filters, textvariable=self.search, width=28).pack(side="left")
+        ttk.Combobox(filters, textvariable=self.achievement_state, width=15,
+                     state="readonly", values=("All", "Not unlocked", "Unlocked")).pack(
+                         side="left", padx=8)
+        ttk.Label(filters, textvariable=self.achievement_count).pack(side="right")
+        self.search.trace_add("write", self._filter_changed)
+        self.achievement_state.trace_add("write", self._filter_changed)
         self.rows = ttk.Treeview(panel, columns=("title", "status", "progress", "points"),
                                  show="headings", selectmode="browse")
         for key, name, width in (("title", "Achievement", 370),
@@ -136,9 +159,9 @@ class OverviewWindow(tk.Toplevel):
                                  ("points", "Points", 75)):
             self.rows.heading(key, text=name)
             self.rows.column(key, width=width, stretch=(key != "points"))
-        self.rows.grid(row=0, column=0, sticky="nsew")
+        self.rows.grid(row=1, column=0, sticky="nsew")
         scroller = ttk.Scrollbar(panel, command=self.rows.yview)
-        scroller.grid(row=0, column=1, sticky="ns")
+        scroller.grid(row=1, column=1, sticky="ns")
         self.rows.configure(yscrollcommand=scroller.set)
         for title, attr in (("Recent engine unlock events", "unlocks"),
                             ("Live leaderboard trackers", "tracking")):
@@ -180,7 +203,8 @@ class OverviewWindow(tk.Toplevel):
             self.account.set(model["account"])
             self.connection.set(model["console"])
             self.game.set(model["game"])
-            self._render_rows(model["rows"])
+            self._all_rows = model["rows"]
+            self._filter_changed()
             for attr in ("unlocks", "tracking"):
                 lines = model[attr] or ["Nothing to display."]
                 widget = getattr(self, attr + "_view")
@@ -191,6 +215,14 @@ class OverviewWindow(tk.Toplevel):
                     widget.insert("1.0", body)
                     widget.configure(state="disabled")
         self.after(200, self._drain)
+
+    def _filter_changed(self, *_unused):
+        all_rows = self._all_rows
+        result = filter_achievements(all_rows, self.search.get(), self.achievement_state.get())
+        unlocked = sum(row[2] == "Unlocked" for row in all_rows)
+        self.achievement_count.set("{} shown / {} total · {} unlocked".format(
+            len(result), len(all_rows), unlocked))
+        self._render_rows(result)
 
     def _render_rows(self, rows):
         # Update only changed rows. Clearing/rebuilding hundreds every two
