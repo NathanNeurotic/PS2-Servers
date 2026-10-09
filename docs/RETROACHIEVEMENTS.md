@@ -158,9 +158,15 @@ only newly seen, sufficiently recent achievements during a packet-verified
 running game produce a brief, non-modal notice. Stale telemetry, reconnects,
 old unlock history, game switches and invalid events cannot replay old notices.
 No additional network server, browser window, system-wide notification
-permission or external service is needed. The engine's existing sound/mute
-setting still controls audio independently; per-device/volume controls and
-physical-console validation are **not implemented yet**.
+permission or external service is needed. The engine's existing sound/mute setting controls audio independently. Under
+**About → Desktop settings → RetroAchievements custom sounds**, you can choose
+separate **connection**, **disconnection**, and **achievement unlock** WAVs or
+restore their embedded defaults. Only bounded, uncompressed 8/16-bit PCM
+mono/stereo audio is accepted. Stop the engine before changing a sound;
+restarting it loads the custom WAV from the PS2-Servers private profile.
+The files are written atomically and independent xeRAbora/Caduceus profiles
+are untouched. Per-device sound output and volume controls, and physical-console
+validation, are **not implemented yet**.
 
 The RetroAchievements tab now shows the live console game when the managed
 engine's packet counters actually advance. It shows a stalled connection when
