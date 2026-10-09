@@ -1,5 +1,6 @@
 import io
 import hashlib
+from importlib.util import find_spec
 from contextlib import closing
 import json
 from pathlib import Path
@@ -34,6 +35,7 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT title FROM games").fetchall(), [("Existing",)])
         self.assertEqual(self.library.games("New")[0]["game_id"], "SLUS_123.45")
 
+    @unittest.skipUnless(find_spec("PIL"), "Pillow required for image export test")
     def test_cover_export_is_indexed_and_preserves_existing_opl_art(self):
         from PIL import Image
 
