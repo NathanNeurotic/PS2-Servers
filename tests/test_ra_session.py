@@ -42,7 +42,19 @@ class SessionTests(unittest.TestCase):
         state["console"]["packets"] = 5
         self.assertEqual(session.observe(state, now=11)["state"], "connected")
         state["game"]["serial"] = "P123456789abcde"
-        self.assertEqual(session.observe(state, now=12)["state"], "playing")
+        self.assertEqual(session.observe(state, now=12)["state"], "connected")
+        state["console"]["packets"] = 6
+        self.assertEqual(session.observe(state, now=13)["state"], "playing")
+
+    def test_switching_loaded_game_needs_new_packets_for_that_game(self):
+        session = SessionTracker()
+        session.observe(payload(10, title="First"), now=10)
+        first = session.observe(payload(11, title="First"), now=11)
+        self.assertEqual(first["state"], "playing")
+        self.assertEqual(session.observe(payload(11, title="Second"), now=12)["state"], "connected")
+        second = session.observe(payload(12, title="Second"), now=13)
+        self.assertEqual(second["state"], "playing")
+        self.assertGreater(second["session"], first["session"])
 
     def test_game_session_identity_resets_on_disconnect_and_stall(self):
         session = SessionTracker(stale_seconds=5)
