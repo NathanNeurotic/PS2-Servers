@@ -98,6 +98,7 @@ INCLUDE_PACKAGES = [
 INCLUDE_MODULES = [
     "launcher.achievements",
     "launcher.ra_session",
+    "launcher.ra_overview",
     "launcher.ra_setup",
     "launcher.ps1_vcd",
     "launcher.caduceus",
