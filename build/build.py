@@ -98,6 +98,13 @@ INCLUDE_PACKAGES = [
 INCLUDE_MODULES = [
     "launcher.achievements",
     "launcher.caduceus",
+    "launcher.achievement_viewer",
+    "launcher.game_library",
+    "launcher.library_gui",
+    "launcher.setup_guide",
+    "launcher.achievement_loader",
+    "launcher.discord_presence",
+    "sqlite3",
     "launcher.raw_storage",
     "launcher.virtual_exfat",
     "argparse",

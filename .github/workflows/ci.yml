@@ -36,7 +36,7 @@ jobs:
           MACOS_TARGET_ARCH: ${{ matrix.mac_arch }}
         run: python build/build_achievements.py
       - name: Exercise native discovery, credential protection and companion wire protocols
-        run: python -m unittest tests.test_retroachievements -v
+        run: python -m unittest tests.test_retroachievements tests.test_game_library tests.test_achievement_viewer tests.test_achievement_loader tests.test_discord_presence -v
 
   windows-storage:
     name: Windows raw and virtual storage tests
@@ -75,7 +75,7 @@ jobs:
         # PyYAML only: tests/test_version_consistency.py parses edge-build.yml
         # rather than grepping it, so that a version literal in a comment cannot
         # satisfy the check. Nothing shipped needs it.
-        run: python -m pip install --disable-pip-version-check PyYAML
+        run: python -m pip install --disable-pip-version-check PyYAML Pillow
 
       - name: Compile Python sources
         run: python -m compileall -q launcher smbv1_server smb2_server udpbd_server udpfs_server http_server ps2servers.py

@@ -43,6 +43,7 @@ def build():
     makefile = (client / "Makefile").read_text()
     sources = re.search(r"RC_SRC := (.*?)\n\nSRC :=", makefile, re.S).group(1)
     sources = [rc / x for x in re.findall(r"\$\(RC\)/([^\s\\]+\.c)", sources)]
+    sources += [path for path in sorted((rc / "src/rhash").glob("*.c")) if path not in sources]
     sources += [client / x for x in re.findall(r"src/[a-z_]+\.c", re.search(r"\nSRC := (.*?)\n\nall:", makefile, re.S).group(1))]
     sources += [client / "src" / ("http_winhttp.c" if system == "Windows" else "http_curl.c")]
     target = ROOT / "build" / "native" / ("ps2ra.exe" if system == "Windows" else "ps2ra")

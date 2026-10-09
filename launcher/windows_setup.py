@@ -136,7 +136,9 @@ def _server_ports(key, values):
         if values.get("mode") in ("caduceus", "Caduceus"):
             ports += [("UDP", 18197, "Caduceus compatibility"),
                       ("UDP", 18198, "Caduceus account progress")]
-        return ports  # The account page is loopback only, never a firewall rule.
+        if values.get("lan_viewer"):
+            ports.append(("TCP", 18199, "Read-only achievements viewer"))
+        return ports  # The private account page never gets a firewall rule.
     if key in ("smbv1", "smbv2", "smbv3"):
         label = "SMBv1" if key == "smbv1" else ("SMBv2" if key == "smbv2" else "SMBv3")
         port = 445 if values.get("take_445") else _parse_port(values.get("port"), 1025)

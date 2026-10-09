@@ -22,6 +22,8 @@ Local xeRAbora changes:
 - Keep the managed service alive after closing its account page.
 - Exit when the supervising process exits, including abrupt Windows termination.
 - Optional browser suppression for automated tests.
+- A non-networking `--hash-file` command using the pinned rcheevos PS2 image
+  identifier, for desktop library compatibility scans.
 - A writable, DMA-sized reset-notice buffer.
 - In Caduceus mode, let the companion send the enriched unlock notice first,
   so the console's duplicate-ID filter does not discard its achievement title.

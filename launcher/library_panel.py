@@ -43,7 +43,10 @@ class LibraryPanel(ttk.Frame):
         self._drain()
         self._run(lambda db: db.list_games(), "Loading catalogue")
         # First-run tutorial is voluntary and never configures network or starts a server.
-        self.after_idle(self._show_first_run_guide)
+        # The integrated desktop offers one shared guide; standalone panels
+        # retain their own first-run guide.
+        if not hasattr(app, "_open_ps2_setup_guide"):
+            self.after_idle(self._show_first_run_guide)
 
     def _load_root(self):
         try:

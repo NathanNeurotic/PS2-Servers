@@ -98,6 +98,8 @@ def main(argv=None):
     parser.add_argument("--mode", choices=("xerabora", "caduceus"), default="xerabora")
     parser.add_argument("--games-folder", type=Path)
     parser.add_argument("--no-sound", action="store_true")
+    parser.add_argument("--obs-folder", type=Path)
+    parser.add_argument("--lan-viewer", action="store_true")
     args = parser.parse_args(argv)
     binary = engine_path()
     if not binary.is_file():
@@ -115,13 +117,22 @@ def main(argv=None):
     command = [str(binary), "--port", "18194", "--ui-port", str(ui_port)]
     if args.no_sound:
         command.append("--no-sound")
+    if args.obs_folder:
+        args.obs_folder.mkdir(parents=True, exist_ok=True)
+        command += ["--obs", str(args.obs_folder.resolve())]
     stopped = threading.Event()
     for name in ("SIGINT", "SIGTERM"):
         signal.signal(getattr(signal, name), lambda *_: stopped.set())
     bridge = None
+    viewer = None
     owner_alive, close_owner = bootstrap_owner()
     try:
         (profile / "account-port").write_text(str(ui_port), encoding="ascii")
+        if args.lan_viewer:
+            from launcher.achievement_viewer import Viewer
+            viewer = Viewer(ui_port)
+            viewer.start()
+            print("Read-only achievements viewer: http://<this PC's LAN IP>:18199/", flush=True)
         if args.mode == "caduceus":
             from launcher.caduceus import Bridge
             bridge = Bridge(profile, args.games_folder, account_port=ui_port)
@@ -141,6 +152,8 @@ def main(argv=None):
                     engine.wait()
             return engine.returncode
     finally:
+        if viewer:
+            viewer.close()
         if bridge:
             bridge.close()
         (profile / "account-port").unlink(missing_ok=True)

@@ -556,6 +556,11 @@ def _achievements_argv(values):
         args += ["--games-folder", folder]
     if values.get("no_sound"):
         args.append("--no-sound")
+    obs = str(values.get("obs_folder") or "").strip()
+    if obs:
+        args += ["--obs-folder", obs]
+    if values.get("lan_viewer"):
+        args.append("--lan-viewer")
     return args
 
 
@@ -574,6 +579,10 @@ RETROACHIEVEMENTS = ServerDef(
               help="The folder already shared with OPL. Caduceus writes ART/CADUCEUS.KEY "
                    "and small achievement icons here. Other modes do not need this folder."),
         Field("no_sound", "Mute achievement sounds", "bool", default=False),
+        Field("obs_folder", "OBS export folder (optional)", "folder",
+              help="Writes live game, progress and unlock text files plus data.json for streaming overlays."),
+        Field("lan_viewer", "View achievements on other devices", "bool", default=False,
+              help="Shares a read-only page on port 18199. Devices on your trusted LAN can see your profile and progress. Account controls stay on this PC."),
     ], _build_argv=_achievements_argv,
 )
 
