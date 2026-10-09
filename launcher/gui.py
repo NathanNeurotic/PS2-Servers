@@ -791,6 +791,7 @@ class LauncherApp:
         self.discord_enabled_var = tk.BooleanVar(value=self._saved_bool("discord_rich_presence", False))
         self.discord_app_id_var = tk.StringVar(value=self.saved.get("discord_application_id") or DEFAULT_APPLICATION_ID)
         self.discord_uptime_var = tk.BooleanVar(value=self._saved_bool("discord_show_uptime", False))
+        self.discord_share_game_var = tk.BooleanVar(value=self._saved_bool("discord_share_game", False))
         self.discord_status_var = tk.StringVar(value="Disabled")
         self._discord_activity = DesktopActivity()
         self._discord_presence = None
@@ -2770,13 +2771,16 @@ class LauncherApp:
             row=0, column=0, columnspan=2, sticky="w", pady=4)
         ttk.Label(frame, text="Application ID").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
         ttk.Entry(frame, textvariable=self.discord_app_id_var, width=28).grid(row=1, column=1, sticky="ew", pady=4)
-        ttk.Checkbutton(frame, text="Show application uptime", variable=self.discord_uptime_var).grid(
+        ttk.Checkbutton(frame, text="Show activity duration", variable=self.discord_uptime_var).grid(
             row=2, column=0, columnspan=2, sticky="w", pady=4)
-        ttk.Label(frame, text="Shares PS2-Servers branding and active server modes only. No paths, IP addresses, credentials or account details. Uses your open Discord desktop account.",
-                  wraplength=420).grid(row=3, column=0, columnspan=2, sticky="w", pady=8)
-        ttk.Label(frame, textvariable=self.discord_status_var, wraplength=420).grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
-        ttk.Button(frame, text="Use official Application ID", command=lambda: self.discord_app_id_var.set(DEFAULT_APPLICATION_ID)).grid(row=5, column=0, sticky="w", pady=8)
-        ttk.Button(frame, text="Apply and save", command=lambda: self._apply_discord_settings(save=True)).grid(row=5, column=1, sticky="e", pady=8)
+        ttk.Checkbutton(frame, text="Share game title during verified RetroAchievements sessions (opt in)",
+                        variable=self.discord_share_game_var).grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Label(frame, text="Default: server modes only. With game sharing enabled, only a live, verified RA game title is public; no paths, network addresses or RA account data are sent. Stop tracking to clear the title.",
+                  wraplength=420).grid(row=4, column=0, columnspan=2, sticky="w", pady=8)
+        ttk.Label(frame, textvariable=self.discord_status_var, wraplength=420).grid(row=5, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Button(frame, text="Use official Application ID", command=lambda: self.discord_app_id_var.set(DEFAULT_APPLICATION_ID)).grid(row=6, column=0, sticky="w", pady=8)
+        ttk.Button(frame, text="Apply and save", command=lambda: self._apply_discord_settings(save=True)).grid(row=6, column=1, sticky="e", pady=8)
 
     def _apply_discord_settings(self, save=False):
         if getattr(self, "_shutting_down", False):
@@ -2810,8 +2814,13 @@ class LauncherApp:
         presence = getattr(self, "_discord_presence", None)
         if presence is None:
             return
+        share_game = getattr(self, "discord_share_game_var", None)
+        share_game = bool(share_game.get()) if share_game is not None else False
+        monitor = getattr(self, "_ra_session", None)
+        game = monitor.snapshot() if share_game and monitor is not None else None
         self._discord_activity.update(
-            [key for key, process in self.procs.items() if process.is_running()], self.discord_uptime_var.get())
+            [key for key, process in self.procs.items() if process.is_running()],
+            self.discord_uptime_var.get(), game=game, show_game=share_game)
         message = presence.message
         if self.discord_status_var.get() != message:
             self.discord_status_var.set(message)
@@ -3052,6 +3061,7 @@ class LauncherApp:
                 "discord_rich_presence": bool(self.discord_enabled_var.get()),
                 "discord_application_id": self.discord_app_id_var.get(),
                 "discord_show_uptime": bool(self.discord_uptime_var.get()),
+                "discord_share_game": bool(self.discord_share_game_var.get()),
                 "last_active_servers": active}
         latest = config.load()
         for key in ("game_library_folder", "library_guide_seen",
