@@ -367,6 +367,12 @@ class ServerCard(ttk.LabelFrame):
             row += 1
 
         if self.server.key == "retroachievements":
+            ttk.Button(self, text="Live achievements (native view)…",
+                       command=self._open_ra_overview).grid(
+                row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
+            row += 1
+
+        if self.server.key == "retroachievements":
             ttk.Button(self, text="Manage game library…", command=self._open_game_library).grid(
                 row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
             row += 1
@@ -479,6 +485,20 @@ class ServerCard(ttk.LabelFrame):
             return
         from launcher.achievements import account_url
         webbrowser.open_new_tab(account_url())
+
+    def _open_ra_overview(self):
+        if not self.app.is_running("retroachievements"):
+            messagebox.showinfo("RetroAchievements",
+                                "Start RetroAchievements to view live achievements.",
+                                parent=self)
+            return
+        from launcher.ra_overview import OverviewWindow
+        existing = getattr(self, "_ra_overview", None)
+        if existing is not None and existing.winfo_exists():
+            existing.lift()
+            existing.focus_set()
+            return
+        self._ra_overview = OverviewWindow(self, self.app)
 
     def _open_game_library(self):
         from launcher.library_gui import LibraryWindow
