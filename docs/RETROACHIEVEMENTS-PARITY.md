@@ -22,6 +22,8 @@ References are pinned in `vendor/retroachievements/sources.json`.
 | Download user-supplied game links | Implemented on feature branch | Progress/cancel; safe names; no incomplete file served |
 | Caduceus JSON/SQLite catalogue import and backup | Implemented on feature branch | Compatible fields; preserve existing rows; snapshot live WAL; no active-DB overwrite |
 | ISO achievement-compatibility scanning | Implemented on feature branch | Official rcheevos hash; bounded lookup/cache; API failures remain retryable |
+| PS1 POPStarter VCD compatibility | First implementation in #222 | POPS discovery and atomic imports; RiptOPL PS1 BOOT executable hash and PS1 system 12 index, fixtures; physical console acceptance pending |
+| RA game session detection | First implementation in #222 | Passive local state poll, packet advancement and 15 s stale detection; generic SMB/UDPFS active-game detection still missing |
 | Cover repair and library storage selection | Implemented on feature branch | Avoid unique-file loss; protect active game sessions |
 | Discord desktop activity | Implemented on feature branch | Official ID 1558114313619898409; disabled by default; public server modes only; optional uptime; IPC and shutdown tests pass; live Discord acceptance pending |
 | Matching loader export | Implemented on feature branch | Pinned upstream downloads, checksum and license verification; no overwrite; host tests pass |
