@@ -32,6 +32,36 @@ with xeRAbora and Caduceus console modes. Edge provides UDPFS, SMBv1, UDPBD, and
 HTTP **management dashboard**; it does not provide the HTTP game server or SMB2/3.
 See [editions](docs/EDITIONS.md) and [Edge setup](docs/EDGE.md).
 
+## Optional desktop game library
+
+Desktop now has a **LIBRARY** tab: a searchable SQLite catalogue of PS2 images,
+a safe CD/DVD folder scan, optional ISO/CSO/ZSO/CHD imports, editable game titles
+and disc IDs, and 8-bit PNG artwork conversion to the chosen `ART/` folder.
+Use **Setup guide** for a five-step LAN/share/console walkthrough. The companion
+also supports JSON metadata import/export and online SQLite backups.
+
+The **Import images** action supports a batch of local image files (up to 1,000 per run),
+records skips without overwriting any destination, and leaves original images intact.
+The **Repair ART** action converts legacy `_COV.jpg`, `_ICO.jpg`, `_LAB.jpg`,
+`_COV3.jpg` (or JPEG/WebP/BMP equivalents) to 8-bit indexed PNG without deleting
+sources or replacing existing PNGs. The current companion does not queue remote
+ISO URLs or automatically download covers from an online provider.
+
+This is **separate from game serving**: selecting a games root here does not
+reconfigure SMB, UDPFS, UDPBD or HTTP cards. The catalogue contains paths and
+metadata only, **not** copies of the games, artwork or VMC saves. Copying an image
+uses an exclusive new-file create and will never overwrite an existing image.
+Stop console reads from that directory during imports; do not copy over an image
+a console is playing. Existing files and artwork are preserved by default.
+
+For artwork, enter the **exact RiptOPL identity**: PS2 disc ID for ISO, VCD
+filename for POPStarter, ELF filename for Apps, or Ember game-folder name as
+appropriate. The library never silently renames games. The PNG writer uses
+Pillow (bundled with desktop builds; install it for source conversions) and
+outputs 8-bit indexed PNGs without forcing Caduceus's fixed cover dimensions.
+Game catalogues and covers can live in the same root used by server cards, but
+the library does not need a server to be running.
+
 ## Quick start
 
 1. Download from [GitHub Releases](https://github.com/NathanNeurotic/PS2-Servers/releases).

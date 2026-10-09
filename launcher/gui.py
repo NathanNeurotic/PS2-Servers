@@ -1142,6 +1142,12 @@ class LauncherApp:
             self.server_tabs[server.key] = tab
             self.cards[server.key] = card
 
+        # PC companion: metadata/artwork operations never run in any server hot path.
+        from .library_panel import LibraryPanel
+        self.library_tab = ttk.Frame(self.nb)
+        LibraryPanel(self.library_tab, self).pack(fill="both", expand=True)
+        self.nb.add(self.library_tab, text="LIBRARY")
+
         self.terminal_tab = ttk.Frame(self.nb)
         self.terminal_tab.rowconfigure(0, weight=1)
         self.terminal_tab.columnconfigure(0, weight=1)

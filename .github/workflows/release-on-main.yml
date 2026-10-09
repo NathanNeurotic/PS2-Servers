@@ -116,6 +116,10 @@ jobs:
           # reference is real rather than a trap for the next editor.
           MACOS_TARGET_ARCH: ${{ matrix.macos_arch }}
 
+      - name: Verify fresh-profile Windows desktop stays open
+        if: runner.os == 'Windows'
+        run: python tools/check_desktop_startup.py dist/PS2Servers.exe
+
       - name: Build app (macOS x64)
         if: matrix.macos_arch == 'x86_64'
         # Python is already executing as x86_64 here. Do not pass
