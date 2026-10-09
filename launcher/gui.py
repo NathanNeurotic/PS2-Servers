@@ -32,6 +32,7 @@ def _direct_link_experimental():
 from . import config, directlink, elevate, netinfo, posix_firewall, servers, status_client, theme, tray, windows_setup
 from .process import ServerProcess
 from .discord_presence import DEFAULT_APPLICATION_ID, DesktopActivity, Presence
+from .ra_session import SessionPoller
 from .release_metadata import DISPLAY_VERSION, version_label
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
 
@@ -355,6 +356,11 @@ class ServerCard(ttk.LabelFrame):
         row += 1
 
         if self.server.key == "retroachievements":
+            self.ra_session_status = ttk.Label(self, text="RA stopped", style="CardStatus.TLabel")
+            self.ra_session_status.grid(row=row, column=0, columnspan=3, sticky="w", padx=4, pady=(0, 4))
+            bind_wraplength(self.ra_session_status, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
+            self._last_ra_session = ""
+            row += 1
             ttk.Button(self, text="Open achievement account (shared engine)",
                        command=self._open_achievement_account).grid(
                 row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
@@ -411,6 +417,16 @@ class ServerCard(ttk.LabelFrame):
         self.hint.grid(row=row, column=0, columnspan=3, sticky="w",
                        padx=4, pady=(4, 0))
         bind_wraplength(self.hint, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
+
+    def render_ra_session(self, snapshot):
+        if self.server.key != "retroachievements":
+            return
+        message = snapshot.get("text", "RA status unavailable")
+        if self._last_ra_session != message:
+            self.ra_session_status.configure(text=message,
+                foreground=COLOR_ERROR if snapshot.get("state") in ("stalled", "unreachable") else COLOR_RUNNING
+                if snapshot.get("state") == "playing" else COLOR_STOPPED)
+            self._last_ra_session = message
 
     def _open_achievement_account(self):
         if not self.app.is_running(self.server.key):
@@ -729,6 +745,8 @@ class LauncherApp:
         # and fall back to the process check, so nothing regresses.
         self.status_poller = status_client.Poller()
         self.status_poller.start()
+        self._ra_session = SessionPoller()
+        self._ra_session.start()
         # Last state painted per card, so the status line is only rebuilt when
         # the answer actually changes rather than on every 600 ms tick.
         self._last_reported = {}
@@ -2709,6 +2727,9 @@ class LauncherApp:
                 if reported != self._last_reported.get(key):
                     self._last_reported[key] = reported
                     self.cards[key].refresh_status(True)
+        ra_running = self.is_running("retroachievements")
+        self._ra_session.set_running(ra_running)
+        self.cards["retroachievements"].render_ra_session(self._ra_session.snapshot())
         if (self._direct_expected and self._direct_proc is not None
                 and not self._direct_proc.is_running()):
             code = self._direct_proc.returncode
@@ -3180,6 +3201,9 @@ class LauncherApp:
         queued after() raises TclError. Every teardown path routes through here,
         including the relaunch/elevation flows that used to destroy directly."""
         self._shutting_down = True
+        poller = getattr(self, "_ra_session", None)
+        if poller:
+            poller.close()
         presence = getattr(self, "_discord_presence", None)
         if presence:
             presence.close()
