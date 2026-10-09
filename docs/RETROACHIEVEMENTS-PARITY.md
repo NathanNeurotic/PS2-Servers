@@ -23,7 +23,7 @@ References are pinned in `vendor/retroachievements/sources.json`.
 | Cover repair and library storage selection | Pending | Avoid unique-file loss; protect active game sessions |
 | Discord desktop activity | Implemented on feature branch | Official ID 1558114313619898409; disabled by default; public server modes only; optional uptime; IPC and shutdown tests pass; live Discord acceptance pending |
 | Matching loader export | Implemented on feature branch | Pinned upstream downloads, checksum and license verification; no overwrite; host tests pass |
-| Sound controls and first-run/setup guide | Partial | Equivalent user controls and persisted choices |
+| Sound controls and first-run/setup guide | In progress | Six-step read-only PS2 setup guide is accessible from Desktop Options; automatic first-run invitation, saved completion state and sound control parity still pending |
 | Theme and catalogue preferences | Pending | Existing native theme support applied to new views |
 
 Reimplement application-specific behavior independently; Caduceus Electron
