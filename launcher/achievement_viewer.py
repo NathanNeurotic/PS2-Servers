@@ -12,7 +12,9 @@ class Viewer:
     def __init__(self, account_port, port=18199, host="0.0.0.0"):
         self.account_port = account_port
         self.stopped = threading.Event()
-        self.slots = threading.BoundedSemaphore(4)
+        # The engine has four SSE slots: reserve one for the local account
+        # page and one for the Caduceus companion.
+        self.slots = threading.BoundedSemaphore(2)
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -54,7 +56,7 @@ class Viewer:
                     self.send_error(404)
                     return
                 if not owner.slots.acquire(blocking=False):
-                    self.send_error(503, "Four viewers are already connected")
+                    self.send_error(503, "Two remote viewers are already connected")
                     return
                 try:
                     request = urllib.request.Request(

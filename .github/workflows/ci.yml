@@ -36,7 +36,7 @@ jobs:
           MACOS_TARGET_ARCH: ${{ matrix.mac_arch }}
         run: python build/build_achievements.py
       - name: Exercise native discovery, credential protection and companion wire protocols
-        run: python -m unittest tests.test_retroachievements -v
+        run: python -m unittest tests.test_retroachievements tests.test_game_library tests.test_achievement_viewer tests.test_achievement_loader tests.test_discord_presence -v
 
   windows-storage:
     name: Windows raw and virtual storage tests

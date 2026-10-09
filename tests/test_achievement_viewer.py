@@ -64,7 +64,7 @@ class ViewerTests(unittest.TestCase):
         self.assertEqual(self.requests, [])
 
     def test_excess_viewers_do_not_consume_private_engine_connections(self):
-        for _ in range(4):
+        for _ in range(2):
             self.viewer.slots.acquire()
         try:
             with self.assertRaises(urllib.error.HTTPError) as caught:
@@ -73,7 +73,7 @@ class ViewerTests(unittest.TestCase):
             caught.exception.close()
             self.assertEqual(self.requests, [])
         finally:
-            for _ in range(4):
+            for _ in range(2):
                 self.viewer.slots.release()
 
     def test_launcher_and_firewall_require_explicit_opt_in(self):

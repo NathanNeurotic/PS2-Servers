@@ -43,7 +43,8 @@ class LibraryWindow(tk.Toplevel):
         search = ttk.Frame(self, padding=(10, 0))
         search.grid(row=1, column=0, sticky="ew")
         search.columnconfigure(1, weight=1)
-        choice = ttk.Combobox(search, textvariable=self.view, values=("Installed images", "Catalogue"), state="readonly", width=20)
+        choice = ttk.Combobox(search, textvariable=self.view,
+                             values=("Installed images", "Recognized achievement sets", "Unmatched ISO hashes", "Catalogue"), state="readonly", width=26)
         choice.grid(row=0, column=0, padx=4)
         choice.bind("<<ComboboxSelected>>", lambda _event: self.refresh())
         ttk.Entry(search, textvariable=self.query).grid(row=0, column=1, sticky="ew", padx=4)
@@ -60,6 +61,9 @@ class LibraryWindow(tk.Toplevel):
 
         button = ttk.Button(tools, text="Repair selected covers", command=self.repair_covers)
         button.grid(row=2, column=0, padx=3, pady=3)
+        self.actions.append(button)
+        button = ttk.Button(tools, text="Export console loader…", command=self.export_loader)
+        button.grid(row=2, column=1, padx=3, pady=3)
         self.actions.append(button)
         for column, (label, action) in enumerate((
                 ("Import catalogue…", self.import_catalog), ("Back up catalogue…", self.backup),
@@ -119,7 +123,7 @@ class LibraryWindow(tk.Toplevel):
         self.rows.clear()
         try:
             if self.view.get() == "Catalogue":
-                rows = self.library.games(self.query.get())
+                rows = self.library.games(self.query.get(), limit=500)
                 for row in rows:
                     key = "catalog-" + str(row["id"])
                     self.rows[key] = row
@@ -133,6 +137,12 @@ class LibraryWindow(tk.Toplevel):
                     key = "image-" + str(len(self.rows))
                     self.rows[key] = row
                     state = states.get(str(Path(row["path"]).resolve()), {})
+                    if state.get("stamp") != row["stamp"]:
+                        state = {}
+                    if self.view.get() == "Recognized achievement sets" and state.get("status") != "compatible":
+                        continue
+                    if self.view.get() == "Unmatched ISO hashes" and state.get("status") != "unmatched":
+                        continue
                     label = state.get("status", "Not checked")
                     if label == "compatible":
                         label = "{} achievements".format(state["count"])
@@ -316,6 +326,19 @@ class LibraryWindow(tk.Toplevel):
             "4. Use the matching achievements-enabled OPL on the PS2. Test the PC connection and check game support before launch.\n\n"
             "5. Optional LAN viewing is read-only. Set an OBS export folder for stream labels.\n\n"
             "Virtual exFAT keeps a frozen inventory: restart it after adding images or artwork. Live achievements remain experimental and softcore-only.", parent=self)
+
+    def export_loader(self):
+        from launcher.achievement_loader import export_loader
+        mode = simpledialog.askstring("Console loader", "Choose the console loader: xerabora or caduceus", initialvalue="xerabora", parent=self)
+        if not mode:
+            return
+        mode = mode.strip().lower()
+        if mode not in ("xerabora", "caduceus"):
+            messagebox.showerror("Console loader", "Choose xerabora or caduceus.", parent=self)
+            return
+        folder = filedialog.askdirectory(parent=self, title="Export official console loader, license and source reference")
+        if folder:
+            self.run(lambda: "Verified upstream loader exported: " + export_loader(mode, folder))
 
     def close(self):
         if self.busy:

@@ -79,10 +79,10 @@ class Library:
         finally:
             db.close()
 
-    def games(self, query=""):
+    def games(self, query="", limit=100000):
         with self.connect() as db:
             return [dict(row) for row in db.execute(
-                "SELECT * FROM games WHERE instr(lower(title),lower(?))>0 ORDER BY title COLLATE NOCASE", (query,))]
+                "SELECT * FROM games WHERE instr(lower(title),lower(?))>0 ORDER BY title COLLATE NOCASE LIMIT ?", (query, int(limit)))]
 
     @staticmethod
     def normalize(row):
@@ -140,6 +140,8 @@ class Library:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as image:
+                if image.width * image.height > 16000000:
+                    raise ValueError("The cover exceeds the 16-megapixel image limit.")
                 image.load()
                 image = image.convert("RGBA")
                 image.thumbnail((512, 512))
@@ -223,7 +225,9 @@ class Library:
             if directory.is_dir():
                 for path in directory.iterdir():
                     if path.is_file() and path.suffix.lower() in IMAGE_TYPES:
-                        result.append({"path": str(path), "name": path.name, "kind": kind, "size": path.stat().st_size})
+                        stat = path.stat()
+                        result.append({"path": str(path), "name": path.name, "kind": kind, "size": stat.st_size,
+                                       "stamp": "{}:{}:{}".format(stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)})
         return sorted(result, key=lambda row: row["name"].casefold())
 
     @staticmethod
@@ -233,7 +237,7 @@ class Library:
             raise ValueError("Choose an ISO, CHD, CSO or ZSO image.")
         before = source.stat()
         return Library.transfer(source.open("rb"), folder, kind, name or source.name,
-                                before.st_size, cancel, progress, source=source, stamp=before)
+                                before.st_size, cancel, progress, source=source, stamp=before, validate_image=True)
 
     @staticmethod
     def download(url, folder, kind, name, cancel=None, progress=None):
@@ -241,10 +245,10 @@ class Library:
         response = urllib.request.urlopen(request, timeout=15)
         length = response.headers.get("Content-Length")
         return Library.transfer(response, folder, kind, name, int(length) if length else None,
-                                cancel, progress)
+                                cancel, progress, validate_image=True)
 
     @staticmethod
-    def transfer(stream, folder, kind, name, total=None, cancel=None, progress=None, source=None, stamp=None):
+    def transfer(stream, folder, kind, name, total=None, cancel=None, progress=None, source=None, stamp=None, validate_image=False):
         temporary = None
         try:
             if kind not in ("CD", "DVD"):
@@ -278,10 +282,23 @@ class Library:
                 raise ValueError("The transfer was incomplete; no image was installed.")
             if not done:
                 raise ValueError("The image is empty.")
+            if validate_image:
+                with temporary.open("rb") as image:
+                    suffix = Path(name).suffix.lower()
+                    if suffix == ".iso":
+                        image.seek(16 * 2048 + 1)
+                        valid = image.read(5) == b"CD001"
+                    else:
+                        magic = {".chd": b"MComprHD", ".cso": b"CISO", ".zso": b"ZISO"}[suffix]
+                        valid = image.read(len(magic)) == magic
+                if not valid:
+                    raise ValueError("The downloaded/imported file is not a valid image of the selected type.")
             if source:
                 after = source.stat()
                 if (after.st_size, after.st_mtime_ns) != (stamp.st_size, stamp.st_mtime_ns):
                     raise ValueError("The source image changed during import.")
+            if cancel and cancel.is_set():
+                raise InterruptedError("Transfer cancelled; no image was installed.")
             publish_new(temporary, destination)
             return str(destination)
         finally:

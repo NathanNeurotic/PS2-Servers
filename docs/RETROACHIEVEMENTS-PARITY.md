@@ -21,11 +21,20 @@ References are pinned in `vendor/retroachievements/sources.json`.
 | Caduceus JSON/SQLite catalogue import and backup | Pending | Compatible fields; preserve existing rows; snapshot live WAL; no active-DB overwrite |
 | ISO achievement-compatibility scanning | In progress | Official rcheevos hash; bounded lookup/cache; API failures remain retryable |
 | Cover repair and library storage selection | Pending | Avoid unique-file loss; protect active game sessions |
-| Discord game/achievement activity | Pending | User opt-in; correct session; clear on stop; reconnect and rate limits |
-| Matching loader export | Pending | Explicit provenance, checksum, licensing; do not mix console builds |
+| Discord desktop activity | Implemented on feature branch | Official ID 1558114313619898409; disabled by default; public server modes only; optional uptime; IPC and shutdown tests pass; live Discord acceptance pending |
+| Matching loader export | Implemented on feature branch | Pinned upstream downloads, checksum and license verification; no overwrite; host tests pass |
 | Sound controls and first-run/setup guide | Partial | Equivalent user controls and persisted choices |
 | Theme and catalogue preferences | Pending | Existing native theme support applied to new views |
 
 Reimplement application-specific behavior independently; Caduceus Electron
 source is a protocol/behavior reference, not vendored code. Retain upstream
 notices for the MIT xeRAbora/rcheevos components.
+
+Discord is configured in **About / Options ? Desktop settings**. The official
+Application ID is the default; users can supply another public ID. No login,
+bot token or OAuth is used. Only allowlisted active server mode names are sent;
+paths, addresses, game metadata and account information cannot enter activity.
+Uptime is optional. Discord IPC runs on a separate worker, checks for changes
+every five seconds, sends changed activity at most every fifteen seconds, and
+retries unavailable Discord at fifteen-second intervals. Exit clears activity
+and closes the IPC transport. Server backends do not import or call Discord.

@@ -31,6 +31,7 @@ def _direct_link_experimental():
 
 from . import config, directlink, elevate, netinfo, posix_firewall, servers, status_client, theme, tray, windows_setup
 from .process import ServerProcess
+from .discord_presence import DEFAULT_APPLICATION_ID, DesktopActivity, Presence
 from .release_metadata import DISPLAY_VERSION, version_label
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
 
@@ -751,6 +752,12 @@ class LauncherApp:
             value=self._saved_bool("ignore_firewall_prompt", "--ignore-firewall-prompt" in sys.argv))
         self.autostart_var = tk.BooleanVar(
             value=self._saved_bool("autostart_last_config", "--autostart" in sys.argv))
+        self.discord_enabled_var = tk.BooleanVar(value=self._saved_bool("discord_rich_presence", False))
+        self.discord_app_id_var = tk.StringVar(value=self.saved.get("discord_application_id") or DEFAULT_APPLICATION_ID)
+        self.discord_uptime_var = tk.BooleanVar(value=self._saved_bool("discord_show_uptime", False))
+        self.discord_status_var = tk.StringVar(value="Disabled")
+        self._discord_activity = DesktopActivity()
+        self._discord_presence = None
 
         root.title("PS2 Servers " + APP_VERSION_LABEL)
         self._configure_window()
@@ -786,6 +793,7 @@ class LauncherApp:
         # Once the window is drawn, so the tab strip has a width to measure.
         self.root.after(200, self._apply_tab_minimum_width)
         self.root.after(600, self._poll_status)
+        self._apply_discord_settings()
         if self.saved.get("pending_firewall_allow"):
             self.root.after(350, self._allow_pending)
         elif self.saved.get("pending_cleanup"):
@@ -1276,6 +1284,12 @@ class LauncherApp:
                                command=self.reset_settings)
         reset_btn.grid(row=b_row, column=b_col, sticky="w",
                        padx=(6 if b_col == 0 else 0, 12), pady=6)
+        b_col += 1
+        if b_col >= 3:
+            b_row += 1
+            b_col = 0
+        ttk.Button(behavior, text="Desktop settings…", command=self._desktop_settings).grid(
+            row=b_row, column=b_col, sticky="w", padx=(6 if b_col == 0 else 0, 12), pady=6)
 
         text_frame = ttk.Frame(about)
         about.rowconfigure(row, weight=1)
@@ -2650,8 +2664,66 @@ class LauncherApp:
                     "The DHCP helper stopped (code {}) — see the TERMINAL "
                     "tab. Untick and tick the box to retry.".format(code))
                 self._finish_direct_exit()
+        self._update_discord_modes()
         if not self._shutting_down:
             self.root.after(600, self._poll_status)
+
+    def _desktop_settings(self):
+        window = tk.Toplevel(self.root)
+        window.title("Desktop settings")
+        window.columnconfigure(0, weight=1)
+        frame = ttk.LabelFrame(window, text=" Discord Rich Presence ", padding=12)
+        frame.grid(row=0, column=0, sticky="ew", padx=12, pady=12)
+        frame.columnconfigure(1, weight=1)
+        ttk.Checkbutton(frame, text="Show PS2-Servers activity on Discord", variable=self.discord_enabled_var).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Label(frame, text="Application ID").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Entry(frame, textvariable=self.discord_app_id_var, width=28).grid(row=1, column=1, sticky="ew", pady=4)
+        ttk.Checkbutton(frame, text="Show application uptime", variable=self.discord_uptime_var).grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Label(frame, text="Shares PS2-Servers branding and active server modes only. No paths, IP addresses, credentials or account details. Uses your open Discord desktop account.",
+                  wraplength=420).grid(row=3, column=0, columnspan=2, sticky="w", pady=8)
+        ttk.Label(frame, textvariable=self.discord_status_var, wraplength=420).grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Button(frame, text="Use official Application ID", command=lambda: self.discord_app_id_var.set(DEFAULT_APPLICATION_ID)).grid(row=5, column=0, sticky="w", pady=8)
+        ttk.Button(frame, text="Apply and save", command=lambda: self._apply_discord_settings(save=True)).grid(row=5, column=1, sticky="e", pady=8)
+
+    def _apply_discord_settings(self, save=False):
+        if getattr(self, "_shutting_down", False):
+            return
+        enabled = self.discord_enabled_var.get()
+        app_id = self.discord_app_id_var.get().strip() or DEFAULT_APPLICATION_ID
+        if enabled and (not app_id.isascii() or not app_id.isdigit() or not 17 <= len(app_id) <= 20):
+            self.discord_status_var.set("Enter a valid public Discord Application ID.")
+            return
+        self.discord_app_id_var.set(app_id)
+        current = self._discord_presence
+        if current and (not enabled or current.app_id != app_id):
+            self._discord_presence = None
+            # Disabling/reconfiguring Discord must not block desktop controls.
+            if not enabled:
+                threading.Thread(target=current.close, daemon=True).start()
+        if enabled and self._discord_presence is None:
+            try:
+                os.makedirs(config.config_dir(), exist_ok=True)
+                self._discord_presence = Presence(app_id, config.config_dir(), activity_provider=self._discord_activity.snapshot, predecessor=current)
+                self._discord_presence.start()
+            except (OSError, ValueError):
+                self.discord_status_var.set("Discord unavailable; server modes are unaffected.")
+        self._update_discord_modes()
+        if not enabled:
+            self.discord_status_var.set("Disabled")
+        if save:
+            self._save_with_feedback()
+
+    def _update_discord_modes(self):
+        presence = getattr(self, "_discord_presence", None)
+        if presence is None:
+            return
+        self._discord_activity.update(
+            [key for key, process in self.procs.items() if process.is_running()], self.discord_uptime_var.get())
+        message = presence.message
+        if self.discord_status_var.get() != message:
+            self.discord_status_var.set(message)
 
     def _finish_direct_exit(self):
         cfg = self.saved.get("direct_link") or {}
@@ -2886,7 +2958,14 @@ class LauncherApp:
                 "minimize_to_tray": bool(self.minimize_to_tray_var.get()),
                 "ignore_firewall_prompt": bool(self.ignore_firewall_var.get()),
                 "autostart_last_config": bool(self.autostart_var.get()),
+                "discord_rich_presence": bool(self.discord_enabled_var.get()),
+                "discord_application_id": self.discord_app_id_var.get(),
+                "discord_show_uptime": bool(self.discord_uptime_var.get()),
                 "last_active_servers": active}
+        latest = config.load()
+        for key in ("game_library_folder", "library_guide_seen"):
+            if key in latest:
+                data[key] = latest[key]
         if self.saved.get("direct_link"):
             data["direct_link"] = self.saved["direct_link"]
         if self.saved.get("pending_direct_link_restore"):
@@ -3028,6 +3107,10 @@ class LauncherApp:
         queued after() raises TclError. Every teardown path routes through here,
         including the relaunch/elevation flows that used to destroy directly."""
         self._shutting_down = True
+        presence = getattr(self, "_discord_presence", None)
+        if presence:
+            presence.close()
+            self._discord_presence = None
         self.root.destroy()
 
     def _shutdown_app(self):
