@@ -24,7 +24,7 @@ References are pinned in `vendor/retroachievements/sources.json`.
 | Import local images into OPL folder | Implemented on feature branch | CD/DVD placement; no overwrite or partial published files |
 | Download user-supplied game links | Implemented on feature branch | Progress/cancel; safe names; no incomplete file served |
 | Caduceus JSON/SQLite catalogue import and backup | Implemented on feature branch | Compatible fields; preserve existing rows; snapshot live WAL; no active-DB overwrite |
-| ISO achievement-compatibility scanning | Implemented on feature branch | Official rcheevos hash; bounded lookup/cache; API failures remain retryable |
+| PS2 ISO/CHD/CSO/ZSO achievement-compatibility scanning | Implemented in #222 | Official rcheevos-equivalent BOOT2 name + up to 64 MiB executable hash; existing native ISO hash and bounded sparse compressed-reader path, no full image extraction; CHD needs libchdr, ZSO needs bundled lz4, console acceptance pending; invalid/replaced discs rejected |
 | PS1 POPStarter VCD compatibility | First implementation in #222 | POPS discovery and atomic imports; RiptOPL PS1 BOOT executable hash and PS1 system 12 index, fixtures; physical console acceptance pending |
 | RA game session detection | First implementation in #222 | Passive local state poll, packet advancement and 15 s stale detection; generic SMB/UDPFS active-game detection still missing |
 | Cover repair and library storage selection | Implemented on feature branch | Avoid unique-file loss; protect active game sessions |
