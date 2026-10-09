@@ -47,7 +47,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Exercise native APIs and real PowerShell script with synthetic storage
-        run: python -m unittest tests.test_raw_storage tests.test_udpbd_storage_modes -v
+        run: python -m unittest tests.test_raw_storage tests.test_udpbd_storage_modes tests.test_library_panel -v
 
   python-checks:
     name: Python checks

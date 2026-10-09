@@ -5,6 +5,7 @@ No game-serving hot path imports this module.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -295,7 +296,7 @@ class Catalog:
         temporary = Path(temp_name)
         created = False
         try:
-            with sqlite3.connect(str(temporary)) as output:
+            with closing(sqlite3.connect(str(temporary))) as output:
                 self.db.backup(output)
             with temporary.open("rb") as inp, target.open("xb") as out:
                 created = True
