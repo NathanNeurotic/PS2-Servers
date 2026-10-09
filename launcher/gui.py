@@ -2832,7 +2832,7 @@ class LauncherApp:
 
     def _show_ra_unlock(self, event, extra=0):
         """A local, non-modal Tk notice; no OS permissions or external hooks."""
-        if self.root.state() != "normal":
+        if self.root.state() not in ("normal", "zoomed"):
             return  # Do not unexpectedly un-minimize or focus a game.
         old = getattr(self, "_ra_toast", None)
         if old is not None:
@@ -2843,7 +2843,10 @@ class LauncherApp:
         notice = tk.Toplevel(self.root)
         self._ra_toast = notice
         notice.overrideredirect(True)
-        notice.attributes("-topmost", True)
+        try:
+            notice.attributes("-topmost", True)
+        except tk.TclError:
+            pass  # Some window managers reject topmost; local notices still work.
         panel = ttk.Frame(notice, padding=16, relief="ridge", borderwidth=2)
         panel.pack(fill="both", expand=True)
         ttk.Label(panel, text="RetroAchievement unlocked",
