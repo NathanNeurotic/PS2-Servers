@@ -19,7 +19,38 @@ from launcher.achievements import engine_path, available_account_port, claim_ser
 from launcher import achievements
 
 
+def stop_native_smoke_process(proc, grace_seconds=15):
+    """Reap native test children on every platform, including on timeout.
+
+    macOS x64 runs under translation on the GitHub arm64 runner and its
+    graceful shutdown may take more than the old 5-second test threshold.
+    A wedged engine must still fail the test, *after* being force-reaped:
+    otherwise the next test can use the wrong UDP listener.
+    """
+    if proc.poll() is None:
+        proc.terminate()
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired as error:
+        proc.kill()
+        proc.wait(timeout=5)
+        raise AssertionError(
+            "Native RetroAchievements engine did not exit after SIGTERM "
+            "within {} seconds (force-reaped).".format(grace_seconds)
+        ) from error
+
+
 class WireTests(unittest.TestCase):
+    def test_native_engine_timeout_always_reaps_process(self):
+        proc = mock.Mock()
+        proc.poll.return_value = None
+        proc.wait.side_effect = [subprocess.TimeoutExpired("ps2ra", 0.1), -9]
+        with self.assertRaisesRegex(AssertionError, "force-reaped"):
+            stop_native_smoke_process(proc, grace_seconds=0.1)
+        proc.terminate.assert_called_once_with()
+        proc.kill.assert_called_once_with()
+        self.assertEqual(proc.wait.call_count, 2)
+
     @unittest.skipUnless(os.name == "nt", "Windows onefile bootstrap lifetime")
     def test_bootstrap_owner_uses_a_held_process_identity(self):
         owner = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
@@ -304,8 +335,16 @@ class NativeEngineTests(unittest.TestCase):
             with socket.socket() as available:
                 available.bind(("127.0.0.1", 0))
                 ui_port = available.getsockname()[1]
-            proc = subprocess.Popen([str(engine_path()), "--port", str(port), "--ui-port", str(ui_port), "--no-sound"],
-                                    env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            # A PIPE that is only drained in finally can itself stall a child
+            # that logs more than the OS pipe capacity. File-backed stderr
+            # keeps shutdown independent of log volume.
+            engine_log_path = profile / "native-engine-stderr.log"
+            with engine_log_path.open("wb") as engine_log:
+                proc = subprocess.Popen(
+                    [str(engine_path()), "--port", str(port),
+                     "--ui-port", str(ui_port), "--no-sound"],
+                    env=env, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=engine_log)
             try:
                 deadline = time.monotonic() + 10
                 while True:
@@ -340,5 +379,8 @@ class NativeEngineTests(unittest.TestCase):
                                           env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
                 self.assertEqual(conflict.returncode, 1, "A busy telemetry port must fail instead of adopting another client")
             finally:
-                proc.terminate()
-                proc.communicate(timeout=5)
+                try:
+                    stop_native_smoke_process(proc)
+                except AssertionError as error:
+                    self.fail("{}\n{}".format(
+                        error, engine_log_path.read_text(encoding="utf-8", errors="replace")[-8000:]))
