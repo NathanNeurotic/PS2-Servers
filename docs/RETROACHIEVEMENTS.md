@@ -6,6 +6,23 @@ is required. This is experimental, softcore-only support for a real PS2 running
 an achievements-enabled OPL fork. Ordinary OPL builds do not send the required
 memory snapshots.
 
+## What the mode selector actually does
+
+**Console mode is not a desktop engine selector.** Both xeRAbora and Caduceus
+use one PS2-Servers-managed native executable, `ps2ra`, currently compiled from
+a modified, MIT-licensed xeRAbora desktop client and rcheevos. The shared
+account/library page also originates from xeRAbora. Selecting **Caduceus**
+adds the independently implemented CADQ/CADA companion services and enriched
+achievement notices; it does not launch the Caduceus Electron desktop app or
+change the underlying achievement evaluator. The console must still use a
+matching loader. Stop RetroAchievements before switching compatibility modes.
+
+**A standalone PS2-Servers implementation of the telemetry receiver, RA client
+and account UI does not exist yet.** The current code is integration and
+adaptation, not an independently implemented achievement runtime. See
+[the parity checklist](RETROACHIEVEMENTS-PARITY.md) for the missing architectural
+work and validation limits. Upstream licenses and provenance are preserved.
+
 ## Setup
 
 1. Use the achievements-enabled console loader from
