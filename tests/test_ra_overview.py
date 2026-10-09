@@ -8,6 +8,20 @@ from launcher import ra_overview
 
 
 class OverviewTests(unittest.TestCase):
+    def test_native_achievement_search_and_state_filter(self):
+        rows = [("42", "Discover Dragonfly", "Unlocked", "", "5"),
+                ("43", "Defeat Ripto", "Not unlocked", "8/10", "10"),
+                ("44", "Collect Gems", "Not unlocked", "", "15")]
+        self.assertEqual(len(ra_overview.filter_achievements(rows)), 3)
+        self.assertEqual(ra_overview.filter_achievements(rows, "ripTO"), [rows[1]])
+        self.assertEqual(ra_overview.filter_achievements(rows, "42"), [rows[0]])
+        self.assertEqual(ra_overview.filter_achievements(rows, status="Unlocked"), [rows[0]])
+        self.assertEqual(ra_overview.filter_achievements(rows, status="Not unlocked"),
+                         rows[1:])
+        self.assertEqual(ra_overview.filter_achievements(rows, "43", "Unlocked"), [])
+        self.assertEqual(ra_overview.filter_achievements(rows, "dragonfly", "Unlocked"),
+                         [rows[0]])
+
     def test_unavailable_and_malformed_data_are_not_fake_gameplay(self):
         for value in (None, [], "bad", {}):
             summary = ra_overview.view_model(value, {"state": "playing", "title": "Old game"})
