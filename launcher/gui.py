@@ -2727,9 +2727,11 @@ class LauncherApp:
                 if reported != self._last_reported.get(key):
                     self._last_reported[key] = reported
                     self.cards[key].refresh_status(True)
-        ra_running = self.is_running("retroachievements")
-        self._ra_session.set_running(ra_running)
-        self.cards["retroachievements"].render_ra_session(self._ra_session.snapshot())
+        ra_monitor = getattr(self, "_ra_session", None)
+        if ra_monitor is not None and "retroachievements" in self.cards:
+            ra_running = self.is_running("retroachievements")
+            ra_monitor.set_running(ra_running)
+            self.cards["retroachievements"].render_ra_session(ra_monitor.snapshot())
         if (self._direct_expected and self._direct_proc is not None
                 and not self._direct_proc.is_running()):
             code = self._direct_proc.returncode
