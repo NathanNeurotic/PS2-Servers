@@ -145,6 +145,10 @@ class Library:
                 image.load()
                 image = image.convert("RGBA")
                 image.thumbnail((512, 512))
+                # RiptOPL/OPL artwork uses indexed 8-bit PNG; RGBA output
+                # otherwise looks fine on desktop but fails on console.
+                # FASTOCTREE supports RGBA inputs and retains transparency.
+                image = image.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
                 with tempfile.NamedTemporaryFile(dir=target.parent, suffix=".png", delete=False) as output:
                     temporary = Path(output.name)
                 try:

@@ -34,6 +34,33 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT title FROM games").fetchall(), [("Existing",)])
         self.assertEqual(self.library.games("New")[0]["game_id"], "SLUS_123.45")
 
+    def test_cover_export_is_indexed_and_preserves_existing_opl_art(self):
+        from PIL import Image
+
+        image = Image.new("RGBA", (32, 32), (40, 110, 220, 128))
+        source = io.BytesIO()
+        image.save(source, "PNG")
+        source_bytes = source.getvalue()
+        game_root = self.root / "games"
+        game_root.mkdir()
+        artwork = game_root / "ART"
+        artwork.mkdir()
+        console_cover = artwork / "SLUS_123.45_COV.png"
+        console_cover.write_bytes(b"custom user artwork")
+        record = {"id": 7, "game_id": "SLUS_123.45",
+                  "icon": "https://example.com/cover.png"}
+        with mock.patch("launcher.game_library.urllib.request.urlopen",
+                        side_effect=lambda *args, **kwargs: io.BytesIO(source_bytes)):
+            cached = self.library.repair_cover(record, game_root)
+            self.assertEqual(console_cover.read_bytes(), b"custom user artwork")
+            console_cover.unlink()
+            self.library.repair_cover(record, game_root)
+        for path in (Path(cached), console_cover):
+            with Image.open(path) as output:
+                self.assertEqual(output.mode, "P")
+                self.assertEqual(output.getpixel((0, 0)), 0)
+                self.assertIn("transparency", output.info)
+
     def test_invalid_import_is_atomic(self):
         source = self.root / "catalog.json"
         source.write_text(json.dumps([{"title": "Good"}, {"title": "Bad", "downloadUrl": "file:///secret"}]))
