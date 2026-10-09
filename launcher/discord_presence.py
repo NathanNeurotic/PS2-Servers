@@ -65,7 +65,8 @@ class DesktopActivity:
             if self.game:
                 result["details"] = self.game
                 result["state"] = "Playing on PlayStation 2"
-                result["timestamps"] = {"start": self.game_started}
+                if self.show_uptime:
+                    result["timestamps"] = {"start": self.game_started}
             elif self.show_uptime:
                 result["timestamps"] = {"start": self.started}
             return result
