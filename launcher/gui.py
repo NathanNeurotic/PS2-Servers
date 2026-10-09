@@ -855,6 +855,8 @@ class LauncherApp:
         self.discord_app_id_var = tk.StringVar(value=self.saved.get("discord_application_id") or DEFAULT_APPLICATION_ID)
         self.discord_uptime_var = tk.BooleanVar(value=self._saved_bool("discord_show_uptime", False))
         self.discord_share_game_var = tk.BooleanVar(value=self._saved_bool("discord_share_game", False))
+        self.ra_unlock_popups_var = tk.BooleanVar(value=self._saved_bool("ra_unlock_popups", False))
+        self._ra_toast = None
         self.discord_status_var = tk.StringVar(value="Disabled")
         self._discord_activity = DesktopActivity()
         self._discord_presence = None
@@ -2796,6 +2798,11 @@ class LauncherApp:
             ra_running = self.is_running("retroachievements")
             ra_monitor.set_running(ra_running)
             self.cards["retroachievements"].render_ra_session(ra_monitor.snapshot())
+            events = ra_monitor.take_unlocks()
+            popup_pref = getattr(self, "ra_unlock_popups_var", None)
+            if (events and ra_running and popup_pref is not None and popup_pref.get()
+                    and not self._shutting_down):
+                self._show_ra_unlock(events[-1], extra=len(events) - 1)
         if (self._direct_expected and self._direct_proc is not None
                 and not self._direct_proc.is_running()):
             code = self._direct_proc.returncode
@@ -2822,6 +2829,35 @@ class LauncherApp:
         self._update_discord_modes()
         if not self._shutting_down:
             self.root.after(600, self._poll_status)
+
+    def _show_ra_unlock(self, event, extra=0):
+        """A local, non-modal Tk notice; no OS permissions or external hooks."""
+        if self.root.state() != "normal":
+            return  # Do not unexpectedly un-minimize or focus a game.
+        old = getattr(self, "_ra_toast", None)
+        if old is not None:
+            try:
+                old.destroy()
+            except tk.TclError:
+                pass
+        notice = tk.Toplevel(self.root)
+        self._ra_toast = notice
+        notice.overrideredirect(True)
+        notice.attributes("-topmost", True)
+        panel = ttk.Frame(notice, padding=16, relief="ridge", borderwidth=2)
+        panel.pack(fill="both", expand=True)
+        ttk.Label(panel, text="RetroAchievement unlocked",
+                  font=("TkDefaultFont", 11, "bold")).pack(anchor="w")
+        ttk.Label(panel, text=event["title"], wraplength=300).pack(anchor="w", pady=(6, 2))
+        label = "+{} points".format(event["points"])
+        if extra:
+            label += " · {} more unlock(s)".format(extra)
+        ttk.Label(panel, text=label).pack(anchor="w")
+        notice.update_idletasks()
+        x = max(0, self.root.winfo_screenwidth() - notice.winfo_reqwidth() - 32)
+        y = max(0, self.root.winfo_screenheight() - notice.winfo_reqheight() - 80)
+        notice.geometry("+{}+{}".format(x, y))
+        notice.after(6500, notice.destroy)
 
     def caduceus_root_candidates(self):
         """Prefer active server roots; only inspect launcher-owned local fields."""
@@ -2851,6 +2887,16 @@ class LauncherApp:
         ttk.Label(frame, textvariable=self.discord_status_var, wraplength=420).grid(row=5, column=0, columnspan=2, sticky="w", pady=4)
         ttk.Button(frame, text="Use official Application ID", command=lambda: self.discord_app_id_var.set(DEFAULT_APPLICATION_ID)).grid(row=6, column=0, sticky="w", pady=8)
         ttk.Button(frame, text="Apply and save", command=lambda: self._apply_discord_settings(save=True)).grid(row=6, column=1, sticky="e", pady=8)
+        ra_frame = ttk.LabelFrame(window, text=" Native RetroAchievements notifications ", padding=12)
+        ra_frame.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+        ttk.Checkbutton(ra_frame, text="Show non-modal achievement unlock popups (off by default)",
+                        variable=self.ra_unlock_popups_var).pack(anchor="w", pady=3)
+        ttk.Label(ra_frame, wraplength=420,
+                  text="Only fresh unlocks during verified console sessions appear. "
+                       "Existing engine sound and mute settings are unchanged; "
+                       "no background notifications are sent to other services.").pack(anchor="w", pady=5)
+        ttk.Button(ra_frame, text="Save notification preference",
+                   command=self._save_with_feedback).pack(anchor="e", pady=4)
 
     def _apply_discord_settings(self, save=False):
         if getattr(self, "_shutting_down", False):
@@ -3132,6 +3178,7 @@ class LauncherApp:
                 "discord_application_id": self.discord_app_id_var.get(),
                 "discord_show_uptime": bool(self.discord_uptime_var.get()),
                 "discord_share_game": bool(self.discord_share_game_var.get()),
+                "ra_unlock_popups": bool(self.ra_unlock_popups_var.get()),
                 "last_active_servers": active}
         latest = config.load()
         for key in ("game_library_folder", "library_guide_seen",
@@ -3286,6 +3333,13 @@ class LauncherApp:
         poller = getattr(self, "_ra_session", None)
         if poller:
             poller.close()
+        toast = getattr(self, "_ra_toast", None)
+        if toast is not None:
+            try:
+                toast.destroy()
+            except tk.TclError:
+                pass
+            self._ra_toast = None
         presence = getattr(self, "_discord_presence", None)
         if presence:
             presence.close()
