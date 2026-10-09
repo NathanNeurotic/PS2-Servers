@@ -153,6 +153,26 @@ Set **OBS export folder** to write the upstream live text labels and
 created when the service starts; it should be writable and dedicated to these
 labels.
 
+## Native read-only live overview
+
+The RetroAchievements card also offers **Live achievements (native view)**.
+This optional Tk window reads the managed engine's local status from a
+background worker with bounded responses; it displays account sign-in state,
+connection packet/frame/loss counters, the loaded achievement set, measured
+progress, recent engine unlocks, and active leaderboard trackers. It does not
+show a previously checked set as a *currently playing* game: the game must
+match the separately verified, advancing console telemetry session.
+No RA credentials, unlock submissions or game-server filesystem reads are
+performed in the native overview. The upstream-derived account page remains
+available for login, editing account settings and deeper library/board views.
+This is the **first native monitoring surface**, not full UI/engine parity.
+
+Discord game-title sharing is separately opt-in under Desktop settings; the
+default shares only server types. Live game names appear only for verified
+RA sessions, and are cleared on disconnection, stalled telemetry or opt-out.
+Caduceus has a manual **Use shared games folder** shortcut which suggests
+the active server's game root and refuses to guess between distinct roots.
+
 ## Credentials and packaging
 
 The private profile lives under `%LOCALAPPDATA%/PS2-Servers/retroachievements`
