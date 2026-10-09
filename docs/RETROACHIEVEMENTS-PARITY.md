@@ -24,7 +24,7 @@ References are pinned in `vendor/retroachievements/sources.json`.
 | Discord desktop activity | Implemented on feature branch | Official ID 1558114313619898409; disabled by default; public server modes only; optional uptime; IPC and shutdown tests pass; live Discord acceptance pending |
 | Matching loader export | Implemented on feature branch | Pinned upstream downloads, checksum and license verification; no overwrite; host tests pass |
 | Sound controls and first-run/setup guide | In progress | Six-step read-only guide, optional first-launch invitation, persisted dismissed/completed state and existing mute toggle implemented; further sound controls and packaged UI acceptance pending |
-| Theme and catalogue preferences | Pending | Existing native theme support applied to new views |
+| Theme and catalogue preferences | In progress | Library view and CD/DVD choice persist; native ttk theme is shared with desktop; further catalogue preferences and packaged UI acceptance pending |
 
 Reimplement application-specific behavior independently; Caduceus Electron
 source is a protocol/behavior reference, not vendored code. Retain upstream

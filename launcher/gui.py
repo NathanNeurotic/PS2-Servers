@@ -3010,7 +3010,8 @@ class LauncherApp:
                 "discord_show_uptime": bool(self.discord_uptime_var.get()),
                 "last_active_servers": active}
         latest = config.load()
-        for key in ("game_library_folder", "library_guide_seen"):
+        for key in ("game_library_folder", "library_guide_seen",
+                    "game_library_view", "game_library_kind"):
             if key in latest:
                 data[key] = latest[key]
         guide_status = self.saved.get(

@@ -21,10 +21,17 @@ class LibraryWindow(tk.Toplevel):
         self.events = queue.Queue()
         self.cancel = threading.Event()
         self.busy = False
-        self.folder = tk.StringVar(value=folder or config.load().get("game_library_folder", ""))
+        settings = config.load()
+        self.folder = tk.StringVar(value=folder or settings.get("game_library_folder", ""))
         self.query = tk.StringVar()
-        self.view = tk.StringVar(value="Installed images")
-        self.kind = tk.StringVar(value="DVD")
+        self.view_options = ("Installed images", "Recognized achievement sets",
+                             "Unmatched ISO hashes", "Catalogue")
+        saved_view = settings.get("game_library_view")
+        saved_kind = settings.get("game_library_kind")
+        self.view = tk.StringVar(value=saved_view if saved_view in self.view_options
+                                 else self.view_options[0])
+        self.kind = tk.StringVar(value=saved_kind if saved_kind in ("DVD", "CD")
+                                 else "DVD")
         self.status = tk.StringVar(value="Choose the same OPL folder used by your game server.")
         self.rows = {}
         self.actions = []
@@ -38,15 +45,18 @@ class LibraryWindow(tk.Toplevel):
         ttk.Entry(header, textvariable=self.folder).grid(row=0, column=1, sticky="ew", padx=4)
         ttk.Button(header, text="Browse…", command=self.choose_folder).grid(row=0, column=2, padx=4)
         ttk.Label(header, text="Image destination").grid(row=1, column=0, padx=4, pady=6)
-        ttk.Combobox(header, textvariable=self.kind, values=("DVD", "CD"), state="readonly", width=8).grid(row=1, column=1, sticky="w", padx=4)
+        destination = ttk.Combobox(header, textvariable=self.kind,
+                                   values=("DVD", "CD"), state="readonly", width=8)
+        destination.grid(row=1, column=1, sticky="w", padx=4)
+        destination.bind("<<ComboboxSelected>>", lambda _event: self.save_preferences())
 
         search = ttk.Frame(self, padding=(10, 0))
         search.grid(row=1, column=0, sticky="ew")
         search.columnconfigure(1, weight=1)
         choice = ttk.Combobox(search, textvariable=self.view,
-                             values=("Installed images", "Recognized achievement sets", "Unmatched ISO hashes", "Catalogue"), state="readonly", width=26)
+                             values=self.view_options, state="readonly", width=26)
         choice.grid(row=0, column=0, padx=4)
-        choice.bind("<<ComboboxSelected>>", lambda _event: self.refresh())
+        choice.bind("<<ComboboxSelected>>", self.on_view_changed)
         ttk.Entry(search, textvariable=self.query).grid(row=0, column=1, sticky="ew", padx=4)
         ttk.Button(search, text="Search / refresh", command=self.refresh).grid(row=0, column=2, padx=4)
 
@@ -97,6 +107,20 @@ class LibraryWindow(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.refresh()
         self.after(100, self.poll)
+
+    def save_preferences(self):
+        """Save local choices without discarding main-window settings."""
+        settings = config.load()
+        settings["game_library_view"] = self.view.get()
+        settings["game_library_kind"] = self.kind.get()
+        try:
+            config.save(settings)
+        except OSError:
+            self.status.set("Could not save library preferences; changes remain active.")
+
+    def on_view_changed(self, _event=None):
+        self.save_preferences()
+        self.refresh()
 
     def choose_folder(self):
         if self.busy:
@@ -252,6 +276,7 @@ class LibraryWindow(tk.Toplevel):
                 self.library.save_game(row, original.get("id"))
                 editor.destroy()
                 self.view.set("Catalogue")
+                self.save_preferences()
                 self.refresh()
             except ValueError as error:
                 messagebox.showerror("Catalogue entry", str(error), parent=editor)
@@ -345,4 +370,5 @@ class LibraryWindow(tk.Toplevel):
             self.cancel.set()
             self.status.set("Cancelling; wait for the current operation before closing.")
             return
+        self.save_preferences()
         self.destroy()
