@@ -187,6 +187,16 @@ class WireTests(unittest.TestCase):
                 self.assertIn(expected + " console protocol", hint)
                 self.assertIn("xeRAbora-derived engine", hint)
 
+    def test_account_button_requires_this_service_running(self):
+        card = mock.Mock()
+        card.server.key = "retroachievements"
+        card.app.is_running.return_value = False
+        with mock.patch.object(gui.messagebox, "showinfo") as dialog, \
+             mock.patch.object(gui.webbrowser, "open_new_tab") as browser:
+            gui.ServerCard._open_achievement_account(card)
+        dialog.assert_called_once()
+        browser.assert_not_called()
+
     def test_running_mode_selector_is_locked_until_stop(self):
         card = mock.Mock()
         card.server = servers.RETROACHIEVEMENTS
