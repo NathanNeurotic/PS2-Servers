@@ -10,6 +10,8 @@ References are pinned in `vendor/retroachievements/sources.json`.
 
 | Capability | Status | Acceptance |
 | --- | --- | --- |
+| Independent PS2-Servers RA runtime (no xeRAbora client executable or embedded page) | **Not implemented** | Own protocol receiver, snapshot assembly, watch-list lifecycle, rcheevos integration, account/RA API workflow and native/local UI. Keep upstream protocol and MIT dependency attribution. Confirm no bundled xeRAbora runtime remains. |
+| True console-mode isolation | Protocol adapters only | One engine in both modes today; xeRAbora-compatible mode must not start CADQ/CADA listeners, while Caduceus mode must explicitly add them and send correct title notifications. Changing the GUI selector requires a stop/restart. |
 | Shared xeRAbora telemetry and rcheevos evaluation | Implemented in #216 | Host wire tests; real console unlock pending |
 | Local account, live progress, game sets, library, boards, follow account | Bundled upstream UI | Real account/runtime validation pending |
 | Caduceus compatibility, pairing, account pages, title notices | Implemented in #216 | Wire tests; console rendering pending |
