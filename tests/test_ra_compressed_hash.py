@@ -96,14 +96,22 @@ class CompressionHashTests(unittest.TestCase):
         path.write_bytes(make_indexed(self.iso_data, magic=b"ZISO"))
         # A ZISO with raw index blocks needs no decompressor. Source-only CI
         # may not have the lz4 dependency packaged in production builds.
-        from udpfs_server.compressed_iso import zso
+        import sys
+        source_dir = str(Path(__file__).resolve().parents[1] / "udpfs_server")
+        if source_dir not in sys.path:
+            sys.path.insert(0, source_dir)
+        from compressed_iso import zso
         with mock.patch.object(zso, "LZ4_AVAILABLE", True):
             self.assertEqual(hash_image(path), self.expected)
 
     def test_zso_opl_layout_matches_iso_hash(self):
         path = self.root / "Game.zso"
         path.write_bytes(make_indexed(self.iso_data, magic=b"ZSO\0"))
-        from udpfs_server.compressed_iso import zso
+        import sys
+        source_dir = str(Path(__file__).resolve().parents[1] / "udpfs_server")
+        if source_dir not in sys.path:
+            sys.path.insert(0, source_dir)
+        from compressed_iso import zso
         with mock.patch.object(zso, "LZ4_AVAILABLE", True):
             self.assertEqual(hash_image(path), self.expected)
 
