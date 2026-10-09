@@ -44,6 +44,20 @@ class SessionTests(unittest.TestCase):
         state["game"]["serial"] = "P123456789abcde"
         self.assertEqual(session.observe(state, now=12)["state"], "playing")
 
+    def test_game_session_identity_resets_on_disconnect_and_stall(self):
+        session = SessionTracker(stale_seconds=5)
+        session.observe(payload(10), now=0)
+        first = session.observe(payload(11), now=1)
+        self.assertEqual(first["session"], 1)
+        self.assertEqual(session.observe(payload(11), now=6)["state"], "stalled")
+        again = session.observe(payload(12), now=7)
+        self.assertGreater(again["session"], first["session"])
+        session.observe(payload(0, connected=False), now=8)
+        session.observe(payload(20), now=9)
+        self.assertGreater(session.observe(payload(21), now=10)["session"], again["session"])
+        changed = payload(22, title="Second game")
+        self.assertGreater(session.observe(changed, now=11)["session"], again["session"])
+
     def test_offline_bad_payload_does_not_report_playing(self):
         session = SessionTracker()
         self.assertEqual(session.observe(None)["state"], "unreachable")
