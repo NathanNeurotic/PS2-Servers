@@ -19,7 +19,7 @@ from .config import config_dir
 IMAGE_EXTENSIONS = frozenset({".iso", ".zso", ".cso", ".chd"})
 MEDIA = ("DVD", "CD")
 ART_TYPES = frozenset({"COV", "ICO", "LAB", "COV3"})
-KEY_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_. -]{0,95}$")
+KEY_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_. ()\[\]-]{0,95}$")
 SERIAL_PREFIX = re.compile(r"^[A-Z]{4}[_-]\d{3}\.\d{2}[. _-]+", re.I)
 
 
