@@ -35,7 +35,11 @@ work and validation limits. Upstream licenses and provenance are preserved.
 2. Open **RetroAchievements** in PS2-Servers. Select **xeRAbora** or **Caduceus**
    to match the loader. Both use the same telemetry engine; Caduceus mode also
    enables its companion protocols described below.
-3. For Caduceus, select the existing OPL games folder shared with the console.
+3. For Caduceus, use **Use shared games folder (Caduceus)** to reuse the
+   configured SMB/UDPFS/HTTP/virtual exFAT root, or browse to the folder
+   directly. Running server roots take precedence over edited settings. If
+   multiple distinct roots exist, select the correct one manually; PS2-Servers
+   will not guess or change a running RetroAchievements session. Once started,
    PS2-Servers creates `ART/CADUCEUS.KEY` for pairing and may add small
    `ART/<hash>_RA.png` icons. Share this same folder through your usual game
    server. Treat the pairing file as access to the account-progress browser;
@@ -126,6 +130,15 @@ the VCD filename, not the PS2 serial; importing a VCD does not alter existing
 custom artwork, POPStarter modules or game contents. Only valid ISO9660 VCDs
 are accepted. PS1 telemetry remains dependent on the matching RA-enabled
 console loader and its supported USB POPStarter launch conditions.
+
+Discord Rich Presence defaults to **server modes only**. Under
+**About → Desktop settings**, opt into **Share game title during verified
+RetroAchievements sessions** if you want Discord to display your currently
+tracked PS1/PS2 title. A session only qualifies after the engine confirms a
+matching game serial and advancing memory packets. It falls back to server
+modes when RA is stopped, stale or untracked; raw paths, IP addresses,
+credentials and account identities are never supplied to Discord. The optional
+activity timer follows the verified game session while one is playing.
 
 The RetroAchievements tab now shows the live console game when the managed
 engine's packet counters actually advance. It shows a stalled connection when
