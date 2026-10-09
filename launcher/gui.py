@@ -29,7 +29,7 @@ def _direct_link_experimental():
     """Non-Windows: the setup path is real but unverified on hardware."""
     return platform.system() in ("Linux", "Darwin")
 
-from . import config, directlink, elevate, netinfo, posix_firewall, servers, status_client, theme, tray, windows_setup
+from . import config, directlink, elevate, netinfo, posix_firewall, ra_setup, servers, status_client, theme, tray, windows_setup
 from .process import ServerProcess
 from .discord_presence import DEFAULT_APPLICATION_ID, DesktopActivity, Presence
 from .ra_session import SessionPoller
@@ -382,6 +382,12 @@ class ServerCard(ttk.LabelFrame):
         for f in primary:
             row = self._add_field(self, f, row)
 
+        if self.server.key == "retroachievements":
+            ttk.Button(self, text="Use shared games folder (Caduceus)",
+                       command=self._use_shared_game_folder).grid(
+                row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
+            row += 1
+
         if any(f.kind in ("folder", "file", "device") for f in shown):
             self.access_btn = ttk.Button(self, text="Check access",
                                          command=self._check_access)
@@ -417,6 +423,43 @@ class ServerCard(ttk.LabelFrame):
         self.hint.grid(row=row, column=0, columnspan=3, sticky="w",
                        padx=4, pady=(4, 0))
         bind_wraplength(self.hint, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
+
+    def _use_shared_game_folder(self):
+        """Explicitly reuse one unambiguous active share for Caduceus pairing."""
+        if self.app.is_running("retroachievements"):
+            messagebox.showinfo("Caduceus pairing",
+                                "Stop RetroAchievements before changing its games folder.", parent=self)
+            return
+        roots = self.app.caduceus_root_candidates()
+        if not roots:
+            messagebox.showinfo("Caduceus pairing",
+                                "Configure a games folder in SMB, UDPFS, HTTP or virtual exFAT first.", parent=self)
+            return
+        if len(roots) != 1:
+            details = "\\n".join("{}: {}".format(", ".join(modes), path)
+                                  for path, modes in roots)
+            messagebox.showinfo("Choose the correct Caduceus share",
+                                "Multiple distinct game roots are configured. "
+                                "Select the folder that your PS2 uses with Browse; no root was changed.\\n\\n" + details,
+                                parent=self)
+            return
+        folder, modes = roots[0]
+        if not os.path.isdir(folder):
+            messagebox.showerror("Caduceus pairing",
+                                 "The selected shared games folder is not accessible: " + folder,
+                                 parent=self)
+            return
+        target = self.vars["games_folder"]
+        old = target.get().strip()
+        if old and os.path.normcase(os.path.abspath(old)) != os.path.normcase(folder):
+            if not messagebox.askyesno("Change Caduceus folder",
+                    "Replace the current pairing folder with the game root shared by {}?\\n\\n{}".format(
+                        ", ".join(modes), folder), parent=self):
+                return
+        target.set(folder)
+        if not self.app._save():
+            messagebox.showwarning("Caduceus pairing",
+                                   "Folder selected, but settings could not be saved.", parent=self)
 
     def render_ra_session(self, snapshot):
         if self.server.key != "retroachievements":
@@ -2759,6 +2802,13 @@ class LauncherApp:
         self._update_discord_modes()
         if not self._shutting_down:
             self.root.after(600, self._poll_status)
+
+    def caduceus_root_candidates(self):
+        """Prefer active server roots; only inspect launcher-owned local fields."""
+        configured = {key: card.values() for key, card in self.cards.items()}
+        active = {key: card._active_values for key, card in self.cards.items()
+                  if self.is_running(key) and isinstance(card._active_values, dict)}
+        return ra_setup.candidate_roots(configured, active)
 
     def _desktop_settings(self):
         window = tk.Toplevel(self.root)
