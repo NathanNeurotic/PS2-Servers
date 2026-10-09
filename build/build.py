@@ -209,6 +209,10 @@ def main():
     native_dir = os.path.join(ROOT, "build", "native")
     if os.path.isdir(native_dir):
         cmd.append("--include-data-dir={}={}".format(native_dir, "native"))
+        # Unix executables have no extension, so Nuitka also classifies this
+        # helper as data. The package configuration already includes it as an
+        # executable; including both categories conflicts after linking.
+        cmd.append("--noinclude-data-files=native/ps2ra")
 
     theme_asset_dir = os.path.join(ROOT, "launcher", "assets", "theme")
     if os.path.isdir(theme_asset_dir):
