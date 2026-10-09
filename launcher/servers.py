@@ -566,15 +566,17 @@ def _achievements_argv(values):
 
 RETROACHIEVEMENTS = ServerDef(
     key="retroachievements", label="RetroAchievements",
-    blurb="Track and unlock RetroAchievements with an achievements-enabled OPL. "
-          "Start here, then sign in on the account page. Runs alongside your game server.",
+    blurb="RetroAchievements for compatible OPL loaders. Both modes use the same "
+          "bundled xeRAbora-derived runtime; Caduceus enables additional console services.",
     recommendation="Experimental — softcore only; console testing required",
     recommendation_kind="legacy", runtime="python", default_port=18194,
     module_file=_repo("launcher", "achievements.py"), module_dir=_repo("launcher"),
     fields=[
-        Field("mode", "Console mode", "choice", default="xerabora", choices=RA_MODE_CHOICES,
-              help="xeRAbora uses the shared telemetry protocol. Caduceus also enables "
-                   "its compatibility queries, title notifications and paired console progress browser."),
+        Field("mode", "Console loader compatibility", "choice", default="xerabora", choices=RA_MODE_CHOICES,
+              help="This selects the PS2 console protocol, NOT a separate desktop engine. Both "
+                   "choices use the bundled xeRAbora-derived/rcheevos runtime. Caduceus "
+                   "additionally enables compatibility queries, title notifications and "
+                   "paired console progress browsing. Stop RetroAchievements before changing modes."),
         Field("games_folder", "OPL games folder (Caduceus)", "folder",
               help="The folder already shared with OPL. Caduceus writes ART/CADUCEUS.KEY "
                    "and small achievement icons here. Other modes do not need this folder."),
