@@ -30,6 +30,60 @@ class ActivityTests(unittest.TestCase):
         self.assertNotIn("timestamps", tracker.snapshot())
         self.assertEqual(tracker.snapshot()["state"], "Desktop launcher")
 
+    def test_ra_game_name_is_explicitly_opt_in_and_tracks_verified_session(self):
+        tracker = DesktopActivity()
+        active = {"state": "playing", "title": "Shadow of the Colossus",
+                  "session": 7, "packets": 123, "serial": "SLUS_123.45",
+                  "ip": "192.168.1.5", "account": "private"}
+        tracker.update(["retroachievements", "udpfs"], show_game=False, game=active)
+        self.assertNotIn("Shadow of the Colossus", json.dumps(tracker.snapshot()))
+        tracker.update(["retroachievements", "udpfs"], show_game=True, game=active,
+                       show_uptime=True)
+        actual = tracker.snapshot()
+        self.assertEqual(actual["details"], "Shadow of the Colossus")
+        self.assertEqual(actual["state"], "Playing on PlayStation 2")
+        started = actual["timestamps"]["start"]
+        tracker.update(["retroachievements", "udpfs"], show_game=True, game=active,
+                       show_uptime=True)
+        self.assertEqual(tracker.snapshot()["timestamps"]["start"], started)
+        for private in ("SLUS_123", "192.168", "private", "packets", "serial"):
+            self.assertNotIn(private, json.dumps(actual))
+
+    def test_verified_game_is_removed_on_stop_disable_and_untrusted_data(self):
+        tracker = DesktopActivity()
+        game = {"state": "playing", "title": "Valid game", "session": 1}
+        tracker.update(["retroachievements"], show_game=True, game=game)
+        self.assertEqual(tracker.snapshot()["details"], "Valid game")
+        tracker.update(["retroachievements"], show_game=True,
+                       game={"state": "stalled", "title": "Valid game", "session": 1})
+        self.assertEqual(tracker.snapshot()["details"], "RetroAchievements")
+        for candidate in ("C:/private/game.iso", "\\\\server\\share\\game",
+                          "https://example.org", "192.168.1.2"):
+            tracker.update(["retroachievements"], show_game=True,
+                           game={"state": "playing", "title": candidate, "session": 2})
+            self.assertEqual(tracker.snapshot()["details"], "RetroAchievements")
+        tracker.update(["retroachievements"], show_game=True, game=game)
+        tracker.update(["retroachievements"], show_game=False, game=game)
+        self.assertEqual(tracker.snapshot()["details"], "RetroAchievements")
+        tracker.update(["udpfs"], show_game=True, game=game)
+        self.assertEqual(tracker.snapshot()["details"], "UDPFS")
+
+    def test_game_timer_changes_only_when_verified_session_changes(self):
+        tracker = DesktopActivity()
+        with mock.patch("launcher.discord_presence.time.time", side_effect=[100, 200, 300]):
+            # The first mocked time is the launcher's creation time.
+            tracker = DesktopActivity()
+            game = {"state": "playing", "title": "Game", "session": 1}
+            tracker.update(["retroachievements"], show_game=True, game=game,
+                           show_uptime=True)
+            self.assertEqual(tracker.snapshot()["timestamps"]["start"], 200)
+            tracker.update(["retroachievements"], show_game=True, game=game,
+                           show_uptime=True)
+            self.assertEqual(tracker.snapshot()["timestamps"]["start"], 200)
+            tracker.update(["retroachievements"], show_game=True,
+                           game=dict(game, session=2), show_uptime=True)
+            self.assertEqual(tracker.snapshot()["timestamps"]["start"], 300)
+
     def test_official_application_identity(self):
         self.assertEqual(DEFAULT_APPLICATION_ID, "1558114313619898409")
 
