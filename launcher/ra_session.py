@@ -22,10 +22,13 @@ class SessionTracker:
         self.stale_seconds = stale_seconds
         self.last_packets = None
         self.last_advance = None
+        self.session_number = 0
+        self.active_identity = None
 
     def reset(self):
         self.last_packets = None
         self.last_advance = None
+        self.active_identity = None
 
     def observe(self, state, now=None):
         now = time.monotonic() if now is None else now
@@ -53,22 +56,33 @@ class SessionTracker:
             self.last_packets = packets
         if (packets is not None and self.last_advance is not None and
                 now - self.last_advance >= self.stale_seconds):
+            self.active_identity = None
             return {"state": "stalled", "text": "PS2 telemetry stalled · Check connection"}
         if packets is None:
+            self.active_identity = None
             return {"state": "connected", "text": "PS2 connected · Telemetry unverified"}
         if self.last_advance is None:
+            self.active_identity = None
             # The first poll may read a stale connected flag and old game name.
             # Do not publish a game until at least two counters advance.
             return {"state": "connected", "text": "PS2 connected · Awaiting fresh telemetry"}
         # The upstream /state may show the last *checked* game even while a
         # different image is streaming. It only fills game.serial when the
         # active console hash matches the loaded achievement set.
-        if not safe_title(game.get("serial")):
+        serial = safe_title(game.get("serial"))
+        if not serial:
+            self.active_identity = None
             return {"state": "connected", "text": "PS2 connected · No verified tracked game"}
         title = safe_title(game.get("title"))
         if not title:
+            self.active_identity = None
             return {"state": "connected", "text": "PS2 connected · Awaiting tracked game"}
+        identity = (serial, str(game.get("hash") or ""), title)
+        if identity != self.active_identity:
+            self.session_number += 1
+            self.active_identity = identity
         return {"state": "playing", "title": title, "packets": packets,
+                "session": self.session_number,
                 "text": "Now playing: {} · {} packets".format(title, packets)}
 
 
