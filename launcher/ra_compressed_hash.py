@@ -56,8 +56,14 @@ def _preflight(path):
 
 
 def open_compressed(path):
-    from udpfs_server.compressed_iso import (CsoFileWrapper, ZsoFileWrapper,
-                                              ChdFileWrapper)
+    # Source tree keeps this package under udpfs_server/. Nuitka compiles it
+    # as the top-level compressed_iso package in frozen releases.
+    from .servers import is_frozen
+    if is_frozen():
+        from compressed_iso import CsoFileWrapper, ZsoFileWrapper, ChdFileWrapper
+    else:
+        from udpfs_server.compressed_iso import (CsoFileWrapper, ZsoFileWrapper,
+                                                  ChdFileWrapper)
     kind = path.suffix.lower()
     reader = {".cso": CsoFileWrapper, ".zso": ZsoFileWrapper,
               ".chd": ChdFileWrapper}[kind]
