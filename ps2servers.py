@@ -21,7 +21,8 @@ def _normalize_headless_alias(argv):
     args = list(argv)
     if args and args[0] == "serve":
         if len(args) < 2:
-            print("error: serve requires udpfs, udpbd, http, smbv1, smbv2, or smbv3",
+            from launcher.servers import REGISTRY
+            print("error: serve requires " + ", ".join(REGISTRY),
                   file=sys.stderr)
             return None
         return ["--serve", args[1], *args[2:]]

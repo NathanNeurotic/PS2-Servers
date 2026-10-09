@@ -13,6 +13,8 @@ import sys
 # Explicitly import standard library modules required by dynamic server engines
 # so PyInstaller, Nuitka, and static bundlers include them in frozen builds.
 import argparse
+import pathlib
+import signal
 import collections
 import ctypes
 import dataclasses
@@ -46,6 +48,11 @@ import typing
 import urllib.parse
 import uuid
 import zlib
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 def _load_module(path):

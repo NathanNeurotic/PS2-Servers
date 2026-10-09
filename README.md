@@ -27,7 +27,8 @@ does not add that protocol to a PS2 application.
 | HTTP | TCP 1100 | Experimental game streaming for compatible OPL HTTP clients; see [HTTP setup and validation](docs/HTTP.md) |
 | UDPBD | UDP 48573 (`0xBDBD`) | Image, raw drive or virtual exFAT folder served as a block device |
 
-Desktop has six server cards. Edge provides UDPFS, SMBv1, UDPBD, and a separate
+Desktop has six game/file server cards plus [RetroAchievements](docs/RETROACHIEVEMENTS.md)
+with xeRAbora and Caduceus console modes. Edge provides UDPFS, SMBv1, UDPBD, and a separate
 HTTP **management dashboard**; it does not provide the HTTP game server or SMB2/3.
 See [editions](docs/EDITIONS.md) and [Edge setup](docs/EDGE.md).
 

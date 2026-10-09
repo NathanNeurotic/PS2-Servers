@@ -131,6 +131,12 @@ def server_ports(key, values):
 
 def _server_ports(key, values):
     """Return [(protocol, port, purpose), ...] for fixed inbound ports."""
+    if key == "retroachievements":
+        ports = [("UDP", 18194, "RetroAchievements telemetry")]
+        if values.get("mode") in ("caduceus", "Caduceus"):
+            ports += [("UDP", 18197, "Caduceus compatibility"),
+                      ("UDP", 18198, "Caduceus account progress")]
+        return ports  # The account page is loopback only, never a firewall rule.
     if key in ("smbv1", "smbv2", "smbv3"):
         label = "SMBv1" if key == "smbv1" else ("SMBv2" if key == "smbv2" else "SMBv3")
         port = 445 if values.get("take_445") else _parse_port(values.get("port"), 1025)

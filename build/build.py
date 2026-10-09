@@ -92,9 +92,12 @@ if _missing:
 INCLUDE_PACKAGES = [
     "compressed_iso",
     "lz4",
+    "PIL",
 ]
 
 INCLUDE_MODULES = [
+    "launcher.achievements",
+    "launcher.caduceus",
     "launcher.raw_storage",
     "launcher.virtual_exfat",
     "argparse",
@@ -174,6 +177,8 @@ def _write_build_id():
 
 def main():
     system = platform.system()
+    from build_achievements import build as build_achievements
+    build_achievements()
     _write_build_id()
     out = (release_metadata.WINDOWS_EXE_NAME if system == "Windows"
            else release_metadata.EXECUTABLE_BASENAME)
@@ -181,6 +186,7 @@ def main():
 
     cmd = [
         sys.executable, "-m", "nuitka",
+        "--user-package-configuration-file=" + os.path.join(ROOT, "build", "achievements.nuitka-package.config.yml"),
         "--enable-plugin=tk-inter",
         "--assume-yes-for-downloads",
         # The launcher re-executes this same binary with '--serve <key> ...'
@@ -203,6 +209,10 @@ def main():
     native_dir = os.path.join(ROOT, "build", "native")
     if os.path.isdir(native_dir):
         cmd.append("--include-data-dir={}={}".format(native_dir, "native"))
+        # Unix executables have no extension, so Nuitka also classifies this
+        # helper as data. The package configuration already includes it as an
+        # executable; including both categories conflicts after linking.
+        cmd.append("--noinclude-data-files=native/ps2ra")
 
     theme_asset_dir = os.path.join(ROOT, "launcher", "assets", "theme")
     if os.path.isdir(theme_asset_dir):
@@ -257,7 +267,14 @@ def main():
     env["PYTHONPATH"] = extra + os.pathsep + existing if existing else extra
 
     print("Running:\n  " + " \\\n  ".join(cmd) + "\n")
-    return subprocess.call(cmd, cwd=ROOT, env=env)
+    result = subprocess.call(cmd, cwd=ROOT, env=env)
+    if result:
+        return result
+    # Exercise the distributed executable from an empty working directory:
+    # source-only tests cannot detect missing bundled helpers or onefile
+    # bootstrap processes retaining the achievement service after Stop.
+    return subprocess.call([sys.executable, os.path.join(ROOT, "tools", "check_achievements_package.py")],
+                           cwd=ROOT)
 
 
 if __name__ == "__main__":
