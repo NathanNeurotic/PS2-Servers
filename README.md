@@ -40,6 +40,13 @@ and disc IDs, and 8-bit PNG artwork conversion to the chosen `ART/` folder.
 Use **Setup guide** for a five-step LAN/share/console walkthrough. The companion
 also supports JSON metadata import/export and online SQLite backups.
 
+The **Import images** action supports a batch of local image files (up to 1,000 per run),
+records skips without overwriting any destination, and leaves original images intact.
+The **Repair ART** action converts legacy `_COV.jpg`, `_ICO.jpg`, `_LAB.jpg`,
+`_COV3.jpg` (or JPEG/WebP/BMP equivalents) to 8-bit indexed PNG without deleting
+sources or replacing existing PNGs. The current companion does not queue remote
+ISO URLs or automatically download covers from an online provider.
+
 This is **separate from game serving**: selecting a games root here does not
 reconfigure SMB, UDPFS, UDPBD or HTTP cards. The catalogue contains paths and
 metadata only, **not** copies of the games, artwork or VMC saves. Copying an image
