@@ -56,14 +56,16 @@ def _preflight(path):
 
 
 def open_compressed(path):
-    # Source tree keeps this package under udpfs_server/. Nuitka compiles it
-    # as the top-level compressed_iso package in frozen releases.
+    # UDPFS is a standalone module, not a Python package. Its sibling
+    # compressed_iso/ is imported as a top-level package by UDPFS itself,
+    # and Nuitka compiles that same package in frozen releases.
     from .servers import is_frozen
-    if is_frozen():
-        from compressed_iso import CsoFileWrapper, ZsoFileWrapper, ChdFileWrapper
-    else:
-        from udpfs_server.compressed_iso import (CsoFileWrapper, ZsoFileWrapper,
-                                                  ChdFileWrapper)
+    if not is_frozen():
+        import sys
+        directory = str(Path(__file__).resolve().parents[1] / "udpfs_server")
+        if directory not in sys.path:
+            sys.path.insert(0, directory)
+    from compressed_iso import CsoFileWrapper, ZsoFileWrapper, ChdFileWrapper
     kind = path.suffix.lower()
     reader = {".cso": CsoFileWrapper, ".zso": ZsoFileWrapper,
               ".chd": ChdFileWrapper}[kind]
