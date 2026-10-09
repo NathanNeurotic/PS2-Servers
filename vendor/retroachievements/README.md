@@ -15,6 +15,8 @@ Local xeRAbora changes:
 - A PS2-Servers-owned profile directory selected through the child's environment.
 - DPAPI-protected Windows credentials/API keys and private POSIX secret files.
 - Account HTTP listener fixed to loopback and its requested port.
+- The account page explains local access and directs integration updates/issues
+  to PS2-Servers while retaining xeRAbora upstream credit.
 - Reject foreign Host/Origin headers, cross-site requests and oversized fields.
 - Fail on telemetry/account port conflicts instead of adopting another process.
 - Keep the managed service alive after closing its account page.

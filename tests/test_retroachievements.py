@@ -172,6 +172,10 @@ class NativeEngineTests(unittest.TestCase):
                     state = json.load(response)
                 self.assertFalse(state["login"]["ok"])
                 self.assertFalse(state["lan"]["on"])
+                with urllib.request.urlopen("http://127.0.0.1:{}/".format(ui_port), timeout=3) as response:
+                    page = response.read().decode("utf-8")
+                self.assertIn("Get updates and report integration issues through PS2-Servers", page)
+                self.assertNotIn("onClick=${flip}", page)
                 for headers in ({"Origin": "https://example.com"},
                                 {"Host": "example.com"},
                                 {"Sec-Fetch-Site": "cross-site"}):
