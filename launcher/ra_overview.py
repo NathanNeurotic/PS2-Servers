@@ -151,7 +151,9 @@ class OverviewWindow(tk.Toplevel):
     def _run(self):
         while not self._stop.is_set():
             try:
-                state = fetch_engine_state()
+                # This panel must never display the state of another client's
+                # listener if our managed achievement service has stopped.
+                state = fetch_engine_state() if self.app.is_running("retroachievements") else None
             except (OSError, ValueError, TypeError, urllib.error.URLError):
                 state = None
             try:
