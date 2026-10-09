@@ -14,6 +14,7 @@ References are pinned in `vendor/retroachievements/sources.json`.
 | True console-mode isolation | Protocol adapters only | One engine in both modes today; xeRAbora-compatible mode must not start CADQ/CADA listeners, while Caduceus mode must explicitly add them and send correct title notifications. Changing the GUI selector requires a stop/restart. |
 | Shared xeRAbora telemetry and rcheevos evaluation | Implemented in #216 | Host wire tests; real console unlock pending |
 | Local account, live progress, game sets, library, boards, follow account | Bundled upstream UI | Real account/runtime validation pending |
+| Caduceus game-root setup | Explicit selection in #222 | Prefer active SMB/UDPFS/HTTP/virtual exFAT game roots; refuse ambiguous auto-selection; real-console pairing acceptance pending |
 | Caduceus compatibility, pairing, account pages, title notices | Implemented in #216 | Wire tests; console rendering pending |
 | OBS text and JSON export | Implemented on feature branch | Export updates during a session; paths with spaces |
 | Optional read-only LAN viewer | Implemented on feature branch | Phone view; account writes and foreign origins rejected; bounded shutdown |
@@ -25,7 +26,7 @@ References are pinned in `vendor/retroachievements/sources.json`.
 | PS1 POPStarter VCD compatibility | First implementation in #222 | POPS discovery and atomic imports; RiptOPL PS1 BOOT executable hash and PS1 system 12 index, fixtures; physical console acceptance pending |
 | RA game session detection | First implementation in #222 | Passive local state poll, packet advancement and 15 s stale detection; generic SMB/UDPFS active-game detection still missing |
 | Cover repair and library storage selection | Implemented on feature branch | Avoid unique-file loss; protect active game sessions |
-| Discord desktop activity | Implemented on feature branch | Official ID 1558114313619898409; disabled by default; public server modes only; optional uptime; IPC and shutdown tests pass; live Discord acceptance pending |
+| Discord desktop activity | Opt-in verified game titles added in #222 | Official ID 1558114313619898409; activity disabled by default; distinct game-title opt-in; no account or path disclosure; live Discord acceptance pending |
 | Matching loader export | Implemented on feature branch | Pinned upstream downloads, checksum and license verification; no overwrite; host tests pass |
 | Sound controls and first-run/setup guide | In progress | Six-step read-only guide, optional first-launch invitation, persisted dismissed/completed state and existing mute toggle implemented; further sound controls and packaged UI acceptance pending |
 | Theme and catalogue preferences | In progress | Library view and CD/DVD choice persist; native ttk theme is shared with desktop; further catalogue preferences and packaged UI acceptance pending |
