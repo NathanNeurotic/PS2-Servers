@@ -164,6 +164,14 @@ class WireTests(unittest.TestCase):
                          [18194, 18197, 18198])
         self.assertEqual([p for _, p, _ in windows_setup.server_ports("retroachievements", {"mode": "xerabora"})], [18194])
 
+    def test_managed_runtime_does_not_auto_open_upstream_window(self):
+        with mock.patch.dict(os.environ, {"PS2SERVERS_RA_NO_BROWSER": ""}):
+            env = achievements.engine_environment(self.root / "profile", "caduceus")
+        self.assertEqual(env["PS2SERVERS_RA_NO_BROWSER"], "1")
+        self.assertEqual(env["PS2SERVERS_RA_MODE"], "caduceus")
+        self.assertEqual(env["PS2SERVERS_RA_PROFILE"], str(self.root / "profile"))
+        self.assertEqual(env["PS2SERVERS_RA_PARENT"], str(os.getpid()))
+
     def test_compatibility_selection_discloses_shared_runtime(self):
         server = servers.RETROACHIEVEMENTS
         mode = next(field for field in server.fields if field.key == "mode")
