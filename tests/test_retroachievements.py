@@ -23,7 +23,13 @@ class WireTests(unittest.TestCase):
         with socket.socket() as occupied:
             if os.name == "nt":
                 occupied.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-            occupied.bind(("127.0.0.1", 18196))
+            try:
+                occupied.bind(("127.0.0.1", 18196))
+            except OSError:
+                # A previous real connection may still own the port in
+                # TIME_WAIT; that is also a valid reason to select another.
+                self.assertNotEqual(available_account_port(), 18196)
+                return
             occupied.listen()
             self.assertNotEqual(available_account_port(), 18196)
 

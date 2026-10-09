@@ -49,6 +49,11 @@ import urllib.parse
 import uuid
 import zlib
 
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
 
 def _load_module(path):
     name = "_ps2srv_" + os.path.splitext(os.path.basename(path))[0]
