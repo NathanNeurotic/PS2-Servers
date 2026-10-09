@@ -413,6 +413,11 @@ class ServerCard(ttk.LabelFrame):
         bind_wraplength(self.hint, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
 
     def _open_achievement_account(self):
+        if not self.app.is_running(self.server.key):
+            messagebox.showinfo("RetroAchievements",
+                                "Start RetroAchievements before opening its account page.",
+                                parent=self)
+            return
         from launcher.achievements import account_url
         webbrowser.open_new_tab(account_url())
 
