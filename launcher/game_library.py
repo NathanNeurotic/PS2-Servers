@@ -328,8 +328,16 @@ def hash_image(path):
         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
             raise ValueError("The VCD changed during hashing; retry the scan.")
         return result
+    if path.suffix.lower() in {".chd", ".cso", ".zso"}:
+        from launcher.ra_compressed_hash import hash_compressed_ps2
+        before = path.stat()
+        digest = hash_compressed_ps2(path)
+        after = path.stat()
+        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ValueError("The compressed disc changed during hashing; retry the scan.")
+        return digest
     if path.suffix.lower() != ".iso":
-        raise ValueError("Achievement compatibility scanning currently requires a PS2 ISO or PS1 VCD.")
+        raise ValueError("Achievement compatibility scanning requires a PS2 ISO/CHD/CSO/ZSO or PS1 VCD.")
     before = path.stat()
     result = subprocess.run([str(engine_path()), "--hash-file", str(path.resolve())],
                             capture_output=True, timeout=120,
@@ -405,8 +413,8 @@ class Compatibility:
 
     def check(self, path):
         path = Path(path).resolve()
-        if path.suffix.lower() not in {".iso", ".vcd"}:
-            return {"status": "unsupported", "message": "Compatibility scanning requires a PS2 ISO or PS1 VCD."}
+        if path.suffix.lower() not in {".iso", ".chd", ".cso", ".zso", ".vcd"}:
+            return {"status": "unsupported", "message": "Compatibility scanning requires PS2 ISO/CHD/CSO/ZSO or PS1 VCD."}
         stat = path.stat()
         stamp = "{}:{}:{}".format(stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
         # API failures propagate; they must never turn into an unsupported result.
