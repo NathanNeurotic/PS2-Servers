@@ -17,52 +17,51 @@ MODE_NAMES = {"smbv1": "SMBv1", "smbv2": "SMBv2", "smbv3": "SMBv3", "udpfs": "UD
               "http": "HTTP", "udpbd": "UDPBD", "retroachievements": "RetroAchievements"}
 
 
+def public_game_title(value):
+    """A verified display title only; never paths, URLs or host identity."""
+    if not isinstance(value, str):
+        return ""
+    title = " ".join(value.split()).strip()[:96]
+    if (not title or any(ord(ch) < 32 or ord(ch) == 127 for ch in title)
+            or "/" in title or "\\" in title or "@" in title
+            or re.search(r"(?i)https?:|(?:\b[0-9]{1,3}\.){3}[0-9]{1,3}\b", title)):
+        return ""
+    return title
+
+
 class DesktopActivity:
-    """Allowlisted public modes only: no paths, addresses or backend data."""
+    """Default to allowlisted server modes; game names require separate opt-in."""
     def __init__(self, show_uptime=False):
         self.lock = threading.Lock()
         self.modes = ()
         self.show_uptime = show_uptime
         self.started = int(time.time())
-        self.game_title = ""
-        self.game_session = None
+        self.game = ""
         self.game_started = None
 
-    def update(self, modes, show_uptime=False, game=None, show_game=False):
+    def update(self, modes, show_uptime=False, session=None, show_game=False):
+        names = tuple(sorted({key for key in modes if key in MODE_NAMES}))
+        active = bool(show_game and "retroachievements" in names
+                      and isinstance(session, dict) and session.get("state") == "playing")
+        title = public_game_title(session.get("title")) if active else ""
         with self.lock:
-            self.modes = tuple(sorted({key for key in modes if key in MODE_NAMES}))
+            self.modes = names
             self.show_uptime = bool(show_uptime)
-            # Only an opt-in verified RA session can supply a public game title.
-            # Never include serial, IP, share paths or RA account details.
-            title = ""
-            session = None
-            if (show_game and "retroachievements" in self.modes and
-                    isinstance(game, dict) and game.get("state") == "playing"):
-                candidate = game.get("title")
-                identifier = game.get("session")
-                if isinstance(candidate, str) and isinstance(identifier, int) and not isinstance(identifier, bool) and identifier > 0:
-                    candidate = " ".join(candidate.split())[:96]
-                    # Refuse accidental file paths/URLs, IPs and control chars.
-                    if (candidate and not any(c in candidate for c in ("\\", "/", "\\x00")) and
-                            "://" not in candidate and not re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", candidate)):
-                        title, session = candidate, identifier
-            if session is None:
-                self.game_title, self.game_session, self.game_started = "", None, None
-            else:
-                if session != self.game_session or title != self.game_title:
-                    self.game_started = int(time.time())
-                self.game_title, self.game_session = title, session
+            if title != self.game:
+                self.game = title
+                self.game_started = int(time.time()) if title else None
 
     def snapshot(self):
         with self.lock:
             names = [MODE_NAMES[key] for key in self.modes]
             result = {"type": 0, "name": "PS2-Servers", "details": ", ".join(names) if names else "Ready to serve games",
                       "state": "Serving PlayStation 2 games" if names else "Desktop launcher", "instance": False}
-            if self.game_title:
-                result["details"] = self.game_title
-                result["state"] = "Playing on PlayStation 2"
-            if self.show_uptime:
-                result["timestamps"] = {"start": self.game_started if self.game_title else self.started}
+            if self.game:
+                result["details"] = ("Playing " + self.game)[:128]
+                result["state"] = "PlayStation 2 · RetroAchievements"
+                result["timestamps"] = {"start": self.game_started}
+            elif self.show_uptime:
+                result["timestamps"] = {"start": self.started}
             return result
 
 def frame(opcode, value):
