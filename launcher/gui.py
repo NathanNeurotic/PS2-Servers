@@ -29,7 +29,7 @@ def _direct_link_experimental():
     """Non-Windows: the setup path is real but unverified on hardware."""
     return platform.system() in ("Linux", "Darwin")
 
-from . import config, directlink, elevate, netinfo, posix_firewall, ra_setup, servers, status_client, theme, tray, windows_setup
+from . import config, directlink, elevate, netinfo, posix_firewall, ra_setup, ra_sounds, servers, status_client, theme, tray, windows_setup
 from .process import ServerProcess
 from .discord_presence import DEFAULT_APPLICATION_ID, DesktopActivity, Presence
 from .ra_session import SessionPoller
@@ -2900,6 +2900,65 @@ class LauncherApp:
                        "no background notifications are sent to other services.").pack(anchor="w", pady=5)
         ttk.Button(ra_frame, text="Save notification preference",
                    command=self._save_with_feedback).pack(anchor="e", pady=4)
+        sound_frame = ttk.LabelFrame(window, text=" RetroAchievements custom sounds ", padding=12)
+        sound_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
+        sound_frame.columnconfigure(0, weight=1)
+        ttk.Label(sound_frame,
+                  text="Optional PCM WAV clips (8/16-bit, up to 15 seconds). Stop RetroAchievements "
+                       "before changing sounds; restart it to hear the changes.",
+                  wraplength=420).grid(row=0, column=0, columnspan=2, sticky="w", pady=5)
+        for index, name in enumerate(ra_sounds.SOUND_NAMES, start=1):
+            label = {"connect": "Connection", "disconnect": "Disconnection",
+                     "achievement": "Achievement unlock"}[name]
+            ttk.Button(sound_frame, text="Choose {} WAV…".format(label),
+                       command=lambda n=name: self._set_ra_sound(n)).grid(
+                           row=index, column=0, sticky="w", pady=3)
+            ttk.Button(sound_frame, text="Restore default",
+                       command=lambda n=name: self._restore_ra_sound(n)).grid(
+                           row=index, column=1, sticky="e", padx=10, pady=3)
+
+    def _set_ra_sound(self, name):
+        if self.is_running("retroachievements"):
+            messagebox.showinfo("RetroAchievements sound",
+                                "Stop RetroAchievements before changing its sounds.", parent=self.root)
+            return
+        source = filedialog.askopenfilename(parent=self.root,
+                                            title="Choose {} sound".format(name),
+                                            filetypes=[("WAV audio", "*.wav"), ("All files", "*.*")])
+        if not source:
+            return
+        try:
+            destination = ra_sounds.sound_path(name)
+            replace = destination.exists()
+            if replace and not messagebox.askyesno("Replace custom sound",
+                      "Replace the existing {} sound? This cannot be undone.".format(name),
+                      parent=self.root):
+                return
+            ra_sounds.install_clip(source, name, replace=replace)
+            messagebox.showinfo("Sound installed",
+                                "Custom {} sound saved. Start RetroAchievements to use it.".format(name),
+                                parent=self.root)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Invalid sound", str(error), parent=self.root)
+
+    def _restore_ra_sound(self, name):
+        if self.is_running("retroachievements"):
+            messagebox.showinfo("RetroAchievements sound",
+                                "Stop RetroAchievements before changing its sounds.", parent=self.root)
+            return
+        try:
+            path = ra_sounds.sound_path(name)
+            if not path.exists() and not path.is_symlink():
+                messagebox.showinfo("RetroAchievements sound",
+                                    "The {} sound already uses the default.".format(name), parent=self.root)
+                return
+            if not messagebox.askyesno("Restore default sound",
+                     "Remove the custom {} WAV and use the embedded default?".format(name),
+                     parent=self.root):
+                return
+            ra_sounds.restore_default(name)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Sound restore failed", str(error), parent=self.root)
 
     def _apply_discord_settings(self, save=False):
         if getattr(self, "_shutting_down", False):
