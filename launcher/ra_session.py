@@ -44,16 +44,22 @@ class SessionTracker:
             return {"state": "listening", "text": (
                 "RA signed in · Waiting for PS2" if login.get("ok")
                 else "RA sign-in required · Waiting for PS2")}
-        if packets is not None and packets != self.last_packets:
+        if packets is not None:
+            if self.last_packets is not None and packets > self.last_packets:
+                self.last_advance = now
+            elif self.last_packets is not None and packets < self.last_packets:
+                # An engine restart resets the counter; wait for new packets.
+                self.last_advance = None
             self.last_packets = packets
-            self.last_advance = now
         if (packets is not None and self.last_advance is not None and
                 now - self.last_advance >= self.stale_seconds):
             return {"state": "stalled", "text": "PS2 telemetry stalled · Check connection"}
         if packets is None:
-            # Legacy engine reports connection without a count; do not assert
-            # that snapshots are advancing.
             return {"state": "connected", "text": "PS2 connected · Telemetry unverified"}
+        if self.last_advance is None:
+            # The first poll may read a stale connected flag and old game name.
+            # Do not publish a game until at least two counters advance.
+            return {"state": "connected", "text": "PS2 connected · Awaiting fresh telemetry"}
         title = safe_title(game.get("title"))
         if not title:
             return {"state": "connected", "text": "PS2 connected · Awaiting tracked game"}
