@@ -436,11 +436,11 @@ class ServerCard(ttk.LabelFrame):
                                 "Configure a games folder in SMB, UDPFS, HTTP or virtual exFAT first.", parent=self)
             return
         if len(roots) != 1:
-            details = "\\n".join("{}: {}".format(", ".join(modes), path)
+            details = "\n".join("{}: {}".format(", ".join(modes), path)
                                   for path, modes in roots)
             messagebox.showinfo("Choose the correct Caduceus share",
                                 "Multiple distinct game roots are configured. "
-                                "Select the folder that your PS2 uses with Browse; no root was changed.\\n\\n" + details,
+                                "Select the folder that your PS2 uses with Browse; no root was changed.\n\n" + details,
                                 parent=self)
             return
         folder, modes = roots[0]
@@ -453,7 +453,7 @@ class ServerCard(ttk.LabelFrame):
         old = target.get().strip()
         if old and os.path.normcase(os.path.abspath(old)) != os.path.normcase(folder):
             if not messagebox.askyesno("Change Caduceus folder",
-                    "Replace the current pairing folder with the game root shared by {}?\\n\\n{}".format(
+                    "Replace the current pairing folder with the game root shared by {}?\n\n{}".format(
                         ", ".join(modes), folder), parent=self):
                 return
         target.set(folder)
