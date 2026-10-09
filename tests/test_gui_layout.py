@@ -66,6 +66,8 @@ class LauncherLayout(unittest.TestCase):
             cls._restore_env_and_stubs()
             raise unittest.SkipTest("no display")
         cls.app = gui.LauncherApp(cls.root)
+        # Geometry tests cannot answer the optional first-install modal.
+        cls.app._invite_ps2_setup_guide = False
         cls._settle()
         cls.app._apply_tab_minimum_width()  # normally fires 200ms after launch
         cls._settle()
