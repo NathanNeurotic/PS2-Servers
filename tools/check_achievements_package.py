@@ -1,5 +1,6 @@
 ﻿"""Smoke-test actual desktop packages without an RA account or game image."""
 import json
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import platform
@@ -25,9 +26,29 @@ def package_command():
     return [str(dist / name)]
 
 
+@contextmanager
+def temporary_profile():
+    directory = tempfile.TemporaryDirectory()
+    try:
+        yield directory.name
+    finally:
+        # Windows retains a process's cwd until final process teardown, which
+        # can follow release of the service lock and sockets. Never ignore a
+        # persistent lock: a surviving child must still fail this gate.
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                directory.cleanup()
+                break
+            except PermissionError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.1)
+
+
 def check(command):
     for mode in ("xerabora", "caduceus"):
-        with tempfile.TemporaryDirectory() as temporary:
+        with temporary_profile() as temporary:
             root = Path(temporary)
             folder = root / "games"
             folder.mkdir()
