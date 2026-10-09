@@ -122,6 +122,41 @@ class LibraryCatalogTests(unittest.TestCase):
             artwork_filename("SLUS_123.45", "BGM")
         self.assertEqual(visible_title("SLUS_123.45.Game_One.iso"), "Game One")
 
+    def test_batch_import_continues_past_existing_and_invalid_images(self):
+        one = self.image("incoming/Game One.iso", b"FIRST" * 128)
+        two = self.image("incoming/Game Two.zso", b"SECOND" * 128)
+        (self.games / "DVD").mkdir()
+        (self.games / "DVD" / one.name).write_bytes(b"EXISTING SAVE")
+        with self.catalog() as db:
+            result = db.import_images([one, two, self.root / "missing.iso"], self.games)
+            self.assertEqual(result["imported"], 1)
+            self.assertEqual(result["skipped"], 2)
+            self.assertEqual(db.list_games()[0]["image_path"], str(self.games / "DVD" / two.name))
+        self.assertEqual((self.games / "DVD" / one.name).read_bytes(), b"EXISTING SAVE")
+        self.assertEqual(one.read_bytes(), b"FIRST" * 128)
+        self.assertEqual(two.read_bytes(), b"SECOND" * 128)
+
+    def test_legacy_cover_repair_skips_existing_png_and_preserves_jpeg(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow optional for source checkout")
+        art = self.games / "ART"
+        art.mkdir()
+        Image.new("RGB", (40, 60), (80, 30, 20)).save(art / "Game (USA)_COV.jpg")
+        Image.new("RGB", (40, 60), (40, 90, 50)).save(art / "EXIST_123.45_COV.jpg")
+        old = art / "EXIST_123.45_COV.png"
+        old.write_bytes(b"existing PNG remains untouched")
+        with self.catalog() as db:
+            result = db.migrate_legacy_art(self.games)
+            self.assertEqual(result, {"converted": 1, "skipped": 1, "errors": 0})
+            self.assertEqual(db.migrate_legacy_art(self.games)["converted"], 0)
+        with Image.open(art / "Game (USA)_COV.png") as icon:
+            self.assertEqual(icon.format, "PNG")
+            self.assertEqual(icon.mode, "P")
+        self.assertTrue((art / "Game (USA)_COV.jpg").exists())
+        self.assertEqual(old.read_bytes(), b"existing PNG remains untouched")
+
     def test_indexed_png_is_not_an_overwrite(self):
         try:
             from PIL import Image

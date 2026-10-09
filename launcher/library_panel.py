@@ -35,12 +35,15 @@ class LibraryPanel(ttk.Frame):
         self._busy = False
         self._buttons = []
         self.root_file = Path(config_dir()) / "library" / "games_root.txt"
+        self.guide_marker = Path(config_dir()) / "library" / "first_run_complete"
         self.path = tk.StringVar(value=self._load_root())
         self.search = tk.StringVar()
         self.status = tk.StringVar(value="Catalogue stores metadata; no ISO or save is modified by scanning.")
         self._build()
         self._drain()
         self._run(lambda db: db.list_games(), "Loading catalogue")
+        # First-run tutorial is voluntary and never configures network or starts a server.
+        self.after_idle(self._show_first_run_guide)
 
     def _load_root(self):
         try:
@@ -68,8 +71,9 @@ class LibraryPanel(ttk.Frame):
         controls = ttk.Frame(self)
         controls.pack(fill="x", padx=12, pady=5)
         self._button(controls, "Scan CD/DVD", self._scan)
-        self._button(controls, "Import image", self._import_image)
+        self._button(controls, "Import images", self._import_image)
         self._button(controls, "Import cover", self._import_art)
+        self._button(controls, "Repair ART", self._repair_art)
         self._button(controls, "Edit metadata", self._edit)
         self._button(controls, "Setup guide", self._guide)
         searchrow = ttk.Frame(self)
@@ -176,9 +180,10 @@ class LibraryPanel(ttk.Frame):
         except (OSError, ValueError) as exc:
             messagebox.showerror("Games root", str(exc))
             return
-        source = filedialog.askopenfilename(title="Choose an ISO/CSO/ZSO/CHD image",
-                    filetypes=[("PS2 disc images", "*.iso *.cso *.zso *.chd"), ("All files", "*.*")])
-        if not source:
+        sources = filedialog.askopenfilenames(
+            title="Select one or more local ISO/CSO/ZSO/CHD images",
+            filetypes=[("PS2 disc images", "*.iso *.cso *.zso *.chd"), ("All files", "*.*")])
+        if not sources:
             return
         media = simpledialog.askstring("Game type", "DVD or CD?", initialvalue="DVD", parent=self)
         if media is None:
@@ -187,12 +192,34 @@ class LibraryPanel(ttk.Frame):
         if media not in library_catalog.MEDIA:
             messagebox.showerror("Game type", "Choose DVD or CD.")
             return
-        if not messagebox.askokcancel("Copy image", "Copy the image into {}/{}?\n\n"
-                "Do not play a game from this folder until the copy finishes. "
-                "Existing files are never overwritten.".format(root, media)):
+        if len(sources) > 1000:
+            messagebox.showerror("Import images", "Select at most 1000 image files per batch.")
             return
-        self._run(lambda db: str(db.import_image(source, root, media)),
-                  "Copying image (do not start game transfers)", True)
+        if not messagebox.askokcancel("Copy images",
+                "Copy {} selected image(s) to {}/{}?\n\n"
+                "No existing file will be overwritten. Stop active game reads "
+                "from this directory until the import is complete.".format(len(sources), root, media)):
+            return
+        def import_selected(db):
+            result = db.import_images(sources, root, media)
+            return "{} imported, {} skipped.{}".format(
+                result["imported"], result["skipped"],
+                " First error: " + result["errors"][0][1] if result["errors"] else "")
+        self._run(import_selected, "Importing selected image batch", True)
+
+    def _repair_art(self):
+        try:
+            root = self._root()
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Games root", str(exc))
+            return
+        if not messagebox.askokcancel("Repair legacy artwork",
+                "Convert supported JPG/WEBP/BMP files in {}/ART to indexed PNG?\n\n"
+                "Original images and existing PNGs are never replaced or removed."
+                .format(root)):
+            return
+        self._run(lambda db: "Artwork: {}".format(db.migrate_legacy_art(root)),
+                  "Converting legacy artwork", False)
 
     def _selected(self):
         sel = self.tree.selection()
@@ -260,6 +287,10 @@ class LibraryPanel(ttk.Frame):
                 "Existing catalogue entries with matching image paths will have metadata updated."):
             self._run(lambda db: db.import_json(path), "Importing catalogue metadata", True)
 
+    def _show_first_run_guide(self):
+        if not self.guide_marker.exists() and self.winfo_exists():
+            self._guide()
+
     def _guide(self):
         window = tk.Toplevel(self)
         window.title("PS2-Servers: Getting started")
@@ -291,6 +322,11 @@ class LibraryPanel(ttk.Frame):
 
         def nxt():
             if index[0] == len(GUIDE)-1:
+                try:
+                    self.guide_marker.parent.mkdir(parents=True, exist_ok=True)
+                    self.guide_marker.write_text("complete\n", encoding="utf-8")
+                except OSError:
+                    pass  # Read-only settings should not break the launcher.
                 window.destroy()
             else:
                 index[0] += 1

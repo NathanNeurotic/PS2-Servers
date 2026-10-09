@@ -164,6 +164,54 @@ class Catalog:
         self.upsert(target, media)
         return target
 
+    def import_images(self, sources, root, media="DVD"):
+        """Queue selected local images one by one; failures never clobber valid files."""
+        chosen = list(sources)
+        if not chosen or len(chosen) > 1000:
+            raise ValueError("Select between 1 and 1000 local disc images.")
+        completed, skipped = [], []
+        for image in chosen:
+            try:
+                completed.append(str(self.import_image(image, root, media)))
+            except (OSError, ValueError) as exc:
+                skipped.append((str(image), str(exc)))
+        return {"imported": len(completed), "skipped": len(skipped), "items": completed,
+                "errors": skipped[:12]}
+
+    def migrate_legacy_art(self, root):
+        """Convert existing ART JPEG/WebP/BMP entries to 8-bit PNG without deleting originals.
+
+        Exact RiptOPL identity is preserved by stripping only the final _TYPE
+        suffix. Existing valid PNG files always win; invalid or linked input
+        files are ignored rather than replacing the user's artwork.
+        """
+        folder = require_directory(root) / "ART"
+        if folder.is_symlink() or not folder.is_dir():
+            return {"converted": 0, "skipped": 0, "errors": 0}
+        matched = re.compile(r"^(.+)_(COV|ICO|LAB|COV3)\.(jpe?g|webp|bmp)$", re.I)
+        converted = skipped = errors = 0
+        for entry in sorted(folder.iterdir()):
+            if entry.is_symlink() or not entry.is_file():
+                continue
+            match = matched.fullmatch(entry.name)
+            if not match:
+                continue
+            name, art_type = match.group(1), match.group(2).upper()
+            try:
+                output = folder / artwork_filename(name, art_type)
+            except ValueError:
+                skipped += 1
+                continue
+            if output.exists() or output.is_symlink():
+                skipped += 1
+                continue
+            try:
+                self.write_art(entry, root, name, art_type)
+                converted += 1
+            except (OSError, ValueError, RuntimeError):
+                errors += 1
+        return {"converted": converted, "skipped": skipped, "errors": errors}
+
     def write_art(self, source, root, identity, art_type="COV"):
         base = require_directory(root)
         destination = base / "ART"
