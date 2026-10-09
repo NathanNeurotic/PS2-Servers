@@ -30,7 +30,7 @@ References are pinned in `vendor/retroachievements/sources.json`.
 | Cover repair and library storage selection | Implemented on feature branch | Avoid unique-file loss; protect active game sessions |
 | Discord desktop activity | Opt-in verified game titles added in #222 | Official ID 1558114313619898409; activity disabled by default; distinct game-title opt-in; no account or path disclosure; live Discord acceptance pending |
 | Matching loader export | Implemented on feature branch | Pinned upstream downloads, checksum and license verification; no overwrite; host tests pass |
-| Sound controls and first-run/setup guide | In progress | Six-step read-only guide, optional first-launch invitation, persisted dismissed/completed state, engine mute toggle and separate local-popup preference. Volume/device selection and packaged UI acceptance pending |
+| Sound controls and first-run/setup guide | Partially implemented in #222 | Six-step read-only guide and persistent invitation choices; engine mute and independent native-popup toggle; atomic per-event custom PCM WAV selection/reset in managed profile. Device/volume settings and packaged UI acceptance pending |
 | Theme and catalogue preferences | In progress | Library view and CD/DVD choice persist; native ttk theme is shared with desktop; further catalogue preferences and packaged UI acceptance pending |
 
 Reimplement application-specific behavior independently; Caduceus Electron
