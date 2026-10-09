@@ -145,8 +145,22 @@ account status, console telemetry, the currently loaded achievement set,
 measured achievement progress, recent events and live leaderboard trackers.
 The overview reads only the local managed engine from a background thread;
 it does not provide account sign-in or replace the full embedded account page.
+Search by achievement title or ID and filter **Unlocked / Not unlocked**
+without sending search queries to the RA service.
 It displays a loaded set as **not verified playing** unless the separate
 packet-validated console session monitor confirms the active game.
+
+**Native unlock popups** are optional and disabled by default. Enable them in
+**About → Desktop settings → Native RetroAchievements notifications**.
+The desktop reuses its existing background console-session poller and the local
+engine's recent unlock ring. The first observation only establishes a baseline;
+only newly seen, sufficiently recent achievements during a packet-verified
+running game produce a brief, non-modal notice. Stale telemetry, reconnects,
+old unlock history, game switches and invalid events cannot replay old notices.
+No additional network server, browser window, system-wide notification
+permission or external service is needed. The engine's existing sound/mute
+setting still controls audio independently; per-device/volume controls and
+physical-console validation are **not implemented yet**.
 
 The RetroAchievements tab now shows the live console game when the managed
 engine's packet counters actually advance. It shows a stalled connection when
