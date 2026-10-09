@@ -188,7 +188,7 @@ class Catalog:
         folder = require_directory(root) / "ART"
         if folder.is_symlink() or not folder.is_dir():
             return {"converted": 0, "skipped": 0, "errors": 0}
-        matched = re.compile(r"^(.+)_(COV|ICO|LAB|COV3)\\.(jpe?g|webp|bmp)$", re.I)
+        matched = re.compile(r"^(.+)_(COV|ICO|LAB|COV3)\.(jpe?g|webp|bmp)$", re.I)
         converted = skipped = errors = 0
         for entry in sorted(folder.iterdir()):
             if entry.is_symlink() or not entry.is_file():
