@@ -720,6 +720,9 @@ class LauncherApp:
         self.out_queue = queue.Queue()
         self.logs = {}
         self.saved = config.load()
+        # Offer optional setup only to genuinely new installs; users with
+        # existing configurations are not interrupted after an upgrade.
+        self._invite_ps2_setup_guide = not bool(self.saved)
         # Set by reset_settings once the config file is deleted: _save becomes a
         # no-op so the shutdown path cannot resurrect the old settings.
         self._config_reset = False
@@ -794,6 +797,9 @@ class LauncherApp:
         self.root.after(200, self._apply_tab_minimum_width)
         self.root.after(600, self._poll_status)
         self._apply_discord_settings()
+        if self._invite_ps2_setup_guide:
+            # Wait until the root is visible; never alter any server settings.
+            self.root.after(1200, self._offer_ps2_setup_guide)
         if self.saved.get("pending_firewall_allow"):
             self.root.after(350, self._allow_pending)
         elif self.saved.get("pending_cleanup"):
@@ -1328,6 +1334,30 @@ class LauncherApp:
 
         self.nb.add(about, text="ABOUT")
 
+    def _offer_ps2_setup_guide(self):
+        """Ask once on a fresh install; declining has no configuration effects."""
+        if self._shutting_down or not self._invite_ps2_setup_guide:
+            return
+        self._invite_ps2_setup_guide = False
+        if messagebox.askyesno(
+                "PS2 setup guide",
+                "This appears to be your first launch. Would you like to see "
+                "the optional six-step PS2 network and game-library guide?\n\n"
+                "It is read-only and will not change your network, storage "
+                "or server settings.",
+                parent=self.root):
+            self._open_ps2_setup_guide()
+        else:
+            self._on_ps2_setup_guide_closed(False)
+
+    def _on_ps2_setup_guide_closed(self, completed):
+        """Persist dismissal separately from actually finishing the guide."""
+        if completed:
+            self.saved["ps2_setup_guide_status"] = "completed"
+        elif self.saved.get("ps2_setup_guide_status") != "completed":
+            self.saved["ps2_setup_guide_status"] = "dismissed"
+        self._save()
+
     def _open_ps2_setup_guide(self):
         from .setup_guide import SetupGuide
         existing = getattr(self, "_ps2_setup_guide", None)
@@ -1335,7 +1365,9 @@ class LauncherApp:
             existing.lift()
             existing.focus_set()
             return
-        self._ps2_setup_guide = SetupGuide(self.root, self.current_ip())
+        self._ps2_setup_guide = SetupGuide(
+            self.root, self.current_ip(),
+            on_close=self._on_ps2_setup_guide_closed)
 
     def _open_url(self, url):
         try:
@@ -2981,6 +3013,10 @@ class LauncherApp:
         for key in ("game_library_folder", "library_guide_seen"):
             if key in latest:
                 data[key] = latest[key]
+        guide_status = self.saved.get(
+            "ps2_setup_guide_status", latest.get("ps2_setup_guide_status"))
+        if guide_status in ("dismissed", "completed"):
+            data["ps2_setup_guide_status"] = guide_status
         if self.saved.get("direct_link"):
             data["direct_link"] = self.saved["direct_link"]
         if self.saved.get("pending_direct_link_restore"):

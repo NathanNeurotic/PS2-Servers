@@ -53,8 +53,9 @@ STEPS = (
 class SetupGuide(tk.Toplevel):
     """A single-instance-friendly modal with explicit Previous/Next controls."""
 
-    def __init__(self, parent, ip=""):
+    def __init__(self, parent, ip="", on_close=None):
         super().__init__(parent)
+        self._on_close = on_close
         self.title("PS2 connection setup guide")
         self.transient(parent.winfo_toplevel())
         self.resizable(True, True)
@@ -79,10 +80,10 @@ class SetupGuide(tk.Toplevel):
         self.prev.pack(side="left")
         self.next = ttk.Button(buttons, text="Next", command=self.advance)
         self.next.pack(side="right")
-        ttk.Button(buttons, text="Close", command=self.destroy).pack(
+        ttk.Button(buttons, text="Close", command=self.close).pack(
             side="right", padx=(0, 8))
-        self.bind("<Escape>", lambda _event: self.destroy())
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.bind("<Escape>", lambda _event: self.close())
+        self.protocol("WM_DELETE_WINDOW", self.close)
         self.show_step()
 
     def show_step(self):
@@ -101,9 +102,16 @@ class SetupGuide(tk.Toplevel):
             self.position -= 1
             self.show_step()
 
+    def close(self, completed=False):
+        callback = self._on_close
+        self._on_close = None  # A close can only report completion once.
+        self.destroy()
+        if callback is not None:
+            callback(bool(completed))
+
     def advance(self):
         if self.position >= len(STEPS) - 1:
-            self.destroy()
+            self.close(completed=True)
         else:
             self.position += 1
             self.show_step()
