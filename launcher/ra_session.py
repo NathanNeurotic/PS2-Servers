@@ -47,8 +47,10 @@ class SessionTracker:
             return {"state": "listening", "text": (
                 "RA signed in · Waiting for PS2" if login.get("ok")
                 else "RA sign-in required · Waiting for PS2")}
+        advanced = (packets is not None and self.last_packets is not None
+                    and packets > self.last_packets)
         if packets is not None:
-            if self.last_packets is not None and packets > self.last_packets:
+            if advanced:
                 self.last_advance = now
             elif self.last_packets is not None and packets < self.last_packets:
                 # An engine restart resets the counter; wait for new packets.
@@ -79,6 +81,11 @@ class SessionTracker:
             return {"state": "connected", "text": "PS2 connected · Awaiting tracked game"}
         identity = (serial, str(game.get("hash") or ""), title)
         if identity != self.active_identity:
+            # The engine can change the displayed/checked set without sending
+            # memory from it. Demand a fresh packet on every identity change.
+            if not advanced:
+                self.active_identity = None
+                return {"state": "connected", "text": "PS2 connected · Awaiting new-game telemetry"}
             self.session_number += 1
             self.active_identity = identity
         return {"state": "playing", "title": title, "packets": packets,
