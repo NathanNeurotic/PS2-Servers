@@ -60,6 +60,11 @@ class SessionTracker:
             # The first poll may read a stale connected flag and old game name.
             # Do not publish a game until at least two counters advance.
             return {"state": "connected", "text": "PS2 connected · Awaiting fresh telemetry"}
+        # The upstream /state may show the last *checked* game even while a
+        # different image is streaming. It only fills game.serial when the
+        # active console hash matches the loaded achievement set.
+        if not safe_title(game.get("serial")):
+            return {"state": "connected", "text": "PS2 connected · No verified tracked game"}
         title = safe_title(game.get("title"))
         if not title:
             return {"state": "connected", "text": "PS2 connected · Awaiting tracked game"}
