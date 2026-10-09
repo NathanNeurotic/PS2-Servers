@@ -35,12 +35,15 @@ class LibraryPanel(ttk.Frame):
         self._busy = False
         self._buttons = []
         self.root_file = Path(config_dir()) / "library" / "games_root.txt"
+        self.guide_marker = Path(config_dir()) / "library" / "first_run_complete"
         self.path = tk.StringVar(value=self._load_root())
         self.search = tk.StringVar()
         self.status = tk.StringVar(value="Catalogue stores metadata; no ISO or save is modified by scanning.")
         self._build()
         self._drain()
         self._run(lambda db: db.list_games(), "Loading catalogue")
+        # First-run tutorial is voluntary and never configures network or starts a server.
+        self.after_idle(self._show_first_run_guide)
 
     def _load_root(self):
         try:
@@ -284,6 +287,10 @@ class LibraryPanel(ttk.Frame):
                 "Existing catalogue entries with matching image paths will have metadata updated."):
             self._run(lambda db: db.import_json(path), "Importing catalogue metadata", True)
 
+    def _show_first_run_guide(self):
+        if not self.guide_marker.exists() and self.winfo_exists():
+            self._guide()
+
     def _guide(self):
         window = tk.Toplevel(self)
         window.title("PS2-Servers: Getting started")
@@ -315,6 +322,11 @@ class LibraryPanel(ttk.Frame):
 
         def nxt():
             if index[0] == len(GUIDE)-1:
+                try:
+                    self.guide_marker.parent.mkdir(parents=True, exist_ok=True)
+                    self.guide_marker.write_text("complete\n", encoding="utf-8")
+                except OSError:
+                    pass  # Read-only settings should not break the launcher.
                 window.destroy()
             else:
                 index[0] += 1
