@@ -142,7 +142,7 @@ class LibraryTests(unittest.TestCase):
             image.write_bytes(b"Different image size")
             scanner.check(image)
             self.assertEqual(hashing.call_count, 2)
-        self.assertEqual(account.request.call_count, 1)
+        self.assertEqual([call.kwargs["i"] for call in account.request.call_args_list], [21, 12])
 
     @unittest.skipUnless(engine_path().is_file(), "native achievement engine required")
     def test_native_ps2_hash_matches_independent_boot_name_and_elf_digest(self):
