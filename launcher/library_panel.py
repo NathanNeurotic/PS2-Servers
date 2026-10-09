@@ -123,11 +123,12 @@ class LibraryPanel(ttk.Frame):
         for btn in self._buttons:
             btn.state(["disabled"])
 
+        search_term = self.search.get()
         def work():
             try:
                 with library_catalog.Catalog() as db:
                     value = action(db)
-                    rows = db.list_games(self.search.get()) if refresh else (
+                    rows = db.list_games(search_term) if refresh else (
                         value if isinstance(value, list) else None)
                 self._results.put((True, value, rows))
             except Exception as exc:
