@@ -17,9 +17,19 @@ import selectors
 import socket
 import threading
 import time
+import tempfile
 import unicodedata
 import urllib.parse
 import urllib.request
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
+
+
+def open_remote(request, timeout):
+    return urllib.request.build_opener(NoRedirect).open(request, timeout=timeout)
 
 
 def clean(value, limit):
@@ -111,7 +121,7 @@ class Account:
         params.update(y=key)
         url = "https://retroachievements.org/API/" + endpoint + ".php?" + urllib.parse.urlencode(params)
         request = urllib.request.Request(url, headers={"User-Agent": "PS2-Servers RetroAchievements"})
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with open_remote(request, timeout=10) as response:
             raw = response.read(8 * 1024 * 1024 + 1)
         if len(raw) > 8 * 1024 * 1024:
             raise ValueError("RetroAchievements response exceeds the configured limit")
@@ -123,9 +133,9 @@ class Account:
     def resolve(self, image_hash):
         body = urllib.parse.urlencode({"r": "gameid", "m": image_hash}).encode("ascii")
         request = urllib.request.Request("https://retroachievements.org/dorequest.php", data=body)
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with open_remote(request, timeout=10) as response:
             data = json.loads(response.read(65536))
-        if not data.get("Success"):
+        if not isinstance(data, dict) or not data.get("Success") or "GameID" not in data:
             raise ValueError("Hash lookup failed")
         return number(data.get("GameID"))
 
@@ -374,9 +384,11 @@ class Bridge:
             return
         try:
             from PIL import Image
-            with urllib.request.urlopen(image, timeout=3.5) as response:
-                if urllib.parse.urlparse(response.url).netloc != url.netloc:
-                    return
+        except ImportError:
+            return
+        temporary = None
+        try:
+            with open_remote(image, timeout=3.5) as response:
                 data = response.read(512 * 1024 + 1)
             if len(data) > 512 * 1024:
                 return
@@ -384,8 +396,12 @@ class Bridge:
                 if icon.width * icon.height > 4000000:
                     return
                 icon = icon.convert("RGBA").resize((64, 64))
-                temporary = target.with_suffix(".tmp")
-                icon.save(temporary, format="PNG")
+                with tempfile.NamedTemporaryFile(dir=self.art, suffix=".tmp", delete=False) as output:
+                    temporary = Path(output.name)
+                    icon.save(output, format="PNG")
                 os.replace(temporary, target)
-        except (ImportError, OSError, ValueError):
+        except (OSError, ValueError, Image.DecompressionBombError):
             pass  # Artwork is optional; account/progress data remains usable.
+        finally:
+            if temporary:
+                temporary.unlink(missing_ok=True)

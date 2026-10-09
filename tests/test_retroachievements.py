@@ -18,6 +18,20 @@ from launcher.achievements import engine_path
 
 
 class WireTests(unittest.TestCase):
+    def test_remote_redirects_are_not_followed(self):
+        request = urllib.request.Request("https://retroachievements.org/API/test.php?y=secret")
+        self.assertIsNone(caduceus.NoRedirect().redirect_request(
+            request, None, 302, "Moved", {}, "https://example.com/collect"))
+
+    def test_malformed_hash_lookup_is_not_unsupported(self):
+        account = caduceus.Account(Path("unused"), lambda: {})
+        for body in (b'[]', b'{"Success":true}', b'{"Success":false,"GameID":0}'):
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = body
+            with mock.patch.object(caduceus, "open_remote", return_value=response):
+                with self.assertRaises(ValueError):
+                    account.resolve("a" * 32)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
