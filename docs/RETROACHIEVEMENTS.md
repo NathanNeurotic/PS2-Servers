@@ -140,6 +140,15 @@ modes when RA is stopped, stale or untracked; raw paths, IP addresses,
 credentials and account identities are never supplied to Discord. The optional
 activity timer follows the verified game session while one is playing.
 
+Achievement-compatibility checks now cover PS2 **ISO, CHD, CSO and ZSO** images
+as well as PS1 POPStarter VCD. PS2 compressed scans read the same logical
+ISO9660 boot executable used by the pinned rcheevos algorithm, without
+expanding a game-size temporary ISO. CHD requires the supported libchdr
+library and ZSO requires LZ4; packaged releases include both. Invalid or
+changed images fail explicitly rather than being marked unsupported.
+For all formats, scanning only checks the local image hash against the cached
+RetroAchievements catalogue; it cannot prove hardware telemetry or unlocks.
+
 Use **Live achievements (native view)** for a read-only in-app overview of
 account status, console telemetry, the currently loaded achievement set,
 measured achievement progress, recent events and live leaderboard trackers.
