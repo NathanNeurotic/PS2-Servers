@@ -38,7 +38,8 @@ class SetupWizardTests(unittest.TestCase):
         ast.parse(source)
         self.assertEqual(source.count('text="PS2 setup guide…"'), 1)
         self.assertEqual(source.count("def _open_ps2_setup_guide("), 1)
-        self.assertIn("SetupGuide(self.root, self.current_ip())", source)
+        self.assertIn("self._ps2_setup_guide = SetupGuide(", source)
+        self.assertIn("self.root, self.current_ip(),", source)
         self.assertIn("existing.winfo_exists()", source)
 
     def test_first_run_invitation_and_persistent_status(self):
