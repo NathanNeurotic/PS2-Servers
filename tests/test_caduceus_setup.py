@@ -56,6 +56,8 @@ class CaduceusShareTests(unittest.TestCase):
             card.vars["games_folder"].set.assert_called_once_with(root)
             card.app._save.assert_called_once()
             card.app.is_running.assert_called_once_with("retroachievements")
+            self.assertTrue({call[0] for call in card.app.mock_calls} <=
+                            {"is_running", "caduceus_root_candidates", "_save"})
 
     def test_button_never_guesses_between_roots_or_edits_live_settings(self):
         card = mock.Mock()

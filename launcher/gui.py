@@ -2929,7 +2929,7 @@ class LauncherApp:
             return
         try:
             destination = ra_sounds.sound_path(name)
-            replace = destination.exists()
+            replace = os.path.lexists(destination)
             if replace and not messagebox.askyesno("Replace custom sound",
                       "Replace the existing {} sound? This cannot be undone.".format(name),
                       parent=self.root):

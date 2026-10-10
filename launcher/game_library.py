@@ -417,10 +417,16 @@ class Compatibility:
             return {"status": "unsupported", "message": "Compatibility scanning requires PS2 ISO/CHD/CSO/ZSO or PS1 VCD."}
         stat = path.stat()
         stamp = "{}:{}:{}".format(stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
-        # API failures propagate; they must never turn into an unsupported result.
-        self.refresh()
         with self.library.connect() as db:
             cached = db.execute("SELECT * FROM image_status WHERE path=? AND stamp=?", (str(path), stamp)).fetchone()
+        try:
+            self.refresh()
+        except (OSError, ValueError):
+            # Only reuse a previously checked, unchanged PS2 ISO offline.
+            if path.suffix.lower() != ".iso" or cached is None:
+                raise
+            return {key: cached[key] for key in
+                    ("status", "hash", "game_id", "title", "count", "checked_at")}
         image_hash = cached["hash"] if cached else hash_image(path)
         game = self.hashes.get(image_hash)
         status = "compatible" if game and game["count"] else "unmatched"

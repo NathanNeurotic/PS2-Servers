@@ -22,6 +22,23 @@ def event(id=101, ago=0, title="First Flame", points=5):
 
 
 class UnlockTrackerTests(unittest.TestCase):
+    def test_normalized_title_matches_verified_session_and_overview(self):
+        from launcher.ra_session import SessionTracker
+        from launcher.ra_overview import view_model
+        for title in ("A" * 97, "  Spyro   the Dragon  "):
+            with self.subTest(title=title):
+                state = payload(title=title, packets=1)
+                sessions = SessionTracker()
+                sessions.observe(state, now=0)
+                state["console"]["packets"] = 2
+                verified = sessions.observe(state, now=1)
+                self.assertEqual(verified["state"], "playing")
+                self.assertTrue(view_model(state, verified)["playing"])
+                tracker = UnlockTracker()
+                tracker.observe(state, verified)
+                state["unlocks"] = [event()]
+                self.assertEqual(len(tracker.observe(state, verified)), 1)
+
     def test_initial_history_never_triggers_popup_even_when_recent(self):
         tracker = UnlockTracker()
         self.assertEqual(tracker.observe(payload([event()]), live()), [])

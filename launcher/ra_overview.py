@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 import webbrowser
 
+from .ra_notifications import safe_title
+
 
 def short(value, limit=120):
     return " ".join(str(value or "").split())[:limit]
@@ -52,7 +54,7 @@ def view_model(state, verified=None):
                   else "Waiting for PS2")
     if isinstance(verified, dict) and verified.get("state") == "stalled":
         connection = "Console telemetry stalled · " + numbers
-    title = short(game.get("title"), 100)
+    title = safe_title(game.get("title"))
     serial = short(game.get("serial"), 24)
     # /state may contain a previously checked game, or a 'follow my play'
     # game from another emulator. Only the separate, counter-validated

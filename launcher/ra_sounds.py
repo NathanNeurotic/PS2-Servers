@@ -54,7 +54,7 @@ def validate_clip(source):
 def install_clip(source, name, directory=None, replace=False):
     """Validate temp copy and atomically publish without a partial playable WAV."""
     destination = sound_path(name, directory)
-    if destination.exists() and not replace:
+    if os.path.lexists(destination) and not replace:
         raise FileExistsError("A custom sound already exists. Confirm replacement first.")
     source = Path(source)
     if source.resolve() == destination.resolve():
@@ -69,7 +69,7 @@ def install_clip(source, name, directory=None, replace=False):
         os.chmod(path, 0o600)
         validate_clip(path)
         # Re-check; callers never silently replace someone else's prior file.
-        if destination.exists() and not replace:
+        if os.path.lexists(destination) and not replace:
             raise FileExistsError("A custom sound appeared before saving.")
         os.replace(path, destination)
         return destination

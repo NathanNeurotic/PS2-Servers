@@ -6,6 +6,10 @@ a catalog query, or a previously checked achievement set.
 """
 
 
+def safe_title(text):
+    return " ".join(str(text or "").split())[:96]
+
+
 def _event(value):
     if not isinstance(value, dict):
         return None
@@ -50,7 +54,7 @@ class UnlockTracker:
             return []
         game = state.get("game")
         if (not isinstance(game, dict) or not game.get("serial")
-                or game.get("title") != verified.get("title")):
+                or safe_title(game.get("title")) != verified.get("title")):
             self.reset()
             return []
         ring = state.get("unlocks")

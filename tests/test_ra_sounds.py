@@ -40,6 +40,23 @@ class SoundProfiles(unittest.TestCase):
             self.assertTrue(untouched.exists())
             self.assertFalse(ra_sounds.restore_default("connect", directory=folder))
 
+    def test_dangling_symlink_requires_explicit_replacement(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root)
+            source = folder / "chosen.wav"
+            make_wav(source)
+            destination = folder / "connect.wav"
+            try:
+                destination.symlink_to(folder / "missing.wav")
+            except OSError as error:
+                self.skipTest(str(error))
+            with self.assertRaises(FileExistsError):
+                ra_sounds.install_clip(source, "connect", directory=folder)
+            self.assertTrue(destination.is_symlink())
+            ra_sounds.install_clip(source, "connect", directory=folder, replace=True)
+            self.assertFalse(destination.is_symlink())
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+
     def test_invalid_sound_never_creates_playable_destination(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)

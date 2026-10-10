@@ -10,11 +10,7 @@ import time
 import urllib.error
 import urllib.request
 
-from .ra_notifications import UnlockTracker
-
-
-def safe_title(text):
-    return " ".join(str(text or "").split())[:96]
+from .ra_notifications import UnlockTracker, safe_title
 
 
 class SessionTracker:
