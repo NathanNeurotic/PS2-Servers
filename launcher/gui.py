@@ -70,7 +70,6 @@ TAB_STRIP_TAIL = 20
 # padding chain between it and the text: notebook padding + tab border + the card's
 # grid padx + card padding + label padx, then the field label column for help text.
 CARD_TEXT_RESERVE = 72
-HELP_RESERVE = 190
 # Indent checkbox help past the indicator so it lines up under the label, not under the box.
 CHECK_HELP_INDENT = 27
 CHECK_HELP_RESERVE = CARD_TEXT_RESERVE + CHECK_HELP_INDENT
@@ -531,13 +530,13 @@ class ServerCard(ttk.LabelFrame):
         except tk.TclError:
             pass
 
-    def _add_help(self, parent, text, row, column, indent, reserve):
+    def _add_help(self, parent, text, row, column, indent, reserve, siblings=()):
         # Own row, so help never overlaps the entry or Browse button. columnspan
         # reaches the card's last column (2) from wherever it starts.
         label = ttk.Label(parent, text=text, style="CardHelp.TLabel", font=("", 8))
         label.grid(row=row, column=column, columnspan=3 - column, sticky="w",
                    padx=(indent, 4), pady=(0, 4))
-        bind_wraplength(label, self._wrap_source(), reserve=reserve)
+        bind_wraplength(label, self._wrap_source(), reserve=reserve, siblings=siblings)
         return row + 1
 
     def _add_field(self, parent, f, row):
@@ -553,8 +552,8 @@ class ServerCard(ttk.LabelFrame):
                                      CHECK_HELP_RESERVE)
             return row
 
-        ttk.Label(parent, text=f.label + ":", style="Card.TLabel").grid(
-            row=row, column=0, sticky="w", padx=4, pady=2)
+        field_label = ttk.Label(parent, text=f.label + ":", style="Card.TLabel")
+        field_label.grid(row=row, column=0, sticky="w", padx=4, pady=2)
         if f.kind == "port":
             # Format the FIELD's own default, never the server's listen port:
             # port_display() always returns ServerDef.default_port, so every port
@@ -600,7 +599,10 @@ class ServerCard(ttk.LabelFrame):
         self.vars[f.key] = var
         row += 1
         if f.help:
-            row = self._add_help(parent, f.help, row, 1, 6, HELP_RESERVE)
+            # Measure the field label: RA labels can exceed the old fixed
+            # allowance, especially with larger fonts or display scaling.
+            row = self._add_help(parent, f.help, row, 1, 6,
+                                 CARD_TEXT_RESERVE + 12, siblings=(field_label,))
         return row
 
     def _use_lan_ip(self):
