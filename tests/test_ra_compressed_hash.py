@@ -115,6 +115,18 @@ class CompressionHashTests(unittest.TestCase):
         with mock.patch.object(zso, "LZ4_AVAILABLE", True):
             self.assertEqual(hash_image(path), self.expected)
 
+    def test_real_chd_decoder_matches_synthetic_iso_and_hash(self):
+        path = Path(__file__).parent / "fixtures/ra_hash/synthetic-dvd.chd"
+        try:
+            reader = compressed.open_compressed(path)
+        except ImportError:
+            self.skipTest("build the pinned libchdr to exercise the real decoder")
+        try:
+            self.assertEqual(reader.read(len(self.iso_data)), self.iso_data)
+        finally:
+            reader.close()
+        self.assertEqual(hash_image(path), self.expected)
+
     def test_chd_v5_hashes_sparse_user_data_without_staging_iso(self):
         path = self.root / "Game.chd"
         header = bytearray(124)

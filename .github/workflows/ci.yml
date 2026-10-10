@@ -113,3 +113,8 @@ jobs:
 
       - name: Smoke build bundled libchdr
         run: python build/build_libchdr.py
+
+      - name: Verify real compressed CHD decoding and RA hash
+        run: |
+          python -c "import sys; sys.path.insert(0, 'udpfs_server'); from compressed_iso.chd import LIBCHDR_AVAILABLE; assert LIBCHDR_AVAILABLE, 'bundled libchdr must load'"
+          python -m unittest tests.test_ra_compressed_hash.CompressionHashTests.test_real_chd_decoder_matches_synthetic_iso_and_hash -v

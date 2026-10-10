@@ -312,6 +312,66 @@ class NativeEngineTests(unittest.TestCase):
                                     self.fail("Engine retained the telemetry port after its supervisor exited")
                         time.sleep(0.05)
 
+    def test_native_obs_exports_and_read_only_viewer_without_account(self):
+        from launcher.achievement_viewer import Viewer
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exports = root / "Stream labels with spaces"
+            exports.mkdir()
+            env = dict(os.environ, PS2SERVERS_RA_PROFILE=str(root / "profile"),
+                       PS2SERVERS_RA_NO_BROWSER="1", PS2SERVERS_RA_PARENT=str(os.getpid()))
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as available:
+                available.bind(("127.0.0.1", 0))
+                port = available.getsockname()[1]
+            with socket.socket() as available:
+                available.bind(("127.0.0.1", 0))
+                ui_port = available.getsockname()[1]
+            viewer = None
+            with (root / "engine.log").open("wb") as log:
+                proc = subprocess.Popen([str(engine_path()), "--port", str(port),
+                                         "--ui-port", str(ui_port), "--no-sound",
+                                         "--obs", str(exports)], env=env,
+                                        stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+            try:
+                deadline = time.monotonic() + 10
+                while True:
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
+                            console.sendto(b"RAS1 sq=000001 vb=0000 n=0000 pt=0 np=0 id=TEST_000.01~~~~ ",
+                                           ("127.0.0.1", port))
+                        state = json.loads((exports / "data.json").read_text())
+                        break
+                    except (OSError, ValueError):
+                        if time.monotonic() >= deadline or proc.poll() is not None:
+                            self.fail("Native OBS export did not become readable")
+                        time.sleep(0.1)
+                self.assertFalse(state["login"]["ok"])
+                self.assertTrue(state["console"]["connected"])
+                self.assertEqual((exports / "progress.txt").read_text(), "0 / 0")
+                self.assertEqual((exports / "console.txt").read_text(), "connected")
+                viewer = Viewer(ui_port, port=0, host="127.0.0.1")
+                viewer.start()
+                url = "http://127.0.0.1:{}/".format(viewer.server.server_port)
+                with urllib.request.urlopen(url + "state", timeout=3) as response:
+                    viewed = json.load(response)
+                self.assertFalse(viewed["login"]["ok"])
+                self.assertTrue(viewed["console"]["connected"])
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(urllib.request.Request(url + "logout", method="POST"), timeout=3)
+                self.assertEqual(caught.exception.code, 403)
+                caught.exception.close()
+                # A second synthetic serial must replace the exported game.
+                while (exports / "game.txt").read_text() != "TEST_000.02":
+                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
+                        console.sendto(b"RAS1 sq=000002 vb=0000 n=0000 pt=0 np=0 id=TEST_000.02~~~~ ",
+                                       ("127.0.0.1", port))
+                    self.assertLess(time.monotonic(), deadline, "OBS game export did not update")
+                    time.sleep(0.1)
+            finally:
+                if viewer is not None:
+                    viewer.close()
+                stop_native_smoke_process(proc)
+
     def test_private_profile_key_protection_and_native_discovery(self):
         with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
             profile = Path(directory)
