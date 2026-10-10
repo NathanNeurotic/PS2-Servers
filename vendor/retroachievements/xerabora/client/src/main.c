@@ -627,7 +627,8 @@ static void startup_summary(int ui_ok, int ui_port, int signed_in, const char *u
     printf("\n  xerabora %s\n\n", XERABORA_VERSION);
 
     if (ui_ok)
-        printf("  interface   http://127.0.0.1:%d/  (opening in your browser)\n", ui_port);
+        printf("  interface   http://127.0.0.1:%d/  (%s)\n", ui_port,
+               getenv("PS2SERVERS_RA_NO_BROWSER") ? "open from PS2-Servers" : "opening in your browser");
     else
         printf("  interface   off\n");
 

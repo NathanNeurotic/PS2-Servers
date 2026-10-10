@@ -9,17 +9,49 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
 import urllib.request
 
-from launcher import caduceus, servers, windows_setup
+from launcher import caduceus, gui, servers, windows_setup
 from launcher.achievements import engine_path, available_account_port, claim_service
 from launcher import achievements
 
 
+def stop_native_smoke_process(proc, grace_seconds=15):
+    """Reap native test children on every platform, including on timeout.
+
+    macOS x64 runs under translation on the GitHub arm64 runner and its
+    graceful shutdown may take more than the old 5-second test threshold.
+    A wedged engine must still fail the test, *after* being force-reaped:
+    otherwise the next test can use the wrong UDP listener.
+    """
+    if proc.poll() is None:
+        proc.terminate()
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired as error:
+        proc.kill()
+        proc.wait(timeout=5)
+        raise AssertionError(
+            "Native RetroAchievements engine did not exit after SIGTERM "
+            "within {} seconds (force-reaped).".format(grace_seconds)
+        ) from error
+
+
 class WireTests(unittest.TestCase):
+    def test_native_engine_timeout_always_reaps_process(self):
+        proc = mock.Mock()
+        proc.poll.return_value = None
+        proc.wait.side_effect = [subprocess.TimeoutExpired("ps2ra", 0.1), -9]
+        with self.assertRaisesRegex(AssertionError, "force-reaped"):
+            stop_native_smoke_process(proc, grace_seconds=0.1)
+        proc.terminate.assert_called_once_with()
+        proc.kill.assert_called_once_with()
+        self.assertEqual(proc.wait.call_count, 2)
+
     @unittest.skipUnless(os.name == "nt", "Windows onefile bootstrap lifetime")
     def test_bootstrap_owner_uses_a_held_process_identity(self):
         owner = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
@@ -164,6 +196,53 @@ class WireTests(unittest.TestCase):
                          [18194, 18197, 18198])
         self.assertEqual([p for _, p, _ in windows_setup.server_ports("retroachievements", {"mode": "xerabora"})], [18194])
 
+    def test_managed_runtime_does_not_auto_open_upstream_window(self):
+        with mock.patch.dict(os.environ, {"PS2SERVERS_RA_NO_BROWSER": ""}):
+            env = achievements.engine_environment(self.root / "profile", "caduceus")
+        self.assertEqual(env["PS2SERVERS_RA_NO_BROWSER"], "1")
+        self.assertEqual(env["PS2SERVERS_RA_MODE"], "caduceus")
+        self.assertEqual(env["PS2SERVERS_RA_PROFILE"], str(self.root / "profile"))
+        self.assertEqual(env["PS2SERVERS_RA_PARENT"], str(os.getpid()))
+
+    def test_compatibility_selection_discloses_shared_runtime(self):
+        server = servers.RETROACHIEVEMENTS
+        mode = next(field for field in server.fields if field.key == "mode")
+        self.assertIn("NOT a separate desktop engine", mode.help)
+        for label, expected in (("xeRAbora", "xeRAbora"), ("Caduceus", "Caduceus")):
+            with self.subTest(label=label):
+                argv = server.build_argv({
+                    "mode": label,
+                    "games_folder": str(self.root / "games"),
+                })
+                self.assertEqual(argv[:2], ["--mode", label.lower()])
+                hint = gui.opl_hint("retroachievements", "192.168.1.2", {"mode": label})
+                self.assertIn(expected + " console protocol", hint)
+                self.assertIn("xeRAbora-derived engine", hint)
+
+    def test_account_button_requires_this_service_running(self):
+        card = mock.Mock()
+        card.server.key = "retroachievements"
+        card.app.is_running.return_value = False
+        with mock.patch.object(gui.messagebox, "showinfo") as dialog, \
+             mock.patch.object(gui.webbrowser, "open_new_tab") as browser:
+            gui.ServerCard._open_achievement_account(card)
+        dialog.assert_called_once()
+        browser.assert_not_called()
+
+    def test_running_mode_selector_is_locked_until_stop(self):
+        card = mock.Mock()
+        card.server = servers.RETROACHIEVEMENTS
+        card.field_widgets = {"mode": mock.Mock()}
+        card._active_values = {"mode": "caduceus"}
+        card._running_label.return_value = "Running"
+        card.app.current_ip.return_value = "192.168.1.2"
+        gui.ServerCard.refresh_status(card, True)
+        card.field_widgets["mode"].config.assert_called_with(state="disabled")
+        self.assertIn("Caduceus console protocol",
+                      card.hint.config.call_args.kwargs["text"])
+        gui.ServerCard.refresh_status(card, False)
+        card.field_widgets["mode"].config.assert_called_with(state="readonly")
+
     def test_mode_validation_and_no_credentials_in_launcher_fields(self):
         server = servers.RETROACHIEVEMENTS
         self.assertEqual(server.build_argv({"mode": "xeRAbora"}), ["--mode", "xerabora"])
@@ -234,6 +313,76 @@ class NativeEngineTests(unittest.TestCase):
                                     self.fail("Engine retained the telemetry port after its supervisor exited")
                         time.sleep(0.05)
 
+    def test_native_obs_exports_and_read_only_viewer_without_account(self):
+        from launcher.achievement_viewer import Viewer
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exports = root / "Stream labels with spaces"
+            exports.mkdir()
+            env = dict(os.environ, PS2SERVERS_RA_PROFILE=str(root / "profile"),
+                       PS2SERVERS_RA_NO_BROWSER="1", PS2SERVERS_RA_PARENT=str(os.getpid()))
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as available:
+                available.bind(("127.0.0.1", 0))
+                port = available.getsockname()[1]
+            with socket.socket() as available:
+                available.bind(("127.0.0.1", 0))
+                ui_port = available.getsockname()[1]
+            viewer = None
+            with (root / "engine.log").open("wb") as log:
+                proc = subprocess.Popen([str(engine_path()), "--port", str(port),
+                                         "--ui-port", str(ui_port), "--no-sound",
+                                         "--obs", str(exports)], env=env,
+                                        stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+            heartbeat_stop = threading.Event()
+            serial = [b"TEST_000.01~~~~ "]
+
+            def heartbeat():
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
+                    while not heartbeat_stop.is_set():
+                        console.sendto(b"RAS1 sq=000001 vb=0000 n=0000 pt=0 np=0 id=" + serial[0],
+                                       ("127.0.0.1", port))
+                        heartbeat_stop.wait(0.1)
+
+            sender = threading.Thread(target=heartbeat, daemon=True)
+            sender.start()
+            try:
+                deadline = time.monotonic() + 10
+                while True:
+                    try:
+                        state = json.loads((exports / "data.json").read_text())
+                        break
+                    except (OSError, ValueError):
+                        if time.monotonic() >= deadline or proc.poll() is not None:
+                            self.fail("Native OBS export did not become readable")
+                        time.sleep(0.1)
+                self.assertFalse(state["login"]["ok"])
+                self.assertTrue(state["console"]["connected"])
+                self.assertEqual((exports / "progress.txt").read_text(), "0 / 0")
+                self.assertEqual((exports / "console.txt").read_text(), "connected")
+                viewer = Viewer(ui_port, port=0, host="127.0.0.1")
+                viewer.start()
+                url = "http://127.0.0.1:{}/".format(viewer.server.server_port)
+                with urllib.request.urlopen(url + "state", timeout=3) as response:
+                    viewed = json.load(response)
+                self.assertFalse(viewed["login"]["ok"])
+                self.assertTrue(viewed["console"]["connected"])
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(urllib.request.Request(url + "logout", method="POST"), timeout=3)
+                self.assertEqual(caught.exception.code, 403)
+                caught.exception.close()
+                # A second synthetic serial must replace the exported game.
+                serial[0] = b"TEST_000.02~~~~ "
+                deadline = time.monotonic() + 10
+                while (exports / "game.txt").read_text() != "TEST_000.02":
+                    self.assertLess(time.monotonic(), deadline, "OBS game export did not update")
+                    time.sleep(0.1)
+            finally:
+                heartbeat_stop.set()
+                sender.join(timeout=2)
+                if viewer is not None:
+                    viewer.close()
+                stop_native_smoke_process(proc)
+
     def test_private_profile_key_protection_and_native_discovery(self):
         with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
             profile = Path(directory)
@@ -257,8 +406,16 @@ class NativeEngineTests(unittest.TestCase):
             with socket.socket() as available:
                 available.bind(("127.0.0.1", 0))
                 ui_port = available.getsockname()[1]
-            proc = subprocess.Popen([str(engine_path()), "--port", str(port), "--ui-port", str(ui_port), "--no-sound"],
-                                    env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            # A PIPE that is only drained in finally can itself stall a child
+            # that logs more than the OS pipe capacity. File-backed stderr
+            # keeps shutdown independent of log volume.
+            engine_log_path = profile / "native-engine-stderr.log"
+            with engine_log_path.open("wb") as engine_log:
+                proc = subprocess.Popen(
+                    [str(engine_path()), "--port", str(port),
+                     "--ui-port", str(ui_port), "--no-sound"],
+                    env=env, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=engine_log)
             try:
                 deadline = time.monotonic() + 10
                 while True:
@@ -293,5 +450,8 @@ class NativeEngineTests(unittest.TestCase):
                                           env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
                 self.assertEqual(conflict.returncode, 1, "A busy telemetry port must fail instead of adopting another client")
             finally:
-                proc.terminate()
-                proc.communicate(timeout=5)
+                try:
+                    stop_native_smoke_process(proc)
+                except AssertionError as error:
+                    self.fail("{}\n{}".format(
+                        error, engine_log_path.read_text(encoding="utf-8", errors="replace")[-8000:]))

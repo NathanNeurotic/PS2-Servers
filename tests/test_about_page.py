@@ -118,6 +118,7 @@ class AboutTabVersionGUITest(unittest.TestCase):
         with mock.patch.object(release_metadata, "build_commit",
                                return_value="cafef00d"):
             app = gui.LauncherApp(root)
+            app._invite_ps2_setup_guide = False  # No first-run modal in unrelated GUI tests.
 
         def cleanup(app=app, root=root):
             app._shutting_down = True

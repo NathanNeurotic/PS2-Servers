@@ -1,4 +1,4 @@
-"""Optional Discord desktop IPC activity, isolated from console telemetry."""
+"""Optional Discord desktop IPC activity, using verified, explicitly shared RA titles."""
 import ctypes
 import json
 import os
@@ -17,27 +17,60 @@ MODE_NAMES = {"smbv1": "SMBv1", "smbv2": "SMBv2", "smbv3": "SMBv3", "udpfs": "UD
               "http": "HTTP", "udpbd": "UDPBD", "retroachievements": "RetroAchievements"}
 
 
+def public_game_title(value):
+    """A verified display title only; never paths, URLs or host identity."""
+    if not isinstance(value, str):
+        return ""
+    title = " ".join(value.split()).strip()[:96]
+    if (not title or any(ord(ch) < 32 or ord(ch) == 127 for ch in title)
+            or "/" in title or "\\" in title or "@" in title
+            or re.search(r"(?i)https?:|(?:\b[0-9]{1,3}\.){3}[0-9]{1,3}\b", title)):
+        return ""
+    return title
+
+
 class DesktopActivity:
-    """Allowlisted public modes only: no paths, addresses or backend data."""
+    """Allowlisted server activity; title sharing requires explicit consent."""
     def __init__(self, show_uptime=False):
         self.lock = threading.Lock()
         self.modes = ()
         self.show_uptime = show_uptime
         self.started = int(time.time())
+        self.game = ""
+        self.game_identity = None
+        self.game_started = None
 
-    def update(self, modes, show_uptime=False):
+    def update(self, modes, show_uptime=False, game=None, show_game=False):
+        names = tuple(sorted({key for key in modes if key in MODE_NAMES}))
+        verified = (show_game and "retroachievements" in names
+                    and isinstance(game, dict) and game.get("state") == "playing"
+                    and isinstance(game.get("session"), int)
+                    and not isinstance(game.get("session"), bool)
+                    and game["session"] > 0)
+        title = public_game_title(game.get("title")) if verified else ""
+        identity = (game["session"], title) if title else None
         with self.lock:
-            self.modes = tuple(sorted({key for key in modes if key in MODE_NAMES}))
+            self.modes = names
             self.show_uptime = bool(show_uptime)
+            if identity != self.game_identity:
+                self.game_identity = identity
+                self.game = title
+                self.game_started = int(time.time()) if title else None
 
     def snapshot(self):
         with self.lock:
             names = [MODE_NAMES[key] for key in self.modes]
             result = {"type": 0, "name": "PS2-Servers", "details": ", ".join(names) if names else "Ready to serve games",
                       "state": "Serving PlayStation 2 games" if names else "Desktop launcher", "instance": False}
-            if self.show_uptime:
+            if self.game:
+                result["details"] = self.game
+                result["state"] = "Playing on PlayStation 2"
+                if self.show_uptime:
+                    result["timestamps"] = {"start": self.game_started}
+            elif self.show_uptime:
                 result["timestamps"] = {"start": self.started}
             return result
+
 
 def frame(opcode, value):
     data = json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -215,7 +248,12 @@ class Presence:
                         elif opcode == 2 or value.get("evt") == "ERROR":
                             raise OSError("Discord IPC disconnected")
                     activity = self.activity_provider() if self.activity_provider else None
-                    if activity != last and (activity is None or not sent or time.monotonic() - sent >= 15):
+                    removing_game = (isinstance(last, dict) and
+                        last.get("state") == "Playing on PlayStation 2" and
+                        (not isinstance(activity, dict) or
+                         activity.get("state") != "Playing on PlayStation 2"))
+                    if activity != last and (activity is None or not sent or removing_game or
+                                             time.monotonic() - sent >= 15):
                         self.publish(activity)
                         last, sent = activity, time.monotonic()
             except Exception:

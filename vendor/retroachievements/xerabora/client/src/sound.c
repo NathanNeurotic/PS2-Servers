@@ -139,13 +139,38 @@ void sound_play(enum sound_id id)
         PlaySoundA((LPCSTR)c->data, NULL, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 #else
     if (g_player != NULL && c->path[0] != '\0') {
-        char cmd[800];
+        /* The managed config directory can contain apostrophes (usernames,
+           mount points). Never splice it unescaped into a shell command;
+           the sound controls also permit importing clips via the GUI. */
+        char cmd[sizeof(c->path) * 4 + 128];
+        const unsigned char *q = (const unsigned char *)c->path;
+        int head = snprintf(cmd, sizeof(cmd), "%s %s",
+                            g_player, strcmp(g_player, "aplay") == 0 ? "-q " : "");
+        size_t n;
 
-        snprintf(cmd, sizeof(cmd), "%s %s'%s' >/dev/null 2>&1 &",
-                 g_player, strcmp(g_player, "aplay") == 0 ? "-q " : "", c->path);
-        if (system(cmd) == 0)
-            return;
+        if (head < 0 || (size_t)head >= sizeof(cmd) - 32)
+            goto bell;
+        n = (size_t)head;
+        cmd[n++] = 39; /* opening quote */
+        while (*q != 0 && n + 32 < sizeof(cmd)) {
+            if (*q == 39) {
+                cmd[n++] = 39;
+                cmd[n++] = 92; /* backslash */
+                cmd[n++] = 39;
+                cmd[n++] = 39;
+            } else {
+                cmd[n++] = (char)*q;
+            }
+            q++;
+        }
+        if (*q == 0) {
+            cmd[n++] = 39; /* closing quote */
+            snprintf(cmd + n, sizeof(cmd) - n, " >/dev/null 2>&1 &");
+            if (system(cmd) == 0)
+                return;
+        }
     }
+bell:
     putchar('\a');
     fflush(stdout);
 #endif

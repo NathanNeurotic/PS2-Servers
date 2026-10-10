@@ -128,15 +128,18 @@ class ZsoFileWrapper(CompressedFileWrapper):
             compressed_size = next_offset - offset
         else:
             # Original ZSO format
+            # High bit signals an uncompressed block for original ZSO too.
+            # It is a flag, never part of the file offset. Without masking
+            # both entries, uncompressed OPL ZSO blocks seek beyond 2 GiB.
+            offset = raw_offset & 0x7FFFFFFF
             if block_idx + 1 < self._num_blocks:
-                next_offset = self.block_offsets[block_idx + 1]
-                compressed_size = next_offset - raw_offset
+                next_offset = self.block_offsets[block_idx + 1] & 0x7FFFFFFF
+                compressed_size = next_offset - offset
             else:
                 # Last block - get file size
                 self.file.seek(0, 2)
                 file_size = self.file.tell()
-                compressed_size = file_size - raw_offset
-            offset = raw_offset
+                compressed_size = file_size - offset
             is_uncompressed = (raw_offset & 0x80000000) != 0
         
         # Read compressed data

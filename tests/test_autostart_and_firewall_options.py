@@ -54,6 +54,7 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
 
         try:
             app = gui.LauncherApp(root)
+            app._invite_ps2_setup_guide = False  # No first-run modal in unrelated GUI tests.
             self.assertFalse(app.ignore_firewall_var.get())
             self.assertFalse(app.autostart_var.get())
 
@@ -89,6 +90,7 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
 
         try:
             app = gui.LauncherApp(root)
+            app._invite_ps2_setup_guide = False  # No first-run modal in unrelated GUI tests.
             started_keys = []
             app.start_server = lambda key: started_keys.append(key)
             app.saved["last_active_servers"] = ["udpfs"]
@@ -113,6 +115,7 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
 
         try:
             app = gui.LauncherApp(root)
+            app._invite_ps2_setup_guide = False  # No first-run modal in unrelated GUI tests.
             started_keys = []
             app.start_server = lambda key: started_keys.append(key)
             app.saved["last_active_servers"] = []
@@ -140,6 +143,7 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
 
         try:
             app = gui.LauncherApp(root)
+            app._invite_ps2_setup_guide = False  # No first-run modal in unrelated GUI tests.
             started_keys = []
             app.start_server = lambda key: started_keys.append(key)
             app.saved.pop("last_active_servers", None)
@@ -171,6 +175,7 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
 
         try:
             app = gui.LauncherApp(root)
+            app._invite_ps2_setup_guide = False  # No first-run modal in unrelated GUI tests.
             self.assertTrue(app.ignore_firewall_var.get())
             self.assertTrue(app.autostart_var.get())
         finally:

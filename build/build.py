@@ -97,6 +97,13 @@ INCLUDE_PACKAGES = [
 
 INCLUDE_MODULES = [
     "launcher.achievements",
+    "launcher.ra_session",
+    "launcher.ra_notifications",
+    "launcher.ra_sounds",
+    "launcher.ra_compressed_hash",
+    "launcher.ra_overview",
+    "launcher.ra_setup",
+    "launcher.ps1_vcd",
     "launcher.caduceus",
     "launcher.achievement_viewer",
     "launcher.game_library",

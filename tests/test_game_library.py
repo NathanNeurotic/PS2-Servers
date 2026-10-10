@@ -129,6 +129,25 @@ class LibraryTests(unittest.TestCase):
         with self.library.connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM image_status").fetchone()[0], 0)
 
+    def test_offline_refresh_preserves_only_unchanged_cached_iso(self):
+        image = self.root / "Example.iso"
+        image.write_bytes(b"ISO fixture")
+        account = mock.Mock()
+        account.request.return_value = [{"ID": 12, "Title": "Game", "NumAchievements": 5, "Hashes": ["a" * 32]}]
+        scanner = Compatibility(self.library, account)
+        with mock.patch("launcher.game_library.hash_image", return_value="a" * 32):
+            expected = scanner.check(image)
+        account.request.side_effect = OSError("offline")
+        scanner.index["at"] = 0
+        self.assertEqual(scanner.check(image), expected)
+        image.write_bytes(b"Changed ISO fixture")
+        with self.assertRaises(OSError):
+            scanner.check(image)
+        vcd = self.root / "Example.vcd"
+        vcd.write_bytes(b"VCD fixture")
+        with self.assertRaises(OSError):
+            scanner.check(vcd)
+
     def test_hash_cache_invalidates_when_image_changes(self):
         image = self.root / "Example.iso"
         image.write_bytes(b"ISO fixture")
@@ -142,7 +161,7 @@ class LibraryTests(unittest.TestCase):
             image.write_bytes(b"Different image size")
             scanner.check(image)
             self.assertEqual(hashing.call_count, 2)
-        self.assertEqual(account.request.call_count, 1)
+        self.assertEqual([call.kwargs["i"] for call in account.request.call_args_list], [21, 12])
 
     @unittest.skipUnless(engine_path().is_file(), "native achievement engine required")
     def test_native_ps2_hash_matches_independent_boot_name_and_elf_digest(self):

@@ -25,12 +25,12 @@ class LibraryWindow(tk.Toplevel):
         self.folder = tk.StringVar(value=folder or settings.get("game_library_folder", ""))
         self.query = tk.StringVar()
         self.view_options = ("Installed images", "Recognized achievement sets",
-                             "Unmatched ISO hashes", "Catalogue")
+                             "Unmatched image hashes", "Catalogue")
         saved_view = settings.get("game_library_view")
         saved_kind = settings.get("game_library_kind")
-        self.view = tk.StringVar(value=saved_view if saved_view in self.view_options
-                                 else self.view_options[0])
-        self.kind = tk.StringVar(value=saved_kind if saved_kind in ("DVD", "CD")
+        self.view = tk.StringVar(value=("Unmatched image hashes" if saved_view == "Unmatched ISO hashes" else
+                                        saved_view if saved_view in self.view_options else self.view_options[0]))
+        self.kind = tk.StringVar(value=saved_kind if saved_kind in ("DVD", "CD", "POPS")
                                  else "DVD")
         self.status = tk.StringVar(value="Choose the same OPL folder used by your game server.")
         self.rows = {}
@@ -46,7 +46,7 @@ class LibraryWindow(tk.Toplevel):
         ttk.Button(header, text="Browse…", command=self.choose_folder).grid(row=0, column=2, padx=4)
         ttk.Label(header, text="Image destination").grid(row=1, column=0, padx=4, pady=6)
         destination = ttk.Combobox(header, textvariable=self.kind,
-                                   values=("DVD", "CD"), state="readonly", width=8)
+                                   values=("DVD", "CD", "POPS"), state="readonly", width=8)
         destination.grid(row=1, column=1, sticky="w", padx=4)
         destination.bind("<<ComboboxSelected>>", lambda _event: self.save_preferences())
 
@@ -165,7 +165,7 @@ class LibraryWindow(tk.Toplevel):
                         state = {}
                     if self.view.get() == "Recognized achievement sets" and state.get("status") != "compatible":
                         continue
-                    if self.view.get() == "Unmatched ISO hashes" and state.get("status") != "unmatched":
+                    if self.view.get() == "Unmatched image hashes" and state.get("status") != "unmatched":
                         continue
                     label = state.get("status", "Not checked")
                     if label == "compatible":
@@ -222,9 +222,9 @@ class LibraryWindow(tk.Toplevel):
         except ValueError as error:
             messagebox.showerror("Import image", str(error), parent=self)
             return
-        source = filedialog.askopenfilename(parent=self, title="Import a game image", filetypes=[("PS2 images", "*.iso *.chd *.cso *.zso")])
+        source = filedialog.askopenfilename(parent=self, title="Import a game image", filetypes=[("Supported PS2/PS1 images", "*.iso *.chd *.cso *.zso *.vcd"), ("POPS PS1 images", "*.vcd"), ("PS2 images", "*.iso *.chd *.cso *.zso")])
         if source:
-            kind = self.kind.get()
+            kind = "POPS" if Path(source).suffix.lower() == ".vcd" else self.kind.get()
             self.run(lambda: "Installed " + self.library.install(source, folder, kind, cancel=self.cancel, progress=self.progress))
 
     def download_image(self):
@@ -238,10 +238,10 @@ class LibraryWindow(tk.Toplevel):
         url = simpledialog.askstring("Download image", "Link to an image you are authorized to download:", initialvalue=default, parent=self)
         if not url:
             return
-        name = simpledialog.askstring("Save image", "File name, including .iso, .chd, .cso or .zso:",
+        name = simpledialog.askstring("Save image", "File name, including .iso, .chd, .cso, .zso or PS1 .vcd:",
                                       initialvalue=Path(urllib.parse.unquote(urllib.parse.urlsplit(url).path)).name, parent=self)
         if name:
-            kind = self.kind.get()
+            kind = "POPS" if Path(name).suffix.lower() == ".vcd" else self.kind.get()
             self.run(lambda: "Installed " + self.library.download(url, folder, kind, name, self.cancel, self.progress))
 
     def import_catalog(self):
@@ -346,7 +346,7 @@ class LibraryWindow(tk.Toplevel):
     def guide(self):
         messagebox.showinfo("Game and achievement setup",
             "1. Choose the OPL folder you also selected in your game-server tab.\n\n"
-            "2. Import images into CD or DVD, or import a Caduceus JSON/SQLite catalogue. Catalogue backups contain metadata, not images or saves.\n\n"
+            "2. Import PS2 images into CD/DVD or POPStarter PS1 VCDs into POPS, or import a Caduceus catalogue. Catalogue backups contain metadata, not images or saves.\n\n"
             "3. Start your game server and RetroAchievements. Sign in and enter your Web API key on the account page.\n\n"
             "4. Use the matching achievements-enabled OPL on the PS2. Test the PC connection and check game support before launch.\n\n"
             "5. Optional LAN viewing is read-only. Set an OBS export folder for stream labels.\n\n"

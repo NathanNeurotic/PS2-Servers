@@ -5,6 +5,9 @@ from ctypes import wintypes
 import platform
 
 
+_MUTEX_NAME = "Local\\PS2Servers.Desktop"
+
+
 def restart_args():
     return ["--desktop-restart"] if platform.system() == "Windows" else []
 
@@ -28,7 +31,7 @@ class DesktopInstance:
         self.kernel.ReleaseMutex.restype = wintypes.BOOL
         self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         self.kernel.CloseHandle.restype = wintypes.BOOL
-        self.handle = self.kernel.CreateMutexW(None, False, "Local\\PS2Servers.Desktop")
+        self.handle = self.kernel.CreateMutexW(None, False, _MUTEX_NAME)
         if self.handle:
             # Restart/UAC children start before the old GUI finishes stopping
             # its servers. Ordinary second launches report immediately.

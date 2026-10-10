@@ -29,9 +29,10 @@ def _direct_link_experimental():
     """Non-Windows: the setup path is real but unverified on hardware."""
     return platform.system() in ("Linux", "Darwin")
 
-from . import config, directlink, elevate, netinfo, posix_firewall, servers, status_client, theme, tray, windows_setup
+from . import config, directlink, elevate, netinfo, posix_firewall, ra_setup, ra_sounds, servers, status_client, theme, tray, windows_setup
 from .process import ServerProcess
 from .discord_presence import DEFAULT_APPLICATION_ID, DesktopActivity, Presence
+from .ra_session import SessionPoller
 from .release_metadata import DISPLAY_VERSION, version_label
 from .servers import REGISTRY, REPO_ROOT, frozen_self_exe, is_frozen, serve_command
 
@@ -69,7 +70,6 @@ TAB_STRIP_TAIL = 20
 # padding chain between it and the text: notebook padding + tab border + the card's
 # grid padx + card padding + label padx, then the field label column for help text.
 CARD_TEXT_RESERVE = 72
-HELP_RESERVE = 190
 # Indent checkbox help past the indicator so it lines up under the label, not under the box.
 CHECK_HELP_INDENT = 27
 CHECK_HELP_RESERVE = CARD_TEXT_RESERVE + CHECK_HELP_INDENT
@@ -260,8 +260,12 @@ def _needs_admin(key, values, setup_needed):
 
 def opl_hint(key, ip, values):
     if key == "retroachievements":
-        return ("Achievements-enabled OPL: PC IP {} · UDP 18194 · "
-                "Use Open account and achievements · softcore only").format(ip)
+        mode = values.get("mode") or "xerabora"
+        mode = dict(servers.RA_MODE_CHOICES).get(mode, mode)
+        compatibility = "Caduceus" if mode == "caduceus" else "xeRAbora"
+        return ("{} console protocol · PC IP {} · UDP 18194 · "
+                "PS2-Servers-managed xeRAbora-derived engine · softcore only").format(
+                    compatibility, ip)
     if key in ("smbv1", "smbv2", "smbv3"):
         port = "445" if values.get("take_445") else str(values.get("port") or 1025)
         # Read back what this card is actually running, not what the defaults
@@ -351,8 +355,19 @@ class ServerCard(ttk.LabelFrame):
         row += 1
 
         if self.server.key == "retroachievements":
-            ttk.Button(self, text="Open account and achievements",
+            self.ra_session_status = ttk.Label(self, text="RA stopped", style="CardStatus.TLabel")
+            self.ra_session_status.grid(row=row, column=0, columnspan=3, sticky="w", padx=4, pady=(0, 4))
+            bind_wraplength(self.ra_session_status, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
+            self._last_ra_session = ""
+            row += 1
+            ttk.Button(self, text="Open achievement account (shared engine)",
                        command=self._open_achievement_account).grid(
+                row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
+            row += 1
+
+        if self.server.key == "retroachievements":
+            ttk.Button(self, text="Live achievements (native view)…",
+                       command=self._open_ra_overview).grid(
                 row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
             row += 1
 
@@ -371,6 +386,12 @@ class ServerCard(ttk.LabelFrame):
         advanced = [f for f in shown if f.advanced]
         for f in primary:
             row = self._add_field(self, f, row)
+
+        if self.server.key == "retroachievements":
+            ttk.Button(self, text="Use shared games folder (Caduceus)",
+                       command=self._use_shared_game_folder).grid(
+                row=row, column=0, columnspan=3, sticky="w", padx=4, pady=4)
+            row += 1
 
         if any(f.kind in ("folder", "file", "device") for f in shown):
             self.access_btn = ttk.Button(self, text="Check access",
@@ -408,9 +429,75 @@ class ServerCard(ttk.LabelFrame):
                        padx=4, pady=(4, 0))
         bind_wraplength(self.hint, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
 
+    def _use_shared_game_folder(self):
+        """Explicitly reuse one unambiguous active share for Caduceus pairing."""
+        if self.app.is_running("retroachievements"):
+            messagebox.showinfo("Caduceus pairing",
+                                "Stop RetroAchievements before changing its games folder.", parent=self)
+            return
+        roots = self.app.caduceus_root_candidates()
+        if not roots:
+            messagebox.showinfo("Caduceus pairing",
+                                "Configure a games folder in SMB, UDPFS, HTTP or virtual exFAT first.", parent=self)
+            return
+        if len(roots) != 1:
+            details = "\n".join("{}: {}".format(", ".join(modes), path)
+                                  for path, modes in roots)
+            messagebox.showinfo("Choose the correct Caduceus share",
+                                "Multiple distinct game roots are configured. "
+                                "Select the folder that your PS2 uses with Browse; no root was changed.\n\n" + details,
+                                parent=self)
+            return
+        folder, modes = roots[0]
+        if not os.path.isdir(folder):
+            messagebox.showerror("Caduceus pairing",
+                                 "The selected shared games folder is not accessible: " + folder,
+                                 parent=self)
+            return
+        target = self.vars["games_folder"]
+        old = target.get().strip()
+        if old and os.path.normcase(os.path.abspath(old)) != os.path.normcase(folder):
+            if not messagebox.askyesno("Change Caduceus folder",
+                    "Replace the current pairing folder with the game root shared by {}?\n\n{}".format(
+                        ", ".join(modes), folder), parent=self):
+                return
+        target.set(folder)
+        if not self.app._save():
+            messagebox.showwarning("Caduceus pairing",
+                                   "Folder selected, but settings could not be saved.", parent=self)
+
+    def render_ra_session(self, snapshot):
+        if self.server.key != "retroachievements":
+            return
+        message = snapshot.get("text", "RA status unavailable")
+        if self._last_ra_session != message:
+            self.ra_session_status.configure(text=message,
+                foreground=COLOR_ERROR if snapshot.get("state") in ("stalled", "unreachable") else COLOR_RUNNING
+                if snapshot.get("state") == "playing" else COLOR_STOPPED)
+            self._last_ra_session = message
+
     def _open_achievement_account(self):
+        if not self.app.is_running(self.server.key):
+            messagebox.showinfo("RetroAchievements",
+                                "Start RetroAchievements before opening its account page.",
+                                parent=self)
+            return
         from launcher.achievements import account_url
         webbrowser.open_new_tab(account_url())
+
+    def _open_ra_overview(self):
+        if not self.app.is_running("retroachievements"):
+            messagebox.showinfo("RetroAchievements",
+                                "Start RetroAchievements to view live achievements.",
+                                parent=self)
+            return
+        from launcher.ra_overview import OverviewWindow
+        existing = getattr(self, "_ra_overview", None)
+        if existing is not None and existing.winfo_exists():
+            existing.lift()
+            existing.focus_set()
+            return
+        self._ra_overview = OverviewWindow(self, self.app)
 
     def _open_game_library(self):
         from launcher.library_gui import LibraryWindow
@@ -443,13 +530,13 @@ class ServerCard(ttk.LabelFrame):
         except tk.TclError:
             pass
 
-    def _add_help(self, parent, text, row, column, indent, reserve):
+    def _add_help(self, parent, text, row, column, indent, reserve, siblings=()):
         # Own row, so help never overlaps the entry or Browse button. columnspan
         # reaches the card's last column (2) from wherever it starts.
         label = ttk.Label(parent, text=text, style="CardHelp.TLabel", font=("", 8))
         label.grid(row=row, column=column, columnspan=3 - column, sticky="w",
                    padx=(indent, 4), pady=(0, 4))
-        bind_wraplength(label, self._wrap_source(), reserve=reserve)
+        bind_wraplength(label, self._wrap_source(), reserve=reserve, siblings=siblings)
         return row + 1
 
     def _add_field(self, parent, f, row):
@@ -465,8 +552,8 @@ class ServerCard(ttk.LabelFrame):
                                      CHECK_HELP_RESERVE)
             return row
 
-        ttk.Label(parent, text=f.label + ":", style="Card.TLabel").grid(
-            row=row, column=0, sticky="w", padx=4, pady=2)
+        field_label = ttk.Label(parent, text=f.label + ":", style="Card.TLabel")
+        field_label.grid(row=row, column=0, sticky="w", padx=4, pady=2)
         if f.kind == "port":
             # Format the FIELD's own default, never the server's listen port:
             # port_display() always returns ServerDef.default_port, so every port
@@ -488,9 +575,10 @@ class ServerCard(ttk.LabelFrame):
             # unknown value, and the server exits rather than guessing.
             labels = [label for label, _ in f.choices]
             var = tk.StringVar(value=str(f.default or (labels[0] if labels else "")))
-            ttk.Combobox(parent, textvariable=var, values=labels,
-                         state="readonly", width=18).grid(
-                row=row, column=1, sticky="w", padx=6, pady=2)
+            choice = ttk.Combobox(parent, textvariable=var, values=labels,
+                                  state="readonly", width=18)
+            choice.grid(row=row, column=1, sticky="w", padx=6, pady=2)
+            self.field_widgets[f.key] = choice
         elif f.kind in ("folder", "file", "device"):
             var = tk.StringVar(value="")
             ttk.Entry(parent, textvariable=var).grid(
@@ -511,7 +599,10 @@ class ServerCard(ttk.LabelFrame):
         self.vars[f.key] = var
         row += 1
         if f.help:
-            row = self._add_help(parent, f.help, row, 1, 6, HELP_RESERVE)
+            # Measure the field label: RA labels can exceed the old fixed
+            # allowance, especially with larger fonts or display scaling.
+            row = self._add_help(parent, f.help, row, 1, 6,
+                                 CARD_TEXT_RESERVE + 12, siblings=(field_label,))
         return row
 
     def _use_lan_ip(self):
@@ -694,6 +785,11 @@ class ServerCard(ttk.LabelFrame):
         else:
             self.status.config(text=DOT_RUNNING + " Stopped", foreground=COLOR_STOPPED)
         self.toggle_btn.config(text="Stop" if running else "Start")
+        if self.server.key == "retroachievements":
+            # Mode selects launch-time wire compatibility; it cannot hot-switch.
+            mode_selector = self.field_widgets.get("mode")
+            if mode_selector is not None:
+                mode_selector.config(state="disabled" if running else "readonly")
         if running:
             hint_values = self._active_values if self._active_values is not None else self.values()
             self.hint.config(text=opl_hint(self.server.key, self.app.current_ip(),
@@ -714,6 +810,8 @@ class LauncherApp:
         # and fall back to the process check, so nothing regresses.
         self.status_poller = status_client.Poller()
         self.status_poller.start()
+        self._ra_session = SessionPoller()
+        self._ra_session.start()
         # Last state painted per card, so the status line is only rebuilt when
         # the answer actually changes rather than on every 600 ms tick.
         self._last_reported = {}
@@ -758,6 +856,9 @@ class LauncherApp:
         self.discord_enabled_var = tk.BooleanVar(value=self._saved_bool("discord_rich_presence", False))
         self.discord_app_id_var = tk.StringVar(value=self.saved.get("discord_application_id") or DEFAULT_APPLICATION_ID)
         self.discord_uptime_var = tk.BooleanVar(value=self._saved_bool("discord_show_uptime", False))
+        self.discord_share_game_var = tk.BooleanVar(value=self._saved_bool("discord_share_game", False))
+        self.ra_unlock_popups_var = tk.BooleanVar(value=self._saved_bool("ra_unlock_popups", False))
+        self._ra_toast = None
         self.discord_status_var = tk.StringVar(value="Disabled")
         self._discord_activity = DesktopActivity()
         self._discord_presence = None
@@ -2694,6 +2795,16 @@ class LauncherApp:
                 if reported != self._last_reported.get(key):
                     self._last_reported[key] = reported
                     self.cards[key].refresh_status(True)
+        ra_monitor = getattr(self, "_ra_session", None)
+        if ra_monitor is not None and "retroachievements" in self.cards:
+            ra_running = self.is_running("retroachievements")
+            ra_monitor.set_running(ra_running)
+            self.cards["retroachievements"].render_ra_session(ra_monitor.snapshot())
+            events = ra_monitor.take_unlocks()
+            popup_pref = getattr(self, "ra_unlock_popups_var", None)
+            if (events and ra_running and popup_pref is not None and popup_pref.get()
+                    and not self._shutting_down):
+                self._show_ra_unlock(events[-1], extra=len(events) - 1)
         if (self._direct_expected and self._direct_proc is not None
                 and not self._direct_proc.is_running()):
             code = self._direct_proc.returncode
@@ -2721,6 +2832,45 @@ class LauncherApp:
         if not self._shutting_down:
             self.root.after(600, self._poll_status)
 
+    def _show_ra_unlock(self, event, extra=0):
+        """A local, non-modal Tk notice; no OS permissions or external hooks."""
+        if self.root.state() not in ("normal", "zoomed"):
+            return  # Do not unexpectedly un-minimize or focus a game.
+        old = getattr(self, "_ra_toast", None)
+        if old is not None:
+            try:
+                old.destroy()
+            except tk.TclError:
+                pass
+        notice = tk.Toplevel(self.root)
+        self._ra_toast = notice
+        notice.overrideredirect(True)
+        try:
+            notice.attributes("-topmost", True)
+        except tk.TclError:
+            pass  # Some window managers reject topmost; local notices still work.
+        panel = ttk.Frame(notice, padding=16, relief="ridge", borderwidth=2)
+        panel.pack(fill="both", expand=True)
+        ttk.Label(panel, text="RetroAchievement unlocked",
+                  font=("TkDefaultFont", 11, "bold")).pack(anchor="w")
+        ttk.Label(panel, text=event["title"], wraplength=300).pack(anchor="w", pady=(6, 2))
+        label = "+{} points".format(event["points"])
+        if extra:
+            label += " · {} more unlock(s)".format(extra)
+        ttk.Label(panel, text=label).pack(anchor="w")
+        notice.update_idletasks()
+        x = max(0, self.root.winfo_screenwidth() - notice.winfo_reqwidth() - 32)
+        y = max(0, self.root.winfo_screenheight() - notice.winfo_reqheight() - 80)
+        notice.geometry("+{}+{}".format(x, y))
+        notice.after(6500, notice.destroy)
+
+    def caduceus_root_candidates(self):
+        """Prefer active server roots; only inspect launcher-owned local fields."""
+        configured = {key: card.values() for key, card in self.cards.items()}
+        active = {key: card._active_values for key, card in self.cards.items()
+                  if self.is_running(key) and isinstance(card._active_values, dict)}
+        return ra_setup.candidate_roots(configured, active)
+
     def _desktop_settings(self):
         window = tk.Toplevel(self.root)
         window.title("Desktop settings")
@@ -2732,13 +2882,85 @@ class LauncherApp:
             row=0, column=0, columnspan=2, sticky="w", pady=4)
         ttk.Label(frame, text="Application ID").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
         ttk.Entry(frame, textvariable=self.discord_app_id_var, width=28).grid(row=1, column=1, sticky="ew", pady=4)
-        ttk.Checkbutton(frame, text="Show application uptime", variable=self.discord_uptime_var).grid(
+        ttk.Checkbutton(frame, text="Show activity duration", variable=self.discord_uptime_var).grid(
             row=2, column=0, columnspan=2, sticky="w", pady=4)
-        ttk.Label(frame, text="Shares PS2-Servers branding and active server modes only. No paths, IP addresses, credentials or account details. Uses your open Discord desktop account.",
-                  wraplength=420).grid(row=3, column=0, columnspan=2, sticky="w", pady=8)
-        ttk.Label(frame, textvariable=self.discord_status_var, wraplength=420).grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
-        ttk.Button(frame, text="Use official Application ID", command=lambda: self.discord_app_id_var.set(DEFAULT_APPLICATION_ID)).grid(row=5, column=0, sticky="w", pady=8)
-        ttk.Button(frame, text="Apply and save", command=lambda: self._apply_discord_settings(save=True)).grid(row=5, column=1, sticky="e", pady=8)
+        ttk.Checkbutton(frame, text="Share game title during verified RetroAchievements sessions (opt in)",
+                        variable=self.discord_share_game_var).grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Label(frame, text="Default: server modes only. With game sharing enabled, only a live, verified RA game title is public; no paths, network addresses or RA account data are sent. Stop tracking to clear the title.",
+                  wraplength=420).grid(row=4, column=0, columnspan=2, sticky="w", pady=8)
+        ttk.Label(frame, textvariable=self.discord_status_var, wraplength=420).grid(row=5, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Button(frame, text="Use official Application ID", command=lambda: self.discord_app_id_var.set(DEFAULT_APPLICATION_ID)).grid(row=6, column=0, sticky="w", pady=8)
+        ttk.Button(frame, text="Apply and save", command=lambda: self._apply_discord_settings(save=True)).grid(row=6, column=1, sticky="e", pady=8)
+        ra_frame = ttk.LabelFrame(window, text=" Native RetroAchievements notifications ", padding=12)
+        ra_frame.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+        ttk.Checkbutton(ra_frame, text="Show non-modal achievement unlock popups (off by default)",
+                        variable=self.ra_unlock_popups_var).pack(anchor="w", pady=3)
+        ttk.Label(ra_frame, wraplength=420,
+                  text="Only fresh unlocks during verified console sessions appear. "
+                       "Existing engine sound and mute settings are unchanged; "
+                       "no background notifications are sent to other services.").pack(anchor="w", pady=5)
+        ttk.Button(ra_frame, text="Save notification preference",
+                   command=self._save_with_feedback).pack(anchor="e", pady=4)
+        sound_frame = ttk.LabelFrame(window, text=" RetroAchievements custom sounds ", padding=12)
+        sound_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
+        sound_frame.columnconfigure(0, weight=1)
+        ttk.Label(sound_frame,
+                  text="Optional PCM WAV clips (8/16-bit, up to 15 seconds). Stop RetroAchievements "
+                       "before changing sounds; restart it to hear the changes.",
+                  wraplength=420).grid(row=0, column=0, columnspan=2, sticky="w", pady=5)
+        for index, name in enumerate(ra_sounds.SOUND_NAMES, start=1):
+            label = {"connect": "Connection", "disconnect": "Disconnection",
+                     "achievement": "Achievement unlock"}[name]
+            ttk.Button(sound_frame, text="Choose {} WAV…".format(label),
+                       command=lambda n=name: self._set_ra_sound(n)).grid(
+                           row=index, column=0, sticky="w", pady=3)
+            ttk.Button(sound_frame, text="Restore default",
+                       command=lambda n=name: self._restore_ra_sound(n)).grid(
+                           row=index, column=1, sticky="e", padx=10, pady=3)
+
+    def _set_ra_sound(self, name):
+        if self.is_running("retroachievements"):
+            messagebox.showinfo("RetroAchievements sound",
+                                "Stop RetroAchievements before changing its sounds.", parent=self.root)
+            return
+        source = filedialog.askopenfilename(parent=self.root,
+                                            title="Choose {} sound".format(name),
+                                            filetypes=[("WAV audio", "*.wav"), ("All files", "*.*")])
+        if not source:
+            return
+        try:
+            destination = ra_sounds.sound_path(name)
+            replace = os.path.lexists(destination)
+            if replace and not messagebox.askyesno("Replace custom sound",
+                      "Replace the existing {} sound? This cannot be undone.".format(name),
+                      parent=self.root):
+                return
+            ra_sounds.install_clip(source, name, replace=replace)
+            messagebox.showinfo("Sound installed",
+                                "Custom {} sound saved. Start RetroAchievements to use it.".format(name),
+                                parent=self.root)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Invalid sound", str(error), parent=self.root)
+
+    def _restore_ra_sound(self, name):
+        if self.is_running("retroachievements"):
+            messagebox.showinfo("RetroAchievements sound",
+                                "Stop RetroAchievements before changing its sounds.", parent=self.root)
+            return
+        try:
+            path = ra_sounds.sound_path(name)
+            if not path.exists() and not path.is_symlink():
+                messagebox.showinfo("RetroAchievements sound",
+                                    "The {} sound already uses the default.".format(name), parent=self.root)
+                return
+            if not messagebox.askyesno("Restore default sound",
+                     "Remove the custom {} WAV and use the embedded default?".format(name),
+                     parent=self.root):
+                return
+            ra_sounds.restore_default(name)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Sound restore failed", str(error), parent=self.root)
 
     def _apply_discord_settings(self, save=False):
         if getattr(self, "_shutting_down", False):
@@ -2772,8 +2994,13 @@ class LauncherApp:
         presence = getattr(self, "_discord_presence", None)
         if presence is None:
             return
+        share_game = getattr(self, "discord_share_game_var", None)
+        share_game = bool(share_game.get()) if share_game is not None else False
+        monitor = getattr(self, "_ra_session", None)
+        game = monitor.snapshot() if share_game and monitor is not None else None
         self._discord_activity.update(
-            [key for key, process in self.procs.items() if process.is_running()], self.discord_uptime_var.get())
+            [key for key, process in self.procs.items() if process.is_running()],
+            self.discord_uptime_var.get(), game=game, show_game=share_game)
         message = presence.message
         if self.discord_status_var.get() != message:
             self.discord_status_var.set(message)
@@ -3014,6 +3241,8 @@ class LauncherApp:
                 "discord_rich_presence": bool(self.discord_enabled_var.get()),
                 "discord_application_id": self.discord_app_id_var.get(),
                 "discord_show_uptime": bool(self.discord_uptime_var.get()),
+                "discord_share_game": bool(self.discord_share_game_var.get()),
+                "ra_unlock_popups": bool(self.ra_unlock_popups_var.get()),
                 "last_active_servers": active}
         latest = config.load()
         for key in ("game_library_folder", "library_guide_seen",
@@ -3165,6 +3394,16 @@ class LauncherApp:
         queued after() raises TclError. Every teardown path routes through here,
         including the relaunch/elevation flows that used to destroy directly."""
         self._shutting_down = True
+        poller = getattr(self, "_ra_session", None)
+        if poller:
+            poller.close()
+        toast = getattr(self, "_ra_toast", None)
+        if toast is not None:
+            try:
+                toast.destroy()
+            except tk.TclError:
+                pass
+            self._ra_toast = None
         presence = getattr(self, "_discord_presence", None)
         if presence:
             presence.close()
