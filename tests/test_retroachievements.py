@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -332,13 +333,22 @@ class NativeEngineTests(unittest.TestCase):
                                          "--ui-port", str(ui_port), "--no-sound",
                                          "--obs", str(exports)], env=env,
                                         stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+            heartbeat_stop = threading.Event()
+            serial = [b"TEST_000.01~~~~ "]
+
+            def heartbeat():
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
+                    while not heartbeat_stop.is_set():
+                        console.sendto(b"RAS1 sq=000001 vb=0000 n=0000 pt=0 np=0 id=" + serial[0],
+                                       ("127.0.0.1", port))
+                        heartbeat_stop.wait(0.1)
+
+            sender = threading.Thread(target=heartbeat, daemon=True)
+            sender.start()
             try:
                 deadline = time.monotonic() + 10
                 while True:
                     try:
-                        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
-                            console.sendto(b"RAS1 sq=000001 vb=0000 n=0000 pt=0 np=0 id=TEST_000.01~~~~ ",
-                                           ("127.0.0.1", port))
                         state = json.loads((exports / "data.json").read_text())
                         break
                     except (OSError, ValueError):
@@ -361,13 +371,14 @@ class NativeEngineTests(unittest.TestCase):
                 self.assertEqual(caught.exception.code, 403)
                 caught.exception.close()
                 # A second synthetic serial must replace the exported game.
+                serial[0] = b"TEST_000.02~~~~ "
+                deadline = time.monotonic() + 10
                 while (exports / "game.txt").read_text() != "TEST_000.02":
-                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
-                        console.sendto(b"RAS1 sq=000002 vb=0000 n=0000 pt=0 np=0 id=TEST_000.02~~~~ ",
-                                       ("127.0.0.1", port))
                     self.assertLess(time.monotonic(), deadline, "OBS game export did not update")
                     time.sleep(0.1)
             finally:
+                heartbeat_stop.set()
+                sender.join(timeout=2)
                 if viewer is not None:
                     viewer.close()
                 stop_native_smoke_process(proc)
