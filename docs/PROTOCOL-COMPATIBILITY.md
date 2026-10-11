@@ -25,19 +25,22 @@ transmit sequence, fallback state, and file handles. Discovery traffic from one
 peer cannot reset another peer, and a background sequence-zero discovery does
 not reset a recently active transfer.
 
-## Standards only — diagnostics
+## Standard only — diagnostics
 
 `--protocol-mode standard` disables Modulo sequence interpretation for the
 session. DATA is still accepted through either local socket so this option does
 not conflate protocol diagnosis with single-port or two-port topology.
 
-## Modulo only — legacy diagnostics
+## Legacy / Modulo only — diagnostics
 
 `--protocol-mode modulo` forces the compatibility sequence behavior. It exists
 for controlled diagnosis and migration, not as the normal user setting.
 
 The historical `--modulo-mode` flag remains a deprecated alias for
-`--protocol-mode modulo`. The Desktop card has an Auto/Standard/Modulo selector
+`--protocol-mode modulo`. The Desktop selector offers **Auto (recommended)**,
+**Standard only**, and **Legacy / Modulo only**. Leave it on Auto for normal use:
+it supports both client generations, including changes during game launch.
+The forced modes are for troubleshooting. The card also has
 and an **Enforce Modulo mode** checkbox; the checkbox overrides the selector.
 Leave it unticked for Auto. Core routes forced Modulo through its legacy
 single-port engine. Edge forces the sequence profile but keeps topology

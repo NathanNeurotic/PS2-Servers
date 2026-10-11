@@ -576,7 +576,7 @@ class ServerCard(ttk.LabelFrame):
             labels = [label for label, _ in f.choices]
             var = tk.StringVar(value=str(f.default or (labels[0] if labels else "")))
             choice = ttk.Combobox(parent, textvariable=var, values=labels,
-                                  state="readonly", width=18)
+                                  state="readonly", width=max(18, max(map(len, labels), default=0)))
             choice.grid(row=row, column=1, sticky="w", padx=6, pady=2)
             self.field_widgets[f.key] = choice
         elif f.kind in ("folder", "file", "device"):
@@ -737,7 +737,12 @@ class ServerCard(ttk.LabelFrame):
         saved = servers.migrate_saved(self.server.key, saved)
         for key, var in self.vars.items():
             if key in saved:
-                var.set(saved[key])
+                value = saved[key]
+                if self.server.key == "udpfs" and key == "protocol_mode":
+                    mode = servers.protocol_mode_value(value)
+                    value = next((label for label, wire in servers.PROTOCOL_MODE_CHOICES
+                                  if wire == mode), value)
+                var.set(value)
 
     # -- lifecycle --------------------------------------------------------- #
     def on_toggle(self):

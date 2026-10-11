@@ -222,14 +222,12 @@ _SMB2_FIELDS = [
 
 # How the protocol mode is offered, and what each choice puts on the wire.
 #
-# The labels match the wire values, so the dropdown, the docs, and the logged
-# command line all say the same word. (The middle label was "Proper" once --
-# the thinking was that "standard" reads like a recommendation when the
-# recommended setting is Auto -- but one name everywhere beats that nuance.)
+# Describe the forced choices as restrictions, not recommendations. Wire values
+# remain unchanged so saved settings and command-line clients stay compatible.
 PROTOCOL_MODE_CHOICES = (
-    ("Auto", "auto"),
-    ("Standard", "standard"),
-    ("Modulo", "modulo"),
+    ("Auto (recommended)", "auto"),
+    ("Standard only", "standard"),
+    ("Legacy / Modulo only", "modulo"),
 )
 
 # Accepts the label, the wire value, or any casing of either. A saved settings
@@ -440,11 +438,11 @@ UDPFS = ServerDef(
         # Visible rather than advanced. It is the first thing to reach for when a
         # console will not connect, and a setting you have to know exists is no
         # use to the person who needs it.
-        Field("protocol_mode", "Protocol mode", "choice", default="Auto",
+        Field("protocol_mode", "Protocol mode", "choice", default="Auto (recommended)",
               choices=PROTOCOL_MODE_CHOICES,
-              help="Auto detects Standard and Modulo clients at the same time and "
-                   "suits almost everyone. Pick one explicitly only if a console "
-                   "will not connect on Auto."),
+              help="Leave on Auto for normal use. Auto supports newer Standard and "
+                   "older Neutrino/Modulo clients, including changes during game "
+                   "launch. The forced modes are for troubleshooting."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("port", "Port", "port", default=0xF5F6, advanced=True,
               help="UDP discovery port (default 0xF5F6)."),
