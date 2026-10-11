@@ -47,20 +47,23 @@ class ChoicesAreServable(unittest.TestCase):
         for label, value in PROTOCOL_MODE_CHOICES:
             with self.subTest(label=label):
                 self.assertIn(value, ACCEPTED_ON_THE_WIRE)
+                self.assertEqual(protocol_mode_value(label), value)
+                self.assertEqual(_mode_in(_argv(protocol_mode=label)),
+                                 None if value == "auto" else value)
 
     def test_the_labels_are_the_ones_asked_for(self):
         self.assertEqual([label for label, _ in PROTOCOL_MODE_CHOICES],
-                         ["Auto", "Standard", "Modulo"])
+                         ["Auto (recommended)", "Standard only", "Legacy / Modulo only"])
 
     def test_auto_is_first_so_it_is_what_an_empty_selection_lands_on(self):
-        self.assertEqual(PROTOCOL_MODE_CHOICES[0], ("Auto", "auto"))
+        self.assertEqual(PROTOCOL_MODE_CHOICES[0], ("Auto (recommended)", "auto"))
 
     def test_the_field_is_visible_not_advanced(self):
         """Hidden behind Advanced it is no use to whoever needs it."""
         field = next(f for f in UDPFS.fields if f.key == "protocol_mode")
         self.assertFalse(field.advanced)
         self.assertEqual(field.kind, "choice")
-        self.assertEqual(field.default, "Auto")
+        self.assertEqual(field.default, "Auto (recommended)")
         self.assertEqual(field.choices, PROTOCOL_MODE_CHOICES)
 
 
@@ -215,8 +218,18 @@ class LegacyKeySurvivesTheRealLoadPath(unittest.TestCase):
 
         card.set_values({"modulo_mode": True, "root_dir": "/games"})
         collected = card.values()
-        self.assertEqual(collected.get("protocol_mode"), "Modulo")
+        self.assertEqual(collected.get("protocol_mode"), "Legacy / Modulo only")
         self.assertEqual(_mode_in(UDPFS.build_argv(collected)), "modulo")
+        for old, wire in (("Auto", "auto"), ("standard", "standard"),
+                          ("Proper", "standard"), ("Modulo", "modulo")):
+            with self.subTest(saved=old):
+                card.set_values({"protocol_mode": old, "enforce_modulo": False})
+                expected = next(label for label, value in PROTOCOL_MODE_CHOICES
+                                if value == wire)
+                self.assertEqual(card.vars["protocol_mode"].get(), expected)
+                self.assertGreaterEqual(card.field_widgets["protocol_mode"].current(), 0)
+                self.assertEqual(_mode_in(UDPFS.build_argv(card.values())),
+                                 None if wire == "auto" else wire)
 
 
 if __name__ == "__main__":
