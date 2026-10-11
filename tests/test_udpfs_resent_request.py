@@ -119,6 +119,42 @@ class ResentRequestTests(unittest.TestCase):
         self.assertEqual(len(self.sess.pushback), 1, "left for the worker")
         self.assertFalse(any("aborting" in e for e in self.events), self.events)
 
+    def test_nack_for_next_unsent_packet_releases_full_window(self):
+        # The receiver got the whole window, but its ACK was lost. A duplicate
+        # prompts a NACK for the first packet it has not seen: not yet sent.
+        # Waiting for another ACK here deadlocks the sender and receiver.
+        for start, with_header in ((776, True), (4092, True), (776, False), (4092, False)):
+            with self.subTest(start=start, with_header=with_header):
+                self.sent.clear()
+                self.sess.pushback.clear()
+                self.reads = 0
+                self.sess.tx_seq_nr = start
+                self.sess.tx_seq_nr_acked = (start - 1) & 0xFFF
+
+                def receiver(packet, addr):
+                    self.sent.append(packet)
+                    seq = srv.Header.unpack(packet).seq_nr
+                    if seq == (start + 7) & 0xFFF:
+                        self.queue(_packet(298, (start + 8) & 0xFFF, flags=0))
+                    elif seq == (start + 11) & 0xFFF:
+                        self.queue(_packet(298, seq))
+
+                def receive_now(sess, timeout=None):
+                    try:
+                        return sess.queue.get_nowait()
+                    except queue.Empty:
+                        self.fail("sender waits instead of sending the packet requested by NACK")
+
+                self.server._sendto = receiver
+                self.server._queue_get = receive_now
+                if with_header:
+                    self.server._send_raw_data_with_header(ADDR, b"\x00" * 8, bytes(16384))
+                else:
+                    self.server._send_raw_data(ADDR, bytes(16384))
+                seqs = [srv.Header.unpack(p).seq_nr for p in self.sent]
+                self.assertEqual(seqs, [(start + i) & 0xFFF for i in range(12)])
+                self.assertTrue(self.sess.queue.empty())
+
 
 if __name__ == "__main__":
     unittest.main()

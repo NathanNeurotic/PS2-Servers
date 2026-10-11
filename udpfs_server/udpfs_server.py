@@ -2454,6 +2454,13 @@ class UdpfsServer:
                     # NACK - retransmit and keep waiting for the confirming ACK.
                     self.tx_seq_nr_acked = (data_hdr.seq_nr_ack - 1) & 0xFFF
                     self._retransmit_from(addr, data_hdr.seq_nr_ack)
+                    if data_hdr.seq_nr_ack == self.tx_seq_nr:
+                        # The receiver has the entire window and is asking for
+                        # the next, unsent packet. Its window ACK was lost; this
+                        # NACK cumulatively confirms that same progress. Resume
+                        # sending instead of waiting for a packet neither side
+                        # can produce while this wait owns the session worker.
+                        return False
                 else:
                     self._queue_pushback(sess, item)
                     return True
