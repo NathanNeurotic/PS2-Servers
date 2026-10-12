@@ -57,6 +57,23 @@ def validate_watchlist(data):
     return WatchList(data, count, direct_bytes, nodes)
 
 
+def validate_orbit_watchlist(data):
+    """Qualify a complete set for ORBIT v1.0.2's Neutrino agent.
+
+    That agent drops snapshots above PAYLOAD - 256 (1216 bytes) and its
+    EE reader ignores pointer tails. Reject the complete set rather than
+    truncate reads or claim partial achievement support. Callers must select
+    this profile explicitly; RAP1 alone cannot identify the loader family.
+    This does not certify hardware behavior or enable a service route.
+    """
+    watch = validate_watchlist(data)
+    if watch.direct_bytes > 1216:
+        raise ValueError("ORBIT v1.0.2 agent cannot send more than 1216 value bytes")
+    if watch.nodes:
+        raise ValueError("ORBIT v1.0.2 agent does not resolve pointer-chain watch entries")
+    return watch
+
+
 class WatchSession:
     """Bind validated lists and assembly state to an identified game generation.
 
