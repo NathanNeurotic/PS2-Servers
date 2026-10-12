@@ -19,7 +19,7 @@ def check():
     client = ROOT / "vendor/retroachievements/xerabora/client/src"
     sources = sorted((rc / "src/rcheevos").glob("*.c"))
     sources += [rc / "src/rc_util.c", rc / "src/rc_compat.c", rc / "src/rhash/md5.c",
-                client / "watchlist.c", HERE / "watchlist.c"]
+                client / "watchlist.c", client / "snapshot.c", HERE / "watchlist.c"]
     compiler = shlex.split(os.environ.get("RA_CC", "gcc" if os.name == "nt" else "cc"))
     command = compiler + ["-O1", "-std=gnu99"]
     for directory in [rc / "include", rc / "src", rc / "src/rcheevos", client,

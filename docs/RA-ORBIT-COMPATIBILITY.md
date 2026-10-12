@@ -49,6 +49,10 @@ Selecting the ORBIT limits must therefore be explicit; do not guess the family
 from a source port or apply its limits to every OPL client. The owned profile
 validator is not yet wired into active native runtime routing or an exporter.
 The receiver fixture uses synthetic worker results, no account and no unlock.
+The native conformance harness also feeds the ORBIT header through the
+production `snapshot.c` parser and checks sparse-memory delivery and duplicate
+suppression. Full native identification/transfer/session and hardware acceptance
+remain distinct gates.
 
 ## Broader feature inventory and next work
 

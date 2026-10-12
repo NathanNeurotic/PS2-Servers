@@ -16,3 +16,9 @@ and the game-info accessor. It exercises the real runtime parser and real
 watch-list builder/serializer. It uses no account, HTTP request or unlock.
 These cases establish representative host wire stability, not compatibility
 with every achievement set or hardware acceptance.
+
+The first case also feeds the ORBIT v1.0.2 agent's complete RA15 field layout
+into the production native snapshot parser. It checks serial extraction,
+delivery into the sparse memory callback and duplicate-frame suppression.
+This extends the wire evidence to the active native implementation without
+requiring an account or submitting an unlock.
