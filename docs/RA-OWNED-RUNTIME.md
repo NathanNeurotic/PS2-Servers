@@ -55,8 +55,16 @@ telemetry is not capped at 40 packets/second. Tests use an injected clock and
 synthetic resolution results; no account or socket is used.
 
 An external event loop must serialize receiver calls and marshal worker results
-back to the owner. Socket lifetime, asynchronous account resolution, evaluator
-integration and active-service selection remain unimplemented. Source-IP
+back to the owner. The opt-in `launcher/ra_owned_service.py` now supplies a UDP
+owner thread, one resolver worker, one queued job/result and one latest-frame
+slot. Loopback tests cover reception during a blocked lookup, stale game
+results, transient failures, reset, bind conflicts and listener release.
+`stop()` reports an outstanding callback and restart refuses to accumulate
+workers. Callbacks must honor cancellation and use external-I/O timeouts;
+Python cannot forcibly stop a blocked callback. Reset revokes results but does
+not cancel an already executing lookup, so it can delay a subsequent lookup.
+Real account resolution, evaluator integration and active-service selection
+remain unimplemented. Source-IP
 ownership is an unauthenticated lease, not a security identity, and cannot
 distinguish multiple consoles behind the same translated source address.
 Foreign-source traffic is rejected before charging the owner's packet budget;

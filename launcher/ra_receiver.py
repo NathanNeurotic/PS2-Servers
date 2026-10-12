@@ -86,6 +86,10 @@ class Receiver:
         job, self.queued = self.queued, None
         return (job,) if job is not None else ()
 
+    def tick(self):
+        """Expire idle ownership and identification without draining queued work."""
+        self._expire(self.clock())
+
     def complete(self, job, watch_file=None, *, unsupported=False,
                  serial=None, title="", achievements=0):
         """Publish a current worker result; stale/account-switched results are ignored.
