@@ -60,9 +60,16 @@ owner thread, one resolver worker, one queued job/result and one latest-frame
 slot. Loopback tests cover reception during a blocked lookup, stale game
 results, transient failures, reset, bind conflicts and listener release.
 `stop()` reports an outstanding callback and restart refuses to accumulate
-workers. Callbacks must honor cancellation and use external-I/O timeouts;
-Python cannot forcibly stop a blocked callback. Reset revokes results but does
-not cancel an already executing lookup, so it can delay a subsequent lookup.
+workers. External identification uses `ProcessResolver`: one spawned child
+per lookup, a hard wall-clock deadline, bounded result IPC, cancellation on
+account reset/game switch/shutdown, and terminate/kill followed by reaping.
+Spawn fixtures deliberately ignore cancellation and prove child cleanup and
+subsequent lookup/restart. A child that cannot be reaped blocks further work
+on that adapter. Direct callbacks remain available for bounded host fixtures;
+they cannot be forcibly stopped. Production resolvers must be module-level
+importable callables with picklable state and must not perform unlock side
+effects. Both application entry points call `freeze_support` before launcher
+initialization; actual frozen-process acceptance remains a packaging gate.
 Real account resolution, evaluator integration and active-service selection
 remain unimplemented. Source-IP
 ownership is an unauthenticated lease, not a security identity, and cannot

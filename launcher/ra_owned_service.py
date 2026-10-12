@@ -1,9 +1,9 @@
 """Opt-in UDP transport for the owned receiver; not active service routing.
 
-The resolver runs on one daemon worker and must honor its cancellation event
-and impose timeouts on external I/O. Python cannot forcibly stop a callback.
-stop() closes the listener even if a resolver misbehaves, reports that worker,
-and start() refuses to accumulate replacement workers while it remains alive.
+The resolver supervisor runs on one daemon worker. Use ProcessResolver for
+external identification: it enforces cancellation and a hard process deadline.
+Direct callbacks are only suitable for bounded/cooperative in-process work.
+stop() reports outstanding work rather than accumulating replacement workers.
 """
 from dataclasses import dataclass
 import queue
@@ -40,6 +40,7 @@ class OwnedService:
         self._reset = threading.Event()
         self._frame_lock = threading.Lock()
         self._frame_generation = None
+        self._active_job = None
 
     def start(self):
         if any(t is not None and t.is_alive() for t in (self._loop, self._worker)):
@@ -76,6 +77,8 @@ class OwnedService:
     def reset(self):
         """Immediately hide queued frames, then revoke state on the UDP owner."""
         with self._frame_lock:
+            if self._active_job is not None:
+                self._active_job[1].set()
             self._reset.set()
             self._discard_frame()
 
@@ -109,12 +112,20 @@ class OwnedService:
                 continue
             if stop.is_set():
                 break
+            cancel = threading.Event()
+            with self._frame_lock:
+                self._active_job = (job.token, cancel)
+                if stop.is_set():
+                    cancel.set()
             try:
-                result = self.resolve(job, stop)
+                result = self.resolve(job, cancel)
                 if not isinstance(result, IdentificationResult):
                     result = IdentificationResult()
             except Exception:
                 result = IdentificationResult()
+            finally:
+                with self._frame_lock:
+                    self._active_job = None
             while not stop.is_set():
                 try:
                     results.put((job, result), timeout=0.02)
@@ -150,6 +161,8 @@ class OwnedService:
                 else:
                     receiver.tick()
                 with self._frame_lock:
+                    if self._active_job is not None and self._active_job[0] != receiver.token:
+                        self._active_job[1].set()
                     if self._frame_generation != receiver.session.generation:
                         self._discard_frame()
                 try:
