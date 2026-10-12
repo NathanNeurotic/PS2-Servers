@@ -4,6 +4,10 @@ Audit baseline: PS2-Servers `9bd458ab5e715e0e4102666ec50081af036eddae`,
 2026-10-11. This is a source and artifact inventory, not console certification.
 The objective and completion criteria remain in [the handoff](RA-COMPATIBILITY-HANDOFF.md).
 
+See [owned runtime implementation](RA-OWNED-RUNTIME.md) for protocol primitives
+under development and the remaining integration gates. They do not replace the
+active engine or change the missing full-runtime classification below.
+
 ## Exact initial targets
 
 These are the two loaders currently offered by `launcher/achievement_loader.py`.
