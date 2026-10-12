@@ -3,6 +3,7 @@ import socket
 import threading
 import time
 import unittest
+from unittest import mock
 
 from launcher.ra_owned_service import OwnedService, IdentificationResult
 from tests.test_ra_protocol import packet
@@ -114,3 +115,32 @@ class OwnedServiceTests(unittest.TestCase):
         self.address = service.start()
         self.assertEqual(self.request(self.query), b"RAA1 WAIT")
         self.assertIsNone(service.take_frame())
+
+    def test_invalid_options_fail_before_socket_or_threads_exist(self):
+        service = OwnedService(lambda job, cancel: None, lease_seconds=0)
+        with mock.patch("launcher.ra_owned_service.socket.socket") as constructor:
+            with self.assertRaises(ValueError):
+                service.start()
+            constructor.assert_not_called()
+        self.assertTrue(service.stop())
+
+    def test_icmp_receive_errors_do_not_stop_discovery(self):
+        # Inject the two platform-specific ICMP errors, then use the actual
+        # loopback socket to prove the listener remains operational.
+        real_socket = socket.socket
+        def make_socket(*args, **kwargs):
+            listener = real_socket(*args, **kwargs)
+            wrapper = mock.Mock(wraps=listener)
+            remaining = [ConnectionResetError(10054, "Synthetic ICMP"),
+                         ConnectionRefusedError(111, "Synthetic ICMP")]
+            def recvfrom(size):
+                if remaining:
+                    raise remaining.pop(0)
+                return listener.recvfrom(size)
+            wrapper.recvfrom.side_effect = recvfrom
+            return wrapper
+        with mock.patch("launcher.ra_owned_service.socket.socket", side_effect=make_socket):
+            service = self.start(lambda job, cancel: IdentificationResult(unsupported=True))
+        self.assertTrue(self.request(b"RAP1 127.0.0.1 18195").startswith(b"RAO1 OK"))
+        self.assertEqual(self.ready(), b"RAA1 NO")
+        self.assertTrue(service._loop.is_alive())

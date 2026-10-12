@@ -45,6 +45,9 @@ class OwnedService:
     def start(self):
         if any(t is not None and t.is_alive() for t in (self._loop, self._worker)):
             raise RuntimeError("Previous owned service has not stopped")
+        # Validate before binding or starting either thread. The receiver is
+        # subsequently owned exclusively by the UDP loop.
+        receiver = Receiver(**self.receiver_options)
         listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             listener.bind(self.address)
@@ -61,7 +64,7 @@ class OwnedService:
             self._discard_frame()
         self._worker = threading.Thread(target=self._resolve, daemon=True,
                                         name="RA owned resolver")
-        self._loop = threading.Thread(target=self._serve, args=(listener,), daemon=True,
+        self._loop = threading.Thread(target=self._serve, args=(listener, receiver), daemon=True,
                                       name="RA owned UDP")
         self._worker.start()
         self._loop.start()
@@ -133,8 +136,7 @@ class OwnedService:
                 except queue.Full:
                     continue
 
-    def _serve(self, listener):
-        receiver = Receiver(**self.receiver_options)
+    def _serve(self, listener, receiver):
         try:
             while not self._stop.is_set():
                 with self._frame_lock:
@@ -167,7 +169,10 @@ class OwnedService:
                         self._discard_frame()
                 try:
                     packet, peer = listener.recvfrom(1473)
-                except socket.timeout:
+                except (socket.timeout, ConnectionResetError, ConnectionRefusedError):
+                    # Windows can report an earlier UDP send's ICMP rejection
+                    # on recvfrom. A departed reply endpoint is not fatal to
+                    # the listener or a new console's discovery.
                     continue
                 if len(packet) > 1472:
                     continue
@@ -191,3 +196,7 @@ class OwnedService:
             receiver.clear()
             listener.close()
             self._stop.set()
+            with self._frame_lock:
+                if self._active_job is not None:
+                    self._active_job[1].set()
+                self._discard_frame()
