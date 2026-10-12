@@ -211,7 +211,11 @@ class AutoUdpfsServer(UdpfsServer):
             if current is not sess:
                 return
             with sess.compat_lock:
-                if (sess.protocol_profile != PROFILE_PENDING
+                # A newer discovery resets the transport and advances the
+                # handshake generation. Its own timer owns the fallback now;
+                # an older timer must not inject an INFORM into this exchange.
+                if (sess.handshake_generation != generation
+                        or sess.protocol_profile != PROFILE_PENDING
                         or sess.first_data_seen
                         or sess.rx_streaming
                         or sess.fallback_sent):
