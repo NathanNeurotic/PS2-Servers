@@ -28,6 +28,17 @@ reference** at `cc1713a893a976c9b26ae1dd9975c200a461edfe`. That last revision is
 different from the exported ELF source. Compare both before treating reference
 fixtures as proof of the exported loader's behavior.
 
+Comparison completed: GitHub's [three-commit comparison](https://github.com/Rian6/caduceus-opl/compare/7a85103eaf65bf19fc155dba239a86acdaae6a55...cc1713a893a976c9b26ae1dd9975c200a461edfe)
+changes only `.github/workflows/build.yml`, `README.md` and
+`docs/images/image.png`; no console or protocol source differs. The workflow
+changes `PADEMU=0` to `PADEMU=1 RA_ACHIEVEMENT_CARD=1`. Thus the protocol source
+is shared, but build configuration and binary provenance remain separate gates.
+The reference `docs/protocol/PROTOCOL.md` also describes a 48-byte snapshot
+header, whereas the actual `ra_snap.h` defines a 64-byte header with cycle
+counters and padding. Use source structure/layout, not that stale prose, when
+building fixtures. Badge RAB1/RAK2 is documented as experimental and optional;
+its presence in the desktop header does not establish console badge support.
+
 ## Transport and feature boundaries from upstream
 
 | Target | Upstream documented path | Required qualification |
