@@ -69,10 +69,10 @@ package and console evidence. Keep a working runtime while filling gaps:
    credit the existing runtime; retain normal Neutrino paths. Do not create a
    new fork merely to reproduce this implementation. Console acceptance must
    include UDPFS stack sharing and list lifetime across IOP reset.
-4. Investigate ORBIT's catalog-assisted hashing/listing and remote VMC workflow
-   as additional server features. Audit `server/orbit_catalog.py` and its
-   consumer before promising endpoint or persistence compatibility. They are
-   distinct from RA transport and remain unaudited here.
+4. Implement catalog-assisted listing and remote VMC interoperability only
+   after consumer fixtures and persistence validation. The release ships
+   `server/orbit_catalog.py`; its source is `tools/orbit_catalog.py`. Initial
+   source inspection confirms the contracts below, not endpoint acceptance.
 5. Extend the existing OPL/Caduceus/PS1/POPStarter matrix with exact runtime
    versions and capability limits. General game loading, hashing, account
    browsing, achievement evaluation and on-console notices are separate rows.
@@ -81,3 +81,21 @@ Preserve Daniel/ORBIT, Maximus32/Neutrino and hacan359/xeRAbora attribution.
 ORBIT identifies its launcher as GPL-3.0 and its Neutrino fork as AFL-3.0;
 its copied protocol headers retain their MIT provenance. Review distribution
 requirements against exact files if a later change bundles binaries or code.
+
+## Initial catalog source inspection
+
+The pinned [catalog source](https://github.com/danielnuld/ps2-launcher/blob/v1.0.2/tools/orbit_catalog.py)
+serves HTTP 18290. `GET /catalog` emits UTF-8, tab-separated rows with five
+columns: relative ISO path, size, underscore-form serial, RA hash and title.
+It scans `DVD/` and `CD/`; unknown serial/hash values are `-`. Background hashing
+keeps the request independent of hash completion. Its cache key uses size and
+whole-second mtime; a compatible adapter should preserve the wire contract
+while retaining stronger invalidation for same-size rewrites.
+
+`POST /vmc/<name>` creates an 8 MiB card through `orbit_hash`, returns 200 for an
+existing correctly sized card, and renames a differently sized existing file
+before creation. This is a write contract, separate from catalog reads. A future
+PS2-Servers adapter must preserve existing cards, coordinate concurrent creation,
+validate the generated format and make write activation explicit. Do not copy
+the unpaired all-interface server as an account/API listener. Catalog and VMC
+end-to-end tests remain outstanding; neither endpoint is enabled by this PR.
