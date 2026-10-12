@@ -46,6 +46,23 @@ loader acceptance still needs to confirm recovery under packet loss.
 
 ## Required next slices
 
+The transport-independent `launcher/ra_receiver.py` now owns a single-console
+source-IP lease, explicit advertised/source-only reply policy, one pending
+identification job with generation tokens, WAIT/NO/OK states, watch transfer
+gating, timeout/retry and explicit account/reset revocation. Control requests
+are limited separately from a 256-datagram/second total budget so normal
+telemetry is not capped at 40 packets/second. Tests use an injected clock and
+synthetic resolution results; no account or socket is used.
+
+An external event loop must serialize receiver calls and marshal worker results
+back to the owner. Socket lifetime, asynchronous account resolution, evaluator
+integration and active-service selection remain unimplemented. Source-IP
+ownership is an unauthenticated lease, not a security identity, and cannot
+distinguish multiple consoles behind the same translated source address.
+The global rate budget can also be exhausted by unrelated traffic; measure
+and refine scheduling before enabling the runtime. Completing transfer is a
+local gate, not proof the console installed the list or began a new launch.
+
 1. Build differential native/reference fixtures and complete historical loader
    variant coverage. Abbreviated requests and endpoint fallback now have host
    tests; verify routing against reference behavior before claiming parity.
