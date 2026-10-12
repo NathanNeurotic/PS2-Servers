@@ -118,8 +118,7 @@ class Receiver:
         self._expire(now)
         if now - self.window >= 1:
             self.window, self.requests, self.datagrams = now, 0, 0
-        self.datagrams += 1
-        if self.datagrams > 256 or not isinstance(packet, bytes):
+        if not isinstance(packet, bytes):
             return ReceiverOutput()
         try:
             source = str(ipaddress.IPv4Address(peer[0]))
@@ -128,6 +127,9 @@ class Receiver:
         except (ValueError, TypeError, IndexError):
             return ReceiverOutput()
         if self.owner is not None and source != self.owner:
+            return ReceiverOutput()
+        self.datagrams += 1
+        if self.datagrams > 256:
             return ReceiverOutput()
         if packet.startswith(b"RA15 "):
             if self.owner is None or self.session.watch is None:

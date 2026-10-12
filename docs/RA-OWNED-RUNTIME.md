@@ -59,8 +59,9 @@ back to the owner. Socket lifetime, asynchronous account resolution, evaluator
 integration and active-service selection remain unimplemented. Source-IP
 ownership is an unauthenticated lease, not a security identity, and cannot
 distinguish multiple consoles behind the same translated source address.
-The global rate budget can also be exhausted by unrelated traffic; measure
-and refine scheduling before enabling the runtime. Completing transfer is a
+Foreign-source traffic is rejected before charging the owner's packet budget;
+same-source traffic can still contend. Measure and refine scheduling before
+enabling the runtime. Completing transfer is a
 local gate, not proof the console installed the list or began a new launch.
 
 1. Build differential native/reference fixtures and complete historical loader

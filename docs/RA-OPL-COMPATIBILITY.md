@@ -8,6 +8,10 @@ See [owned runtime implementation](RA-OWNED-RUNTIME.md) for protocol primitives
 under development and the remaining integration gates. They do not replace the
 active engine or change the missing full-runtime classification below.
 
+The [upstream update audit](RA-UPSTREAM-AUDIT.md) records alpha.17's verified
+candidate artifact and Mode 6 behavior, unchanged Caduceus references, rcheevos
+upgrade candidates and compatible host improvements. Existing export pins remain.
+
 ## Exact initial targets
 
 These are the two loaders currently offered by `launcher/achievement_loader.py`.

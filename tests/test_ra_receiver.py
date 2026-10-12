@@ -110,3 +110,12 @@ class ReceiverTests(unittest.TestCase):
         for sequence in range(100):
             self.assertEqual(self.receiver.receive(packet(b"abcdef", sequence=sequence),
                                                     self.peer).values, b"abcdef")
+
+    def test_foreign_console_cannot_exhaust_active_telemetry_budget(self):
+        """Reject nonowners before charging the current owner's packet budget."""
+        self.receiver.complete(self.identify(), self.watch)
+        self.chunk()
+        for _ in range(300):
+            self.assertFalse(self.receiver.receive(self.query, ("192.0.2.20", 18195)).reply)
+        self.assertEqual(self.receiver.receive(packet(b"abcdef"), self.peer).values,
+                         b"abcdef")
