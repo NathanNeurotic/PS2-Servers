@@ -174,7 +174,31 @@ class AutoUdpfsServer(UdpfsServer):
         return self._init_compat(super()._get_or_create_session(addr))
 
     def _send_specific(self, sock, packet: bytes, addr):
-        _send_with_retry(sock, packet, addr, self.send_lock, self.tx_delay_s)
+        # The console learns the data port from INFORM's *UDP source port*.
+        # Receiving DISCOVERY does not prove that the response was even sent.
+        # Verbose logging here covers the actual packaged Core path, including
+        # normal and fallback INFORMs, without logging every DATA packet.
+        is_inform = len(packet) >= 2 and (packet[0] & 0xF) == PacketType.INFORM
+        source_port = "unknown"
+        if is_inform:
+            try:
+                source_port = sock.getsockname()[1]
+            except (OSError, AttributeError, IndexError):
+                pass
+        try:
+            _send_with_retry(sock, packet, addr, self.send_lock, self.tx_delay_s)
+        except OSError as exc:
+            if is_inform:
+                self._print_event(
+                    f"[{addr[0]}:{addr[1]}] INFORM sendto FAILED "
+                    f"source-port={source_port}: {exc}")
+            raise
+        if is_inform and self.verbose:
+            sequence = (int.from_bytes(packet[:2], "little") >> 4) & 0xFFF
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] INFORM sendto OK "
+                f"source-port={source_port} seq={sequence} bytes={len(packet)} "
+                "(OS accepted send; delivery is not confirmed)")
 
     def _sendto(self, packet: bytes, addr):
         """Send replies through the socket negotiated for this session."""

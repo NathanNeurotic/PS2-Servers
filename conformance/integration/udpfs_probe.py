@@ -87,8 +87,13 @@ def run_client(host, port, path, expected, discovery_seq, first_seq, modulo):
         if canonical_seq != 1:
             raise AssertionError(f"canonical INFORM seq={canonical_seq}, expected 1")
         service, advertised_port = struct.unpack_from("<HH", canonical, 2)
-        if service != SERVICE or advertised_port == 0:
-            raise AssertionError("canonical INFORM advertised an invalid service/port")
+        if service != SERVICE:
+            raise AssertionError("canonical INFORM used an invalid service")
+        # Python Core sends reserved port=0; native Edge advertises its data
+        # port. The actual RiptOPL client uses the UDP *source* port in both
+        # cases, not the optional field in the INFORM body.
+        if advertised_port not in (0, canonical_addr[1]):
+            raise AssertionError("INFORM port conflicts with UDP source port")
 
         if modulo:
             _compatibility, target = receive_until(
@@ -99,9 +104,7 @@ def run_client(host, port, path, expected, discovery_seq, first_seq, modulo):
             if target[1] != port:
                 raise AssertionError("Modulo fallback did not originate on discovery port")
         else:
-            target = (host, advertised_port)
-            if canonical_addr[1] != advertised_port:
-                raise AssertionError("canonical INFORM source and advertised data port differ")
+            target = (host, canonical_addr[1])
 
         open_request = bytearray(8)
         open_request[0] = OPEN_REQ
