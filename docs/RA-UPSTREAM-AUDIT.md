@@ -72,3 +72,35 @@ Remaining limitations: source-IP leases are not authentication; same-source-IP
 traffic can still contend. Measure owner/control/telemetry scheduling under
 real load before runtime activation. Prefer internal recovery and compatible
 extensions over requiring a new loader wire format.
+
+## rcheevos candidate adoption
+
+The table above records the initial audit. A subsequent isolated update adopts
+`1433173220a7eaede6a9ed7a18e94117be1821e0` in `sources.json` and the vendored
+source tree. Eighteen source files differ after line-ending normalization;
+public headers and the xeRAbora client remain unchanged. The relevant bounds,
+datetime and evaluator fixes are in sources compiled by our native build.
+
+Validation on Windows:
+
+- Compile and run the candidate's upstream tests with GCC, hash support enabled:
+  2,825 of 2,825 passed, including evaluator, API, client and disc hashing.
+  This is the default client configuration, without optional external-client
+  and RAINTEGRATION extensions.
+- Build our native engine against the candidate with `RA_CC=gcc`: passed.
+- Run full Python discovery with that engine present: 870 tests passed,
+  14 skipped. The prior run without a native engine skipped 18.
+- Compile our unchanged watch-list implementation separately against the old
+  and new dependency. Six synthetic cases produce identical serialized RAWL/RANL
+  bytes and counts: direct widths, bitfields, delta/prior, arithmetic,
+  single-level and nested pointer chains. The fixture baseline comes from
+  `f1417fbf2236936e8334533628b2948dfa4a46d0`; the checked-in conformance command
+  is `python conformance/ra_dependency/check_watchlist.py`. Existing Python CI
+  discovers `tests.test_ra_dependency`, which runs this check where a native
+  compiler is available, to guard private-structure dependency changes.
+
+This does not cover all achievement sets, physical console behavior, a newly
+built desktop package, or alpha.17 loader acceptance. Cross-platform native
+builds and exact-head CI must pass before merge. Existing loader export pins
+and host wire profiles are unchanged. No account or real unlock is used by
+the conformance harness.

@@ -10,6 +10,12 @@ Only the desktop client, shared protocol definitions and required rcheevos
 source/include tree are vendored. No console-loader ELF or OPL source is
 included. No Caduceus Electron source or binaries are copied.
 
+The rcheevos pin is now `1433173220a7eaede6a9ed7a18e94117be1821e0`
+(source version 12.5.0), including upstream API bounds and constant-recall
+evaluator fixes. The xeRAbora client, loader export baseline and console wire
+profiles retain their existing revisions. See `docs/RA-UPSTREAM-AUDIT.md`
+for dependency validation and remaining console acceptance boundaries.
+
 Local xeRAbora changes:
 
 - A PS2-Servers-owned profile directory selected through the child's environment.
