@@ -22,6 +22,12 @@ def main(argv=None):
         argv = (getattr(sys, "argv", None) or [])[1:]
     argv = list(argv)
 
+    if argv == ["--selfcheck-ra-resolver"]:
+        import json
+        from .ra_resolver_process import package_selfcheck
+        print(json.dumps(package_selfcheck(), sort_keys=True))
+        return 0
+
     if "--serve" in argv:
         i = argv.index("--serve")
         rest = argv[i + 1:]

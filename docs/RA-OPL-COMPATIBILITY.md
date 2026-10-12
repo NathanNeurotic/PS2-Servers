@@ -4,6 +4,14 @@ Audit baseline: PS2-Servers `9bd458ab5e715e0e4102666ec50081af036eddae`,
 2026-10-11. This is a source and artifact inventory, not console certification.
 The objective and completion criteria remain in [the handoff](RA-COMPATIBILITY-HANDOFF.md).
 
+See [owned runtime implementation](RA-OWNED-RUNTIME.md) for protocol primitives
+under development and the remaining integration gates. They do not replace the
+active engine or change the missing full-runtime classification below.
+
+The [upstream update audit](RA-UPSTREAM-AUDIT.md) records alpha.17's verified
+candidate artifact and Mode 6 behavior, unchanged Caduceus references, rcheevos
+upgrade candidates and compatible host improvements. Existing export pins remain.
+
 ## Exact initial targets
 
 These are the two loaders currently offered by `launcher/achievement_loader.py`.
@@ -47,6 +55,7 @@ its presence in the desktop header does not establish console badge support.
 | Caduceus snapshot family | Loader advertises USB/BDM, HDD and network; RA compatibility query specifically documents ISO on USB/BDM and ETH | General game loading support does not establish RA support on every transport. |
 | Caduceus account browser | Pairing key in `ART/CADUCEUS.KEY`, read through ETH share; UDP 18198 | ETH share is required even when browsing achievements for a USB game. Keep the pairing key separate from RA credentials. |
 | Ordinary OPL / other forks / older releases | No support established by this audit | Inventory actual RA-capable releases and protocol revisions before adding support claims. RiptOPL PS1 hash compatibility alone does not certify its full session protocol. |
+| ORBIT v1.0.2 Neutrino fork | Source shares base xeRAbora requests/RA15; author reports Black over UDPFS | Additional non-OPL family. Agent is direct-only and sends at most 1216 value bytes; browser requires HTTP 18280. See [ORBIT audit](RA-ORBIT-COMPATIBILITY.md); host fixtures do not certify native or console parity. |
 
 Sources: pinned [xeRAbora README](https://github.com/hacan359/xerabora/blob/357d00e930c7921984f69650706bea69d56f32ef/README.md)
 and [Caduceus OPL README](https://github.com/Rian6/caduceus-opl/blob/cc1713a893a976c9b26ae1dd9975c200a461edfe/README.md).
