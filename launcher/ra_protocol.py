@@ -30,8 +30,8 @@ class ConsoleRequest:
     index: int = 0
 
 
-def parse_request(packet):
-    """Decode the full requests emitted by the pinned console, without I/O.
+def parse_request(packet, peer=None):
+    """Decode full or abbreviated base requests without sending traffic.
 
     Peer authorization and NAT reply routing belong to the future receiver.
     This parser does not send traffic to the advertised address.
@@ -45,26 +45,39 @@ def parse_request(packet):
     if not fields or fields[0] not in ("RAP1", "RAQ1", "RAG1"):
         raise ValueError("Unknown request")
     kind = fields[0]
-    if len(fields) != (3 if kind == "RAP1" else 5):
+    minimum = {"RAP1": 3, "RAQ1": 2, "RAG1": 3}[kind]
+    maximum = 3 if kind == "RAP1" else 5
+    if not minimum <= len(fields) <= maximum:
         raise ValueError("Invalid request field count")
+    endpoint_at = 1 if kind == "RAP1" else 3
+    endpoint = fields[endpoint_at:endpoint_at + 2]
     try:
-        address = str(ipaddress.IPv4Address(fields[-2]))
-        if not fields[-1].isascii() or not fields[-1].isdigit():
+        if len(endpoint) != 2 or not endpoint[1].isdigit():
             raise ValueError("Invalid port")
-        port = int(fields[-1])
-        if not 1 <= port <= 65535:
-            raise ValueError("Invalid port")
+        address = str(ipaddress.IPv4Address(endpoint[0]))
+        port = int(endpoint[1])
+        if address in ("0.0.0.0", "255.255.255.255") or not 1 <= port <= 65535:
+            raise ValueError("Invalid endpoint")
     except (ipaddress.AddressValueError, ValueError) as error:
-        raise ValueError("Invalid reply endpoint") from error
+        if peer is None:
+            raise ValueError("Request requires a source reply endpoint") from error
+        try:
+            address = str(ipaddress.IPv4Address(peer[0]))
+            port = peer[1]
+            if type(port) is not int or not 1 <= port <= 65535:
+                raise ValueError("Invalid source port")
+        except (IndexError, TypeError, ValueError) as invalid_peer:
+            raise ValueError("Invalid source reply endpoint") from invalid_peer
     if kind == "RAP1":
         return ConsoleRequest(kind, address, port)
     image_hash = fields[1]
     if not re.fullmatch(r"[a-fA-F0-9]{32}", image_hash):
         raise ValueError("Invalid image hash")
     if kind == "RAQ1":
-        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", fields[2]):
+        serial = fields[2] if len(fields) >= 3 else ""
+        if serial and not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", serial):
             raise ValueError("Invalid game serial")
-        return ConsoleRequest(kind, address, port, image_hash.lower(), fields[2])
+        return ConsoleRequest(kind, address, port, image_hash.lower(), serial)
     if not re.fullmatch(r"[0-9]{1,5}", fields[2]):
         raise ValueError("Invalid chunk index")
     return ConsoleRequest(kind, address, port, image_hash.lower(), index=int(fields[2]))

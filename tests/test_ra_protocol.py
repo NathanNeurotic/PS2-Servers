@@ -19,6 +19,23 @@ def packet(values=b"abcd", sequence=1, index=0, parts=1, count=2,
 
 
 class RequestTests(unittest.TestCase):
+    def test_abbreviated_requests_and_source_fallback(self):
+        """Reference optional fields fall back to the source when unusable."""
+        peer = ("192.0.2.20", 12345)
+        for data in (b"RAQ1 " + b"a" * 32,
+                     b"RAQ1 " + b"a" * 32 + b" SLUS_210.65",
+                     b"RAG1 " + b"a" * 32 + b" 0",
+                     b"RAP1 0.0.0.0 18195",
+                     b"RAP1 invalid 18195",
+                     b"RAP1 192.0.2.10 0"):
+            with self.subTest(data=data):
+                result = parse_request(data, peer)
+                self.assertEqual((result.address, result.port), peer)
+        full = parse_request(b"RAP1 192.0.2.10 18195", peer)
+        self.assertEqual((full.address, full.port), ("192.0.2.10", 18195))
+        with self.assertRaises(ValueError):
+            parse_request(b"RAQ1 " + b"a" * 32)
+
     def test_full_console_requests(self):
         """Decode reference discovery, identification and chunk request fields."""
         discovery = parse_request(b"RAP1 192.0.2.10 18195")
