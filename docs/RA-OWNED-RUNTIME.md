@@ -69,7 +69,13 @@ on that adapter. Direct callbacks remain available for bounded host fixtures;
 they cannot be forcibly stopped. Production resolvers must be module-level
 importable callables with picklable state and must not perform unlock side
 effects. Both application entry points call `freeze_support` before launcher
-initialization; actual frozen-process acceptance remains a packaging gate.
+initialization. Windows standalone build `3f1e7e7` passed the actual EXE's
+`--selfcheck-ra-resolver` probe (result delivery, hard timeout, child reaping),
+both existing packaged RA-mode smoke checks, and fresh-profile desktop startup.
+Use `OwnedService(ProcessResolver(resolve_set, timeout=10), ...)` for external
+identification; passing `resolve_set` directly selects the cooperative thread
+path and does not supply hard cancellation. The resolver integration must
+retain the process adapter. No owned account/evaluator route is activated yet.
 Real account resolution, evaluator integration and active-service selection
 remain unimplemented. Source-IP
 ownership is an unauthenticated lease, not a security identity, and cannot
