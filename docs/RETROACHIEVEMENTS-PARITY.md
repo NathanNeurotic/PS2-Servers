@@ -8,6 +8,11 @@ unfinished items.
 
 References are pinned in `vendor/retroachievements/sources.json`.
 
+See [the OPL compatibility matrix](RA-OPL-COMPATIBILITY.md) for exact initial
+loader targets, verified artifact identities, transport qualifications and the
+reconciled remaining-work inventory. An implemented row below does not imply
+console acceptance or an independently owned runtime.
+
 | Capability | Status | Acceptance |
 | --- | --- | --- |
 | Independent PS2-Servers RA runtime (no xeRAbora client executable or embedded page) | **Not implemented** | Own protocol receiver, snapshot assembly, watch-list lifecycle, rcheevos integration, account/RA API workflow and native/local UI. Keep upstream protocol and MIT dependency attribution. Confirm no bundled xeRAbora runtime remains. |
