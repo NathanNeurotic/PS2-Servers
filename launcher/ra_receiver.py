@@ -31,6 +31,7 @@ class ReceiverOutput:
     destination: tuple = ()
     values: bytes = b""
     generation: int = 0
+    sequence: int = None
 
 
 class Receiver:
@@ -147,7 +148,8 @@ class Receiver:
                 return ReceiverOutput()
             if values is not None:
                 self.last_activity = now
-                return ReceiverOutput(values=values, generation=self.session.generation)
+                return ReceiverOutput(values=values, generation=self.session.generation,
+                                      sequence=self.session.assembler.sequence)
             return ReceiverOutput()
         self.requests += 1
         if self.requests > self.requests_per_second:

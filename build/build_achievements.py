@@ -13,7 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "vendor" / "retroachievements"
 
-def build():
+def compiler_command():
+    """Select the existing pinned native toolchain and requested target."""
     system = platform.system()
     compiler = os.environ.get("RA_CC")
     if system == "Windows" and not compiler:
@@ -38,6 +39,12 @@ def build():
         cc = shlex.split(compiler or "cc")
     if not shutil.which(cc[0]):
         raise RuntimeError("RetroAchievements engine requires a C compiler (RA_CC)")
+    return cc
+
+
+def build():
+    system = platform.system()
+    cc = compiler_command()
     client = VENDOR / "xerabora" / "client"
     rc = VENDOR / "rcheevos"
     makefile = (client / "Makefile").read_text()

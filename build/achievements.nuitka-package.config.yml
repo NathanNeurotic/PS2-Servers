@@ -6,3 +6,9 @@
           - 'ps2ra'
         executable: 'yes'
       dest_path: 'native'
+    - from_filenames:
+        relative_path: '../build/native'
+        prefixes:
+          - 'rcheevos-owned'
+          - 'librcheevos-owned'
+      dest_path: 'native'

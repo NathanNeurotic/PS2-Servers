@@ -28,6 +28,12 @@ def main(argv=None):
         print(json.dumps(package_selfcheck(), sort_keys=True))
         return 0
 
+    if argv == ["--selfcheck-ra-evaluator"]:
+        import json
+        from .ra_evaluator import package_selfcheck
+        print(json.dumps(package_selfcheck(), sort_keys=True))
+        return 0
+
     if "--serve" in argv:
         i = argv.index("--serve")
         rest = argv[i + 1:]

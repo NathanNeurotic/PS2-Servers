@@ -26,8 +26,8 @@ class OwnedServiceTests(unittest.TestCase):
             self.assertTrue(service.stop())
         self.client.close()
 
-    def start(self, resolve):
-        service = OwnedService(resolve, advertised_replies=False)
+    def start(self, resolve, **options):
+        service = OwnedService(resolve, advertised_replies=False, **options)
         self.services.append(service)
         self.address = service.start()
         return service
@@ -144,3 +144,33 @@ class OwnedServiceTests(unittest.TestCase):
         self.assertTrue(self.request(b"RAP1 127.0.0.1 18195").startswith(b"RAO1 OK"))
         self.assertEqual(self.ready(), b"RAA1 NO")
         self.assertTrue(service._loop.is_alive())
+
+    def test_complete_frames_are_fifo_and_overflow_is_observable(self):
+        service = self.start(lambda job, cancel: IdentificationResult(self.watch),
+                             frame_capacity=2)
+        self.ready()
+        self.request(b"RAG1 " + b"a" * 32 + b" 0")
+        for sequence in (1, 2):
+            self.client.sendto(packet(b"abcdef", sequence=sequence), self.address)
+        self.request(b"RAP1 127.0.0.1 18195")
+        self.assertEqual(service.take_frame().sequence, 1)
+        self.assertEqual(service.take_frame().sequence, 2)
+        self.assertIsNone(service.take_frame())
+        for sequence in (3, 4, 5):
+            self.client.sendto(packet(b"abcdef", sequence=sequence), self.address)
+        self.request(b"RAP1 127.0.0.1 18195")
+        self.assertEqual(service.dropped_frames, 2)
+        self.assertEqual(service.take_frame().sequence, 5)
+        self.assertIsNone(service.take_frame())
+
+    def test_reset_clears_entire_frame_backlog(self):
+        service = self.start(lambda job, cancel: IdentificationResult(self.watch))
+        self.ready()
+        self.request(b"RAG1 " + b"a" * 32 + b" 0")
+        for sequence in (1, 2, 3):
+            self.client.sendto(packet(b"abcdef", sequence=sequence), self.address)
+        self.request(b"RAP1 127.0.0.1 18195")
+        service.reset()
+        self.assertIsNone(service.take_frame())
+        self.request(b"RAP1 127.0.0.1 18195")
+        self.assertIsNone(service.take_frame())
