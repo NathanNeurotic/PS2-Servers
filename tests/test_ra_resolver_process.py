@@ -50,6 +50,9 @@ class ProcessResolverTests(unittest.TestCase):
         self.assertIsNone(resolver(self.job, threading.Event()))
         self.assertLess(time.monotonic() - started, 3)
         resolver.resolve = supported
+        # Recovery is the assertion here, not sub-300ms Windows spawn. Keep
+        # the short deadline above for the deliberately stuck callback only.
+        resolver.timeout = 5
         self.assertTrue(resolver(self.job, threading.Event()).unsupported)
 
     def test_cancellation_reaps_child_before_deadline(self):
