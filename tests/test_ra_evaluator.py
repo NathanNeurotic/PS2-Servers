@@ -15,6 +15,8 @@ from launcher.ra_evaluated_receiver import EvaluatedReceiver
 from launcher.ra_receiver import Receiver
 from tests.test_ra_protocol import packet
 from tests.test_ra_watchlist import watch_file
+from tests.test_ra_sets import responses
+from launcher.ra_sets import SetContext, qualify_set, derive_direct_watch
 
 
 class EvaluatorTests(unittest.TestCase):
@@ -256,3 +258,59 @@ class EvaluatorTests(unittest.TestCase):
         self.assertEqual(self.frame(first, b"\1", 2).triggered, (10,))
         self.assertFalse(self.frame(second, b"\1", 1).triggered)
         self.assertEqual(self.frame(second, b"\1", 2).triggered, (10,))
+
+    def qualified(self, expressions, *, unlocks=(), console=21):
+        context = SetContext("Synthetic", 1, "a" * 32, 42, console)
+        patch, prior = responses([{"ID": index + 10, "Flags": 3, "MemAddr": expression}
+                                  for index, expression in enumerate(expressions)], unlocks)
+        if console != 21:
+            import json
+            data = json.loads(patch)
+            data["PatchData"]["ConsoleID"] = console
+            patch = json.dumps(data).encode()
+        return qualify_set(context, patch, prior)
+
+    def test_native_watch_sizes_alternatives_pause_and_deduplication(self):
+        qualified = self.qualified([
+            "0xH001000=1_0x001004=2_0xW001008=3_0xX00100C=4",
+            "P:0xH001000=1S0xH001002=1"])
+        data = derive_direct_watch(self.library, qualified)
+        words = struct.unpack_from("<5I", data, 16)
+        self.assertEqual(words, (0x10001000, 0x10001002, 0x20001004, 0x40001008, 0x4000100C))
+        self.assertEqual(struct.unpack_from("<4I", data)[3], 12)
+
+    def test_native_watch_chain_invalid_expression_and_ram_limits_reject_whole_set(self):
+        for expression, console in (("I:0xX001000_0xH000004=1", 21),
+                                    ("invalid", 21), ("0xX1FFFFF=1", 12)):
+            with self.subTest(expression=expression), self.assertRaises(ValueError):
+                derive_direct_watch(self.library, self.qualified(["0xH001000=1", expression], console=console))
+
+    def test_native_watch_prior_unlocks_are_not_requested_and_orbit_limit_is_enforced(self):
+        data = derive_direct_watch(self.library, self.qualified(
+            ["0xH001000=1", "0xH001001=1"], unlocks=(10,)))
+        self.assertEqual(struct.unpack_from("<I", data, 16)[0], 0x10001001)
+        expression = "_".join("0xX{:06X}=1".format(0x1000 + 4 * i) for i in range(305))
+        qualified = self.qualified([expression])
+        self.assertEqual(struct.unpack_from("<I", derive_direct_watch(self.library, qualified), 12)[0], 1220)
+        with self.assertRaises(ValueError):
+            derive_direct_watch(self.library, qualified, profile="orbit-v1.0.2")
+
+    def test_qualified_account_set_watch_and_native_evaluation_handoff(self):
+        owner = EvaluatedReceiver(self.library)
+        self.addCleanup(owner.close)
+        owner.bind_account("Synthetic", 1)
+        peer = ("127.0.0.1", 18195)
+        query = b"RAQ1 " + b"a" * 32 + b" SLUS_210.65"
+        owner.receive(query, peer)
+        job, = owner.take_jobs()
+        self.assertTrue(owner.complete_set(job, self.qualified(["0xH001000=1"])))
+        owner.receive(b"RAG1 " + b"a" * 32 + b" 0", peer)
+        owner.receive(packet(b"\0", count=1, sequence=1), peer)
+        self.assertEqual(owner.receive(packet(b"\1", count=1, sequence=2), peer).evaluation.triggered, (10,))
+        owner.bind_account("Synthetic", 2)
+        owner.receive(query, peer)
+        new_job, = owner.take_jobs()
+        self.assertFalse(owner.complete_set(new_job, self.qualified(["0xH001000=1"])))
+        self.assertIsNone(owner._evaluator)
+        owner.clear_account()
+        self.assertFalse(owner.complete_set(new_job, self.qualified(["0xH001000=1"])))

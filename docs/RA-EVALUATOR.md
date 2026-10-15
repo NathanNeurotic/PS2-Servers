@@ -10,9 +10,11 @@ desktop application for this path. This is an intermediate implementation for
 `build/build_ra_evaluator.py` builds `rcheevos-owned.dll`,
 `librcheevos-owned.dylib` or `librcheevos-owned.so`. It shares the existing
 pinned native toolchain selection and target architecture. Sources are only
-rcheevos runtime, utility/compatibility and MD5 files. The build preserves the
+rcheevos runtime, utility/compatibility and MD5 files plus our small public-API
+watch probe in `native/ra_watch_probe.c`. The build preserves the
 MIT license and records the exact dependency pin in
 `OWNED-EVALUATOR-SOURCES.json`. Normal package builds stage this library.
+The provenance file also records the watch probe's source hash.
 
 `launcher/ra_evaluator.py` keeps `rc_runtime_t` opaque: it calls allocation,
 achievement activation, frame evaluation and destruction through public
@@ -61,6 +63,31 @@ staged library and callback ABI, independently of source tests.
 
 ## Remaining integration
 
+The opt-in set path first verifies `gameid` for the image hash, without sending
+credentials, then reads the pinned runtime API's `patch` and softcore
+`unlocks` responses using an existing runtime login token. It does not implement
+login or token persistence. Requests use verified HTTPS, POST-only credentials,
+no redirects, bounded response sizes and sanitized failure messages. The socket
+timeout is not a total lookup deadline; this client still needs a killable
+worker integration before activation in the live service. No session or unlock
+submission is performed and tests never contact the real service.
+
+`ra_sets.qualify_set` validates game/console identity, applies core/unofficial
+selection and prior unlocks, and preserves the captured account epoch and image
+hash. Empty remaining definitions are distinct from a failed/unsupported game.
+`EvaluatedReceiver.bind_account/clear_account/complete_set` revoke previous
+state and reject mismatched account epochs/images before native derivation.
+The lower-level `complete` interface remains for already-qualified callers.
+
+Direct watch derivation uses native rcheevos memory callbacks and public parsed
+condition sets; it does not scan expression strings or mirror private layouts.
+It includes alternate and paused groups, deduplicates reads, validates PS1/PS2
+RAM limits and enforces the explicit ORBIT ceiling. Pointer-chain sets are
+rejected in full until owned RANL derivation is implemented. Constant-only sets
+and sets with no remaining conditions also cannot currently be installed on
+this opt-in receiver path. These are remaining gaps, not unsupported-game
+declarations, and the managed service remains selected.
+
 `launcher/ra_evaluated_receiver.py` now provides an opt-in, single-owner adapter
 between the receiver and evaluator. It activates a complete set before
 advertising the watch list, ignores stale worker results before native
@@ -72,9 +99,9 @@ pending results for the same image. Local events are returned to the owner,
 never submitted automatically. This synchronous adapter belongs off the UI
 thread and has not replaced the managed service or been wired into OwnedService.
 
-Account eligibility, legitimate set fetching, prior unlocks and core/unofficial
-selection must be resolved before evaluator construction. Watch derivation
-from the fetched set, live service/evaluator ownership, leaderboard and rich
+Account login/persistence, authenticated host/real-account acceptance and
+killable set-fetch integration remain open. Pointer watch derivation,
+live service/evaluator transport ownership, leaderboard and rich
 presence integration, unlock/session API handling, UI adapters and console
 acceptance remain open. The new evaluator performs no HTTP requests or unlock
 submissions. Neither source tests nor a packaged probe establish hardware or
