@@ -193,6 +193,8 @@ def main():
     system = platform.system()
     from build_achievements import build as build_achievements
     build_achievements()
+    from build_ra_evaluator import build as build_ra_evaluator
+    build_ra_evaluator()
     _write_build_id()
     out = (release_metadata.WINDOWS_EXE_NAME if system == "Windows"
            else release_metadata.EXECUTABLE_BASENAME)

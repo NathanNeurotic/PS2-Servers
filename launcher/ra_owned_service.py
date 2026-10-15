@@ -23,7 +23,7 @@ class IdentificationResult:
 
 
 class OwnedService:
-    """One UDP owner, one resolver and one latest-frame slot.
+    """One UDP owner, one resolver and a bounded FIFO of complete frames.
 
     resolve(job, cancel_event) returns IdentificationResult. Exceptions and
     invalid results are transient failures, never declarations of no support.
@@ -31,12 +31,16 @@ class OwnedService:
     No account credentials or native evaluator are wired here yet.
     """
 
-    def __init__(self, resolve, address=("127.0.0.1", 0), **receiver_options):
+    def __init__(self, resolve, address=("127.0.0.1", 0), frame_capacity=256,
+                 **receiver_options):
+        if type(frame_capacity) is not int or not 1 <= frame_capacity <= 1024:
+            raise ValueError("Invalid frame queue capacity")
         self.resolve = resolve
         self.address = address
         self.receiver_options = receiver_options
         self._loop = self._worker = None
-        self._frames = queue.Queue(maxsize=1)
+        self._frames = queue.Queue(maxsize=frame_capacity)
+        self.dropped_frames = 0
         self._reset = threading.Event()
         self._frame_lock = threading.Lock()
         self._frame_generation = None
@@ -62,6 +66,7 @@ class OwnedService:
         self._results = queue.Queue(maxsize=1)
         with self._frame_lock:
             self._discard_frame()
+            self.dropped_frames = 0
         self._worker = threading.Thread(target=self._resolve, daemon=True,
                                         name="RA owned resolver")
         self._loop = threading.Thread(target=self._serve, args=(listener, receiver), daemon=True,
@@ -72,10 +77,11 @@ class OwnedService:
 
     def _discard_frame(self):
         self._frame_generation = None
-        try:
-            self._frames.get_nowait()
-        except queue.Empty:
-            pass
+        while True:
+            try:
+                self._frames.get_nowait()
+            except queue.Empty:
+                break
 
     def reset(self):
         """Immediately hide queued frames, then revoke state on the UDP owner."""
@@ -86,7 +92,12 @@ class OwnedService:
             self._discard_frame()
 
     def take_frame(self):
-        """Return the latest complete ReceiverOutput, or None; never block."""
+        """Return the oldest queued complete frame, or None; never block.
+
+        On overflow the backlog is discarded and the new frame retained.
+        Its sequence exposes the discontinuity to the evaluator, which must
+        reset temporal history. dropped_frames makes this loss observable.
+        """
         with self._frame_lock:
             if self._reset.is_set():
                 return None
@@ -189,7 +200,9 @@ class OwnedService:
                 if output.values:
                     with self._frame_lock:
                         if not self._reset.is_set():
-                            self._discard_frame()
+                            if self._frames.full():
+                                self.dropped_frames += self._frames.qsize()
+                                self._discard_frame()
                             self._frames.put_nowait(output)
                             self._frame_generation = output.generation
         finally:

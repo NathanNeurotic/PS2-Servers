@@ -56,8 +56,8 @@ synthetic resolution results; no account or socket is used.
 
 An external event loop must serialize receiver calls and marshal worker results
 back to the owner. The opt-in `launcher/ra_owned_service.py` now supplies a UDP
-owner thread, one resolver worker, one queued job/result and one latest-frame
-slot. Loopback tests cover reception during a blocked lookup, stale game
+owner thread, one resolver worker, one queued job/result and a bounded FIFO
+of complete frames. Loopback tests cover reception during a blocked lookup, stale game
 results, transient failures, reset, bind conflicts and listener release.
 `stop()` reports an outstanding callback and restart refuses to accumulate
 workers. External identification uses `ProcessResolver`: one spawned child
@@ -76,8 +76,9 @@ Use `OwnedService(ProcessResolver(resolve_set, timeout=10), ...)` for external
 identification; passing `resolve_set` directly selects the cooperative thread
 path and does not supply hard cancellation. The resolver integration must
 retain the process adapter. No owned account/evaluator route is activated yet.
-Real account resolution, evaluator integration and active-service selection
-remain unimplemented. Source-IP
+The [owned evaluator](RA-EVALUATOR.md) now consumes validated receiver outputs
+through the public rcheevos API in offline tests. Account-backed set resolution,
+live evaluator ownership and active-service selection remain unimplemented. Source-IP
 ownership is an unauthenticated lease, not a security identity, and cannot
 distinguish multiple consoles behind the same translated source address.
 Foreign-source traffic is rejected before charging the owner's packet budget;
