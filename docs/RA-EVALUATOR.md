@@ -61,6 +61,17 @@ staged library and callback ABI, independently of source tests.
 
 ## Remaining integration
 
+`launcher/ra_evaluated_receiver.py` now provides an opt-in, single-owner adapter
+between the receiver and evaluator. It activates a complete set before
+advertising the watch list, ignores stale worker results before native
+allocation, evaluates only complete transferred-list frames, and closes native
+state on game change, lease expiry, reset and shutdown. A failed activation or
+metadata conversion revokes any partial installation and remains retryable.
+Account changes must call `reset()`; its generation tokens invalidate even
+pending results for the same image. Local events are returned to the owner,
+never submitted automatically. This synchronous adapter belongs off the UI
+thread and has not replaced the managed service or been wired into OwnedService.
+
 Account eligibility, legitimate set fetching, prior unlocks and core/unofficial
 selection must be resolved before evaluator construction. Watch derivation
 from the fetched set, live service/evaluator ownership, leaderboard and rich

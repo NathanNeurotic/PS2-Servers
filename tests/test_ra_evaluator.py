@@ -11,6 +11,7 @@ import ctypes
 
 from build.build_ra_evaluator import build, library_name
 from launcher.ra_evaluator import Evaluator
+from launcher.ra_evaluated_receiver import EvaluatedReceiver
 from launcher.ra_receiver import Receiver
 from tests.test_ra_protocol import packet
 from tests.test_ra_watchlist import watch_file
@@ -52,6 +53,109 @@ class EvaluatorTests(unittest.TestCase):
                             watch or watch_file([0x10001000]), 7)
         self.addCleanup(runtime.close)
         return runtime
+
+    def owned_receiver(self):
+        self.now = 0
+        owner = EvaluatedReceiver(self.library, clock=lambda: self.now)
+        self.addCleanup(owner.close)
+        self.peer = ("127.0.0.1", 18195)
+        self.query = b"RAQ1 " + b"a" * 32 + b" SLUS_210.65"
+        owner.receive(self.query, self.peer)
+        job, = owner.take_jobs()
+        return owner, job
+
+    def install_owned(self, owner, job, expression="0xH001000=1"):
+        self.assertTrue(owner.complete(job, watch_file([0x10001000]),
+                                       {10: expression}, title="Synthetic"))
+        owner.receive(b"RAG1 " + b"a" * 32 + b" 0", self.peer)
+
+    def test_owned_receiver_evaluates_only_after_watch_transfer(self):
+        owner, job = self.owned_receiver()
+        self.assertTrue(owner.complete(job, watch_file([0x10001000]),
+                                       {10: "0xH001000=1"}))
+        self.assertIsNone(owner.receive(packet(b"\0", count=1), self.peer).evaluation)
+        owner.receive(b"RAG1 " + b"a" * 32 + b" 0", self.peer)
+        owner.receive(packet(b"\0", count=1, sequence=1), self.peer)
+        result = owner.receive(packet(b"\1", count=1, sequence=2), self.peer)
+        self.assertEqual(result.evaluation.triggered, (10,))
+        self.assertIsNone(owner.receive(packet(b"\1", count=1, sequence=2), self.peer).evaluation)
+
+    def test_owned_reset_revokes_worker_result_before_native_allocation(self):
+        owner, job = self.owned_receiver()
+        owner.reset()
+        owner.receive(self.query, self.peer)  # same image, new account generation
+        with mock.patch("launcher.ra_evaluated_receiver.Evaluator") as allocate:
+            self.assertFalse(owner.complete(job, watch_file([0x10001000]),
+                                            {10: "0xH001000=1"}))
+            allocate.assert_not_called()
+
+    def test_owned_metadata_failure_revokes_partially_installed_watch(self):
+        owner, job = self.owned_receiver()
+        class InvalidTitle:
+            def __str__(self):
+                raise ValueError("Invalid title")
+        allocated = []
+        def allocate(*args):
+            runtime = Evaluator(*args)
+            allocated.append(runtime)
+            return runtime
+        with mock.patch("launcher.ra_evaluated_receiver.Evaluator", side_effect=allocate):
+            with self.assertRaises(ValueError):
+                owner.complete(job, watch_file([0x10001000]),
+                               {10: "0xH001000=1"}, title=InvalidTitle())
+        self.assertIsNone(owner._receiver.session.watch)
+        self.assertIsNone(owner._evaluator)
+        runtime, = allocated
+        with self.assertRaises(RuntimeError):
+            runtime.evaluate(b"\0", generation=runtime.generation, sequence=1)
+        self.assertEqual(owner.receive(self.query, self.peer).wire.reply.rstrip(), b"RAA1 WAIT")
+
+    def test_owned_expiry_closes_runtime_and_rejects_old_memory(self):
+        owner, job = self.owned_receiver()
+        self.install_owned(owner, job)
+        runtime = owner._evaluator
+        self.now = 16
+        owner.tick()
+        with self.assertRaises(RuntimeError):
+            runtime.evaluate(b"\0", generation=runtime.generation, sequence=1)
+        self.assertIsNone(owner.receive(packet(b"\1", count=1), self.peer).evaluation)
+
+    def test_owned_game_change_discards_hits_and_closes_previous_runtime(self):
+        owner, job = self.owned_receiver()
+        self.install_owned(owner, job, "0xH001000=1.2.")
+        old = owner._evaluator
+        owner.receive(packet(b"\0", count=1, sequence=1), self.peer)
+        owner.receive(packet(b"\1", count=1, sequence=2), self.peer)
+        other = self.query.replace(b"a" * 32, b"b" * 32)
+        owner.receive(other, self.peer)
+        self.assertIsNone(owner._evaluator)
+        with self.assertRaises(RuntimeError):
+            old.evaluate(b"\1", generation=old.generation, sequence=3)
+        job, = owner.take_jobs()
+        self.assertTrue(owner.complete(job, watch_file([0x10001000]),
+                                       {10: "0xH001000=1.2."}))
+        owner.receive(b"RAG1 " + b"b" * 32 + b" 0", self.peer)
+        owner.receive(packet(b"\0", count=1, sequence=1), self.peer)
+        self.assertFalse(owner.receive(packet(b"\1", count=1, sequence=2), self.peer).evaluation.triggered)
+        self.assertEqual(owner.receive(packet(b"\1", count=1, sequence=3), self.peer).evaluation.triggered, (10,))
+
+    def test_owned_invalid_set_is_retryable_and_never_advertised(self):
+        owner, job = self.owned_receiver()
+        with self.assertRaises(ValueError):
+            owner.complete(job, watch_file([0x10001000]), {10: "invalid"})
+        reply = owner.receive(self.query, self.peer).wire.reply.rstrip()
+        self.assertEqual(reply, b"RAA1 WAIT")
+        self.assertIsNone(owner._evaluator)
+        retry, = owner.take_jobs()
+        self.install_owned(owner, retry)
+
+    def test_owned_close_is_terminal_and_idempotent(self):
+        owner, job = self.owned_receiver()
+        self.install_owned(owner, job)
+        owner.close()
+        owner.close()
+        with self.assertRaises(RuntimeError):
+            owner.receive(self.query, self.peer)
 
     def frame(self, runtime, value, sequence, generation=7):
         return runtime.evaluate(value, generation=generation, sequence=sequence)
