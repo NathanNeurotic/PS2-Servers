@@ -5,33 +5,49 @@ The application must enable multiprocessing.freeze_support in its entry point
 before selecting this adapter in a frozen build. No credentials go on argv.
 """
 import multiprocessing
+import pickle
+import queue
+import threading
 import time
 
+IPC_LIMIT = 8 * 1024 * 1024
 
-def _run(resolve, job, cancel, connection):
+
+def valid_identification_result(result):
+    """Keep the original bounded identification IPC contract as the default."""
+    from launcher.ra_owned_service import IdentificationResult
+    return (isinstance(result, IdentificationResult) and
+            (result.watch_file is None or (type(result.watch_file) is bytes and len(result.watch_file) <= 17432)) and
+            type(result.title) is str and len(result.title) <= 4096 and
+            (result.serial is None or (type(result.serial) is str and len(result.serial) <= 64)) and
+            type(result.achievements) is int and 0 <= result.achievements <= 10000000 and
+            type(result.unsupported) is bool)
+
+
+def _run(resolve, job, cancel, connection, validate):
     try:
-        from launcher.ra_owned_service import IdentificationResult
         result = resolve(job, cancel)
         # Bound IPC before serializing; a callback cannot send arbitrary objects
         # or an unbounded response into the receiving supervisor thread.
-        if not isinstance(result, IdentificationResult):
+        if not validate(result):
             return
-        if result.watch_file is not None and (type(result.watch_file) is not bytes or
-                                              len(result.watch_file) > 17432):
-            return
-        if (type(result.title) is not str or len(result.title) > 4096 or
-                (result.serial is not None and
-                 (type(result.serial) is not str or len(result.serial) > 64)) or
-                type(result.achievements) is not int or
-                not 0 <= result.achievements <= 10000000 or
-                type(result.unsupported) is not bool):
-            return
-        connection.send(result)
+        payload = pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL)
+        if len(payload) <= IPC_LIMIT:
+            connection.send_bytes(payload)
     except Exception:
         # Failures remain retryable; do not serialize exception/credential text.
         pass
     finally:
         connection.close()
+
+
+def _receive(connection, delivered):
+    """Keep partial pipe writes from blocking the supervisor's deadline loop."""
+    try:
+        result = pickle.loads(connection.recv_bytes(IPC_LIMIT))
+    except Exception:
+        result = None
+    delivered.put_nowait(result)
 
 
 class ProcessResolver:
@@ -42,20 +58,24 @@ class ProcessResolver:
     Intended for bounded identification, never unlock/submission side effects.
     """
 
-    def __init__(self, resolve, timeout=10):
+    def __init__(self, resolve, timeout=10, validate=valid_identification_result):
         if timeout <= 0:
             raise ValueError("Resolver deadline must be positive")
         self.resolve = resolve
+        self.validate = validate
         self.timeout = timeout
         self._child = None
+        self._reader = None
 
     def __call__(self, job, cancel):
         if self._child is not None and self._child.is_alive():
             raise RuntimeError("Previous resolver process remains alive")
+        if self._reader is not None and self._reader.is_alive():
+            raise RuntimeError("Previous resolver reader remains alive")
         context = multiprocessing.get_context("spawn")
         reader, writer = context.Pipe(duplex=False)
         child_cancel = context.Event()
-        child = context.Process(target=_run, args=(self.resolve, job, child_cancel, writer),
+        child = context.Process(target=_run, args=(self.resolve, job, child_cancel, writer, self.validate),
                                 daemon=True, name="RA identification")
         self._child = child
         started = False
@@ -63,18 +83,20 @@ class ProcessResolver:
             child.start()
             started = True
             writer.close()
+            delivered = queue.Queue(maxsize=1)
+            receiver = self._reader = threading.Thread(target=_receive, args=(reader, delivered), daemon=True)
+            receiver.start()
             deadline = time.monotonic() + self.timeout
             while not cancel.is_set() and time.monotonic() < deadline:
-                if reader.poll(0.02):
-                    try:
-                        return reader.recv()
-                    except EOFError:
-                        return None
-                if not child.is_alive():
+                try:
+                    result = delivered.get(timeout=0.02)
+                except queue.Empty:
+                    continue
+                if cancel.is_set() or time.monotonic() >= deadline:
                     return None
+                return result if self.validate(result) else None
             return None
         finally:
-            reader.close()
             writer.close()
             if started:
                 child_cancel.set()
@@ -89,6 +111,12 @@ class ProcessResolver:
                     raise RuntimeError("Cannot reap resolver process")
                 child.close()
             self._child = None
+            reader.close()
+            if self._reader is not None:
+                self._reader.join(0.5)
+                if self._reader.is_alive():
+                    raise RuntimeError("Cannot reap resolver reader")
+                self._reader = None
 
 
 def _probe_result(job, cancel):

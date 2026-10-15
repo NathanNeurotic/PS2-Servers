@@ -1,5 +1,50 @@
 # Upstream RA audit, 2026-10-11
 
+## Refresh, 2026-10-15
+
+Verified default-branch heads and published release metadata directly against
+the pins. No dependency or loader artifact pin was changed by this refresh.
+
+| Reference | Current head | Delta / decision |
+| --- | --- | --- |
+| xeRAbora | `0e5d35a3e9c64594973aff995f5d1a2db62310d4`, alpha.18 | Four commits after our pin. Inspect/adapt focused changes; preserve our managed profile, secret protection and native conformance patches. |
+| Caduceus | `311f4eabc4ddaad649cbd0d60859f27d0ffcbbfc` | Matches the existing pin; latest release remains v1.2.1. |
+| Caduceus OPL | `cc1713a893a976c9b26ae1dd9975c200a461edfe` | Matches the existing pin. |
+| ORBIT | `28a23666fbc8b11b5edabcfff0f780b2b2161219` | One merge commit beyond v1.0.2, with no tree difference. Latest release remains v1.0.2. |
+
+[xeRAbora alpha.18](https://github.com/hacan359/xerabora/releases/tag/v0.1.0-alpha.18)
+reports large-set telemetry repair and hardware results for Mortal Kombat:
+Shaolin Monks. These are upstream-reported results, not our console acceptance.
+Its OPL submodule advances from `531aad4584d65d1779b744739b81402150c7669c` to
+`c6e14e6b943be74210981e3a7bd51a25702a8df0`, adding the previously audited Mode 6
+snapshot hook and a binary chunk parser correction.
+
+The [parser fix](https://github.com/hacan359/Open-PS2-Loader/commit/c6e14e6b943be74210981e3a7bd51a25702a8df0)
+removes scanf whitespace before `%n`, which otherwise consumes leading binary
+payload bytes 0x09--0x0D or 0x20. RiptOPL's remote `rebuild/main` already has
+its corresponding bounded parser in
+[`c0841e4`](https://github.com/NathanNeurotic/Open-PS2-Loader/commit/c0841e4af500a87cc4e4536ce61adf5ba4b49b69).
+The local RiptOPL checkout inspected first was behind; do not duplicate that
+fix or try to hide it by changing the server's compatible chunk wire format.
+Upstream also removes the cheat engine in that commit; adopting that separate
+product decision is not required to adapt the parser repair.
+
+Desktop follow-ups from alpha.18: independent softcore/hardcore date flags,
+a persistent TV-notice toggle, rich presence in console diagnostics and richer
+list/grid presentation. Our vendored `raweb_game_progress` still has the old
+date precedence and needs a focused correction with a native response fixture;
+these desktop changes have not been imported by this refresh.
+
+The new unread-memory survey confirms a PS2 agent constraint: low/kernel RAM
+below 0x80000 and the scratchpad above 0x02000000 are not streamed as authentic
+values by the current EE reader. Our owned direct-watch qualification now
+rejects those sets in full, with native fixtures at the boundaries. This does
+not alter PS1 logical RAM bounds or the managed engine's routing. Broadening
+agent reads needs console work and acceptance, not a host-generated zero value.
+
+References: [Caduceus v1.2.1](https://github.com/Rian6/caduceus/releases/tag/v1.2.1),
+[ORBIT v1.0.2](https://github.com/danielnuld/ps2-launcher/releases/tag/v1.0.2).
+
 Scope: the pinned xeRAbora, its OPL submodule, Caduceus, Caduceus OPL and
 rcheevos references used by PS2-Servers. Source, published binary identity,
 host tests and physical console acceptance remain separate evidence.

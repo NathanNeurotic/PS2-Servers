@@ -205,16 +205,16 @@ class Evaluator:
 def package_selfcheck():
     """Exercise native callbacks and memory-history recovery without an account."""
     from launcher.ra_sets import SetContext, QualifiedSet, derive_direct_watch
-    watch = struct.pack("<5I", 0x4C574152, 1, 1, 1, 0x10001000)
+    watch = struct.pack("<5I", 0x4C574152, 1, 1, 1, 0x10080000)
     qualified = QualifiedSet(SetContext("Synthetic", 1, "a" * 32, 42, 21),
-                             "Synthetic", ((10, "0xH001000=1"),), (10,), (), ())
+                             "Synthetic", ((10, "0xH080000=1"),), (10,), (), ())
     if derive_direct_watch(library_path(), qualified) != watch:
         raise RuntimeError("Native direct-watch derivation mismatch")
-    with Evaluator(library_path(), {10: "0xH001000=1"}, watch, 1) as runtime:
+    with Evaluator(library_path(), {10: "0xH080000=1"}, watch, 1) as runtime:
         runtime.evaluate(b"\0", generation=1, sequence=0)
         if runtime.evaluate(b"\1", generation=1, sequence=1).triggered != (10,):
             raise RuntimeError("Native achievement condition did not trigger")
-    with Evaluator(library_path(), {10: "d0xH001000=9_0xH001000=1"}, watch, 1) as runtime:
+    with Evaluator(library_path(), {10: "d0xH080000=9_0xH080000=1"}, watch, 1) as runtime:
         runtime.evaluate(b"\0", generation=1, sequence=0)
         runtime.evaluate(b"\11", generation=1, sequence=1)
         if runtime.evaluate(b"\1", generation=1, sequence=3).triggered:

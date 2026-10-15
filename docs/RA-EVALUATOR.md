@@ -66,10 +66,12 @@ staged library and callback ABI, independently of source tests.
 The opt-in set path first verifies `gameid` for the image hash, without sending
 credentials, then reads the pinned runtime API's `patch` and softcore
 `unlocks` responses using an existing runtime login token. It does not implement
-login or token persistence. Requests use verified HTTPS, POST-only credentials,
+the active login UI. The opt-in [owned account boundary](RA-ACCOUNT.md) now adds
+login/resume, explicit import, private token storage and a killable paced worker.
+Requests use verified HTTPS, POST-only credentials,
 no redirects, bounded response sizes and sanitized failure messages. The socket
-timeout is not a total lookup deadline; this client still needs a killable
-worker integration before activation in the live service. No session or unlock
+timeout is not a total lookup deadline; the owned account worker supplies a
+process deadline, with active service orchestration still pending. No session or unlock
 submission is performed and tests never contact the real service.
 
 `ra_sets.qualify_set` validates game/console identity, applies core/unofficial
@@ -82,7 +84,9 @@ The lower-level `complete` interface remains for already-qualified callers.
 Direct watch derivation uses native rcheevos memory callbacks and public parsed
 condition sets; it does not scan expression strings or mirror private layouts.
 It includes alternate and paused groups, deduplicates reads, validates PS1/PS2
-RAM limits and enforces the explicit ORBIT ceiling. Pointer-chain sets are
+RAM limits and enforces the explicit ORBIT ceiling. The PS2 lower bound is
+0x80000, matching the current EE reader; its kernel/low RAM and scratchpad
+must not be treated as authentic zero-valued watched memory. Pointer-chain sets are
 rejected in full until owned RANL derivation is implemented. Constant-only sets
 and sets with no remaining conditions also cannot currently be installed on
 this opt-in receiver path. These are remaining gaps, not unsupported-game
@@ -99,8 +103,8 @@ pending results for the same image. Local events are returned to the owner,
 never submitted automatically. This synchronous adapter belongs off the UI
 thread and has not replaced the managed service or been wired into OwnedService.
 
-Account login/persistence, authenticated host/real-account acceptance and
-killable set-fetch integration remain open. Pointer watch derivation,
+Native login UI, authenticated host/real-account acceptance and
+active set-fetch orchestration remain open. Pointer watch derivation,
 live service/evaluator transport ownership, leaderboard and rich
 presence integration, unlock/session API handling, UI adapters and console
 acceptance remain open. The new evaluator performs no HTTP requests or unlock

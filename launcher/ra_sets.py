@@ -156,14 +156,16 @@ def derive_direct_watch(library, qualified, *, profile="opl"):
     probe.restype = ctypes.c_int
     entries = set()
     memory_limit = 2 * 1024 * 1024 if qualified.context.console_id == 12 else 32 * 1024 * 1024
+    memory_low = 0 if qualified.context.console_id == 12 else 0x80000
     for _, expression in qualified.definitions:
         output = (ctypes.c_uint32 * 4096)()
         count = probe(expression.encode("ascii"), output, len(output))
         if count < 0:
             raise ValueError("Native watch derivation rejected the complete set (code {})".format(count))
         for word in output[:count]:
-            if (word & 0x0FFFFFFF) + (word >> 28) > memory_limit:
-                raise ValueError("Watch read exceeds console RAM")
+            address = word & 0x0FFFFFFF
+            if address < memory_low or address + (word >> 28) > memory_limit:
+                raise ValueError("Watch read is outside console-readable RAM")
             entries.add(word)
         if len(entries) > 4096:
             raise ValueError("Watch entry limit exceeded")

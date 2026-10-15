@@ -1,5 +1,6 @@
 """Spawn-based hard cancellation tests with intentionally stuck callbacks."""
 import multiprocessing
+import os
 import threading
 import time
 import unittest
@@ -24,6 +25,19 @@ def crash(job, cancel):
 
 def oversized(job, cancel):
     return IdentificationResult(watch_file=b"x" * 17433)
+
+
+def partial_write(job, cancel):
+    """POSIX sender writes a header and one payload byte, then stalls."""
+    import struct
+    from multiprocessing.connection import Connection
+    def send_partial(connection, data):
+        connection._send(struct.pack("!i", len(data)))
+        connection._send(bytes(data[:1]))
+        while True:
+            time.sleep(1)
+    Connection._send_bytes = send_partial
+    return IdentificationResult(unsupported=True)
 
 
 class SignalledStuck:
@@ -53,6 +67,16 @@ class ProcessResolverTests(unittest.TestCase):
         # Recovery is the assertion here, not sub-300ms Windows spawn. Keep
         # the short deadline above for the deliberately stuck callback only.
         resolver.timeout = 5
+        self.assertTrue(resolver(self.job, threading.Event()).unsupported)
+
+    @unittest.skipIf(os.name == "nt", "POSIX byte-stream framing; Windows uses message-mode pipes")
+    def test_partial_ipc_payload_cannot_block_deadline_or_leave_a_reader(self):
+        resolver = ProcessResolver(partial_write, timeout=2)
+        started = time.monotonic()
+        self.assertIsNone(resolver(self.job, threading.Event()))
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertIsNone(resolver._reader)
+        resolver.resolve, resolver.timeout = supported, 5
         self.assertTrue(resolver(self.job, threading.Event()).unsupported)
 
     def test_cancellation_reaps_child_before_deadline(self):
