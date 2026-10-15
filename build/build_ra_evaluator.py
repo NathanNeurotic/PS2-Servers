@@ -1,5 +1,6 @@
 """Build the owned evaluator's pinned rcheevos library, without desktop sources."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import platform
@@ -17,7 +18,7 @@ def library_name():
 
 
 def build(output=None):
-    """Compile only rcheevos runtime sources; return the output path."""
+    """Compile rcheevos and our public-API watch adapter; return the output path."""
     rc = ROOT / "vendor/retroachievements/rcheevos"
     target = Path(output) if output else ROOT / "build/native" / library_name()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -38,12 +39,15 @@ def build(output=None):
         command += ["-I", str(directory)]
     sources = sorted((rc / "src/rcheevos").glob("*.c"))
     sources += [rc / "src/rc_util.c", rc / "src/rc_compat.c", rc / "src/rhash/md5.c"]
+    sources += [ROOT / "native/ra_watch_probe.c"]
     subprocess.run(command + list(map(str, sources)) + ["-o", str(target), "-lm"],
                    check=True, timeout=180)
     shutil.copy2(rc / "LICENSE", target.parent / "LICENSE-rcheevos.txt")
     provenance = json.loads((ROOT / "vendor/retroachievements/sources.json").read_text())
     (target.parent / "OWNED-EVALUATOR-SOURCES.json").write_text(
         json.dumps({"rcheevos": provenance["rcheevos"],
+                    "owned_sources": {"native/ra_watch_probe.c": hashlib.sha256(
+                        (ROOT / "native/ra_watch_probe.c").read_bytes()).hexdigest()},
                     "interface": "public rc_runtime API; no xeRAbora desktop sources"},
                    indent=2) + "\n", encoding="utf-8")
     return target
