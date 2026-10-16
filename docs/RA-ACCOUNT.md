@@ -45,6 +45,10 @@ IPC to 8 MiB and reads on one owned helper thread. Partial pipe payloads therefo
 cannot block its deadline loop. Timeout/cancellation terminates and reaps the
 child and releases its reader; a surviving process/reader prevents replacement.
 This is a trusted local child channel, not a network pickle endpoint.
+Deserialization permits only the passive result dataclasses; other pickle globals
+are rejected before result validation. The managed POSIX engine also tightens an
+existing application profile to 0700, rejecting links and foreign owners while
+leaving the shared XDG/.config parent unchanged.
 
 Qualified set results retain the account epoch, image hash and game/console ID.
 The owner publishes them only through the existing generation-bound receiver.

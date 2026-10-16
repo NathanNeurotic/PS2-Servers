@@ -5,6 +5,7 @@ The application must enable multiprocessing.freeze_support in its entry point
 before selecting this adapter in a frozen build. No credentials go on argv.
 """
 import multiprocessing
+import io
 import pickle
 import queue
 import threading
@@ -41,10 +42,24 @@ def _run(resolve, job, cancel, connection, validate):
         connection.close()
 
 
+class _ResultUnpickler(pickle.Unpickler):
+    """Only passive result dataclasses may cross the lookup child boundary."""
+    def find_class(self, module, name):
+        allowed = {
+            "launcher.ra_owned_service": {"IdentificationResult"},
+            "launcher.ra_account_worker": {"AccountResult"},
+            "launcher.ra_credentials": {"Credentials"},
+            "launcher.ra_sets": {"SetContext", "QualifiedSet"},
+        }
+        if name not in allowed.get(module, set()):
+            raise pickle.UnpicklingError("Invalid resolver result type")
+        return super().find_class(module, name)
+
+
 def _receive(connection, delivered):
     """Keep partial pipe writes from blocking the supervisor's deadline loop."""
     try:
-        result = pickle.loads(connection.recv_bytes(IPC_LIMIT))
+        result = _ResultUnpickler(io.BytesIO(connection.recv_bytes(IPC_LIMIT))).load()
     except Exception:
         result = None
     delivered.put_nowait(result)

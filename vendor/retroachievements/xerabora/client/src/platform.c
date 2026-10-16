@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <time.h>
+#include <unistd.h>
 #endif
 
 static volatile int *g_stop_flag = NULL;
@@ -113,13 +114,27 @@ static int make_dir(const char *path)
 #endif
 }
 
+/* Only the final secret-bearing application profile is private. Never change
+   permissions on the shared XDG/.config parent. Reject links and foreign owners. */
+static int make_profile_dir(const char *path)
+{
+    if (make_dir(path) != 0) return -1;
+#ifndef _WIN32
+    struct stat info;
+    if (lstat(path, &info) != 0 || !S_ISDIR(info.st_mode) || info.st_uid != geteuid())
+        return -1;
+    if (chmod(path, 0700) != 0) return -1;
+#endif
+    return 0;
+}
+
 int platform_config_dir(char *out, size_t size)
 {
     const char *profile = getenv("PS2SERVERS_RA_PROFILE");
     if (profile != NULL && profile[0] != 0) {
         if (strlen(profile) >= size) return -1;
         snprintf(out, size, "%s", profile);
-        return make_dir(out);
+        return make_profile_dir(out);
     }
 #ifdef _WIN32
     /* Local, not Roaming: the token should not replicate between machines. */
@@ -130,7 +145,7 @@ int platform_config_dir(char *out, size_t size)
     if (base == NULL || base[0] == '\0')
         return -1;
     snprintf(out, size, "%s\\xerabora", base);
-    return make_dir(out);
+    return make_profile_dir(out);
 #else
     const char *xdg = getenv("XDG_CONFIG_HOME");
     const char *home = getenv("HOME");
@@ -147,7 +162,7 @@ int platform_config_dir(char *out, size_t size)
     if (make_dir(parent) != 0)
         return -1;
     snprintf(out, size, "%s/xerabora", parent);
-    return make_dir(out);
+    return make_profile_dir(out);
 #endif
 }
 

@@ -386,6 +386,8 @@ class NativeEngineTests(unittest.TestCase):
     def test_private_profile_key_protection_and_native_discovery(self):
         with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
             profile = Path(directory)
+            if os.name != "nt":
+                profile.chmod(0o755)  # legacy existing profile must become private
             env = dict(os.environ, PS2SERVERS_RA_PROFILE=directory, PS2SERVERS_RA_NO_BROWSER="1",
                        PS2SERVERS_RA_PARENT=str(os.getpid()))
             key = "synthetic-test-key"
@@ -396,6 +398,7 @@ class NativeEngineTests(unittest.TestCase):
             if os.name == "nt":
                 self.assertNotIn(key.encode(), (profile / "apikey").read_bytes())
             else:
+                self.assertEqual(profile.stat().st_mode & 0o777, 0o700)
                 self.assertEqual((profile / "apikey").stat().st_mode & 0o777, 0o600)
             console.bind(("127.0.0.1", 0))
             console.settimeout(0.3)

@@ -1,5 +1,7 @@
 """Spawn-based hard cancellation tests with intentionally stuck callbacks."""
 import multiprocessing
+import io
+import pickle
 import os
 import threading
 import time
@@ -7,7 +9,7 @@ import unittest
 
 from launcher.ra_owned_service import IdentificationResult, OwnedService
 from launcher.ra_receiver import IdentificationJob
-from launcher.ra_resolver_process import ProcessResolver
+from launcher.ra_resolver_process import ProcessResolver, _ResultUnpickler
 
 
 def stuck(job, cancel):
@@ -57,6 +59,12 @@ class ProcessResolverTests(unittest.TestCase):
 
     def tearDown(self):
         self.assertEqual({p.pid for p in multiprocessing.active_children()}, self.before)
+
+    def test_result_unpickler_rejects_executable_globals_before_validation(self):
+        with self.assertRaises(pickle.UnpicklingError):
+            _ResultUnpickler(io.BytesIO(b"cbuiltins\neval\n(V1+1\ntR.")).load()
+        value = IdentificationResult(unsupported=True)
+        self.assertEqual(_ResultUnpickler(io.BytesIO(pickle.dumps(value))).load(), value)
 
     def test_deadline_reaps_noncooperative_child(self):
         resolver = ProcessResolver(stuck, timeout=0.3)
