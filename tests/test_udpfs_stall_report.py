@@ -125,13 +125,33 @@ class StallReportTests(unittest.TestCase):
         self._sweep(server, arp=True)
         self.assertEqual(len(server.lines), 1, server.lines)
         self.assertIn("no request for 60s", server.lines[0])
-        self.assertIn("still answers ARP", server.lines[0])
+        self.assertIn("neighbor reports REACHABLE", server.lines[0])
+        self.assertIn("does not confirm UDPFS or game progress", server.lines[0])
+        self.assertNotIn("so it stopped asking", server.lines[0])
 
     def test_dead_console(self):
         server = _server()
         server.sessions[(IP, 62966)] = _session(60, 60)
         self._sweep(server, arp=False)
-        self.assertIn("no longer answers ARP", server.lines[0])
+        self.assertIn("neighbor is unresolved", server.lines[0])
+
+    def test_stall_includes_last_block_reply_and_pending_transport(self):
+        for completion in ("sending", "fin-acked", "unconfirmed"):
+            with self.subTest(completion=completion):
+                server = _server()
+                sess = _session(60, 60)
+                sess.last_bread_reply = dict(handle=33, sector=88, requested=2048,
+                                            read=2048, completion=completion)
+                sess.tx_buffer = [(102, b"pending")]
+                sess.tx_seq_nr = 103
+                sess.tx_seq_nr_acked = 101
+                server.sessions[(IP, 62966)] = sess
+                self._sweep(server)
+                self.assertIn("last BREAD handle=33 sector=88 requested=2048 read=2048",
+                              server.lines[0])
+                self.assertIn("reply=" + completion, server.lines[0])
+                self.assertIn("pending_reply_packets=1 next_tx=103 last_ack=101",
+                              server.lines[0])
 
     def test_console_still_sending_is_not_probed(self):
         server = _server()

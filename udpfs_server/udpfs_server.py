@@ -932,6 +932,14 @@ class UdpfsServer:
 
     def _report_stall(self, addr, sess, quiet: float, still_sending: bool):
         head = f"[{addr[0]}:{addr[1]}] no request for {quiet:.0f}s"
+        reply = getattr(sess, "last_bread_reply", None)
+        if reply:
+            head += (f"; last BREAD handle={reply['handle']} sector={reply['sector']}"
+                     f" requested={reply['requested']} read={reply['read']}"
+                     f" reply={reply['completion']}")
+        head += (f"; pending_reply_packets={len(getattr(sess, 'tx_buffer', []))}"
+                 f" next_tx={getattr(sess, 'tx_seq_nr', 'unknown')}"
+                 f" last_ack={getattr(sess, 'tx_seq_nr_acked', 'unknown')}")
         if still_sending:
             self._print_event(f"{head}, but the console is still sending "
                               "(out-of-sequence DATA or DISCOVERY; see the lines above)")
@@ -941,8 +949,8 @@ class UdpfsServer:
 
         def probe():
             verdict = {
-                True: "the console still answers ARP: its network side is up, so it stopped asking",
-                False: "the console no longer answers ARP: its IOP or network adapter is down",
+                True: "neighbor reports REACHABLE; this does not confirm UDPFS or game progress",
+                False: "neighbor is unresolved; the console or network path may be unavailable",
                 None: "could not tell whether the console still answers ARP",
             }[console_answers_arp(addr[0])]
             if sess.last_request != stalled_at:
@@ -1487,14 +1495,9 @@ class UdpfsServer:
         payload_size = hdr_size + data_hdr.data_byte_count
         actual_payload = payload[:payload_size] if payload_size > 0 else b''
 
-        # Process piggybacked ACK from any packet with ACK flag
+        # Delayed ACKs must not rewind send progress or acknowledge unsent data.
         if data_hdr.flags & DataFlags.ACK:
-            self.tx_seq_nr_acked = data_hdr.seq_nr_ack
-            if self.tx_buffer:
-                self.tx_buffer = [
-                    (seq, pkt) for seq, pkt in self.tx_buffer
-                    if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
-                ]
+            self._acknowledge_tx(data_hdr.seq_nr_ack)
 
         # Pure ACK (no payload) - done
         if payload_size == 0 and (data_hdr.flags & DataFlags.ACK):
@@ -1503,7 +1506,7 @@ class UdpfsServer:
         # Handle NACK - update acked position and retransmit
         if payload_size == 0 and not (data_hdr.flags & DataFlags.ACK):
             # NACK seq_nr_ack = expected seq, so acked up to expected-1
-            self.tx_seq_nr_acked = (data_hdr.seq_nr_ack - 1) & 0xFFF
+            self._acknowledge_tx((data_hdr.seq_nr_ack - 1) & 0xFFF)
             if self.verbose:
                 self._print_event(f"  NACK received, retransmit from seq={data_hdr.seq_nr_ack}")
             self._retransmit_from(addr, data_hdr.seq_nr_ack)
@@ -2186,7 +2189,13 @@ class UdpfsServer:
         self.stats['bytes_read'] += len(data)
         self._update_status()
 
-        self._send_read_result(addr, len(data), data)
+        sess = self._local.session
+        reply = dict(handle=handle, sector=sector_nr, requested=total_size,
+                     read=len(data), completion="sending")
+        sess.last_bread_reply = reply
+        confirmed = self._send_read_result(addr, len(data), data)
+        sess.last_bread_reply = dict(
+            reply, completion="fin-acked" if confirmed else "unconfirmed")
 
     def _handle_bwrite_req(self, addr: Tuple[str, int], payload: bytes):
         """Handle BWRITE_REQ - start of block write operation"""
@@ -2414,9 +2423,13 @@ class UdpfsServer:
         It has moved on, so the caller stops the transfer; the packet stays
         queued for the worker."""
         sess = self._local.session
+        deadline = time.monotonic() + WINDOW_ACK_TIMEOUT
         while True:
             try:
-                item = self._queue_get(sess, timeout=WINDOW_ACK_TIMEOUT)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise queue.Empty
+                item = self._queue_get(sess, timeout=remaining)
             except queue.Empty:
                 if self.tx_buffer:
                     self._retransmit_from(addr, self.tx_buffer[0][0])
@@ -2439,22 +2452,20 @@ class UdpfsServer:
             if self._is_resent_request(hdr.seq_nr, payload_size):
                 continue
             if data_hdr.flags & DataFlags.ACK:
-                # Window ACK - advance acked position
-                self.tx_seq_nr_acked = data_hdr.seq_nr_ack
-                self.tx_buffer = [
-                    (seq, p) for seq, p in self.tx_buffer
-                    if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
-                ]
+                previous = self.tx_seq_nr_acked
+                self._acknowledge_tx(data_hdr.seq_nr_ack)
                 if payload_size > 0:
                     self._queue_pushback(sess, item)
                     return True
-                return False
+                if self.tx_seq_nr_acked != previous:
+                    return False
+                # Duplicate/stale ACKs do not restart the retransmit timer.
             else:
                 if payload_size == 0:
                     # NACK - retransmit and keep waiting for the confirming ACK.
-                    self.tx_seq_nr_acked = (data_hdr.seq_nr_ack - 1) & 0xFFF
+                    accepted = self._acknowledge_tx((data_hdr.seq_nr_ack - 1) & 0xFFF)
                     self._retransmit_from(addr, data_hdr.seq_nr_ack)
-                    if data_hdr.seq_nr_ack == self.tx_seq_nr:
+                    if accepted and data_hdr.seq_nr_ack == self.tx_seq_nr:
                         # The receiver has the entire window and is asking for
                         # the next, unsent packet. Its window ACK was lost; this
                         # NACK cumulatively confirms that same progress. Resume
@@ -2464,6 +2475,25 @@ class UdpfsServer:
                 else:
                     self._queue_pushback(sess, item)
                     return True
+
+    def _acknowledge_tx(self, acknowledged: int) -> bool:
+        """Accept cumulative progress within the sent interval, including wrap.
+
+        Reordered ACK/NACK packets cannot rewind the window. Nor can an ACK
+        beyond the last packet sent discard a reply that still needs delivery.
+        Equal ACKs are valid but do not make progress. The 2048-step half-ring
+        is ambiguous; real send windows contain at most SEND_WINDOW packets.
+        """
+        advance = (acknowledged - self.tx_seq_nr_acked) & 0xFFF
+        sent = (self.tx_seq_nr - self.tx_seq_nr_acked - 1) & 0xFFF
+        if advance >= 2048 or sent >= 2048 or advance > sent:
+            return False
+        self.tx_seq_nr_acked = acknowledged
+        self.tx_buffer = [
+            (seq, packet) for seq, packet in self.tx_buffer
+            if ((seq - acknowledged - 1) & 0xFFF) < 2048
+        ]
+        return True
 
     def _in_flight(self) -> int:
         """Number of unacknowledged packets in flight"""
@@ -2475,9 +2505,13 @@ class UdpfsServer:
         not complete the wait — only an ACK covering the FIN does."""
         sess = self._local.session
         fin_seq = (self.tx_seq_nr - 1) & 0xFFF
+        deadline = time.monotonic() + timeout
         while True:
             try:
-                item = self._queue_get(sess, timeout=timeout)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise queue.Empty
+                item = self._queue_get(sess, timeout=remaining)
             except queue.Empty:
                 return False
             # Before unpacking, as in _wait_for_window_ack above.
@@ -2499,20 +2533,17 @@ class UdpfsServer:
             if self._is_resent_request(hdr.seq_nr, payload_size):
                 continue
             if data_hdr.flags & DataFlags.ACK:
-                # Always advance acked position and prune tx_buffer
-                self.tx_seq_nr_acked = data_hdr.seq_nr_ack
-                if self.tx_buffer:
-                    self.tx_buffer = [
-                        (seq, p) for seq, p in self.tx_buffer
-                        if ((seq - data_hdr.seq_nr_ack - 1) & 0xFFF) < 2048
-                    ]
-                # Only accept as final ACK if it covers the FIN packet
-                if data_hdr.seq_nr_ack == fin_seq:
+                previous = self.tx_seq_nr_acked
+                accepted = self._acknowledge_tx(data_hdr.seq_nr_ack)
+                # Only accept as final ACK if it covers the FIN packet.
+                if accepted and data_hdr.seq_nr_ack == fin_seq:
                     self.tx_buffer = []
                     if payload_size > 0:
                         self._queue_pushback(sess, item)
                     return True
-                # else: mid-stream window ACK — keep waiting
+                # Forward progress gets a new interval; stale traffic does not.
+                if self.tx_seq_nr_acked != previous:
+                    deadline = time.monotonic() + timeout
                 if payload_size > 0:
                     # A new request: the console has moved on.
                     self._queue_pushback(sess, item)
@@ -2520,8 +2551,11 @@ class UdpfsServer:
             else:
                 # NACK - retransmit and keep waiting
                 if payload_size == 0:
-                    self.tx_seq_nr_acked = (data_hdr.seq_nr_ack - 1) & 0xFFF
+                    previous = self.tx_seq_nr_acked
+                    self._acknowledge_tx((data_hdr.seq_nr_ack - 1) & 0xFFF)
                     self._retransmit_from(addr, data_hdr.seq_nr_ack)
+                    if self.tx_seq_nr_acked != previous:
+                        deadline = time.monotonic() + timeout
                 else:
                     self._queue_pushback(sess, item)
                     return True
@@ -2531,14 +2565,18 @@ class UdpfsServer:
         Senders must always confirm receipt — single packet or stream."""
         for attempt in range(MAX_WINDOW_RETRIES + 1):
             if self._wait_for_ack(addr, timeout=WINDOW_ACK_TIMEOUT):
-                return  # Transfer confirmed
+                # A new request also ends this wait; report FIN confirmation
+                # only when the cumulative ACK actually covers the last packet.
+                return (self.tx_seq_nr_acked == (self.tx_seq_nr - 1) & 0xFFF
+                        and not self.tx_buffer)
             if not self.tx_buffer:
-                return
+                return False
             start_seq = self.tx_buffer[0][0]
             if self.verbose:
                 self._print_event(
                     f"  Final ACK timeout, retransmit from seq={start_seq} (attempt {attempt+1})")
             self._retransmit_from(addr, start_seq)
+        return False
 
     def _send_raw_data(self, addr: Tuple[str, int], data: bytes):
         """Send raw data as UDPRDMA multi-packet transfer with flow control"""
@@ -2572,7 +2610,7 @@ class UdpfsServer:
             self._send_data_packet(addr, chunk_data, fin=is_last)
             offset += chunk_size
 
-        self._wait_for_final_ack(addr)
+        return self._wait_for_final_ack(addr)
 
     def _send_raw_data_with_header(self, addr: Tuple[str, int],
                                    header: bytes, data: bytes):
@@ -2614,7 +2652,7 @@ class UdpfsServer:
                                    fin=is_last)
             offset += chunk_size
 
-        self._wait_for_final_ack(addr)
+        return self._wait_for_final_ack(addr)
 
     # --- Response builders ---
 
@@ -2643,7 +2681,7 @@ class UdpfsServer:
     def _send_read_result(self, addr: Tuple[str, int], result: int, data: bytes):
         """Send READ response: RESULT_REPLY as app header + optional data"""
         result_reply = struct.pack('<BBBBi', MsgType.RESULT_REPLY, 0, 0, 0, result)
-        self._send_raw_data_with_header(addr, result_reply, data)
+        return self._send_raw_data_with_header(addr, result_reply, data)
 
     def _send_result_reply(self, addr: Tuple[str, int], result: int):
         """Send RESULT_REPLY"""

@@ -183,11 +183,12 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
                 server._handle_data(control, addr)
                 self.assertEqual(sess.protocol_profile, CORE.PROFILE_PENDING)
                 self.assertFalse(sess.first_data_seen)
+                # These control ACK/NACK positions are outside the sent
+                # interval and must not rewind the synthetic live progress.
+                self.assertEqual(sess.tx_seq_nr_acked, 41)
                 if control_flags:
-                    self.assertEqual(sess.tx_seq_nr_acked, 0)
                     self.assertEqual(server._sent, [])
                 else:
-                    self.assertEqual(sess.tx_seq_nr_acked, 0xFFF)
                     self.assertEqual(server._sent,
                                      [(server.dsock, b"queued-data", addr)])
                 consumed, _ = _exercise_payload_data(
