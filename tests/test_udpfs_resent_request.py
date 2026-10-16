@@ -83,7 +83,11 @@ class ResentRequestTests(unittest.TestCase):
                    _packet(298, 1584))           # FIN ACK
         self.server._send_raw_data_with_header(ADDR, b"\x00" * 8, bytes(14336))
 
-        seqs = [srv.Header.unpack(p).seq_nr for p in self.sent]
+        data_packets = [p for p in self.sent if srv.DataHeader.unpack(p[2:6]).data_byte_count]
+        seqs = [srv.Header.unpack(p).seq_nr for p in data_packets]
+        request_acks = [p for p in self.sent if not srv.DataHeader.unpack(p[2:6]).data_byte_count]
+        self.assertEqual(len(request_acks), 1, "re-ACK a request whose separate ACK was lost")
+        self.assertEqual(srv.DataHeader.unpack(request_acks[0][2:6]).seq_nr_ack, 297)
         self.assertEqual(seqs, list(range(1574, 1585)),
                          "all 11 packets, once each, no retransmit")
         self.assertFalse(any("aborting" in e for e in self.events), self.events)
@@ -96,6 +100,22 @@ class ResentRequestTests(unittest.TestCase):
         self.assertTrue(self.server._wait_for_ack(ADDR, timeout=1.0))
         self.assertFalse(self.sess.pushback, "the copy must be dropped")
         self.assertTrue(self.sess.queue.empty(), "the FIN ACK was consumed")
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(srv.DataHeader.unpack(self.sent[0][2:6]).flags, srv.DataFlags.ACK)
+        self.assertEqual(srv.DataHeader.unpack(self.sent[0][2:6]).seq_nr_ack, 297)
+
+    def test_reply_payload_does_not_acknowledge_a_later_request(self):
+        for fin, payload, hdr_size in ((False, b"1234", 0), (True, b"1234", 0), (True, bytes(12), 8)):
+            with self.subTest(fin=fin, hdr_size=hdr_size):
+                self.sent.clear()
+                self.server._send_data_packet(ADDR, payload, fin=fin, hdr_size=hdr_size)
+                header = srv.DataHeader.unpack(self.sent[0][2:6])
+                self.assertFalse(header.flags & srv.DataFlags.ACK)
+                self.assertEqual(bool(header.flags & srv.DataFlags.FIN), fin)
+        self.sent.clear()
+        self.server._send_data(ADDR, b"RPC reply")
+        header = srv.DataHeader.unpack(self.sent[0][2:6])
+        self.assertEqual(header.flags, srv.DataFlags.FIN)
 
     def test_a_new_request_ends_either_wait_once(self):
         """Anything else is the console moving on: hand it back, stop waiting."""
