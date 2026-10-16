@@ -5,6 +5,10 @@ setup instructions. See [the README](../README.md) for the shipped modes.
 The remaining text records the design discussion dated below; it is not a
 release commitment.
 
+2026-10-15 refresh: see [the broader network tools roadmap](NETWORK-TOOLS-ROADMAP.md)
+for FTP, HOST/RadHostClient parity, OPLServer parity and network APA installation.
+Its pinned-source handshake and socket-role findings supersede assumptions below.
+
 Handoff for the next agent. Written 2026-09-05, straight after HTTP mode landed
 (#188). Read the whole "Direction" section before designing anything — it
 changes what both of these tabs are.
@@ -54,9 +58,10 @@ the PS2's internal drive from Windows without WSL.
 - **Fixed newstyle handshake**: server sends `NBDMAGIC`
   (`0x4e42444d41474943`) then `IHAVEOPT` (`0x49484156454F5054`), and advertises
   `NBD_FLAG_FIXED_NEWSTYLE` (bit 0).
-- Client selects an export with `NBD_OPT_GO` (7) — modern — or the older
-  `NBD_OPT_EXPORT_NAME` (1). lwNBD's header says "Modern clients use NBD_OPT_GO
-  instead of this", so implement `NBD_OPT_GO` and keep `EXPORT_NAME` as fallback.
+- Client must support `NBD_OPT_EXPORT_NAME` (1). The inspected OPL pin
+  `15f1c14536d662e2e00d38d0aa91ef24149e8b96` and current research head explicitly
+  reject `NBD_OPT_GO` (7) and INFO with `NBD_REP_ERR_UNSUP`. A GO-first attempt
+  is optional only with a tested fallback; header constants are not support.
 - Transmission: request magic `0x25609513`, simple reply magic `0x67446698`.
   Structured replies (`0x668e33ef`) exist in the header — check whether lwNBD
   actually negotiates them before assuming simple-only.
@@ -229,7 +234,7 @@ Both were read in full for this plan.
 | Socket | Direction | What it carries |
 |---|---|---|
 | UDP `0x4712` | PC → PS2 | commands (reset, run an ELF, power off) |
-| TCP `0x4711` | PS2 → PC, we answer | file I/O requests for the `host:` device |
+| TCP `0x4711` | PC connects to PS2; PS2 sends requests on that connection | file I/O requests for the `host:` device |
 | UDP `0x4712` | PS2 → PC | log/stdout text from the running program |
 
 > The protocol doc lists the command port and the log port as the same number
