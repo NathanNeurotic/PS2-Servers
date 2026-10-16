@@ -17,6 +17,8 @@ import errno
 import os
 import struct
 import sys
+import threading
+import types
 import unittest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +45,8 @@ class _Recorder(srv.UdpfsServer):
         # Skip UdpfsServer.__init__ entirely: it opens sockets. Only the fields
         # the handlers under test touch are set up.
         self.replies = []
+        self._local = threading.local()
+        self._local.session = types.SimpleNamespace()
         self.root_dir = None
         self.read_only = False
         self.verbose = False

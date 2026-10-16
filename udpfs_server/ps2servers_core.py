@@ -139,6 +139,7 @@ class AutoUdpfsServer(UdpfsServer):
         sess.rx_seq_nr_expected = 0
         sess.tx_buffer = []
         sess.tx_start_seq = 0
+        sess.last_bread_reply = None
         sess.write_handle = -1
         sess.write_is_block = False
         sess.write_sector_nr = 0
