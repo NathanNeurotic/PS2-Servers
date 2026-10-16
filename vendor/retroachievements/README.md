@@ -20,6 +20,8 @@ Local xeRAbora changes:
 
 - A PS2-Servers-owned profile directory selected through the child's environment.
 - DPAPI-protected Windows credentials/API keys and private POSIX secret files.
+- Tighten existing POSIX application profiles to 0700, reject links/foreign
+  owners, and leave shared XDG/.config parent permissions unchanged.
 - Account HTTP listener fixed to loopback and its requested port.
 - The account page explains local access and directs integration updates/issues
   to PS2-Servers while retaining xeRAbora upstream credit.

@@ -1,12 +1,15 @@
 """Spawn-based hard cancellation tests with intentionally stuck callbacks."""
 import multiprocessing
+import io
+import pickle
+import os
 import threading
 import time
 import unittest
 
 from launcher.ra_owned_service import IdentificationResult, OwnedService
 from launcher.ra_receiver import IdentificationJob
-from launcher.ra_resolver_process import ProcessResolver
+from launcher.ra_resolver_process import ProcessResolver, _ResultUnpickler
 
 
 def stuck(job, cancel):
@@ -24,6 +27,19 @@ def crash(job, cancel):
 
 def oversized(job, cancel):
     return IdentificationResult(watch_file=b"x" * 17433)
+
+
+def partial_write(job, cancel):
+    """POSIX sender writes a header and one payload byte, then stalls."""
+    import struct
+    from multiprocessing.connection import Connection
+    def send_partial(connection, data):
+        connection._send(struct.pack("!i", len(data)))
+        connection._send(bytes(data[:1]))
+        while True:
+            time.sleep(1)
+    Connection._send_bytes = send_partial
+    return IdentificationResult(unsupported=True)
 
 
 class SignalledStuck:
@@ -44,6 +60,12 @@ class ProcessResolverTests(unittest.TestCase):
     def tearDown(self):
         self.assertEqual({p.pid for p in multiprocessing.active_children()}, self.before)
 
+    def test_result_unpickler_rejects_executable_globals_before_validation(self):
+        with self.assertRaises(pickle.UnpicklingError):
+            _ResultUnpickler(io.BytesIO(b"cbuiltins\neval\n(V1+1\ntR.")).load()
+        value = IdentificationResult(unsupported=True)
+        self.assertEqual(_ResultUnpickler(io.BytesIO(pickle.dumps(value))).load(), value)
+
     def test_deadline_reaps_noncooperative_child(self):
         resolver = ProcessResolver(stuck, timeout=0.3)
         started = time.monotonic()
@@ -53,6 +75,16 @@ class ProcessResolverTests(unittest.TestCase):
         # Recovery is the assertion here, not sub-300ms Windows spawn. Keep
         # the short deadline above for the deliberately stuck callback only.
         resolver.timeout = 5
+        self.assertTrue(resolver(self.job, threading.Event()).unsupported)
+
+    @unittest.skipIf(os.name == "nt", "POSIX byte-stream framing; Windows uses message-mode pipes")
+    def test_partial_ipc_payload_cannot_block_deadline_or_leave_a_reader(self):
+        resolver = ProcessResolver(partial_write, timeout=2)
+        started = time.monotonic()
+        self.assertIsNone(resolver(self.job, threading.Event()))
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertIsNone(resolver._reader)
+        resolver.resolve, resolver.timeout = supported, 5
         self.assertTrue(resolver(self.job, threading.Event()).unsupported)
 
     def test_cancellation_reaps_child_before_deadline(self):
