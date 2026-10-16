@@ -399,6 +399,22 @@ class NativeEngineTests(unittest.TestCase):
             self.assertEqual(target.stat().st_mode & 0o777, 0o755)
             self.assertFalse((target / "apikey").exists())
 
+    @unittest.skipIf(os.name == "nt", "POSIX secret file descriptor policy")
+    def test_native_secret_link_cannot_truncate_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile = root / "profile"
+            profile.mkdir(mode=0o700)
+            target = root / "target"
+            target.write_bytes(b"preserve this file")
+            target.chmod(0o600)
+            (profile / "apikey").symlink_to(target)
+            env = dict(os.environ, PS2SERVERS_RA_PROFILE=str(profile), PS2SERVERS_RA_NO_BROWSER="1")
+            result = subprocess.run([str(engine_path()), "--api-key", "synthetic-test-key"],
+                                    env=env, capture_output=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(target.read_bytes(), b"preserve this file")
+
     def test_private_profile_key_protection_and_native_discovery(self):
         with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console:
             profile = Path(directory)

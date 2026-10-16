@@ -34,11 +34,47 @@ int config_credentials_path(char *out, size_t size)
 #include <fcntl.h>
 #include <unistd.h>
 #endif
+#ifndef _WIN32
+/* Bind validation and secret access to the same private directory descriptor.
+   Reopening the pathname after validation would permit a parent-entry swap. */
+static int secret_open(const char *path, int writing)
+{
+    char directory[600], *name;
+    struct stat info;
+    int dir, fd;
+    if (strlen(path) >= sizeof(directory)) return -1;
+    strcpy(directory, path);
+    name = strrchr(directory, '/');
+    if (!name || !name[1]) return -1;
+    *name++ = 0;
+    dir = open(directory, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (dir < 0) return -1;
+    if (fstat(dir, &info) || !S_ISDIR(info.st_mode) || info.st_uid != geteuid() ||
+        (info.st_mode & 0077)) { close(dir); return -1; }
+    fd = openat(dir, name, O_NOFOLLOW | O_NONBLOCK |
+                (writing ? O_WRONLY | O_CREAT : O_RDONLY), 0600);
+    close(dir);
+    if (fd < 0) return -1;
+    if (fstat(fd, &info) || !S_ISREG(info.st_mode) || info.st_uid != geteuid() ||
+        info.st_nlink != 1 || (info.st_mode & 0077) ||
+        (writing && (fchmod(fd, 0600) || ftruncate(fd, 0)))) {
+        close(fd); return -1;
+    }
+    return fd;
+}
+#endif
 static int secret_read(const char *path, char *out, size_t size)
 {
     unsigned char bytes[4096]; size_t n; FILE *f;
     out[0] = 0;
-    f = fopen(path, "rb"); if (!f) return 0;
+#ifdef _WIN32
+    f = fopen(path, "rb");
+#else
+    int fd = secret_open(path, 0);
+    if (fd < 0) return 0;
+    f = fdopen(fd, "rb"); if (!f) close(fd);
+#endif
+    if (!f) return 0;
     n = fread(bytes, 1, sizeof(bytes), f); fclose(f);
 #ifdef _WIN32
     DATA_BLOB input, result = {0};
@@ -65,9 +101,8 @@ static int secret_write(const char *path, const char *text)
     bytes = result.pbData; n = result.cbData;
     f = fopen(path, "wb");
 #else
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    int fd = secret_open(path, 1);
     if (fd < 0) return -1;
-    if (fchmod(fd, 0600)) { close(fd); return -1; }
     f = fdopen(fd, "wb"); if (!f) close(fd);
 #endif
     ok = f && fwrite(bytes, 1, n, f) == n;
