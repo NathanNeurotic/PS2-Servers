@@ -31,9 +31,14 @@ product decision is not required to adapt the parser repair.
 
 Desktop follow-ups from alpha.18: independent softcore/hardcore date flags,
 a persistent TV-notice toggle, rich presence in console diagnostics and richer
-list/grid presentation. Our vendored `raweb_game_progress` still has the old
-date precedence and needs a focused correction with a native response fixture;
-these desktop changes have not been imported by this refresh.
+list/grid presentation. Our vendored `raweb_game_progress` had the old
+date precedence at the initial refresh. The 2026-10-16 follow-up adapts the
+hardcore-date correction with an eight-case offline fixture compiled against
+the production native parser. It preserves our existing row layout and displayed
+date fallback. The notice toggle, rich-presence diagnostics and presentation
+changes remain unadapted; dependency pins are unchanged. The current embedded
+game-detail response exposes the earned date, not this per-row mode flag, so
+the parser correction alone does not add mode-aware badges or enable hardcore.
 
 The new unread-memory survey confirms a PS2 agent constraint: low/kernel RAM
 below 0x80000 and the scratchpad above 0x02000000 are not streamed as authentic

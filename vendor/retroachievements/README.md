@@ -18,6 +18,9 @@ for dependency validation and remaining console acceptance boundaries.
 
 Local xeRAbora changes:
 
+- Read the Web API hardcore earned date independently of the softcore date,
+  adapting the alpha.18 correction while preserving the existing row layout.
+
 - A PS2-Servers-owned profile directory selected through the child's environment.
 - DPAPI-protected Windows credentials/API keys and private POSIX secret files.
 - Tighten existing POSIX application profiles to 0700, reject links/foreign
