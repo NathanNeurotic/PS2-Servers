@@ -433,6 +433,7 @@ int raweb_game_progress(unsigned game_id, struct raweb_game_progress *info,
 
     for (e = obj + 1; e < j.count && n < max; e++) {
         struct raweb_achievement *a;
+        char hardcore_date[sizeof(a->date_earned)];
 
         if (j.tok[e].parent != obj)
             continue;
@@ -455,10 +456,10 @@ int raweb_game_progress(unsigned game_id, struct raweb_game_progress *info,
         a->num_awarded = obj_uint(&j, e + 1, "NumAwarded");
         a->display_order = obj_uint(&j, e + 1, "DisplayOrder");
         obj_str(&j, e + 1, "DateEarned", a->date_earned, sizeof(a->date_earned));
-        if (a->date_earned[0] == '\0') {
-            obj_str(&j, e + 1, "DateEarnedHardcore", a->date_earned, sizeof(a->date_earned));
-            a->earned_hardcore = a->date_earned[0] != '\0';
-        }
+        obj_str(&j, e + 1, "DateEarnedHardcore", hardcore_date, sizeof(hardcore_date));
+        a->earned_hardcore = hardcore_date[0] != '\0';
+        if (a->date_earned[0] == '\0')
+            snprintf(a->date_earned, sizeof(a->date_earned), "%s", hardcore_date);
         n++;
     }
 

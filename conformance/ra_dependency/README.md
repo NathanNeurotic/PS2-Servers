@@ -22,3 +22,14 @@ into the production native snapshot parser. It checks serial extraction,
 delivery into the sparse memory callback and duplicate-frame suppression.
 This extends the wire evidence to the active native implementation without
 requiring an account or submitting an unlock.
+
+## Earned-date parsing
+
+`python conformance/ra_dependency/check_progress_dates.py` compiles the production
+`raweb_game_progress` parser against an offline HTTP response stub. Eight rows
+cover both dates, either date alone, missing fields, JSON null and empty dates.
+The fixture checks hardcore status independently while preserving the softcore
+display date and the existing hardcore-only fallback. It uses synthetic account
+fields and cannot make HTTP requests because the network implementation is not
+linked. The Python test suite runs this fixture when a native compiler is present
+and requires it on Linux CI.
