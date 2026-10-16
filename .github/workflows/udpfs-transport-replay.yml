@@ -42,7 +42,7 @@ jobs:
           python3 tools/replay_neutrino_udpfs.py --stale-control \
             --official-source .replay/official --stable-source .replay/stable \
             --fixed-source .replay/fixed --server-source . --server-before 07210f3f1c200b6e4b95eba47b9667e58220765a --output replay-results/control
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: neutrino-compatibility-replay

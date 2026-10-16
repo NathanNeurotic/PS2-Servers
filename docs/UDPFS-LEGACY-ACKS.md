@@ -16,7 +16,9 @@ RiptOPL and independent udpfsd receive paths handle them.
 
 If the separate request ACK is lost, either send wait re-ACKs a duplicate
 request without repeating file I/O, consuming a reply sequence number or
-pushing the duplicate back ahead of queued window/FIN ACKs. Both changes are
+pushing the duplicate back ahead of queued window/FIN ACKs. If that control ACK is lost, recovery now waits for the client's real send
+timeout (500 ms in the inspected clients) before the retried request is ACKed;
+reply data no longer provides the redundant ACK shortcut. Both changes are
 needed: omitting piggyback ACKs alone could otherwise stall a real retry.
 
 The compatibility replay compiles the actual stable/development Neutrino C
