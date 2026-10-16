@@ -25,6 +25,8 @@ reply sender from the parent and patched server. It injects lost requests,
 six delayed previous reply packets, a lost separate request ACK, and sequence
 wraparound. File bytes, IOP events, alarms, FIFO and the network are host
 fixtures. It verifies exact 16 KiB results and one accepted request per read.
+Both bulk reads and single-packet RPC replies are replayed, including loss of
+the separate request ACK. A third matrix retains the standalone-ACK limitation.
 The test uses a fixed accelerated alarm deadline that packet traffic cannot
 restart. Kernel/PS2 behavior is not simulated fully.
 

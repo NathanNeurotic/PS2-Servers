@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: rickgaiser/neutrino
@@ -35,10 +35,13 @@ jobs:
         run: |
           python3 tools/replay_neutrino_udpfs.py --drop-request-ack \
             --official-source .replay/official --stable-source .replay/stable \
-            --fixed-source .replay/fixed --server-source . --output replay-results/data
+            --fixed-source .replay/fixed --server-source . --server-before 07210f3f1c200b6e4b95eba47b9667e58220765a --output replay-results/data
+          python3 tools/replay_neutrino_udpfs.py --drop-request-ack --rpc \
+            --official-source .replay/official --stable-source .replay/stable \
+            --fixed-source .replay/fixed --server-source . --server-before 07210f3f1c200b6e4b95eba47b9667e58220765a --output replay-results/rpc
           python3 tools/replay_neutrino_udpfs.py --stale-control \
             --official-source .replay/official --stable-source .replay/stable \
-            --fixed-source .replay/fixed --server-source . --output replay-results/control
+            --fixed-source .replay/fixed --server-source . --server-before 07210f3f1c200b6e4b95eba47b9667e58220765a --output replay-results/control
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -25,6 +25,7 @@ parser.add_argument("--server-source", type=Path, required=True)
 parser.add_argument("--server-before", default="HEAD^")
 parser.add_argument("--stale-control", action="store_true")
 parser.add_argument("--drop-request-ack", action="store_true")
+parser.add_argument("--rpc", action="store_true")
 parser.add_argument("--output", type=Path, required=True)
 args = parser.parse_args()
 OUT = args.output.resolve()
@@ -224,13 +225,16 @@ def run(lib, drop=False, stale=False, scatter=False, tx=57, rx=653):
     sess.tx_buffer = []
     server._sendto = server_send
     server._print_event = events.append
-    expected = bytes(i % 251 for i in range(16384))
+    expected = bytes(i % 251 for i in range(32 if args.rpc else 16384))
 
     def bread(addr, payload):
         accepted.append(srv.Header.unpack(current[0]).seq_nr)
-        server._send_raw_data_with_header(
-            addr, struct.pack("<BBBBi", 0x11, 0, 0, 0, len(expected)), expected
-        )
+        if args.rpc:
+            server._send_data(addr, expected)
+        else:
+            server._send_raw_data_with_header(
+                addr, struct.pack("<BBBBi", 0x11, 0, 0, 0, len(expected)), expected
+            )
 
     # Only file I/O is replaced by deterministic bytes; wire sender and waits are production.
     server._handle_bread = bread
@@ -299,9 +303,9 @@ def run(lib, drop=False, stale=False, scatter=False, tx=57, rx=653):
     lib.replay_init(scb, wcb, tx, rx)
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
-    buffer = ct.create_string_buffer(16384)
+    buffer = ct.create_string_buffer(len(expected))
     result = ct.create_string_buffer(8)
-    ret = lib.replay_read(buffer, 16384, result, int(scatter))
+    ret = lib.replay_read(buffer, len(expected), result, int(scatter))
     stop = srv.Header(packet_type=srv.PacketType.DISCOVERY, seq_nr=0).pack() + bytes(4)
     sess.queue.put((stop, ADDR, "data"))
     sess.queue.put(None)
@@ -311,7 +315,7 @@ def run(lib, drop=False, stale=False, scatter=False, tx=57, rx=653):
     return {
         "previous_packet_had_ack": reply_has_ack,
         "returned": ret,
-        "bytes_match": buffer.raw[:16384] == expected,
+        "bytes_match": buffer.raw[: len(expected)] == expected,
         "connected": bool(lib.replay_connected()),
         "request_attempts": attempts,
         "requests_accepted": accepted,
@@ -380,7 +384,7 @@ if __name__ == "__main__":
                             ), (key, result)
                         else:
                             assert (
-                                result["returned"] == 16384
+                                result["returned"] == (32 if args.rpc else 16384)
                                 and result["bytes_match"]
                                 and result["connected"]
                             ), (key, result)
