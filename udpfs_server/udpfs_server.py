@@ -2306,14 +2306,20 @@ class UdpfsServer:
         self._sendto(packet, addr)
 
     def _send_data(self, addr: Tuple[str, int], payload: bytes):
-        """Send DATA packet with payload (single packet RPC reply, always FIN)."""
+        """Send a FIN reply; request acknowledgement is a separate control packet.
+
+        Neutrino 1.8.0 accepts a stale piggybacked ACK as an answer to its next
+        request. Keeping ACK off reply payloads prevents delayed/retransmitted
+        data from triggering that client defect. A delayed standalone ACK is
+        still a client-side limitation; this does not repair its ACK comparison.
+        """
         padded_size = (len(payload) + 3) & ~3
         padded_payload = payload.ljust(padded_size, b'\x00')
 
         hdr = Header(packet_type=PacketType.DATA, seq_nr=self.tx_seq_nr)
         data_hdr = DataHeader(
             seq_nr_ack=(self.rx_seq_nr_expected - 1) & 0xFFF,
-            flags=DataFlags.ACK | DataFlags.FIN,
+            flags=DataFlags.FIN,
             hdr_word_count=0,
             data_byte_count=padded_size
         )
@@ -2327,6 +2333,8 @@ class UdpfsServer:
                           fin: bool = False, hdr_size: int = 0):
         """Send DATA packet and store for retransmit.
 
+        Payload packets do not repeat the request ACK; _handle_data sends it
+        separately, and both waits re-ACK a retried request if it was lost.
         If hdr_size > 0, the first hdr_size bytes of payload are treated as
         an app-level header (encoded via hdr_word_count in the UDPRDMA header).
         """
@@ -2337,7 +2345,7 @@ class UdpfsServer:
         hdr = Header(packet_type=PacketType.DATA, seq_nr=self.tx_seq_nr)
         data_hdr = DataHeader(
             seq_nr_ack=(self.rx_seq_nr_expected - 1) & 0xFFF,
-            flags=DataFlags.ACK | (DataFlags.FIN if fin else 0),
+            flags=DataFlags.FIN if fin else 0,
             hdr_word_count=hdr_size // 4,
             data_byte_count=padded_data_size
         )
@@ -2450,6 +2458,10 @@ class UdpfsServer:
             hdr_size = data_hdr.hdr_word_count * 4
             payload_size = hdr_size + data_hdr.data_byte_count
             if self._is_resent_request(hdr.seq_nr, payload_size):
+                # The separate request ACK may have been lost. Reply data no
+                # longer repeats it, so re-ACK without re-running file I/O or
+                # pushing the duplicate back ahead of the window/FIN ACK.
+                self._send_ack(addr, is_ack=True)
                 continue
             if data_hdr.flags & DataFlags.ACK:
                 previous = self.tx_seq_nr_acked
@@ -2531,6 +2543,10 @@ class UdpfsServer:
             hdr_size = data_hdr.hdr_word_count * 4
             payload_size = hdr_size + data_hdr.data_byte_count
             if self._is_resent_request(hdr.seq_nr, payload_size):
+                # The separate request ACK may have been lost. Reply data no
+                # longer repeats it, so re-ACK without re-running file I/O or
+                # pushing the duplicate back ahead of the window/FIN ACK.
+                self._send_ack(addr, is_ack=True)
                 continue
             if data_hdr.flags & DataFlags.ACK:
                 previous = self.tx_seq_nr_acked
