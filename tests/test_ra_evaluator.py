@@ -276,8 +276,58 @@ class EvaluatorTests(unittest.TestCase):
             "P:0xH080000=1S0xH080002=1"])
         data = derive_direct_watch(self.library, qualified)
         words = struct.unpack_from("<5I", data, 16)
-        self.assertEqual(words, (0x10080000, 0x10080002, 0x20080004, 0x40080008, 0x4008000C))
+        self.assertEqual(words, (0x10080000, 0x20080004, 0x40080008, 0x4008000C, 0x10080002))
         self.assertEqual(struct.unpack_from("<4I", data)[3], 12)
+
+    def test_native_watch_pointer_chain_derivation_and_evaluation(self):
+        # Single pointer chain on PS2
+        qualified_single = self.qualified(["I:0xX080000_0xH000004=1"])
+        data_single = derive_direct_watch(self.library, qualified_single)
+        magic, ver, count, direct_bytes = struct.unpack_from("<4I", data_single)
+        self.assertEqual((magic, ver, count, direct_bytes), (0x4C574152, 1, 1, 4))
+        self.assertEqual(struct.unpack_from("<I", data_single, 16)[0], 0x40080000)
+        node_magic, nodes = struct.unpack_from("<2I", data_single, 20)
+        self.assertEqual((node_magic, nodes), (0x4C4E4152, 1))
+        node_w, node_off = struct.unpack_from("<2I", data_single, 28)
+        self.assertEqual((node_w, node_off), (0x2000, 4))
+        self.assertEqual(len(data_single), 36)
+
+        # Full evaluator trigger test with pointer pair
+        evaluator = Evaluator(self.library, {10: "I:0xX080000_0xH000004=1"}, data_single, 1)
+        self.addCleanup(evaluator.close)
+        # Frame 1: base pointer points to 0x81000, target byte at 0x81004 is 0
+        snapshot1 = struct.pack("<III", 0x81000, 0x81004, 0)
+        result1 = evaluator.evaluate(snapshot1, generation=1, sequence=1)
+        self.assertTrue(result1.accepted)
+        self.assertFalse(result1.triggered)
+        # Frame 2: target byte at 0x81004 is 1 -> triggers achievement 10
+        snapshot2 = struct.pack("<III", 0x81000, 0x81004, 1)
+        result2 = evaluator.evaluate(snapshot2, generation=1, sequence=2)
+        self.assertTrue(result2.accepted)
+        self.assertEqual(result2.triggered, (10,))
+
+        # Nested pointer chain on PS2
+        qualified_nested = self.qualified(["I:0xX080000_I:0xX000004_0xH000008=1"])
+        data_nested = derive_direct_watch(self.library, qualified_nested)
+        magic, ver, count, direct_bytes = struct.unpack_from("<4I", data_nested)
+        self.assertEqual((magic, ver, count, direct_bytes), (0x4C574152, 1, 1, 4))
+        node_magic, nodes = struct.unpack_from("<2I", data_nested, 20)
+        self.assertEqual((node_magic, nodes), (0x4C4E4152, 2))
+        node0_w, node0_off = struct.unpack_from("<2I", data_nested, 28)
+        node1_w, node1_off = struct.unpack_from("<2I", data_nested, 36)
+        self.assertEqual((node0_w, node0_off), (0x8000, 4))
+        self.assertEqual((node1_w, node1_off), (0x3000, 8))
+        self.assertEqual(len(data_nested), 44)
+
+        # PS1 pointer chain matches golden baseline case 4 byte-for-byte
+        qualified_ps1 = self.qualified(["I:0xX001000_0xH000004=1"], console=12)
+        data_ps1 = derive_direct_watch(self.library, qualified_ps1)
+        self.assertEqual(data_ps1.hex(),
+                         "5241574c0100000001000000040000000010004052414e4c010000000020000004000000")
+
+        # ORBIT profile rejects pointer chains
+        with self.assertRaises(ValueError):
+            derive_direct_watch(self.library, qualified_single, profile="orbit-v1.0.2")
 
     def test_native_watch_chain_invalid_expression_and_ram_limits_reject_whole_set(self):
         for expression, console in (("I:0xX001000_0xH000004=1", 21),

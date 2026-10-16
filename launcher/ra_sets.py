@@ -141,38 +141,58 @@ def qualify_set(context, patch_response, unlock_response, *, include_unofficial=
 
 
 def derive_direct_watch(library, qualified, *, profile="opl"):
-    """Derive complete direct reads using native rcheevos, never text matching.
+    """Derive complete direct reads and pointer chains using native rcheevos.
 
-    Pointer-chain sets are rejected as a whole until RANL derivation exists.
-    ORBIT v1.0.2 additionally enforces its 1216-byte snapshot ceiling.
+    Direct reads and pointer chains are derived in dependency order.
+    ORBIT v1.0.2 additionally enforces its 1216-byte snapshot ceiling and rejects pointer chains.
     """
     if not isinstance(qualified, QualifiedSet) or not qualified.remaining:
         raise ValueError("No remaining achievement definitions")
     if profile not in ("opl", "orbit-v1.0.2"):
         raise ValueError("Invalid watch profile")
     lib = ctypes.CDLL(str(library))
-    probe = lib.ps2servers_probe_watch
-    probe.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
-    probe.restype = ctypes.c_int
-    entries = set()
     memory_limit = 2 * 1024 * 1024 if qualified.context.console_id == 12 else 32 * 1024 * 1024
     memory_low = 0 if qualified.context.console_id == 12 else 0x80000
-    for _, expression in qualified.definitions:
-        output = (ctypes.c_uint32 * 4096)()
-        count = probe(expression.encode("ascii"), output, len(output))
-        if count < 0:
-            raise ValueError("Native watch derivation rejected the complete set (code {})".format(count))
-        for word in output[:count]:
-            address = word & 0x0FFFFFFF
-            if address < memory_low or address + (word >> 28) > memory_limit:
-                raise ValueError("Watch read is outside console-readable RAM")
-            entries.add(word)
-        if len(entries) > 4096:
-            raise ValueError("Watch entry limit exceeded")
-    if not entries:
-        raise ValueError("Set has no direct memory reads")
-    words = sorted(entries, key=lambda word: (word & 0x0FFFFFFF, word >> 28))
-    data = struct.pack("<4I", 0x4C574152, 1, len(words), sum(word >> 28 for word in words))
-    data += struct.pack("<{}I".format(len(words)), *words)
+
+    builder = getattr(lib, "ps2servers_build_watchlist", None)
+    if builder is not None:
+        expressions = [expression.encode("ascii") for _, expression in qualified.definitions]
+        array_type = ctypes.c_char_p * len(expressions)
+        definitions_array = array_type(*expressions)
+        output = ctypes.create_string_buffer(18000)
+        builder.argtypes = [array_type, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
+                            ctypes.c_char_p, ctypes.c_uint32]
+        builder.restype = ctypes.c_int
+        size = builder(definitions_array, len(expressions), memory_low, memory_limit,
+                       output, len(output))
+        if size < 0:
+            raise ValueError("Native watch derivation rejected the complete set (code {})".format(size))
+        data = output.raw[:size]
+    else:
+        probe = lib.ps2servers_probe_watch
+        probe.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
+        probe.restype = ctypes.c_int
+        entries = set()
+        for _, expression in qualified.definitions:
+            output = (ctypes.c_uint32 * 4096)()
+            count = probe(expression.encode("ascii"), output, len(output))
+            if count < 0:
+                raise ValueError("Native watch derivation rejected the complete set (code {})".format(count))
+            for word in output[:count]:
+                address = word & 0x0FFFFFFF
+                if address < memory_low or address + (word >> 28) > memory_limit:
+                    raise ValueError("Watch read is outside console-readable RAM")
+                entries.add(word)
+            if len(entries) > 4096:
+                raise ValueError("Watch entry limit exceeded")
+        if not entries:
+            raise ValueError("Set has no direct memory reads")
+        words = sorted(entries, key=lambda word: (word & 0x0FFFFFFF, word >> 28))
+        data = struct.pack("<4I", 0x4C574152, 1, len(words), sum(word >> 28 for word in words))
+        data += struct.pack("<{}I".format(len(words)), *words)
     (validate_orbit_watchlist if profile == "orbit-v1.0.2" else validate_watchlist)(data)
     return data
+
+
+derive_watch = derive_direct_watch
+
