@@ -18,6 +18,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 #endif
 
 static volatile int *g_stop_flag = NULL;
@@ -121,9 +122,15 @@ static int make_profile_dir(const char *path)
     if (make_dir(path) != 0) return -1;
 #ifndef _WIN32
     struct stat info;
-    if (lstat(path, &info) != 0 || !S_ISDIR(info.st_mode) || info.st_uid != geteuid())
-        return -1;
-    if (chmod(path, 0700) != 0) return -1;
+    int result, fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (fd < 0) return -1;
+    result = fstat(fd, &info);
+    if (result == 0 && S_ISDIR(info.st_mode) && info.st_uid == geteuid())
+        result = fchmod(fd, 0700);
+    else
+        result = -1;
+    close(fd);
+    if (result != 0) return -1;
 #endif
     return 0;
 }
