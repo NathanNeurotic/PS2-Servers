@@ -238,8 +238,9 @@ Both were read in full for this plan.
 | UDP `0x4712` | PS2 → PC | log/stdout text from the running program |
 
 > The protocol doc lists the command port and the log port as the same number
-> (`0x4712`). That is unusual enough to verify against `src/ps2link.c` in
-> ps2client before building on it.
+> (`0x4712`). Verified against `src/ps2link.c` at PS2Client
+> `4af9c6a7a05a3a428270f2d836166cd3965bcb17`: the PC listens for UDP logs
+> and sends commands to that port on the console.
 
 **Commands to send** (`0xBABE02xx`): `reset` `0201`, `execiop` `0202`,
 `execee` `0203`, `poweroff` `0204`, `dumpmem` `0207`, `startvu` `0208`,
@@ -296,19 +297,19 @@ including the UNC/drive-root fix from PR #73. Do not write a fresh path check.
 ## Shared work both tabs need
 
 **`ServerDef` assumes server semantics.** `default_port`, Start/Stop, and
-`opl_hint`'s "In OPL → …" phrasing all read wrong for a client. Add a `role`
-field (`"server" | "client" | "interactive"`) to `ServerDef` and branch on that
-in `launcher/gui.py`, rather than adding more `if key == "..."` special cases —
-there are already two such spots (`TAB_TITLES` ~line 205, `opl_hint` ~line 257)
-and a third and fourth will not age well.
+`opl_hint`'s "In OPL → …" phrasing all read wrong for a client. The refreshed
+roadmap adds a job/session abstraction beside the server registry. Role metadata
+can drive UI/firewall behavior, but finite transfers must not be forced into a
+long-running listener lifecycle or scattered `if key == "..."` special cases.
 
 **A test will fail that you did not break.** `tests/test_linux_parity.py`'s
 `EveryServerDeclaresItsPortsTests` requires every registered Python server to
 declare at least one inbound firewall port. That guard was added deliberately
 (HTTP mode shipped without one and was unreachable). A pure client like NBD has
 no inbound port and will fail it. **Make the guard role-aware — do not delete
-it.** Note that ps2link is *not* exempt: its TCP `0x4711` and UDP `0x4712` are
-genuinely inbound and must be declared.
+it.** PS2Link needs a PC inbound UDP `0x4712` log listener. Its TCP `0x4711`
+connection is initiated by the PC to the console; do not declare a PC TCP
+listener or request an unnecessary inbound firewall rule for it.
 
 **The usual registry touchpoints**, all of which have tests that will tell you
 if you miss one:
@@ -323,9 +324,9 @@ if you miss one:
 
 ## Phases
 
-1. Confirm the ps2link command/log port collision against `src/ps2link.c`.
+1. Pin the verified PS2Client socket roles and console compatibility fixtures.
    (The NBD direction is settled: client. See "Direction" above.)
-2. `role` on `ServerDef` + role-aware firewall guard. Small, unblocks both.
+2. Shared job/session lifecycle beside `ServerDef` + role-aware firewall guard.
 3. ps2link: command sender + log listener + `host:` fileio server, contained.
 4. The interactive terminal UI, wired to the ps2link dispatcher.
 5. ps2netfs client verbs in the same tab.
