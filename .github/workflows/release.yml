@@ -397,7 +397,7 @@ jobs:
           subject-path: out/PS2Servers-x86_64.AppImage
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.asset }}
           path: |
@@ -407,7 +407,7 @@ jobs:
       - name: Upload portable build artifact
         if: matrix.portable_asset != ''
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.portable_asset }}
           path: |
@@ -424,7 +424,7 @@ jobs:
       - name: Upload Linux AppImage artifact
         if: runner.os == 'Linux' && matrix.portable_asset != ''
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: PS2Servers-x86_64.AppImage
           if-no-files-found: ignore
@@ -470,7 +470,7 @@ jobs:
           subject-path: PS2Servers-source.zip
 
       - name: Upload source artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: PS2Servers-source.zip
           path: |
