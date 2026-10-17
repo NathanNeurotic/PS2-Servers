@@ -81,13 +81,13 @@ hash. Empty remaining definitions are distinct from a failed/unsupported game.
 state and reject mismatched account epochs/images before native derivation.
 The lower-level `complete` interface remains for already-qualified callers.
 
-Direct watch derivation uses native rcheevos memory callbacks and public parsed
-condition sets; it does not scan expression strings or mirror private layouts.
-It includes alternate and paused groups, deduplicates reads, validates PS1/PS2
-RAM limits and enforces the explicit ORBIT ceiling. The PS2 lower bound is
+Direct and pointer watch derivation uses native rcheevos runtime memory pools
+and public condition parsing; it does not scan expression strings or vendor
+xeRAbora client sources. It includes alternate and paused groups, deduplicates
+reads, compiles pointer chains into dependency-ordered RANL nodes, validates
+PS1/PS2 RAM limits and enforces the explicit ORBIT ceiling. The PS2 lower bound is
 0x80000, matching the current EE reader; its kernel/low RAM and scratchpad
-must not be treated as authentic zero-valued watched memory. Pointer-chain sets are
-rejected in full until owned RANL derivation is implemented. Constant-only sets
+must not be treated as authentic zero-valued watched memory. Constant-only sets
 and sets with no remaining conditions also cannot currently be installed on
 this opt-in receiver path. These are remaining gaps, not unsupported-game
 declarations, and the managed service remains selected.
@@ -104,9 +104,8 @@ never submitted automatically. This synchronous adapter belongs off the UI
 thread and has not replaced the managed service or been wired into OwnedService.
 
 Native login UI, authenticated host/real-account acceptance and
-active set-fetch orchestration remain open. Pointer watch derivation,
-live service/evaluator transport ownership, leaderboard and rich
-presence integration, unlock/session API handling, UI adapters and console
-acceptance remain open. The new evaluator performs no HTTP requests or unlock
-submissions. Neither source tests nor a packaged probe establish hardware or
-complete achievement-set compatibility.
+active set-fetch orchestration remain open. Live service/evaluator
+transport ownership, leaderboard and rich presence integration, unlock/session
+API handling, UI adapters and console acceptance remain open. The new evaluator
+performs no HTTP requests or unlock submissions. Neither source tests nor a
+packaged probe establish hardware or complete achievement-set compatibility.
