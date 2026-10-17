@@ -80,8 +80,10 @@ retain the process adapter. When `library` (and optional `profile`) is supplied,
 thread, derives direct and pointer-chain watch lists from qualified sets, and
 queues evaluated outputs via `take_evaluation()`. The [owned evaluator](RA-EVALUATOR.md)
 consumes validated receiver outputs through the public rcheevos API in offline
-and loopback UDP tests. Active-service selection in the desktop launcher remains
-unimplemented. Source-IP ownership is an unauthenticated lease, not a security
+Active-service selection is available via the `--owned-runtime` flag in
+`launcher/achievements.py` and the advanced `owned_runtime` field on the
+RetroAchievements server definition in `launcher/servers.py`. The managed
+runtime remains the default. Source-IP ownership is an unauthenticated lease, not a security
 identity, and cannot distinguish multiple consoles behind the same translated
 source address. Foreign-source traffic is rejected before charging the owner's
 packet budget; same-source traffic can still contend. Measure and refine
@@ -109,5 +111,7 @@ proof the console installed the list or began a new launch.
    ping APIs are implemented and covered by offline unit tests.
 5. Integrate native UI, exports and compatibility adapters; compare outputs and
    packaged lifetime behavior before enabling the replacement service.
+   The supervisor now wires `OwnedService`, `AccountWorker`, `CredentialStore`,
+   and `RASessionClient` under the `--owned-runtime` opt-in flag.
 6. Complete exact-artifact console acceptance from the matrix. Do not remove
    the working runtime until the replacement meets those gates.

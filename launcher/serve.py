@@ -22,6 +22,7 @@ import email.utils
 import enum
 import errno
 import fnmatch
+import getpass
 import gzip
 import hashlib
 import hmac

@@ -559,6 +559,8 @@ def _achievements_argv(values):
         args += ["--obs-folder", obs]
     if values.get("lan_viewer"):
         args.append("--lan-viewer")
+    if values.get("owned_runtime"):
+        args.append("--owned-runtime")
     return args
 
 
@@ -583,6 +585,8 @@ RETROACHIEVEMENTS = ServerDef(
               help="Writes live game, progress and unlock text files plus data.json for streaming overlays."),
         Field("lan_viewer", "View achievements on other devices", "bool", default=False,
               help="Shares a read-only page on port 18199. Devices on your trusted LAN can see your profile and progress. Account controls stay on this PC."),
+        Field("owned_runtime", "Use PS2-Servers native runtime (Issue #223 preview)", "bool", default=False, advanced=True,
+              help="Run the experimental PS2-Servers owned RetroAchievements runtime instead of the bundled xeRAbora engine."),
     ], _build_argv=_achievements_argv,
 )
 

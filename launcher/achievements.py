@@ -12,8 +12,10 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 
 from launcher.config import config_dir
+from launcher.ra_evaluator import library_path
 from launcher.servers import is_frozen
 
 
@@ -104,6 +106,165 @@ def engine_environment(profile, mode):
                 PS2SERVERS_RA_MODE=mode, PS2SERVERS_RA_NO_BROWSER="1")
 
 
+def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
+    from launcher.ra_account_worker import AccountWorker, AccountTask
+    from launcher.ra_owned_service import OwnedService, IdentificationResult
+    from launcher.ra_credentials import CredentialStore
+    from launcher.ra_session_client import RASessionClient
+    from launcher.ra_http import Transport
+    from launcher.ra_sets import decode_response, SetContext
+
+    lib = library_path()
+    if not lib.is_file():
+        raise RuntimeError("The native rcheevos library is missing. Source users: run python build/build_ra_evaluator.py.")
+
+    store = CredentialStore(str(profile))
+
+    if getattr(args, "import_credentials", False):
+        try:
+            managed = store.read_managed(consent=True)
+            if managed:
+                from launcher.ra_account import AccountClient
+                validated = AccountClient().login(managed.username, token=managed.token)
+                store.save(validated)
+                print(f"RetroAchievements: successfully imported credentials for {validated.username}.", flush=True)
+            else:
+                print("RetroAchievements: no existing managed credentials found to import.", flush=True)
+        except Exception as err:
+            print(f"RetroAchievements: credential import failed ({err}).", flush=True)
+
+    if getattr(args, "login", None):
+        import getpass
+        username = args.login
+        password = getpass.getpass(f"Password for RetroAchievements user '{username}': ")
+        from launcher.ra_account import AccountClient
+        try:
+            validated = AccountClient().login(username, password=password)
+            store.save(validated)
+            print(f"RetroAchievements: successfully signed in and saved credentials for {validated.username}.", flush=True)
+        except Exception as err:
+            print(f"RetroAchievements: login failed ({err}).", flush=True)
+            lease.close()
+            close_owner()
+            return 1
+
+    profile_mode = "caduceus" if args.mode == "caduceus" else "opl"
+    worker = AccountWorker(str(profile))
+    active_context = None
+    context_lock = threading.Lock()
+
+    def resolve_job(job, cancel):
+        nonlocal active_context
+        creds = store.load()
+        if creds is None:
+            return IdentificationResult()
+        transport = Transport()
+        try:
+            resp = decode_response(transport.post({"r": "gameid", "m": job.image_hash}, cancel=cancel))
+            game_id = resp.get("GameID")
+            if not isinstance(game_id, int) or game_id <= 0:
+                return IdentificationResult(unsupported=True)
+        except Exception:
+            return IdentificationResult()
+
+        serial_lower = str(job.serial).lower()
+        console_ids = (12, 21) if "vcd" in serial_lower or serial_lower.endswith(".vcd") else (21, 12)
+        for console_id in console_ids:
+            try:
+                ctx = SetContext(creds.username, 1, job.image_hash, game_id, console_id)
+                task = AccountTask(1, 1, "set", credentials=creds, context=ctx)
+                res = worker(task, cancel)
+                if res and res.status == "ok" and res.qualified:
+                    with context_lock:
+                        active_context = ctx
+                    try:
+                        sess_task = AccountTask(2, 1, "start_session", credentials=creds, context=ctx)
+                        worker(sess_task, cancel)
+                    except Exception:
+                        pass
+                    return IdentificationResult(qualified=res.qualified, profile=profile_mode)
+            except Exception:
+                continue
+        return IdentificationResult(unsupported=True)
+
+    service = OwnedService(
+        resolve_job,
+        address=("0.0.0.0", 18194),
+        library=lib,
+        profile=str(profile),
+    )
+    service.start()
+    creds = store.load()
+    if creds:
+        service.bind_account(creds.username, 1)
+        print(f"RetroAchievements: signed in as {creds.username} (owned runtime).", flush=True)
+    else:
+        print("RetroAchievements: signed out (owned runtime). Run with --import-credentials or --login.", flush=True)
+    print(f"RetroAchievements: {args.mode} console compatibility; softcore only (owned runtime).", flush=True)
+    print("Desktop engine: PS2-Servers native runtime (Issue #223).", flush=True)
+
+    bridge = None
+    viewer = None
+    ui_port = available_account_port()
+    try:
+        (profile / "account-port").write_text(str(ui_port), encoding="ascii")
+        if getattr(args, "lan_viewer", False):
+            from launcher.achievement_viewer import Viewer
+            viewer = Viewer(ui_port)
+            viewer.start()
+            print("Read-only achievements viewer: http://<this PC's LAN IP>:18199/", flush=True)
+        if args.mode == "caduceus" and getattr(args, "games_folder", None):
+            from launcher.caduceus import Bridge
+            bridge = Bridge(profile, args.games_folder, account_port=ui_port)
+            bridge.start()
+
+        last_ping = time.monotonic()
+        while not stopped.wait(0.25) and owner_alive():
+            evaluated = service.take_evaluation()
+            if evaluated and evaluated.evaluation and evaluated.evaluation.triggered:
+                for aid in evaluated.evaluation.triggered:
+                    print(f"RetroAchievements: achievement {aid} triggered on console!", flush=True)
+                    with context_lock:
+                        ctx = active_context
+                    current_creds = store.load()
+                    if current_creds and ctx:
+                        def submit(aid=aid, ctx=ctx, c=current_creds):
+                            try:
+                                client = RASessionClient(c.username, c.token)
+                                award = client.award_achievement(ctx, aid)
+                                if award.awarded:
+                                    status = "already unlocked" if award.already_unlocked else "awarded"
+                                    print(f"RetroAchievements: achievement {aid} {status} on server (softcore score: {award.softcore_score}).", flush=True)
+                            except Exception as err:
+                                print(f"RetroAchievements: unlock submission failed for {aid} ({err}).", flush=True)
+                        threading.Thread(target=submit, daemon=True).start()
+
+            now = time.monotonic()
+            if now - last_ping >= 120:
+                last_ping = now
+                with context_lock:
+                    ctx = active_context
+                current_creds = store.load()
+                if current_creds and ctx:
+                    def ping(ctx=ctx, c=current_creds):
+                        try:
+                            client = RASessionClient(c.username, c.token)
+                            client.ping(ctx)
+                        except Exception:
+                            pass
+                    threading.Thread(target=ping, daemon=True).start()
+        return 0
+    finally:
+        if viewer:
+            viewer.close()
+        if bridge:
+            bridge.close()
+        (profile / "account-port").unlink(missing_ok=True)
+        service.stop()
+        lease.close()
+        close_owner()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="RetroAchievements for real PS2 consoles")
     parser.add_argument("--mode", choices=("xerabora", "caduceus"), default="xerabora")
@@ -111,10 +272,21 @@ def main(argv=None):
     parser.add_argument("--no-sound", action="store_true")
     parser.add_argument("--obs-folder", type=Path)
     parser.add_argument("--lan-viewer", action="store_true")
+    parser.add_argument("--owned-runtime", action="store_true",
+                        help="Run the PS2-Servers native runtime (Issue #223 preview)")
+    parser.add_argument("--login", type=str, metavar="USERNAME",
+                        help="Sign in with RetroAchievements username and password prompt")
+    parser.add_argument("--import-credentials", action="store_true",
+                        help="Import credentials from existing managed profile with explicit consent")
     args = parser.parse_args(argv)
-    binary = engine_path()
-    if not binary.is_file():
-        parser.error("The bundled achievement engine is missing. Source users: run python build/build_achievements.py.")
+    if args.owned_runtime:
+        lib = library_path()
+        if not lib.is_file():
+            parser.error("The native rcheevos library is missing. Source users: run python build/build_ra_evaluator.py.")
+    else:
+        binary = engine_path()
+        if not binary.is_file():
+            parser.error("The bundled achievement engine is missing. Source users: run python build/build_achievements.py.")
     if args.mode == "caduceus" and (not args.games_folder or not args.games_folder.is_dir()):
         parser.error("Caduceus needs the existing OPL games folder for its ART/CADUCEUS.KEY pairing file.")
     profile = profile_dir()
@@ -122,6 +294,12 @@ def main(argv=None):
         lease = claim_service(profile)
     except OSError:
         parser.error("RetroAchievements is already running for this profile.")
+    stopped = threading.Event()
+    for name in ("SIGINT", "SIGTERM"):
+        signal.signal(getattr(signal, name), lambda *_: stopped.set())
+    owner_alive, close_owner = bootstrap_owner()
+    if args.owned_runtime:
+        return run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner)
     env = engine_environment(profile, args.mode)
     ui_port = available_account_port()
     command = [str(binary), "--port", "18194", "--ui-port", str(ui_port)]
@@ -130,12 +308,8 @@ def main(argv=None):
     if args.obs_folder:
         args.obs_folder.mkdir(parents=True, exist_ok=True)
         command += ["--obs", str(args.obs_folder.resolve())]
-    stopped = threading.Event()
-    for name in ("SIGINT", "SIGTERM"):
-        signal.signal(getattr(signal, name), lambda *_: stopped.set())
     bridge = None
     viewer = None
-    owner_alive, close_owner = bootstrap_owner()
     try:
         (profile / "account-port").write_text(str(ui_port), encoding="ascii")
         if args.lan_viewer:
