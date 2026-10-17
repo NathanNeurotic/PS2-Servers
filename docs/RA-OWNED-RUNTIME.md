@@ -113,5 +113,8 @@ proof the console installed the list or began a new launch.
    packaged lifetime behavior before enabling the replacement service.
    The supervisor now wires `OwnedService`, `AccountWorker`, `CredentialStore`,
    and `RASessionClient` under the `--owned-runtime` opt-in flag.
+   `launcher/ra_web.py` supplies the native HTTP status dashboard and live
+   Server-Sent Events (`/events` and `/state`) on `account-port` without
+   vendoring or presenting the legacy xeRAbora client page.
 6. Complete exact-artifact console acceptance from the matrix. Do not remove
    the working runtime until the replacement meets those gates.

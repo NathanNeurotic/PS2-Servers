@@ -113,6 +113,7 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
     from launcher.ra_session_client import RASessionClient
     from launcher.ra_http import Transport
     from launcher.ra_sets import decode_response, SetContext
+    from launcher.ra_web import RAState, RAWebServer
 
     lib = library_path()
     if not lib.is_file():
@@ -152,6 +153,7 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
     worker = AccountWorker(str(profile))
     active_context = None
     context_lock = threading.Lock()
+    state = RAState()
 
     def resolve_job(job, cancel):
         nonlocal active_context
@@ -177,6 +179,24 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                 if res and res.status == "ok" and res.qualified:
                     with context_lock:
                         active_context = ctx
+                    achievements_data = []
+                    prior_set = set(res.qualified.prior_unlocks)
+                    for aid, pts, title in res.qualified.metadata:
+                        achievements_data.append({
+                            "id": aid,
+                            "title": title,
+                            "description": "",
+                            "points": pts,
+                            "unlocked": aid in prior_set,
+                        })
+                    state.set_game(
+                        game_id=res.qualified.context.game_id,
+                        title=res.qualified.title,
+                        serial=job.serial,
+                        image_hash=job.image_hash,
+                        achievements=achievements_data,
+                    )
+                    state.update_console(connected=True, status="playing")
                     try:
                         sess_task = AccountTask(2, 1, "start_session", credentials=creds, context=ctx)
                         worker(sess_task, cancel)
@@ -197,17 +217,23 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
     creds = store.load()
     if creds:
         service.bind_account(creds.username, 1)
+        state.set_account(creds.username, True)
         print(f"RetroAchievements: signed in as {creds.username} (owned runtime).", flush=True)
     else:
+        state.set_account("", False)
         print("RetroAchievements: signed out (owned runtime). Run with --import-credentials or --login.", flush=True)
     print(f"RetroAchievements: {args.mode} console compatibility; softcore only (owned runtime).", flush=True)
     print("Desktop engine: PS2-Servers native runtime (Issue #223).", flush=True)
 
     bridge = None
     viewer = None
+    web_server = None
     ui_port = available_account_port()
     try:
         (profile / "account-port").write_text(str(ui_port), encoding="ascii")
+        web_server = RAWebServer(ui_port, state)
+        web_server.start()
+        print(f"Account, achievements and leaderboards: http://127.0.0.1:{ui_port}/", flush=True)
         if getattr(args, "lan_viewer", False):
             from launcher.achievement_viewer import Viewer
             viewer = Viewer(ui_port)
@@ -221,23 +247,30 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
         last_ping = time.monotonic()
         while not stopped.wait(0.25) and owner_alive():
             evaluated = service.take_evaluation()
-            if evaluated and evaluated.evaluation and evaluated.evaluation.triggered:
-                for aid in evaluated.evaluation.triggered:
-                    print(f"RetroAchievements: achievement {aid} triggered on console!", flush=True)
-                    with context_lock:
-                        ctx = active_context
-                    current_creds = store.load()
-                    if current_creds and ctx:
-                        def submit(aid=aid, ctx=ctx, c=current_creds):
-                            try:
-                                client = RASessionClient(c.username, c.token)
-                                award = client.award_achievement(ctx, aid)
-                                if award.awarded:
-                                    status = "already unlocked" if award.already_unlocked else "awarded"
-                                    print(f"RetroAchievements: achievement {aid} {status} on server (softcore score: {award.softcore_score}).", flush=True)
-                            except Exception as err:
-                                print(f"RetroAchievements: unlock submission failed for {aid} ({err}).", flush=True)
-                        threading.Thread(target=submit, daemon=True).start()
+            if evaluated:
+                state.update_console(
+                    connected=True,
+                    packets=state.packets + 1,
+                    frames=state.frames + 1,
+                )
+                if evaluated.evaluation and evaluated.evaluation.triggered:
+                    for aid in evaluated.evaluation.triggered:
+                        state.note_unlock(aid)
+                        print(f"RetroAchievements: achievement {aid} triggered on console!", flush=True)
+                        with context_lock:
+                            ctx = active_context
+                        current_creds = store.load()
+                        if current_creds and ctx:
+                            def submit(aid=aid, ctx=ctx, c=current_creds):
+                                try:
+                                    client = RASessionClient(c.username, c.token)
+                                    award = client.award_achievement(ctx, aid)
+                                    if award.awarded:
+                                        status = "already unlocked" if award.already_unlocked else "awarded"
+                                        print(f"RetroAchievements: achievement {aid} {status} on server (softcore score: {award.softcore_score}).", flush=True)
+                                except Exception as err:
+                                    print(f"RetroAchievements: unlock submission failed for {aid} ({err}).", flush=True)
+                            threading.Thread(target=submit, daemon=True).start()
 
             now = time.monotonic()
             if now - last_ping >= 120:
@@ -255,6 +288,8 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                     threading.Thread(target=ping, daemon=True).start()
         return 0
     finally:
+        if web_server:
+            web_server.close()
         if viewer:
             viewer.close()
         if bridge:
