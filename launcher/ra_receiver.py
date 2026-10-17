@@ -56,6 +56,8 @@ class Receiver:
         self.window = clock()
         self.requests = 0
         self.datagrams = 0
+        self.destination = None
+        self.acknowledged = set()
         self.session = WatchSession(clock=clock, timeout=lease_seconds)
         self.clear()
 
@@ -63,6 +65,8 @@ class Receiver:
         """Revoke ownership and invalidate pending work on account/reset/stop."""
         self.token += 1
         self.owner = None
+        self.destination = None
+        self.acknowledged.clear()
         self.last_activity = None
         self.pending = None
         self.pending_since = None
@@ -148,7 +152,8 @@ class Receiver:
                 return ReceiverOutput()
             if values is not None:
                 self.last_activity = now
-                return ReceiverOutput(values=values, generation=self.session.generation,
+                destination = self.destination or (source, peer[1])
+                return ReceiverOutput(destination=destination, values=values, generation=self.session.generation,
                                       sequence=self.session.assembler.sequence)
             return ReceiverOutput()
         self.requests += 1
@@ -165,6 +170,15 @@ class Receiver:
         self.last_activity = now
         destination = ((request.address, request.port) if self.advertised_replies
                        else (source, peer[1]))
+        self.destination = destination
+        if request.kind in ("RAH1", "RAK1", "RAK2"):
+            if request.kind in ("RAK1", "RAK2"):
+                for item in request.extra:
+                    try:
+                        self.acknowledged.add(int(item))
+                    except ValueError:
+                        pass
+            return ReceiverOutput(destination=destination)
         if request.kind == "RAP1":
             return ReceiverOutput(pad_reply(b"RAO1 OK PS2-Servers/owned-protocol"), destination)
         if request.kind == "RAG1":

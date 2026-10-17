@@ -12,6 +12,7 @@ from launcher.ra_account import AccountClient
 from launcher.ra_credentials import Credentials, CredentialStore
 from launcher.ra_http import RateLimited
 from launcher.ra_resolver_process import ProcessResolver
+from launcher.ra_session_client import RASessionClient, SessionInfo, AwardResult
 from launcher.ra_set_client import RASetClient
 from launcher.ra_sets import SetContext, QualifiedSet
 
@@ -28,12 +29,15 @@ class AccountTask:
     context: SetContext = None
     include_unofficial: bool = False
     consent: bool = False
+    achievement_id: int = 0
+    rich_presence: str = ""
 
     def __post_init__(self):
         for value in (self.task_id, self.epoch):
             if type(value) is not int or not 1 <= value <= 0xFFFFFFFF:
                 raise ValueError("Invalid account task identity")
-        if type(self.operation) is not str or self.operation not in ("login", "resume", "import", "set"):
+        if type(self.operation) is not str or self.operation not in (
+                "login", "resume", "import", "set", "start_session", "award", "ping"):
             raise ValueError("Invalid account operation")
         if (type(self.username) is not str or len(self.username) > 64 or
                 any(c in self.username for c in "\0\r\n") or
@@ -45,15 +49,26 @@ class AccountTask:
                 raise ValueError("Invalid login input")
         elif self.password is not None:
             raise ValueError("Unexpected password")
-        if self.operation == "set":
+        if self.operation in ("set", "start_session", "award", "ping"):
             if type(self.credentials) is not Credentials or type(self.context) is not SetContext:
-                raise ValueError("Invalid set input")
+                raise ValueError("Invalid session or set input")
             self.credentials.__post_init__()
             self.context.__post_init__()
             if self.context.account != self.credentials.username or self.context.epoch != self.epoch:
-                raise ValueError("Set account context mismatch")
-        elif self.credentials is not None or self.context is not None:
-            raise ValueError("Unexpected set input")
+                raise ValueError("Account context mismatch")
+            if self.operation == "award":
+                if type(self.achievement_id) is not int or not 1 <= self.achievement_id <= 0xFFFFFFFF:
+                    raise ValueError("Invalid award achievement ID")
+            elif self.achievement_id != 0:
+                raise ValueError("Unexpected achievement ID")
+            if self.operation == "ping":
+                if type(self.rich_presence) is not str or len(self.rich_presence) > 4096 or "\0" in self.rich_presence:
+                    raise ValueError("Invalid rich presence")
+            elif self.rich_presence != "":
+                raise ValueError("Unexpected rich presence")
+        elif (self.credentials is not None or self.context is not None or
+              self.achievement_id != 0 or self.rich_presence != ""):
+            raise ValueError("Unexpected task input")
 
 
 @dataclass(frozen=True)
@@ -64,6 +79,9 @@ class AccountResult:
     status: str
     credentials: Credentials = field(default=None, repr=False)
     qualified: QualifiedSet = None
+    session_info: SessionInfo = None
+    award: AwardResult = None
+    ping: bool = None
     retry_after: int = 0
 
 
@@ -74,16 +92,35 @@ def valid_account_result(result):
             result.status not in ("ok", "failed", "rate_limited") or
             type(result.retry_after) is not int or not 0 <= result.retry_after <= 300):
         return False
+    payloads = [result.credentials, result.qualified, result.session_info, result.award, result.ping]
+    count = sum(p is not None for p in payloads)
     if result.status != "ok":
-        return (result.credentials is None and result.qualified is None and
-                (result.retry_after > 0 if result.status == "rate_limited" else result.retry_after == 0))
-    if result.retry_after or (result.credentials is None) == (result.qualified is None):
+        return count == 0 and (result.retry_after > 0 if result.status == "rate_limited" else result.retry_after == 0)
+    if result.retry_after or count != 1:
         return False
+    if result.ping is not None:
+        return type(result.ping) is bool and result.ping is True
     if result.credentials is not None:
         if type(result.credentials) is not Credentials:
             return False
         try:
             result.credentials.__post_init__()
+        except ValueError:
+            return False
+        return True
+    if result.session_info is not None:
+        if type(result.session_info) is not SessionInfo:
+            return False
+        try:
+            result.session_info.__post_init__()
+        except ValueError:
+            return False
+        return True
+    if result.award is not None:
+        if type(result.award) is not AwardResult:
+            return False
+        try:
+            result.award.__post_init__()
         except ValueError:
             return False
         return True
@@ -116,6 +153,16 @@ def valid_account_result(result):
         if type(values) is not tuple or len(values) > limit or any(
                 type(value) is not int or not 1 <= value <= 0xFFFFFFFF for value in values):
             return False
+    if type(qualified.metadata) is not tuple or len(qualified.metadata) > 4096:
+        return False
+    for item in qualified.metadata:
+        if type(item) is not tuple or len(item) != 3:
+            return False
+        aid, pts, atitle = item
+        if (type(aid) is not int or not 1 <= aid <= 0xFFFFFFFF or
+                type(pts) is not int or not 0 <= pts <= 999999 or
+                type(atitle) is not str or len(atitle) > 4096):
+            return False
     return (total <= 4 * 1024 * 1024 and seen <= set(qualified.selected_ids) and
             not seen.intersection(qualified.prior_unlocks) and
             set(qualified.unofficial_ids) <= set(qualified.selected_ids))
@@ -134,6 +181,26 @@ class _Lookup:
                 qualified = RASetClient(job.credentials.username, job.credentials.token).fetch(
                     job.context, include_unofficial=job.include_unofficial, cancel=cancel)
                 return AccountResult(job.task_id, job.epoch, "ok", qualified=qualified)
+            if job.operation == "start_session":
+                if type(job.credentials) is not Credentials or job.context.epoch != job.epoch:
+                    raise ValueError("Invalid start_session job")
+                info = RASessionClient(job.credentials.username, job.credentials.token).start_session(
+                    job.context, cancel=cancel)
+                return AccountResult(job.task_id, job.epoch, "ok", session_info=info)
+            if job.operation == "award":
+                if type(job.credentials) is not Credentials or job.context.epoch != job.epoch:
+                    raise ValueError("Invalid award job")
+                award = RASessionClient(job.credentials.username, job.credentials.token).award_achievement(
+                    job.context, job.achievement_id, cancel=cancel)
+                return AccountResult(job.task_id, job.epoch, "ok", award=award)
+            if job.operation == "ping":
+                if type(job.credentials) is not Credentials or job.context.epoch != job.epoch:
+                    raise ValueError("Invalid ping job")
+                ok = RASessionClient(job.credentials.username, job.credentials.token).ping(
+                    job.context, rich_presence=job.rich_presence or None, cancel=cancel)
+                if not ok:
+                    raise ValueError("Ping failed")
+                return AccountResult(job.task_id, job.epoch, "ok", ping=True)
             client = AccountClient()
             if job.operation == "login":
                 credentials = client.login(job.username, password=job.password, cancel=cancel)
@@ -196,11 +263,21 @@ class AccountSession:
         self.receiver, self.store = receiver, store
         self._epoch = self._serial = 0
         self._credentials = self._pending = self._identification = None
+        self._context = None
+        self._session_info = None
         self.cancel = threading.Event()
 
     @property
     def username(self):
         return self._credentials.username if self._credentials is not None else None
+
+    @property
+    def context(self):
+        return self._context
+
+    @property
+    def session_info(self):
+        return self._session_info
 
     def _new_task(self, operation, **options):
         candidate = AccountTask(self._serial + 1, self._epoch, operation, **options)
@@ -234,6 +311,47 @@ class AccountSession:
         self._identification = identification
         return task
 
+    def begin_start_session(self, context=None):
+        if self._credentials is None:
+            raise ValueError("Account sign-in required")
+        target_context = self._context if context is None else context
+        if (type(target_context) is not SetContext or target_context.epoch != self._epoch or
+                target_context.account != self._credentials.username):
+            raise ValueError("Account context mismatch")
+        return self._new_task("start_session", credentials=self._credentials, context=target_context)
+
+    def begin_award(self, first, second=None):
+        if self._credentials is None:
+            raise ValueError("Account sign-in required")
+        if isinstance(first, SetContext):
+            target_context, achievement_id = first, second
+        elif isinstance(second, SetContext):
+            achievement_id, target_context = first, second
+        else:
+            achievement_id, target_context = first, self._context
+        if (type(target_context) is not SetContext or target_context.epoch != self._epoch or
+                target_context.account != self._credentials.username):
+            raise ValueError("Account context mismatch")
+        if type(achievement_id) is not int or not 1 <= achievement_id <= 0xFFFFFFFF:
+            raise ValueError("Invalid award achievement ID")
+        return self._new_task("award", credentials=self._credentials, context=target_context,
+                              achievement_id=achievement_id)
+
+    def begin_ping(self, context=None, *, rich_presence=""):
+        if self._credentials is None:
+            raise ValueError("Account sign-in required")
+        if isinstance(context, str) and not rich_presence:
+            rich_presence, target_context = context, self._context
+        else:
+            target_context = self._context if context is None else context
+        if (type(target_context) is not SetContext or target_context.epoch != self._epoch or
+                target_context.account != self._credentials.username):
+            raise ValueError("Account context mismatch")
+        if type(rich_presence) is not str or len(rich_presence) > 4096 or "\0" in rich_presence:
+            raise ValueError("Invalid rich presence")
+        return self._new_task("ping", credentials=self._credentials, context=target_context,
+                              rich_presence=rich_presence)
+
     def accept(self, job, result, *, remember=False, profile="opl"):
         """Persist/activate only after matching the current task and epoch."""
         if (type(job) is not AccountTask or self._pending != job or self.cancel.is_set() or not valid_account_result(result) or
@@ -245,7 +363,23 @@ class AccountSession:
             if job.operation == "set":
                 if result.qualified is None or result.qualified.context != job.context:
                     return False
-                return self.receiver.complete_set(self._identification, result.qualified, profile=profile)
+                accepted = self.receiver.complete_set(self._identification, result.qualified, profile=profile)
+                if accepted:
+                    self._context = job.context
+                return accepted
+            if job.operation == "start_session":
+                if result.session_info is None or result.session_info.game_id != job.context.game_id:
+                    return False
+                self._session_info = result.session_info
+                return True
+            if job.operation == "award":
+                if result.award is None or result.award.achievement_id != job.achievement_id:
+                    return False
+                return True
+            if job.operation == "ping":
+                if result.ping is not True:
+                    return False
+                return True
             if result.credentials is None or type(remember) is not bool:
                 return False
             if remember:
@@ -264,6 +398,8 @@ class AccountSession:
         self.cancel.set()
         self._epoch += 1
         self._credentials = self._pending = self._identification = None
+        self._context = None
+        self._session_info = None
         self.receiver.clear_account()
         if forget:
             self.store.clear()

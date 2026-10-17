@@ -83,6 +83,7 @@ class _ResultUnpickler(pickle.Unpickler):
             "launcher.ra_account_worker": {"AccountResult"},
             "launcher.ra_credentials": {"Credentials"},
             "launcher.ra_sets": {"SetContext", "QualifiedSet"},
+            "launcher.ra_session_client": {"SessionInfo", "AwardResult"},
         }
         if name not in allowed.get(module, set()):
             raise pickle.UnpicklingError("Invalid resolver result type")

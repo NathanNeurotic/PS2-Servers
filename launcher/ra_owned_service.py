@@ -61,6 +61,7 @@ class OwnedService:
         self._account = None
         self._account_epoch = 0
         self._commands = queue.Queue()
+        self._receiver = None
 
     @property
     def account(self):
@@ -106,6 +107,7 @@ class OwnedService:
             self._discard_frame()
             self.dropped_frames = 0
             self.dropped_evaluations = 0
+        self._receiver = receiver
         self._worker = threading.Thread(target=self._resolve, daemon=True,
                                         name="RA owned resolver")
         self._loop = threading.Thread(target=self._serve,
@@ -382,6 +384,14 @@ class OwnedService:
                         listener.sendto(output.reply, output.destination)
                     except OSError:
                         pass  # a failed datagram does not kill discovery
+                if evaluated is not None and evaluated.notices:
+                    destination = output.destination or raw.destination
+                    if destination:
+                        for notice in evaluated.notices:
+                            try:
+                                listener.sendto(notice, destination)
+                            except OSError:
+                                pass
                 if output.values:
                     with self._frame_lock:
                         if not self._reset.is_set():
@@ -417,6 +427,7 @@ class OwnedService:
                 if self._active_job is not None:
                     self._active_job[1].set()
                 self._discard_frame()
+                self._receiver = None
             listener.close()
             self._stop.set()
 

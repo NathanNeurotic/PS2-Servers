@@ -104,6 +104,9 @@ proof the console installed the list or began a new launch.
    requires a handshake/launch boundary as well as clearing local fragments.
 4. Integrate rcheevos evaluation and legitimate account/API/session handling,
    retaining secure private storage, without real unlock submissions in CI.
+   Offline native evaluation, RAU1 console unlock notices, console heartbeat/ack
+   tracking, RASessionClient session registration, softcore unlock submission and
+   ping APIs are implemented and covered by offline unit tests.
 5. Integrate native UI, exports and compatibility adapters; compare outputs and
    packaged lifetime behavior before enabling the replacement service.
 6. Complete exact-artifact console acceptance from the matrix. Do not remove
