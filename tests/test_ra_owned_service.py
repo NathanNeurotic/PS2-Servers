@@ -271,12 +271,19 @@ class EvaluatedOwnedServiceTests(unittest.TestCase):
         self.fail("Evaluated frame did not arrive")
 
     def qualified(self, expressions=("0xH080000=1",), *, account="Synthetic", epoch=1,
-                  image_hash="a" * 32, unlocks=()):
+                  image_hash="a" * 32, unlocks=(), titles=None, points=None):
         from launcher.ra_sets import SetContext, qualify_set
         from tests.test_ra_sets import responses
         context = SetContext(account, epoch, image_hash, 42, 21)
-        patch, prior = responses([{"ID": index + 10, "Flags": 3, "MemAddr": expression}
-                                  for index, expression in enumerate(expressions)], unlocks)
+        achievements = []
+        for index, expression in enumerate(expressions):
+            item = {"ID": index + 10, "Flags": 3, "MemAddr": expression}
+            if titles and index < len(titles):
+                item["Title"] = titles[index]
+            if points and index < len(points):
+                item["Points"] = points[index]
+            achievements.append(item)
+        patch, prior = responses(achievements, unlocks)
         return qualify_set(context, patch, prior)
 
     def test_qualified_set_handoff_derives_watch_and_evaluates_frames_over_udp(self):
@@ -375,4 +382,81 @@ class EvaluatedOwnedServiceTests(unittest.TestCase):
         self.request(self.query.replace(b"a" * 32, b"b" * 32))
         self.assertIsNone(service.take_evaluation())
         self.assertIsNone(service.take_frame())
+
+    def test_end_to_end_unlock_notice_delivery_base_opl_profile(self):
+        service = self.start(lambda job, cancel: self.qualified(
+            titles=["First Unlock"], points=[10], image_hash=job.image_hash))
+        service.bind_account("Synthetic", 1)
+        self.ready()
+        self.request(b"RAG1 " + b"a" * 32 + b" 0")
+
+        # Frame 1: value 0 (no trigger)
+        self.client.sendto(packet(b"\0", count=1, sequence=1), self.address)
+        first = self.wait_evaluation(service)
+        self.assertFalse(first.evaluation.triggered)
+        self.assertEqual(first.notices, ())
+
+        # Frame 2: value 1 (triggers achievement 10)
+        self.client.sendto(packet(b"\1", count=1, sequence=2), self.address)
+        second = self.wait_evaluation(service)
+        self.assertEqual(second.evaluation.triggered, (10,))
+        self.assertEqual(len(second.notices), 1)
+        self.assertTrue(second.notices[0].startswith(b"RAU1 10 10"))
+        self.assertEqual(len(second.notices[0]) % 64, 0)
+
+        # Receive RAU1 on the client socket
+        notice_pkt, _ = self.client.recvfrom(2000)
+        self.assertEqual(notice_pkt, second.notices[0])
+
+        # Console sends RAK1 acknowledgment
+        self.client.sendto(b"RAK1 10", self.address)
+        raw = service._raw_receiver(service._receiver)
+        deadline = time.monotonic() + 1
+        while 10 not in raw.acknowledged and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertIn(10, raw.acknowledged)
+
+    def test_end_to_end_unlock_notice_delivery_caduceus_profile(self):
+        service = self.start(lambda job, cancel: IdentificationResult(
+            qualified=self.qualified(titles=["Café Master"], points=[25], image_hash=job.image_hash),
+            profile="caduceus"))
+        service.bind_account("Synthetic", 1)
+        self.ready()
+        self.request(b"RAG1 " + b"a" * 32 + b" 0")
+
+        self.client.sendto(packet(b"\0", count=1, sequence=1), self.address)
+        first = self.wait_evaluation(service)
+        self.assertFalse(first.evaluation.triggered)
+
+        self.client.sendto(packet(b"\1", count=1, sequence=2), self.address)
+        evaluated = self.wait_evaluation(service)
+        self.assertEqual(evaluated.evaluation.triggered, (10,))
+        self.assertEqual(len(evaluated.notices), 1)
+        # Caduceus profile includes cleaned title in notice
+        self.assertTrue(evaluated.notices[0].startswith(b"RAU1 10 25 Cafe Master"))
+        self.assertEqual(len(evaluated.notices[0]) % 64, 0)
+
+        notice_pkt, _ = self.client.recvfrom(2000)
+        self.assertEqual(notice_pkt, evaluated.notices[0])
+
+    def test_console_heartbeat_and_ack_handling(self):
+        service = self.start(lambda job, cancel: self.qualified(image_hash=job.image_hash))
+        service.bind_account("Synthetic", 1)
+        self.ready()
+        raw = service._raw_receiver(service._receiver)
+        initial_activity = raw.last_activity
+
+        time.sleep(0.05)
+        self.client.sendto(b"RAH1", self.address)
+        deadline = time.monotonic() + 1
+        while raw.last_activity == initial_activity and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertGreater(raw.last_activity, initial_activity)
+
+        self.client.sendto(b"RAK2 55 66", self.address)
+        deadline = time.monotonic() + 1
+        while not ({55, 66} <= raw.acknowledged) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue({55, 66} <= raw.acknowledged)
+
 

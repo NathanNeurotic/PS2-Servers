@@ -100,15 +100,19 @@ expiry, reset and shutdown. A failed activation, mismatched account epoch or
 metadata conversion revokes any partial installation and remains retryable.
 Account changes call `reset()`; its generation tokens invalidate even pending
 results for the same image. Local events are returned to the owner, never
-submitted automatically. `launcher/ra_owned_service.py` now wires
-`EvaluatedReceiver` and optional `AccountSession` onto its UDP owner thread when
-configured with `library` (and optional `profile`), exposing evaluated frames via
-`take_evaluation()` and serializing account commands (`bind_account`,
-`clear_account`, `run_account`) on the single owner thread.
+submitted automatically. When achievements trigger, `EvaluatedReceiver` formats
+`RAU1` unlock notice datagrams via `format_unlock_notice` (space-padded, minimum
+128 bytes, 64-byte aligned for console DMA). Base OPL uses `RAU1 <id> <points>`;
+Caduceus profile appends the printable cleaned title.
+`launcher/ra_owned_service.py` wires `EvaluatedReceiver` and optional `AccountSession`
+onto its UDP owner thread when configured with `library` (and optional `profile`),
+exposing evaluated frames via `take_evaluation()`, serializing account commands
+(`bind_account`, `clear_account`, `run_account`) on the single owner thread, and
+immediately transmitting `RAU1` notices to the console over UDP. Console heartbeats
+(`RAH1`) and unlock acknowledgments (`RAK1`, `RAK2`) refresh console lease activity
+and track acknowledged IDs in the receiver.
 
 Native login UI, authenticated host/real-account acceptance and active desktop
-service selection remain open. Leaderboard and rich presence integration,
-unlock/session API handling, UI adapters and console acceptance remain open. The
-new evaluator performs no HTTP requests or unlock submissions. Neither source
-tests nor a packaged probe establish hardware or complete achievement-set
+service selection remain open. Leaderboards and console acceptance remain open.
+Neither source tests nor a packaged probe establish hardware or complete achievement-set
 compatibility.

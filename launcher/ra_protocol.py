@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import ipaddress
 import re
 import time
+import unicodedata
 
 
 MAX_DATAGRAM = 1472
@@ -28,6 +29,7 @@ class ConsoleRequest:
     image_hash: str = ""
     serial: str = ""
     index: int = 0
+    extra: tuple = ()
 
 
 def parse_request(packet, peer=None):
@@ -42,9 +44,20 @@ def parse_request(packet, peer=None):
         fields = packet.decode("ascii").split()
     except UnicodeDecodeError as error:
         raise ValueError("Non-ASCII request") from error
-    if not fields or fields[0] not in ("RAP1", "RAQ1", "RAG1"):
+    if not fields or fields[0] not in ("RAP1", "RAQ1", "RAG1", "RAH1", "RAK1", "RAK2"):
         raise ValueError("Unknown request")
     kind = fields[0]
+    if kind in ("RAH1", "RAK1", "RAK2"):
+        if peer is None:
+            raise ValueError("Request requires a source reply endpoint")
+        try:
+            address = str(ipaddress.IPv4Address(peer[0]))
+            port = peer[1]
+            if type(port) is not int or not 1 <= port <= 65535:
+                raise ValueError("Invalid source port")
+        except (IndexError, TypeError, ValueError) as invalid_peer:
+            raise ValueError("Invalid source reply endpoint") from invalid_peer
+        return ConsoleRequest(kind, address, port, extra=tuple(fields[1:]))
     minimum = {"RAP1": 3, "RAQ1": 2, "RAG1": 3}[kind]
     maximum = 3 if kind == "RAP1" else 5
     if not minimum <= len(fields) <= maximum:
@@ -91,6 +104,26 @@ def pad_reply(body):
     if not isinstance(body, bytes) or not 1 <= len(body) < 960:
         raise ValueError("Reply exceeds console receive buffer")
     return body + b" " * (max(128, ((len(body) + 63) // 64) * 64) - len(body))
+
+
+def clean_title(title, limit=63):
+    """Convert title to printable ASCII without combining characters."""
+    text = unicodedata.normalize("NFKD", str(title or ""))
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return "".join(c if " " <= c <= "~" else " " for c in text)[:limit]
+
+
+def format_unlock_notice(achievement_id, points=0, title=None):
+    """Format a space-padded RAU1 console notification for DMA alignment."""
+    if type(achievement_id) is not int or not 1 <= achievement_id <= 0xFFFFFFFF:
+        raise ValueError("Invalid achievement ID")
+    if type(points) is not int or not 0 <= points <= 999999:
+        raise ValueError("Invalid achievement points")
+    if title is not None:
+        body = f"RAU1 {achievement_id} {points} {clean_title(title)}".encode("ascii")
+    else:
+        body = f"RAU1 {achievement_id} {points}".encode("ascii")
+    return pad_reply(body)
 
 
 def watch_chunk(watch_file, index):

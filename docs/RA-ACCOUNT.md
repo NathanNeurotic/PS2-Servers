@@ -55,6 +55,26 @@ The owner publishes them only through the existing generation-bound receiver.
 No-support, transport failure, cooldown and no-remaining-achievement states must
 remain distinct when the active UI/service adapter is added.
 
+## Session tracking, unlock submission and ping
+
+`RASessionClient` handles session tracking and unlock submission using an existing
+runtime login token. It requires an active `SetContext` matching the account identity:
+
+- `start_session(context)` submits `r=startsession` for softcore session registration
+  and returns `SessionInfo` with server timestamp and existing unlock IDs.
+- `award_achievement(context, achievement_id, seconds_since_unlock=0)` generates
+  the required softcore MD5 signature `v=md5(f"{achievement_id}{username}0")`
+  (including `seconds_since_unlock` when nonzero) and submits `r=awardachievement`.
+  Responses with `"User already has"` are treated as idempotent successes with
+  `already_unlocked=True`. Sanitized exceptions prevent leaking credentials or private errors.
+- `ping(context, rich_presence=None)` submits periodic session keepalives (`r=ping`)
+  with optional rich presence strings truncated to 4096 bytes.
+
+`AccountSession` exposes `begin_start_session()`, `begin_award()`, and `begin_ping()`.
+These operations execute through `AccountWorker` in isolated subprocesses. The owner
+commits results only when task IDs and epochs match, saving `session_info` on the
+session owner and verifying awards against active context.
+
 ## Verification and remaining gates
 
 Source fixtures cover real platform token protection, atomic rollback, explicit
@@ -69,6 +89,5 @@ resource release. Existing resolver and evaluator selfchecks remain separate.
 `OwnedService` now orchestrates `EvaluatedReceiver` and `AccountSession` on its
 single UDP owner thread when configured with an evaluator library and profile.
 Native account UI/consent prompts, active desktop service selection, real-account
-acceptance, session/unlock submission, leaderboards, rich presence and console
-acceptance remain open. Passing offline login fixtures does not establish real
-RetroAchievements authentication or unlock acceptance.
+acceptance, leaderboards and console acceptance remain open. Passing offline login
+fixtures does not establish real RetroAchievements authentication or unlock acceptance.

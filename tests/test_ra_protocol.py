@@ -6,7 +6,8 @@ the owned parser. Payloads are synthetic and no RA API is contacted.
 import unittest
 
 from launcher.ra_protocol import (MAX_VALUES, SnapshotAssembler, parse_snapshot,
-                                  parse_request, pad_reply, watch_chunk)
+                                  parse_request, pad_reply, watch_chunk,
+                                  clean_title, format_unlock_notice)
 
 
 def packet(values=b"abcd", sequence=1, index=0, parts=1, count=2,
@@ -178,3 +179,67 @@ class AssemblyTests(unittest.TestCase):
         self.assembler.feed(first)
         self.now = 15
         self.assertEqual(self.assembler.feed(packet(b"abcdef", sequence=0)), b"abcdef")
+
+
+class UnlockNoticeTests(unittest.TestCase):
+    def test_clean_title(self):
+        self.assertEqual(clean_title("Café 100% — Complete!"), "Cafe 100%   Complete!")
+        self.assertEqual(clean_title("A" * 100, limit=10), "A" * 10)
+        self.assertEqual(clean_title("Control\x00\x01\x1fChars"), "Control   Chars")
+        self.assertEqual(clean_title(None), "")
+
+    def test_format_unlock_notice_base_opl(self):
+        notice = format_unlock_notice(12345, 5)
+        self.assertTrue(notice.startswith(b"RAU1 12345 5"))
+        self.assertGreaterEqual(len(notice), 128)
+        self.assertEqual(len(notice) % 64, 0)
+        self.assertEqual(notice.strip(), b"RAU1 12345 5")
+
+    def test_format_unlock_notice_caduceus(self):
+        notice = format_unlock_notice(42, 10, title="Victory!")
+        self.assertTrue(notice.startswith(b"RAU1 42 10 Victory!"))
+        self.assertGreaterEqual(len(notice), 128)
+        self.assertEqual(len(notice) % 64, 0)
+        self.assertEqual(notice.strip(), b"RAU1 42 10 Victory!")
+
+    def test_format_unlock_notice_bounds_and_types(self):
+        with self.assertRaises(ValueError):
+            format_unlock_notice(0)
+        with self.assertRaises(ValueError):
+            format_unlock_notice(0x100000000)
+        with self.assertRaises(ValueError):
+            format_unlock_notice("123")
+        with self.assertRaises(ValueError):
+            format_unlock_notice(1, points=-1)
+        with self.assertRaises(ValueError):
+            format_unlock_notice(1, points=1000000)
+        with self.assertRaises(ValueError):
+            format_unlock_notice(1, points="5")
+
+
+class HeartbeatAndAckRequestTests(unittest.TestCase):
+    def test_heartbeat_and_ack_parsing_with_peer(self):
+        peer = ("192.0.2.15", 18195)
+        heartbeat = parse_request(b"RAH1", peer)
+        self.assertEqual((heartbeat.kind, heartbeat.address, heartbeat.port),
+                         ("RAH1", "192.0.2.15", 18195))
+        self.assertEqual(heartbeat.extra, ())
+
+        ack1 = parse_request(b"RAK1 42", peer)
+        self.assertEqual((ack1.kind, ack1.address, ack1.port),
+                         ("RAK1", "192.0.2.15", 18195))
+        self.assertEqual(ack1.extra, ("42",))
+
+        ack2 = parse_request(b"RAK2 42 99", peer)
+        self.assertEqual((ack2.kind, ack2.address, ack2.port),
+                         ("RAK2", "192.0.2.15", 18195))
+        self.assertEqual(ack2.extra, ("42", "99"))
+
+    def test_heartbeat_and_ack_require_valid_peer(self):
+        with self.assertRaises(ValueError):
+            parse_request(b"RAH1")
+        with self.assertRaises(ValueError):
+            parse_request(b"RAK1 42", ("invalid", 18195))
+        with self.assertRaises(ValueError):
+            parse_request(b"RAK2 42", ("192.0.2.15", 0))
+

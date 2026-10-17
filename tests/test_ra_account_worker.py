@@ -10,6 +10,7 @@ from unittest import mock
 from launcher.ra_account_worker import (AccountTask, AccountResult, AccountWorker,
                                         AccountSession, valid_account_result, _Lookup)
 from launcher.ra_credentials import Credentials, CredentialStore
+from launcher.ra_session_client import SessionInfo, AwardResult
 from launcher.ra_sets import QualifiedSet, SetContext
 
 
@@ -163,3 +164,96 @@ class AccountWorkerTests(unittest.TestCase):
         self.assertFalse(valid_account_result(AccountResult(1, 1, "ok")))
         self.assertFalse(valid_account_result(AccountResult(1, 1, "failed", credentials=Credentials("Synthetic", "token"))))
         self.assertFalse(valid_account_result(AccountResult(True, 1, "failed")))
+
+    def test_session_award_ping_task_validation(self):
+        context = SetContext("Synthetic", 1, "a" * 32, 100, 21)
+        creds = Credentials("Synthetic", "token")
+        task_session = AccountTask(1, 1, "start_session", credentials=creds, context=context)
+        self.assertEqual(task_session.operation, "start_session")
+
+        task_award = AccountTask(2, 1, "award", credentials=creds, context=context, achievement_id=42)
+        self.assertEqual(task_award.achievement_id, 42)
+
+        task_ping = AccountTask(3, 1, "ping", credentials=creds, context=context, rich_presence="Playing")
+        self.assertEqual(task_ping.rich_presence, "Playing")
+
+        with self.assertRaises(ValueError):
+            AccountTask(4, 1, "award", credentials=creds, context=context, achievement_id=0)
+        with self.assertRaises(ValueError):
+            AccountTask(5, 1, "start_session", credentials=creds, context=context, achievement_id=42)
+
+    def test_valid_account_result_session_award_ping(self):
+        info = SessionInfo(100, 1600000000, (10,), ())
+        self.assertTrue(valid_account_result(AccountResult(1, 1, "ok", session_info=info)))
+        award = AwardResult(42, True, score=10)
+        self.assertTrue(valid_account_result(AccountResult(1, 1, "ok", award=award)))
+        self.assertTrue(valid_account_result(AccountResult(1, 1, "ok", ping=True)))
+        self.assertFalse(valid_account_result(AccountResult(1, 1, "ok", ping=False)))
+        self.assertFalse(valid_account_result(AccountResult(1, 1, "ok", session_info=info, award=award)))
+
+    def test_account_session_start_session_award_and_ping_lifecycle(self):
+        receiver, store = mock.Mock(), mock.Mock()
+        receiver.complete_set.return_value = True
+        session = AccountSession(receiver, store)
+        login_task = session.begin_login("Synthetic", "pwd")
+        self.assertTrue(session.accept(login_task, synthetic_login(login_task, None)))
+
+        ident = mock.Mock(image_hash="a" * 32)
+        set_task = session.begin_set(ident, 100, 21)
+        qualified = QualifiedSet(set_task.context, "Synth", (), (), (), ())
+        self.assertTrue(session.accept(set_task, AccountResult(set_task.task_id, 1, "ok", qualified=qualified)))
+        self.assertEqual(session.context, set_task.context)
+
+        # start_session
+        sess_task = session.begin_start_session()
+        self.assertEqual(sess_task.operation, "start_session")
+        info = SessionInfo(100, 1600000000, (), ())
+        self.assertTrue(session.accept(sess_task, AccountResult(sess_task.task_id, 1, "ok", session_info=info)))
+        self.assertEqual(session.session_info, info)
+
+        # award
+        award_task = session.begin_award(42)
+        self.assertEqual(award_task.operation, "award")
+        self.assertEqual(award_task.achievement_id, 42)
+        award = AwardResult(42, True, score=5)
+        self.assertTrue(session.accept(award_task, AccountResult(award_task.task_id, 1, "ok", award=award)))
+
+        # ping
+        ping_task = session.begin_ping(rich_presence="Boss Fight")
+        self.assertEqual(ping_task.operation, "ping")
+        self.assertEqual(ping_task.rich_presence, "Boss Fight")
+        self.assertTrue(session.accept(ping_task, AccountResult(ping_task.task_id, 1, "ok", ping=True)))
+
+        # logout clears context and session_info
+        session.logout()
+        self.assertIsNone(session.context)
+        self.assertIsNone(session.session_info)
+
+    def test_lookup_dispatches_session_award_and_ping(self):
+        context = SetContext("Synthetic", 1, "a" * 32, 100, 21)
+        creds = Credentials("Synthetic", "token")
+        with mock.patch("launcher.ra_account_worker.RASessionClient") as client_cls:
+            client = client_cls.return_value
+            info = SessionInfo(100, 12345, (), ())
+            client.start_session.return_value = info
+            award = AwardResult(99, True)
+            client.award_achievement.return_value = award
+            client.ping.return_value = True
+
+            lookup = _Lookup(str(self.profile))
+
+            task1 = AccountTask(1, 1, "start_session", credentials=creds, context=context)
+            res1 = lookup(task1, threading.Event())
+            self.assertEqual(res1.session_info, info)
+            client.start_session.assert_called_once_with(context, cancel=mock.ANY)
+
+            task2 = AccountTask(2, 1, "award", credentials=creds, context=context, achievement_id=99)
+            res2 = lookup(task2, threading.Event())
+            self.assertEqual(res2.award, award)
+            client.award_achievement.assert_called_once_with(context, 99, cancel=mock.ANY)
+
+            task3 = AccountTask(3, 1, "ping", credentials=creds, context=context, rich_presence="In Game")
+            res3 = lookup(task3, threading.Event())
+            self.assertTrue(res3.ping)
+            client.ping.assert_called_once_with(context, rich_presence="In Game", cancel=mock.ANY)
+

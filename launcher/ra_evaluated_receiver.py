@@ -15,6 +15,7 @@ class EvaluatedOutput:
     """Wire effects plus optional local evaluation, never a submitted unlock."""
     wire: ReceiverOutput
     evaluation: Evaluation = None
+    notices: tuple = ()
 
 
 class EvaluatedReceiver:
@@ -31,6 +32,8 @@ class EvaluatedReceiver:
         self._evaluator = None
         self._closed = False
         self._account = None
+        self._profile = "opl"
+        self._metadata = {}
 
     def bind_account(self, account, epoch):
         """Revoke jobs/native state before accepting a new non-secret account epoch."""
@@ -70,8 +73,10 @@ class EvaluatedReceiver:
             self._receiver.clear()
             self._reconcile()
             raise
+        metadata_map = {aid: (pts, title) for aid, pts, title in qualified.metadata}
         return self.complete(job, watch, dict(qualified.definitions),
-                             title=qualified.title, achievements=len(qualified.selected_ids))
+                             title=qualified.title, achievements=len(qualified.selected_ids),
+                             profile=profile, achievement_metadata=metadata_map)
 
     def _reconcile(self):
         runtime = self._evaluator
@@ -107,6 +112,8 @@ class EvaluatedReceiver:
         receiver = self._receiver
         if receiver.pending != job or job is None or job.token != receiver.token:
             return False
+        profile = metadata.pop("profile", "opl")
+        achievement_metadata = metadata.pop("achievement_metadata", None)
         if watch_file is None:
             accepted = receiver.complete(job, **metadata)
             self._reconcile()
@@ -130,6 +137,8 @@ class EvaluatedReceiver:
             return False
         self._reconcile()
         self._evaluator = candidate
+        self._profile = profile
+        self._metadata = dict(achievement_metadata) if achievement_metadata is not None else {}
         return True
 
     def receive(self, packet, peer):
@@ -138,15 +147,28 @@ class EvaluatedReceiver:
         output = self._receiver.receive(packet, peer)
         self._reconcile()
         evaluation = None
+        notices = ()
         if output.values and self._evaluator is not None:
             evaluation = self._evaluator.evaluate_frame(output)
-        return EvaluatedOutput(output, evaluation)
+            if evaluation is not None and evaluation.triggered:
+                from launcher.ra_protocol import format_unlock_notice
+                formatted = []
+                for achievement_id in evaluation.triggered:
+                    pts, title = self._metadata.get(achievement_id, (0, ""))
+                    if self._profile == "caduceus" and title:
+                        formatted.append(format_unlock_notice(achievement_id, pts, title=title))
+                    else:
+                        formatted.append(format_unlock_notice(achievement_id, pts))
+                notices = tuple(formatted)
+        return EvaluatedOutput(output, evaluation, notices)
 
     def reset(self):
         """Revoke account/game jobs, wire ownership and native history together."""
         self._check_open()
         self._receiver.clear()
         self._reconcile()
+        self._metadata.clear()
+        self._profile = "opl"
 
     def close(self):
         """Release native state and prevent reuse; safe to call repeatedly."""

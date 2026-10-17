@@ -71,6 +71,7 @@ class QualifiedSet:
     selected_ids: tuple
     unofficial_ids: tuple
     prior_unlocks: tuple
+    metadata: tuple = ()
 
     @property
     def remaining(self):
@@ -108,6 +109,7 @@ def qualify_set(context, patch_response, unlock_response, *, include_unofficial=
         raise ValueError("Invalid prior unlock collection")
     prior = {_uint(value, "prior unlock ID") for value in unlocked}
     definitions, selected, unofficial, seen = [], [], [], set()
+    metadata = []
     total_bytes = 0
     for achievement in achievements:
         if type(achievement) is not dict:
@@ -124,6 +126,11 @@ def qualify_set(context, patch_response, unlock_response, *, include_unofficial=
         selected.append(achievement_id)
         if category == 5:
             unofficial.append(achievement_id)
+        pts = achievement.get("Points", 0)
+        atitle = achievement.get("Title", "")
+        pts_val = pts if type(pts) is int and 0 <= pts <= 999999 else 0
+        atitle_val = str(atitle) if type(atitle) is str else ""
+        metadata.append((achievement_id, pts_val, atitle_val))
         if achievement_id in prior:
             continue
         expression = achievement.get("MemAddr")
@@ -137,7 +144,7 @@ def qualify_set(context, patch_response, unlock_response, *, include_unofficial=
             raise ValueError("Achievement definitions exceed limit")
         definitions.append((achievement_id, expression))
     return QualifiedSet(context, title, tuple(definitions), tuple(selected),
-                        tuple(unofficial), tuple(sorted(prior)))
+                        tuple(unofficial), tuple(sorted(prior)), tuple(metadata))
 
 
 def derive_direct_watch(library, qualified, *, profile="opl"):
@@ -148,7 +155,7 @@ def derive_direct_watch(library, qualified, *, profile="opl"):
     """
     if not isinstance(qualified, QualifiedSet) or not qualified.remaining:
         raise ValueError("No remaining achievement definitions")
-    if profile not in ("opl", "orbit-v1.0.2"):
+    if profile not in ("opl", "orbit-v1.0.2", "caduceus"):
         raise ValueError("Invalid watch profile")
     lib = ctypes.CDLL(str(library))
     memory_limit = 2 * 1024 * 1024 if qualified.context.console_id == 12 else 32 * 1024 * 1024
