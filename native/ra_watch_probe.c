@@ -218,7 +218,8 @@ RC_EXPORT int RC_CCONV ps2servers_build_watchlist(
                 return -2;
             }
 
-            if (addr < memory_low || addr + (uint32_t)size_bytes > memory_high) {
+            if (addr < memory_low || addr >= memory_high ||
+                (uint32_t)size_bytes > memory_high - addr || addr >= 0x10000000u) {
                 free((void *)b.direct_of);
                 free((void *)b.watch);
                 rc_runtime_destroy(runtime);
@@ -242,15 +243,18 @@ RC_EXPORT int RC_CCONV ps2servers_build_watchlist(
     for (mml = &pool->modified_memrefs; mml != NULL; mml = mml->next) {
         uint16_t k;
         for (k = 0; k < mml->count; ++k) {
-            compile_node(&b, &mml->items[k].memref);
+            const rc_modified_memref_t *mm = &mml->items[k];
+            if (mm->modifier_type == RC_OPERATOR_INDIRECT_READ &&
+                compile_node(&b, &mm->memref) < 0) {
+                free((void *)b.direct_of);
+                free((void *)b.watch);
+                rc_runtime_destroy(runtime);
+                return -5;
+            }
         }
     }
 
     if (b.direct_bytes + b.node_count * RA_NODE_PAIR_BYTES > RA_SNAP_MAX_BYTES) {
-        b.node_count = 0;
-    }
-
-    if (b.direct_bytes > RA_SNAP_MAX_BYTES) {
         free((void *)b.direct_of);
         free((void *)b.watch);
         rc_runtime_destroy(runtime);

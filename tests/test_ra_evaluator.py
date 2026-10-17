@@ -331,6 +331,7 @@ class EvaluatorTests(unittest.TestCase):
 
     def test_native_watch_chain_invalid_expression_and_ram_limits_reject_whole_set(self):
         for expression, console in (("I:0xX001000_0xH000004=1", 21),
+                                    ("I:d0xX080000_0xH000004=1", 21),
                                     ("invalid", 21), ("0xX1FFFFF=1", 12),
                                     ("0xH07FFFF=0", 21), ("0xH2000000=0", 21)):
             with self.subTest(expression=expression), self.assertRaises(ValueError):
