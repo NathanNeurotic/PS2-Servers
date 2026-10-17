@@ -92,20 +92,23 @@ and sets with no remaining conditions also cannot currently be installed on
 this opt-in receiver path. These are remaining gaps, not unsupported-game
 declarations, and the managed service remains selected.
 
-`launcher/ra_evaluated_receiver.py` now provides an opt-in, single-owner adapter
-between the receiver and evaluator. It activates a complete set before
-advertising the watch list, ignores stale worker results before native
-allocation, evaluates only complete transferred-list frames, and closes native
-state on game change, lease expiry, reset and shutdown. A failed activation or
+`launcher/ra_evaluated_receiver.py` provides a single-owner adapter between the
+receiver and evaluator. It activates a complete set before advertising the watch
+list, ignores stale worker results before native allocation, evaluates only
+complete transferred-list frames, and closes native state on game change, lease
+expiry, reset and shutdown. A failed activation, mismatched account epoch or
 metadata conversion revokes any partial installation and remains retryable.
-Account changes must call `reset()`; its generation tokens invalidate even
-pending results for the same image. Local events are returned to the owner,
-never submitted automatically. This synchronous adapter belongs off the UI
-thread and has not replaced the managed service or been wired into OwnedService.
+Account changes call `reset()`; its generation tokens invalidate even pending
+results for the same image. Local events are returned to the owner, never
+submitted automatically. `launcher/ra_owned_service.py` now wires
+`EvaluatedReceiver` and optional `AccountSession` onto its UDP owner thread when
+configured with `library` (and optional `profile`), exposing evaluated frames via
+`take_evaluation()` and serializing account commands (`bind_account`,
+`clear_account`, `run_account`) on the single owner thread.
 
-Native login UI, authenticated host/real-account acceptance and
-active set-fetch orchestration remain open. Live service/evaluator
-transport ownership, leaderboard and rich presence integration, unlock/session
-API handling, UI adapters and console acceptance remain open. The new evaluator
-performs no HTTP requests or unlock submissions. Neither source tests nor a
-packaged probe establish hardware or complete achievement-set compatibility.
+Native login UI, authenticated host/real-account acceptance and active desktop
+service selection remain open. Leaderboard and rich presence integration,
+unlock/session API handling, UI adapters and console acceptance remain open. The
+new evaluator performs no HTTP requests or unlock submissions. Neither source
+tests nor a packaged probe establish hardware or complete achievement-set
+compatibility.

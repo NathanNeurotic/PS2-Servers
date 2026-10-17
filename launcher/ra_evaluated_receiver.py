@@ -61,6 +61,8 @@ class EvaluatedReceiver:
         if (self._account != (context.account, context.epoch) or
                 self._receiver.pending != job or job is None or
                 job.image_hash != context.image_hash):
+            self._receiver.complete(job)
+            self._reconcile()
             return False
         try:
             watch = derive_direct_watch(self._library, qualified, profile=profile)

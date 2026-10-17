@@ -174,3 +174,205 @@ class OwnedServiceTests(unittest.TestCase):
         self.assertIsNone(service.take_frame())
         self.request(b"RAP1 127.0.0.1 18195")
         self.assertIsNone(service.take_frame())
+
+    def test_account_binding_requires_library_and_profile_requires_library(self):
+        with self.assertRaises(ValueError):
+            OwnedService(lambda job, cancel: None, profile="profile")
+        service = OwnedService(lambda job, cancel: None)
+        with self.assertRaises(RuntimeError):
+            service.bind_account("Synthetic", 1)
+        with self.assertRaises(RuntimeError):
+            service.clear_account(forget=True)
+        with self.assertRaises(RuntimeError):
+            service.run_account(lambda session: None)
+
+
+class EvaluatedOwnedServiceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import ctypes
+        import os
+        from pathlib import Path
+        import shutil
+        import sys
+        import tempfile
+        from build.build_ra_evaluator import build, library_name
+        compiler = os.environ.get("RA_CC", "gcc" if os.name == "nt" else "cc").split()[0]
+        if not shutil.which(compiler):
+            if os.environ.get("GITHUB_ACTIONS") == "true" and sys.platform.startswith("linux"):
+                raise AssertionError("Linux CI requires compiler for native evaluator coverage")
+            raise unittest.SkipTest("C compiler required for real rcheevos evaluation")
+        cls.temporary = tempfile.TemporaryDirectory(prefix="ra-owned-service-")
+        cls.addClassCleanup(cls.temporary.cleanup)
+        with mock.patch.dict(os.environ, {"RA_CC": os.environ.get("RA_CC", compiler)}):
+            cls.library = build(Path(cls.temporary.name) / library_name())
+        original = ctypes.CDLL
+        loads = []
+        def load(*args, **kwargs):
+            library = original(*args, **kwargs)
+            loads.append(library)
+            return library
+        patcher_eval = mock.patch("launcher.ra_evaluator.ctypes.CDLL", side_effect=load)
+        patcher_sets = mock.patch("launcher.ra_sets.ctypes.CDLL", side_effect=load)
+        patcher_eval.start()
+        patcher_sets.start()
+        cls.addClassCleanup(patcher_eval.stop)
+        cls.addClassCleanup(patcher_sets.stop)
+        def unload():
+            import _ctypes
+            release = _ctypes.FreeLibrary if os.name == "nt" else _ctypes.dlclose
+            for library in loads:
+                release(library._handle)
+        cls.addClassCleanup(unload)
+
+    def setUp(self):
+        from pathlib import Path
+        import tempfile
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.profile = Path(self.temp_dir.name) / "profile"
+        self.client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.client.bind(("127.0.0.1", 0))
+        self.client.settimeout(1)
+        self.services = []
+        self.query = b"RAQ1 " + b"a" * 32 + b" SLUS_210.65"
+
+    def tearDown(self):
+        for service in self.services:
+            self.assertTrue(service.stop())
+        self.client.close()
+
+    def start(self, resolve, **options):
+        service = OwnedService(resolve, advertised_replies=False, library=self.library, **options)
+        self.services.append(service)
+        self.address = service.start()
+        return service
+
+    def request(self, data):
+        self.client.sendto(data, self.address)
+        return self.client.recvfrom(2000)[0].rstrip()
+
+    def ready(self, query=None):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            reply = self.request(query or self.query)
+            if reply != b"RAA1 WAIT":
+                return reply
+            threading.Event().wait(0.04)
+        self.fail("Identification did not finish")
+
+    def wait_evaluation(self, service):
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            evaluated = service.take_evaluation()
+            if evaluated is not None:
+                return evaluated
+            threading.Event().wait(0.01)
+        self.fail("Evaluated frame did not arrive")
+
+    def qualified(self, expressions=("0xH080000=1",), *, account="Synthetic", epoch=1,
+                  image_hash="a" * 32, unlocks=()):
+        from launcher.ra_sets import SetContext, qualify_set
+        from tests.test_ra_sets import responses
+        context = SetContext(account, epoch, image_hash, 42, 21)
+        patch, prior = responses([{"ID": index + 10, "Flags": 3, "MemAddr": expression}
+                                  for index, expression in enumerate(expressions)], unlocks)
+        return qualify_set(context, patch, prior)
+
+    def test_qualified_set_handoff_derives_watch_and_evaluates_frames_over_udp(self):
+        service = self.start(lambda job, cancel: self.qualified(image_hash=job.image_hash))
+        service.bind_account("Synthetic", 1)
+        self.assertEqual(service.account, "Synthetic")
+        self.assertEqual(service.account_epoch, 1)
+        reply = self.ready()
+        self.assertTrue(reply.startswith(b"RAA1 OK 20 1 1 0 0 Synthetic"))
+        self.assertTrue(self.request(b"RAG1 " + b"a" * 32 + b" 0").startswith(b"RAC1 0 20"))
+        self.client.sendto(packet(b"\0", count=1, sequence=1), self.address)
+        first = self.wait_evaluation(service)
+        self.assertTrue(first.evaluation.accepted)
+        self.assertFalse(first.evaluation.triggered)
+        self.assertEqual(service.take_frame().values, b"\0")
+        self.client.sendto(packet(b"\1", count=1, sequence=2), self.address)
+        second = self.wait_evaluation(service)
+        self.assertEqual(second.evaluation.triggered, (10,))
+        self.assertEqual(service.take_frame().values, b"\1")
+
+    def test_pointer_chain_qualified_set_evaluates_over_udp(self):
+        import struct
+        service = self.start(lambda job, cancel: self.qualified(
+            ("I:0xX080000_0xH000004=1",), image_hash=job.image_hash))
+        service.bind_account("Synthetic", 1)
+        reply = self.ready()
+        self.assertTrue(reply.startswith(b"RAA1 OK 36 1 1 0 0 Synthetic"))
+        self.assertTrue(self.request(b"RAG1 " + b"a" * 32 + b" 0").startswith(b"RAC1 0 36"))
+        self.client.sendto(packet(struct.pack("<III", 0x81000, 0x81004, 0), count=1, sequence=1), self.address)
+        self.assertFalse(self.wait_evaluation(service).evaluation.triggered)
+        self.client.sendto(packet(struct.pack("<III", 0x81000, 0x81004, 1), count=1, sequence=2), self.address)
+        self.assertEqual(self.wait_evaluation(service).evaluation.triggered, (10,))
+
+    def test_account_session_login_set_commit_and_logout_revocation_on_udp_owner(self):
+        from launcher.ra_account_worker import AccountResult
+        from launcher.ra_credentials import Credentials, CredentialStore
+        service = self.start(lambda job, cancel: None, profile=self.profile)
+        def login_and_commit(session):
+            task = session.begin_login("Synthetic", "transient-password")
+            result = AccountResult(task.task_id, task.epoch, "ok",
+                                   credentials=Credentials("Synthetic", "synthetic-token"))
+            return session.accept(task, result, remember=True)
+        self.assertTrue(service.run_account(login_and_commit))
+        self.assertEqual(service.account, "Synthetic")
+        self.assertEqual(service.account_epoch, 1)
+        self.assertEqual(CredentialStore(self.profile).load(),
+                         Credentials("Synthetic", "synthetic-token"))
+        # Now resolve returns AccountResult for epoch 1
+        service.resolve = lambda job, cancel: AccountResult(
+            1, 1, "ok", qualified=self.qualified(epoch=1, image_hash=job.image_hash))
+        self.assertTrue(self.ready().startswith(b"RAA1 OK 20 1"))
+        self.request(b"RAG1 " + b"a" * 32 + b" 0")
+        self.client.sendto(packet(b"\0", count=1, sequence=1), self.address)
+        self.wait_evaluation(service)
+        # Logout with forget=True revokes active evaluation and clears stored token
+        service.resolve = lambda job, cancel: None
+        service.clear_account(forget=True)
+        self.assertIsNone(service.account)
+        self.assertIsNone(service.take_evaluation())
+        self.assertIsNone(service.take_frame())
+        self.assertIsNone(service.run_account(lambda session: session.username))
+        self.assertEqual(self.request(self.query), b"RAA1 WAIT")
+        self.assertIsNone(CredentialStore(self.profile).load())
+
+    def test_mismatched_epoch_and_empty_remaining_set_remain_retryable_not_unsupported(self):
+        calls = []
+        def resolve(job, cancel):
+            calls.append(job)
+            if len(calls) == 1:
+                # Wrong account epoch (epoch 99 vs bound epoch 1) -> rejected, remains retryable
+                return self.qualified(epoch=99, image_hash=job.image_hash)
+            if len(calls) == 2:
+                # Zero remaining achievements (all unlocked) -> raises ValueError on derive, remains retryable
+                return self.qualified(unlocks=(10,), image_hash=job.image_hash)
+            return self.qualified(epoch=1, image_hash=job.image_hash)
+        service = self.start(resolve)
+        service.bind_account("Synthetic", 1)
+        self.assertTrue(self.ready().startswith(b"RAA1 OK 20 1"))
+        self.assertEqual(len(calls), 3)
+
+    def test_evaluation_overflow_and_game_switch_discard_stale_evaluations(self):
+        service = self.start(lambda job, cancel: self.qualified(image_hash=job.image_hash),
+                             frame_capacity=2)
+        service.bind_account("Synthetic", 1)
+        self.ready()
+        self.request(b"RAG1 " + b"a" * 32 + b" 0")
+        for sequence in (1, 2, 3):
+            self.client.sendto(packet(b"\1", count=1, sequence=sequence), self.address)
+        self.request(b"RAP1 127.0.0.1 18195")
+        self.assertEqual(service.dropped_evaluations, 2)
+        evaluated = service.take_evaluation()
+        self.assertEqual(evaluated.wire.sequence, 3)
+        self.assertIsNone(service.take_evaluation())
+        # Queue another frame, then switch game before reading it
+        self.client.sendto(packet(b"\0", count=1, sequence=4), self.address)
+        self.request(self.query.replace(b"a" * 32, b"b" * 32))
+        self.assertIsNone(service.take_evaluation())
+        self.assertIsNone(service.take_frame())
+

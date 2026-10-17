@@ -17,12 +17,45 @@ IPC_LIMIT = 8 * 1024 * 1024
 def valid_identification_result(result):
     """Keep the original bounded identification IPC contract as the default."""
     from launcher.ra_owned_service import IdentificationResult
-    return (isinstance(result, IdentificationResult) and
-            (result.watch_file is None or (type(result.watch_file) is bytes and len(result.watch_file) <= 17432)) and
+    from launcher.ra_account_worker import AccountResult, valid_account_result
+    from launcher.ra_sets import QualifiedSet, SetContext
+    if not isinstance(result, IdentificationResult):
+        return False
+    if not ((result.watch_file is None or (type(result.watch_file) is bytes and len(result.watch_file) <= 17432)) and
             type(result.title) is str and len(result.title) <= 4096 and
             (result.serial is None or (type(result.serial) is str and len(result.serial) <= 64)) and
             type(result.achievements) is int and 0 <= result.achievements <= 10000000 and
-            type(result.unsupported) is bool)
+            type(result.unsupported) is bool and
+            type(result.profile) is str and result.profile in ("opl", "orbit-v1.0.2")):
+        return False
+    if result.qualified is not None:
+        if (result.watch_file is not None or result.unsupported or result.definitions is not None or
+                type(result.qualified) is not QualifiedSet or
+                type(result.qualified.context) is not SetContext or
+                not valid_account_result(AccountResult(1, result.qualified.context.epoch, "ok",
+                                                       qualified=result.qualified))):
+            return False
+    if result.definitions is not None:
+        if (result.watch_file is None or result.unsupported or
+                type(result.definitions) is not tuple or not 1 <= len(result.definitions) <= 4096):
+            return False
+        total = 0
+        seen = set()
+        for pair in result.definitions:
+            if type(pair) is not tuple or len(pair) != 2:
+                return False
+            identifier, expression = pair
+            if (type(identifier) is not int or not 1 <= identifier <= 0xFFFFFFFF or identifier in seen or
+                    type(expression) is not str or not 1 <= len(expression) <= 16384 or "\0" in expression):
+                return False
+            try:
+                total += len(expression.encode("ascii"))
+            except UnicodeError:
+                return False
+            seen.add(identifier)
+        if total > 4 * 1024 * 1024:
+            return False
+    return True
 
 
 def _run(resolve, job, cancel, connection, validate):
