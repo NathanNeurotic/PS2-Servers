@@ -66,7 +66,9 @@ injects a partial IPC payload to verify the byte-stream deadline boundary.
 without networking. It checks platform storage, private credential delivery and
 resource release. Existing resolver and evaluator selfchecks remain separate.
 
-Active UDP/service orchestration, native account UI/consent prompts, real-account
-acceptance, pointer-chain watch derivation, session/unlock submission, leaderboards,
-rich presence and console acceptance remain open. Passing offline login fixtures
-does not establish real RetroAchievements authentication or unlock acceptance.
+`OwnedService` now orchestrates `EvaluatedReceiver` and `AccountSession` on its
+single UDP owner thread when configured with an evaluator library and profile.
+Native account UI/consent prompts, active desktop service selection, real-account
+acceptance, session/unlock submission, leaderboards, rich presence and console
+acceptance remain open. Passing offline login fixtures does not establish real
+RetroAchievements authentication or unlock acceptance.

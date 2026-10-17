@@ -75,24 +75,27 @@ both existing packaged RA-mode smoke checks, and fresh-profile desktop startup.
 Use `OwnedService(ProcessResolver(resolve_set, timeout=10), ...)` for external
 identification; passing `resolve_set` directly selects the cooperative thread
 path and does not supply hard cancellation. The resolver integration must
-retain the process adapter. No owned account/evaluator route is activated yet.
-The [owned evaluator](RA-EVALUATOR.md) now consumes validated receiver outputs
-through the public rcheevos API in offline tests. Account-backed set resolution,
-live evaluator ownership and active-service selection remain unimplemented. Source-IP
-ownership is an unauthenticated lease, not a security identity, and cannot
-distinguish multiple consoles behind the same translated source address.
-Foreign-source traffic is rejected before charging the owner's packet budget;
-same-source traffic can still contend. Measure and refine scheduling before
-enabling the runtime. Completing transfer is a
-local gate, not proof the console installed the list or began a new launch.
+retain the process adapter. When `library` (and optional `profile`) is supplied,
+`OwnedService` owns `EvaluatedReceiver` and `AccountSession` on the UDP owner
+thread, derives direct and pointer-chain watch lists from qualified sets, and
+queues evaluated outputs via `take_evaluation()`. The [owned evaluator](RA-EVALUATOR.md)
+consumes validated receiver outputs through the public rcheevos API in offline
+and loopback UDP tests. Active-service selection in the desktop launcher remains
+unimplemented. Source-IP ownership is an unauthenticated lease, not a security
+identity, and cannot distinguish multiple consoles behind the same translated
+source address. Foreign-source traffic is rejected before charging the owner's
+packet budget; same-source traffic can still contend. Measure and refine
+scheduling before enabling the runtime. Completing transfer is a local gate, not
+proof the console installed the list or began a new launch.
 
 1. Build differential native/reference fixtures and complete historical loader
    variant coverage. Abbreviated requests and endpoint fallback now have host
    tests; verify routing against reference behavior before claiming parity.
 2. Own the watch-list lifecycle: derive/validate direct entries and pointer
    nodes through rcheevos, bind lists to image hashes/sets, and invalidate them
-   across title, account and connection changes. Structural validation and
-   generation binding exist; rcheevos derivation and receiver wiring remain.
+   across title, account and connection changes. Direct and pointer-chain
+   derivation, structural validation, generation binding and `OwnedService`
+   wiring are implemented and verified against the reference baseline.
 3. Add a receiver with explicit peer ownership, NAT reply policy, bounded
    queues/rates, discovery, asynchronous identify WAIT/NO/OK responses, cleanup
    and reconnect. The assembler must be reset on peer or watch-list changes;

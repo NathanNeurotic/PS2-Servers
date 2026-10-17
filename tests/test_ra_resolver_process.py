@@ -61,10 +61,23 @@ class ProcessResolverTests(unittest.TestCase):
         self.assertEqual({p.pid for p in multiprocessing.active_children()}, self.before)
 
     def test_result_unpickler_rejects_executable_globals_before_validation(self):
+        from launcher.ra_resolver_process import valid_identification_result
+        from launcher.ra_sets import SetContext, QualifiedSet
         with self.assertRaises(pickle.UnpicklingError):
             _ResultUnpickler(io.BytesIO(b"cbuiltins\neval\n(V1+1\ntR.")).load()
         value = IdentificationResult(unsupported=True)
         self.assertEqual(_ResultUnpickler(io.BytesIO(pickle.dumps(value))).load(), value)
+        context = SetContext("Synthetic", 1, "a" * 32, 42, 21)
+        qualified = QualifiedSet(context, "Synthetic", ((10, "0xH080000=1"),), (10,), (), ())
+        self.assertTrue(valid_identification_result(IdentificationResult(qualified=qualified)))
+        self.assertTrue(valid_identification_result(IdentificationResult(
+            watch_file=b"x" * 20, definitions=((10, "0xH080000=1"),))))
+        self.assertFalse(valid_identification_result(IdentificationResult(
+            watch_file=b"x" * 20, qualified=qualified)))
+        self.assertFalse(valid_identification_result(IdentificationResult(
+            definitions=((10, "0xH080000=1"),))))
+        self.assertFalse(valid_identification_result(IdentificationResult(
+            unsupported=True, profile="invalid")))
 
     def test_deadline_reaps_noncooperative_child(self):
         resolver = ProcessResolver(stuck, timeout=0.3)
