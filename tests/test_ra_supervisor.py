@@ -126,3 +126,59 @@ class SupervisorTests(unittest.TestCase):
             ret = run_owned_runtime(args, self.profile, lease, stopped, owner_alive, close_owner)
             self.assertEqual(ret, 0)
             service.stop.assert_called_once()
+
+    def test_run_owned_runtime_serves_state_http(self):
+        import urllib.request
+        import json
+
+        args = mock.Mock(
+            mode="xerabora",
+            owned_runtime=True,
+            login=None,
+            import_credentials=False,
+            lan_viewer=False,
+            games_folder=None,
+        )
+        fake_lib = Path(self.temp_dir.name) / "fake_rcheevos.dll"
+        fake_lib.write_bytes(b"dummy")
+
+        lease = mock.Mock()
+        stopped = threading.Event()
+        close_owner = mock.Mock()
+
+        port_box = []
+
+        def check_port_and_alive():
+            port_file = self.profile / "account-port"
+            if port_file.is_file() and not port_box:
+                try:
+                    port = int(port_file.read_text("ascii"))
+                    req = urllib.request.Request(f"http://127.0.0.1:{port}/state")
+                    with urllib.request.urlopen(req, timeout=3) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        port_box.append((port, data))
+                except Exception:
+                    pass
+                return True
+            return False
+
+        with mock.patch("launcher.achievements.library_path", return_value=fake_lib), \
+             mock.patch("launcher.ra_owned_service.OwnedService") as service_cls, \
+             mock.patch("launcher.ra_credentials.CredentialStore") as store_cls, \
+             mock.patch("launcher.ra_account_worker.AccountWorker"):
+
+            service = service_cls.return_value
+            service.account = "WebUser"
+            service.take_evaluation.return_value = None
+
+            store = store_cls.return_value
+            store.load.return_value = mock.Mock(username="WebUser", token="dummy-token")
+
+            ret = run_owned_runtime(args, self.profile, lease, stopped, check_port_and_alive, close_owner)
+            self.assertEqual(ret, 0)
+            self.assertTrue(port_box)
+            port, data = port_box[0]
+            self.assertEqual(data["login"]["user"], "WebUser")
+            self.assertTrue(data["login"]["ok"])
+            # Verify account-port is unlinked after clean exit
+            self.assertFalse((self.profile / "account-port").is_file())
