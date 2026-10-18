@@ -20,7 +20,7 @@ class SupervisorTests(unittest.TestCase):
         self.profile = Path(self.temp_dir.name) / "profile"
         self.profile.mkdir(parents=True, exist_ok=True)
 
-    def resolve_fixture(self, mapping, response, *, cancel=None):
+    def resolve_fixture(self, mapping, response, *, cancel=None, state=None):
         """Exercise the actual supervisor resolver with all account I/O stubbed."""
         import json
         cancel = cancel or threading.Event()
@@ -45,7 +45,8 @@ class SupervisorTests(unittest.TestCase):
              mock.patch("launcher.ra_credentials.CredentialStore") as store_type, \
              mock.patch("launcher.ra_account_worker.AccountWorker") as worker_type, \
              mock.patch("launcher.ra_http.Transport") as transport_type, \
-             mock.patch("launcher.ra_web.RAWebServer"):
+             mock.patch("launcher.ra_web.RAWebServer"), \
+             mock.patch("launcher.ra_web.RAState", return_value=state or mock.Mock()):
             store_type.return_value.load.return_value = Credentials("Synthetic", "synthetic-token")
             transport_type.return_value.post.return_value = json.dumps({"Success": True, "GameID": mapping}).encode()
             worker_type.return_value.side_effect = worker_call
@@ -100,16 +101,19 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual([task.operation for task, _ in calls], ["set"])
 
     def test_cancelled_session_start_does_not_return_a_qualified_result(self):
+        state = mock.Mock()
         def reply(task, cancel, options):
             if task.operation == "start_session":
                 cancel.set()
                 return None
             qualified = QualifiedSet(task.context, "Synthetic", ((1, "0xH080000=1"),), (1,), (), ())
             return AccountResult(task.task_id, task.epoch, "ok", qualified=qualified)
-        result, calls = self.resolve_fixture(123, reply)
+        result, calls = self.resolve_fixture(123, reply, state=state)
         self.assertIsNone(result.qualified)
         self.assertFalse(result.unsupported)
         self.assertEqual([task.operation for task, _ in calls], ["set", "start_session"])
+        state.set_game.assert_not_called()
+        state.update_console.assert_not_called()
 
     def test_achievements_argv_owned_runtime(self):
         args_default = _achievements_argv({"mode": "xerabora"})

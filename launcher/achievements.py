@@ -185,6 +185,13 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                 if cancel.is_set():
                     return IdentificationResult()
                 if res and res.status == "ok" and res.qualified:
+                    try:
+                        sess_task = AccountTask(2, 1, "start_session", credentials=creds, context=ctx)
+                        worker(sess_task, cancel, wait=True)
+                    except Exception:
+                        pass
+                    if cancel.is_set():
+                        return IdentificationResult()
                     with context_lock:
                         active_context = ctx
                     achievements_data = []
@@ -205,13 +212,6 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                         achievements=achievements_data,
                     )
                     state.update_console(connected=True, status="playing")
-                    try:
-                        sess_task = AccountTask(2, 1, "start_session", credentials=creds, context=ctx)
-                        worker(sess_task, cancel, wait=True)
-                    except Exception:
-                        pass
-                    if cancel.is_set():
-                        return IdentificationResult()
                     return IdentificationResult(qualified=res.qualified, profile=profile_mode)
             except Exception:
                 continue
