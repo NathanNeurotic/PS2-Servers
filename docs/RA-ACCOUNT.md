@@ -34,6 +34,11 @@ an account after logout because children never write profile credentials.
 
 `AccountWorker` serializes lookups through one spawned, reaped child. It rejects
 concurrent callers, paces starts and retains HTTP 429 backoff across children.
+The supervisor uses `wait=True` for console-profile fallback and session startup:
+it waits cancellably for the existing cooldown instead of dropping those jobs.
+The default worker call still returns immediately during cooldown. Only a
+successful hash lookup with an integer `GameID` of zero declares an unknown
+image; malformed mappings and failed/limited set qualification stay retryable.
 The HTTPS transport spaces requests by at least one second per client, uses a
 fixed verified HTTPS endpoint and POST fields, rejects redirects, bounds bodies,
 sanitizes errors and performs no automatic retries. Backoff is bounded to 1--300
@@ -88,6 +93,8 @@ resource release. Existing resolver and evaluator selfchecks remain separate.
 
 `OwnedService` now orchestrates `EvaluatedReceiver` and `AccountSession` on its
 single UDP owner thread when configured with an evaluator library and profile.
-Native account UI/consent prompts, active desktop service selection, real-account
-acceptance, leaderboards and console acceptance remain open. Passing offline login
+The supervisor offers this service under `--owned-runtime`; the managed service
+remains the default. Native account UI/consent prompts, real-account acceptance,
+complete session/submission lifetime ownership, leaderboards and console acceptance
+remain open. Passing offline login
 fixtures does not establish real RetroAchievements authentication or unlock acceptance.
