@@ -157,6 +157,8 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
 
     def resolve_job(job, cancel):
         nonlocal active_context
+        if cancel.is_set():
+            return IdentificationResult()
         creds = store.load()
         if creds is None:
             return IdentificationResult()
@@ -164,18 +166,24 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
         try:
             resp = decode_response(transport.post({"r": "gameid", "m": job.image_hash}, cancel=cancel))
             game_id = resp.get("GameID")
-            if not isinstance(game_id, int) or game_id <= 0:
+            if type(game_id) is int and game_id == 0:
                 return IdentificationResult(unsupported=True)
+            if type(game_id) is not int or not 1 <= game_id <= 0xFFFFFFFF:
+                return IdentificationResult()
         except Exception:
             return IdentificationResult()
 
         serial_lower = str(job.serial).lower()
         console_ids = (12, 21) if "vcd" in serial_lower or serial_lower.endswith(".vcd") else (21, 12)
         for console_id in console_ids:
+            if cancel.is_set():
+                return IdentificationResult()
             try:
                 ctx = SetContext(creds.username, 1, job.image_hash, game_id, console_id)
                 task = AccountTask(1, 1, "set", credentials=creds, context=ctx)
-                res = worker(task, cancel)
+                res = worker(task, cancel, wait=True)
+                if cancel.is_set():
+                    return IdentificationResult()
                 if res and res.status == "ok" and res.qualified:
                     with context_lock:
                         active_context = ctx
@@ -199,13 +207,15 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                     state.update_console(connected=True, status="playing")
                     try:
                         sess_task = AccountTask(2, 1, "start_session", credentials=creds, context=ctx)
-                        worker(sess_task, cancel)
+                        worker(sess_task, cancel, wait=True)
                     except Exception:
                         pass
+                    if cancel.is_set():
+                        return IdentificationResult()
                     return IdentificationResult(qualified=res.qualified, profile=profile_mode)
             except Exception:
                 continue
-        return IdentificationResult(unsupported=True)
+        return IdentificationResult()  # failed qualification is retryable, not no-support
 
     service = OwnedService(
         resolve_job,

@@ -7,6 +7,10 @@ from unittest import mock
 
 from launcher.achievements import main, run_owned_runtime
 from launcher.servers import _achievements_argv, RETROACHIEVEMENTS
+from launcher.ra_account_worker import AccountResult
+from launcher.ra_credentials import Credentials
+from launcher.ra_receiver import IdentificationJob
+from launcher.ra_sets import QualifiedSet
 
 
 class SupervisorTests(unittest.TestCase):
@@ -15,6 +19,97 @@ class SupervisorTests(unittest.TestCase):
         self.addCleanup(self.temp_dir.cleanup)
         self.profile = Path(self.temp_dir.name) / "profile"
         self.profile.mkdir(parents=True, exist_ok=True)
+
+    def resolve_fixture(self, mapping, response, *, cancel=None):
+        """Exercise the actual supervisor resolver with all account I/O stubbed."""
+        import json
+        cancel = cancel or threading.Event()
+        job = IdentificationJob(1, "a" * 32, "SLUS_000.01")
+        captured, calls = [], []
+        args = mock.Mock(mode="xerabora", login=None, import_credentials=False,
+                         lan_viewer=False, games_folder=None)
+        library = self.profile / "fixture.dll"
+        library.write_bytes(b"fixture")
+
+        def worker_call(task, event, **options):
+            calls.append((task, options))
+            return response(task, event, options)
+
+        def service_factory(resolve, **options):
+            service = mock.Mock()
+            service.start.side_effect = lambda: captured.append(resolve(job, cancel))
+            return service
+
+        with mock.patch("launcher.achievements.library_path", return_value=library), \
+             mock.patch("launcher.ra_owned_service.OwnedService", side_effect=service_factory), \
+             mock.patch("launcher.ra_credentials.CredentialStore") as store_type, \
+             mock.patch("launcher.ra_account_worker.AccountWorker") as worker_type, \
+             mock.patch("launcher.ra_http.Transport") as transport_type, \
+             mock.patch("launcher.ra_web.RAWebServer"):
+            store_type.return_value.load.return_value = Credentials("Synthetic", "synthetic-token")
+            transport_type.return_value.post.return_value = json.dumps({"Success": True, "GameID": mapping}).encode()
+            worker_type.return_value.side_effect = worker_call
+            self.assertEqual(run_owned_runtime(args, self.profile, mock.Mock(), threading.Event(),
+                                               lambda: False, mock.Mock()), 0)
+        return captured[0], calls
+
+    def test_console_fallback_and_session_are_not_dropped_by_worker_cooldown(self):
+        def reply(task, cancel, options):
+            if task.operation == "set" and task.context.console_id == 12 and options.get("wait"):
+                qualified = QualifiedSet(task.context, "Synthetic PS1", ((1, "0xH001000=1"),), (1,), (), ())
+                return AccountResult(task.task_id, task.epoch, "ok", qualified=qualified)
+            return AccountResult(task.task_id, task.epoch, "failed")
+        result, calls = self.resolve_fixture(123, reply)
+        self.assertIsNotNone(result.qualified)
+        self.assertEqual(result.qualified.context.console_id, 12)
+        self.assertEqual([task.operation for task, _ in calls], ["set", "set", "start_session"])
+        self.assertTrue(all(options.get("wait") for _, options in calls))
+
+    def test_failed_or_rate_limited_set_lookup_does_not_declare_no_support(self):
+        for status in ("failed", "rate_limited"):
+            with self.subTest(status=status):
+                def reply(task, cancel, options):
+                    return AccountResult(task.task_id, task.epoch, status,
+                                         retry_after=1 if status == "rate_limited" else 0)
+                result, _ = self.resolve_fixture(123, reply)
+                self.assertFalse(result.unsupported)
+                self.assertIsNone(result.qualified)
+
+    def test_only_explicit_zero_mapping_declares_unknown_image(self):
+        for mapping in (0, False, True, None, -1, 0x100000000, "123"):
+            with self.subTest(mapping=mapping):
+                result, calls = self.resolve_fixture(mapping, lambda *args: None)
+                self.assertEqual(result.unsupported, type(mapping) is int and mapping == 0)
+                self.assertEqual(calls, [])
+
+    def test_cancelled_lookup_does_not_start_account_jobs(self):
+        cancel = threading.Event()
+        cancel.set()
+        result, calls = self.resolve_fixture(123, lambda *args: None, cancel=cancel)
+        self.assertFalse(result.unsupported)
+        self.assertEqual(calls, [])
+
+    def test_cancelled_success_cannot_publish_a_qualified_set_or_start_session(self):
+        def reply(task, cancel, options):
+            qualified = QualifiedSet(task.context, "Synthetic", ((1, "0xH080000=1"),), (1,), (), ())
+            cancel.set()
+            return AccountResult(task.task_id, task.epoch, "ok", qualified=qualified)
+        result, calls = self.resolve_fixture(123, reply)
+        self.assertIsNone(result.qualified)
+        self.assertFalse(result.unsupported)
+        self.assertEqual([task.operation for task, _ in calls], ["set"])
+
+    def test_cancelled_session_start_does_not_return_a_qualified_result(self):
+        def reply(task, cancel, options):
+            if task.operation == "start_session":
+                cancel.set()
+                return None
+            qualified = QualifiedSet(task.context, "Synthetic", ((1, "0xH080000=1"),), (1,), (), ())
+            return AccountResult(task.task_id, task.epoch, "ok", qualified=qualified)
+        result, calls = self.resolve_fixture(123, reply)
+        self.assertIsNone(result.qualified)
+        self.assertFalse(result.unsupported)
+        self.assertEqual([task.operation for task, _ in calls], ["set", "start_session"])
 
     def test_achievements_argv_owned_runtime(self):
         args_default = _achievements_argv({"mode": "xerabora"})

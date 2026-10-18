@@ -1,8 +1,10 @@
 """Opt-in account/set worker and single-owner credential commit boundary.
 
-Children only read profiles and call read/login APIs. They never persist
-credentials or submit unlocks. The owner commits fresh login results after
-generation checks, so a cancelled child cannot sign an account back in.
+Children never persist credentials. Read/login and explicit session/award jobs
+share the process boundary. The owner commits fresh login results after
+generation checks, so a cancelled child cannot sign an account back in. A timed
+out side-effecting request may already have been accepted remotely; no automatic
+award retry is implied by a missing result.
 """
 from dataclasses import dataclass, field
 import threading
@@ -224,6 +226,8 @@ class AccountWorker:
     Call on a supervisor thread. A busy worker rejects another caller rather
     than accumulating processes. None means cancellation, deadline or cooldown;
     it never declares that a game has no support.
+    wait=True lets a supervisor wait cancellably for retained pacing/backoff
+    before starting its next child. The default remains a non-waiting attempt.
     """
     def __init__(self, profile, *, timeout=30, minimum_interval=1, resolve=None):
         import math
@@ -237,13 +241,20 @@ class AccountWorker:
         self._not_before = 0
         self.minimum_interval = minimum_interval
 
-    def __call__(self, job, cancel):
-        if type(job) is not AccountTask:
+    def __call__(self, job, cancel, *, wait=False):
+        if type(job) is not AccountTask or type(wait) is not bool:
             raise ValueError("Invalid account task")
         job.__post_init__()  # validate bounded input before spawn serialization
         if not self._lock.acquire(blocking=False):
             raise RuntimeError("Account worker is already busy")
         try:
+            if wait:
+                while True:
+                    remaining = self._not_before - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    if cancel.wait(remaining):
+                        return None
             if cancel.is_set() or time.monotonic() < self._not_before:
                 return None
             result = self._resolver(job, cancel)

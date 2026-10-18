@@ -97,6 +97,47 @@ class AccountWorkerTests(unittest.TestCase):
         self.assertIsNone(worker(self.task, threading.Event()))
         worker._resolver.assert_not_called()
 
+    def test_waiting_caller_obeys_cooldown_before_private_delivery(self):
+        worker = AccountWorker(self.profile, resolve=synthetic_login)
+        ready = time.monotonic() + 0.05
+        worker._not_before = ready
+        def resolve(task, cancel):
+            self.assertGreaterEqual(time.monotonic(), ready)
+            return synthetic_login(task, cancel)
+        worker._resolver = mock.Mock(side_effect=resolve)
+        self.assertIsNotNone(worker(self.task, threading.Event(), wait=True))
+        worker._resolver.assert_called_once()
+
+    def test_early_wake_rechecks_cooldown_deadline(self):
+        worker = AccountWorker(self.profile, resolve=synthetic_login)
+        worker._not_before = 11
+        cancel = mock.Mock()
+        cancel.wait.return_value = False
+        cancel.is_set.return_value = False
+        worker._resolver = mock.Mock(side_effect=synthetic_login)
+        with mock.patch("launcher.ra_account_worker.time.monotonic",
+                        side_effect=[10, 10.5, 11, 11, 11]):
+            self.assertIsNotNone(worker(self.task, cancel, wait=True))
+        self.assertEqual(cancel.wait.call_args_list, [mock.call(1), mock.call(0.5)])
+        worker._resolver.assert_called_once()
+
+    def test_cancel_during_backoff_does_not_spawn_and_releases_worker(self):
+        worker = AccountWorker(self.profile, resolve=synthetic_login)
+        worker._not_before = time.monotonic() + 120
+        worker._resolver = mock.Mock(side_effect=synthetic_login)
+        cancel = threading.Event()
+        timer = threading.Timer(0.02, cancel.set)
+        timer.start()
+        started = time.monotonic()
+        try:
+            self.assertIsNone(worker(self.task, cancel, wait=True))
+        finally:
+            timer.join()
+        self.assertLess(time.monotonic() - started, 2)
+        worker._resolver.assert_not_called()
+        worker._not_before = 0
+        self.assertIsNotNone(worker(self.task, threading.Event(), wait=True))
+
     def test_cancellation_and_busy_worker_do_not_accumulate_children(self):
         worker = AccountWorker(self.profile, resolve=synthetic_login)
         cancel = threading.Event()
