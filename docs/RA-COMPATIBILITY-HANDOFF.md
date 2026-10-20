@@ -30,8 +30,12 @@ silently reject supported clients. Claims of improvement need measured evidence.
   identity and tested action were not supplied in this clarification.
 - The independent runtime remains unfinished in
   [issue #223](https://github.com/NathanNeurotic/PS2-Servers/issues/223).
-  Existing modes still supervise the xeRAbora-derived engine. A completed backend
-  awaiting only a frontend is an incorrect description of current status.
+  Existing modes supervise the xeRAbora-derived engine by default. The opt-in
+  `--owned-runtime` preview now includes receiver/evaluation, private account work,
+  session/submission clients, supervisor and native HTTP dashboard (#232–252).
+  Logout revokes the owned account; submissions are bounded and retain origin.
+  See [account/runtime details](RA-ACCOUNT.md). Complete UI/feature parity,
+  real-account acceptance and physical-console acceptance remain open.
 
 ## Priority 1: prove compatibility with their OPL ecosystem
 

@@ -74,7 +74,7 @@ Both projects describe experimental behavior; preserve that qualification.
 | Caduceus account browser | CADA1 on UDP 18198, pairing key, paged/filterable account data | Existing host tests cover pairing, formatting, filters and logout races. ETH key retrieval and console rendering remain untested here. |
 | Caduceus titled notice | Owned adapter sends RAU1 title/points to UDP 18195 | Existing host/package checks do not prove card rendering or notification recovery on console. |
 | Base-mode isolation | Supervisor launches shared ps2ra; Caduceus adapter is mode-dependent | Audit native unsolicited notices and all listeners/writes, not just Python adapter creation. Full isolation remains an acceptance item. |
-| Owned evaluation/account service | Both modes still launch the xeRAbora-derived native engine | Missing independent implementation; retain rcheevos library and attribution. Track issue #223. |
+| Owned evaluation/account service | Opt-in owned preview; both modes retain managed engine by default | Receiver/evaluation, account worker, bounded submissions and local dashboard implemented in #232–252. Full feature and console acceptance remain open; retain rcheevos attribution. Track issue #223 and RA-ACCOUNT.md. |
 
 Prior results are recorded in [host acceptance](RA-HOST-ACCEPTANCE.md).
 Do not relabel those results as tests of this audit commit or a later package.
@@ -83,7 +83,7 @@ Do not relabel those results as tests of this audit commit or a later package.
 
 | Work | Current classification | Next concrete gate |
 | --- | --- | --- |
-| Independent receiver, watch lists, snapshots, evaluator integration, account/API/session lifecycle | Missing; shared upstream runtime remains | Implement behind existing supervisor contract; compare identical inputs before migration |
+| Independent receiver, watch lists, snapshots, evaluator integration, account/API/session lifecycle | Opt-in owned preview implemented; managed runtime remains default | Complete missing feature integration and validate identical inputs/account/console behavior before migration; see RA-ACCOUNT.md |
 | Native login/account, game details, leaderboards, opt-in profile migration | Incomplete; embedded upstream account UI still used | Native workflows with secure storage, rollback and offline/error behavior |
 | Live overview, native notifications, OBS, viewer, Discord | Implemented with specific prior host/package evidence | Exact current-package UI acceptance and real-session/unlock checks |
 | PS2 compressed hashing and PS1 VCD scanning | Implemented; synthetic/hash evidence exists | Representative real-image and loader/console acceptance; no inference from hash to unlock support |
