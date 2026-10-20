@@ -245,9 +245,10 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
     def logout():
         nonlocal active_context
         with context_lock:
+            # Cancel the resolver's worker event before publishing local revocation.
+            service.clear_account()
             account_cancel.set()
             active_context = None
-        service.clear_account()
         service.run_account(lambda session: session.logout(forget=True))
 
     try:

@@ -400,7 +400,7 @@ document.getElementById('logout').onclick = async function() {
   error.textContent = '';
   try {
     const response = await fetch('/logout', {method: 'POST'});
-    if (!response.ok) throw new Error('logout failed');
+    if (!response.ok || !(await response.json()).ok) throw new Error('logout failed');
     const state = await fetch('/state', {cache: 'no-store'});
     if (!state.ok) throw new Error('state unavailable');
     render(await state.json());
