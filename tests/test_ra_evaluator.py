@@ -364,6 +364,7 @@ class EvaluatorTests(unittest.TestCase):
         self.assertEqual(output.context, origin)
         owner.bind_account("Synthetic", 2)
         self.assertEqual(output.context, origin)
+        self.assertIsNone(owner._context)
         self.assertIsNone(owner.receive(query, peer).context)
         owner.receive(query, peer)
         new_job, = owner.take_jobs()
