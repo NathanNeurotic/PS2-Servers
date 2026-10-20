@@ -41,6 +41,15 @@ class RAState:
             self.logged_in = bool(logged_in)
             self._dirty.set()
 
+    def logout(self):
+        with self._lock:
+            self.user, self.logged_in = "", False
+            self.game_id, self.game_title = 0, ""
+            self.game_serial, self.game_hash = "", ""
+            self.achievements, self.unlocks = [], []
+            self.console_status = "signed out"
+            self._dirty.set()
+
     def update_console(self, connected, ip=None, status=None, packets=None, frames=None, watch_addresses=None):
         with self._lock:
             if connected and not self.console_connected:
@@ -263,6 +272,8 @@ h1 { font-size: 1.5rem; color: var(--text-bright); display: flex; align-items: c
       <span class="badge badge-softcore">Softcore Only</span>
     </h1>
     <div id="account-status" class="account-badge">Checking account...</div>
+    <button id="logout" type="button" hidden>Sign out</button>
+    <span id="account-error" role="status"></span>
   </header>
 
   <div id="unlock-banner" class="unlock-banner">
@@ -310,6 +321,7 @@ h1 { font-size: 1.5rem; color: var(--text-bright); display: flex; align-items: c
 <script>
 function render(state) {
   const accountEl = document.getElementById('account-status');
+  document.getElementById('logout').hidden = !(state.login && state.login.ok);
   if (state.login && state.login.ok) {
     accountEl.textContent = 'Signed in: ' + state.login.user;
   } else {
@@ -362,6 +374,8 @@ function render(state) {
     const u = state.unlocks[0];
     document.getElementById('unlock-text').textContent = 'Recent unlock: ' + u.title + ' (' + u.points + ' points)';
     banner.style.display = 'block';
+  } else {
+    document.getElementById('unlock-banner').style.display = 'none';
   }
 
   const container = document.getElementById('achievements-container');
@@ -379,6 +393,23 @@ function render(state) {
     `).join('');
   }
 }
+
+document.getElementById('logout').onclick = async function() {
+  this.disabled = true;
+  const error = document.getElementById('account-error');
+  error.textContent = '';
+  try {
+    const response = await fetch('/logout', {method: 'POST'});
+    if (!response.ok || !(await response.json()).ok) throw new Error('logout failed');
+    const state = await fetch('/state', {cache: 'no-store'});
+    if (!state.ok) throw new Error('state unavailable');
+    render(await state.json());
+  } catch (_) {
+    error.textContent = 'Sign out could not be completed. Please try again.';
+  } finally {
+    this.disabled = false;
+  }
+};
 
 function initSSE() {
   const source = new EventSource('/events');
@@ -405,7 +436,7 @@ initSSE();
 class RAWebServer:
     """Loopback HTTP server for RetroAchievements status and Server-Sent Events."""
 
-    def __init__(self, port, state, host="127.0.0.1"):
+    def __init__(self, port, state, host="127.0.0.1", *, logout=None):
         self.port = port
         self.state = state
         self.host = host
@@ -491,7 +522,22 @@ class RAWebServer:
                     return
                 target = urllib.parse.urlsplit(self.path)
                 if target.path == "/logout":
-                    owner.state.set_account("", False)
+                    host_header = self.headers.get("Host")
+                    origin = self.headers.get("Origin")
+                    if host_header not in (f"127.0.0.1:{owner.server_port}",
+                                           f"localhost:{owner.server_port}") or (
+                            origin and origin != f"http://{host_header}"):
+                        self.send_error(403, "Forbidden")
+                        return
+                    if logout is None:
+                        self._send_json({"ok": False}, 503)
+                        return
+                    try:
+                        logout()
+                    except Exception:
+                        self._send_json({"ok": False}, 503)
+                        return
+                    owner.state.logout()
                     self._send_json({"ok": True})
                 else:
                     self.send_error(404, "Not Found")

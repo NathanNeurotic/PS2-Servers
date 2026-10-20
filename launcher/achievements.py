@@ -153,11 +153,12 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
     worker = AccountWorker(str(profile))
     active_context = None
     context_lock = threading.Lock()
+    account_cancel = threading.Event()
     state = RAState()
 
     def resolve_job(job, cancel):
         nonlocal active_context
-        if cancel.is_set():
+        if cancel.is_set() or account_cancel.is_set():
             return IdentificationResult()
         creds = store.load()
         if creds is None:
@@ -193,25 +194,27 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                     if cancel.is_set():
                         return IdentificationResult()
                     with context_lock:
+                        if account_cancel.is_set():
+                            return IdentificationResult()
                         active_context = ctx
-                    achievements_data = []
-                    prior_set = set(res.qualified.prior_unlocks)
-                    for aid, pts, title in res.qualified.metadata:
-                        achievements_data.append({
-                            "id": aid,
-                            "title": title,
-                            "description": "",
-                            "points": pts,
-                            "unlocked": aid in prior_set,
-                        })
-                    state.set_game(
-                        game_id=res.qualified.context.game_id,
-                        title=res.qualified.title,
-                        serial=job.serial,
-                        image_hash=job.image_hash,
-                        achievements=achievements_data,
-                    )
-                    state.update_console(connected=True, status="playing")
+                        achievements_data = []
+                        prior_set = set(res.qualified.prior_unlocks)
+                        for aid, pts, title in res.qualified.metadata:
+                            achievements_data.append({
+                                "id": aid,
+                                "title": title,
+                                "description": "",
+                                "points": pts,
+                                "unlocked": aid in prior_set,
+                            })
+                        state.set_game(
+                            game_id=res.qualified.context.game_id,
+                            title=res.qualified.title,
+                            serial=job.serial,
+                            image_hash=job.image_hash,
+                            achievements=achievements_data,
+                        )
+                        state.update_console(connected=True, status="playing")
                     return IdentificationResult(qualified=res.qualified, profile=profile_mode)
             except Exception:
                 continue
@@ -239,9 +242,18 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
     viewer = None
     web_server = None
     ui_port = available_account_port()
+    def logout():
+        nonlocal active_context
+        with context_lock:
+            # Cancel the resolver's worker event before publishing local revocation.
+            service.clear_account()
+            account_cancel.set()
+            active_context = None
+        service.run_account(lambda session: session.logout(forget=True))
+
     try:
         (profile / "account-port").write_text(str(ui_port), encoding="ascii")
-        web_server = RAWebServer(ui_port, state)
+        web_server = RAWebServer(ui_port, state, logout=logout)
         web_server.start()
         print(f"Account, achievements and leaderboards: http://127.0.0.1:{ui_port}/", flush=True)
         if getattr(args, "lan_viewer", False):
@@ -258,23 +270,28 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
         while not stopped.wait(0.25) and owner_alive():
             evaluated = service.take_evaluation()
             if evaluated:
-                state.update_console(
-                    connected=True,
-                    packets=state.packets + 1,
-                    frames=state.frames + 1,
-                )
+                with context_lock:
+                    if account_cancel.is_set():
+                        continue
+                    state.update_console(
+                        connected=True,
+                        packets=state.packets + 1,
+                        frames=state.frames + 1,
+                    )
                 if evaluated.evaluation and evaluated.evaluation.triggered:
                     for aid in evaluated.evaluation.triggered:
-                        state.note_unlock(aid)
-                        print(f"RetroAchievements: achievement {aid} triggered on console!", flush=True)
                         with context_lock:
+                            if account_cancel.is_set():
+                                break
+                            state.note_unlock(aid)
                             ctx = active_context
+                        print(f"RetroAchievements: achievement {aid} triggered on console!", flush=True)
                         current_creds = store.load()
-                        if current_creds and ctx:
+                        if current_creds and ctx and not account_cancel.is_set():
                             def submit(aid=aid, ctx=ctx, c=current_creds):
                                 try:
                                     client = RASessionClient(c.username, c.token)
-                                    award = client.award_achievement(ctx, aid)
+                                    award = client.award_achievement(ctx, aid, cancel=account_cancel)
                                     if award.awarded:
                                         status = "already unlocked" if award.already_unlocked else "awarded"
                                         print(f"RetroAchievements: achievement {aid} {status} on server (softcore score: {award.softcore_score}).", flush=True)
@@ -288,16 +305,17 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                 with context_lock:
                     ctx = active_context
                 current_creds = store.load()
-                if current_creds and ctx:
+                if current_creds and ctx and not account_cancel.is_set():
                     def ping(ctx=ctx, c=current_creds):
                         try:
                             client = RASessionClient(c.username, c.token)
-                            client.ping(ctx)
+                            client.ping(ctx, cancel=account_cancel)
                         except Exception:
                             pass
                     threading.Thread(target=ping, daemon=True).start()
         return 0
     finally:
+        account_cancel.set()
         if web_server:
             web_server.close()
         if viewer:

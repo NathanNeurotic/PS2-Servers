@@ -3,6 +3,7 @@ import json
 import threading
 import time
 import unittest
+from unittest import mock
 import urllib.request
 import urllib.error
 
@@ -12,7 +13,8 @@ from launcher.ra_web import RAState, RAWebServer
 class RAWebTests(unittest.TestCase):
     def setUp(self):
         self.state = RAState()
-        self.server = RAWebServer(0, self.state)
+        self.logout = mock.Mock()
+        self.server = RAWebServer(0, self.state, logout=self.logout)
         self.server.start()
         self.port = self.server.server_port
         self.base_url = f"http://127.0.0.1:{self.port}"
@@ -108,6 +110,8 @@ class RAWebTests(unittest.TestCase):
 
     def test_post_logout(self):
         self.state.set_account("LoggedInUser", True)
+        self.state.set_game(123, "Private game", achievements=[{"id": 1}])
+        self.state.note_unlock(1)
         req = urllib.request.Request(f"{self.base_url}/logout", data=b"", method="POST")
         with urllib.request.urlopen(req, timeout=3) as resp:
             self.assertEqual(resp.status, 200)
@@ -115,6 +119,26 @@ class RAWebTests(unittest.TestCase):
             self.assertTrue(data.get("ok"))
         self.assertFalse(self.state.logged_in)
         self.assertEqual(self.state.user, "")
+        self.logout.assert_called_once_with()
+        self.assertEqual(self.state.to_dict()["game"]["id"], 0)
+        self.assertEqual(self.state.to_dict()["unlocks"], [])
+
+    def test_failed_logout_does_not_claim_success(self):
+        self.state.set_account("LoggedInUser", True)
+        self.logout.side_effect = OSError("fixture failure")
+        req = urllib.request.Request(f"{self.base_url}/logout", data=b"", method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(req, timeout=3)
+        self.assertEqual(error.exception.code, 503)
+        self.assertTrue(self.state.logged_in)
+
+    def test_cross_origin_logout_is_rejected(self):
+        req = urllib.request.Request(f"{self.base_url}/logout", data=b"", method="POST",
+                                     headers={"Origin": "https://other.example"})
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(req, timeout=3)
+        self.assertEqual(error.exception.code, 403)
+        self.logout.assert_not_called()
 
     def test_not_found(self):
         req = urllib.request.Request(f"{self.base_url}/unknown-route")

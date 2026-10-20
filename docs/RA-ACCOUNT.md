@@ -39,6 +39,15 @@ it waits cancellably for the existing cooldown instead of dropping those jobs.
 The default worker call still returns immediately during cooldown. Only a
 successful hash lookup with an integer `GameID` of zero declares an unknown
 image; malformed mappings and failed/limited set qualification stay retryable.
+
+The owned dashboard's logout revokes the live service account and removes only
+its owned credential through the existing owner-thread account session. It also
+cancels subsequent session requests and prevents pending lookup/evaluation output
+from restoring the displayed game. The dashboard remains available signed out;
+restart with `--login` or explicit import to sign in again. HTTP logout reports
+failure if the owner cannot complete credential removal. Cancellation cannot undo
+an unlock request already accepted remotely. Bounded submission scheduling remains
+separate work; logout adds no new worker, queue, or PS2 protocol messages.
 The HTTPS transport spaces requests by at least one second per client, uses a
 fixed verified HTTPS endpoint and POST fields, rejects redirects, bounds bodies,
 sanitizes errors and performs no automatic retries. Backoff is bounded to 1--300
