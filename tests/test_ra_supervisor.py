@@ -183,6 +183,40 @@ class SupervisorTests(unittest.TestCase):
             lease.close.assert_called_once()
             close_owner.assert_called_once()
 
+    def test_dashboard_logout_revokes_service_and_blocks_further_lookups(self):
+        args = mock.Mock(mode="xerabora", login=None, import_credentials=False,
+                         lan_viewer=False, games_folder=None)
+        library = self.profile / "fixture.dll"
+        library.write_bytes(b"fixture")
+        callbacks = {}
+        session = mock.Mock()
+        service = mock.Mock()
+        service.run_account.side_effect = lambda callback: callback(session)
+        def service_factory(resolve, **options):
+            callbacks["resolve"] = resolve
+            return service
+        def web_factory(port, state, **options):
+            web = mock.Mock()
+            def start():
+                options["logout"]()
+                result = callbacks["resolve"](IdentificationJob(1, "a" * 32, "fixture"),
+                                               threading.Event())
+                self.assertIsNone(result.qualified)
+                self.assertFalse(result.unsupported)
+            web.start.side_effect = start
+            return web
+        with mock.patch("launcher.achievements.library_path", return_value=library), \
+             mock.patch("launcher.ra_owned_service.OwnedService", side_effect=service_factory), \
+             mock.patch("launcher.ra_credentials.CredentialStore") as store, \
+             mock.patch("launcher.ra_account_worker.AccountWorker") as worker, \
+             mock.patch("launcher.ra_web.RAWebServer", side_effect=web_factory):
+            store.return_value.load.return_value = Credentials("Synthetic", "synthetic-token")
+            self.assertEqual(run_owned_runtime(args, self.profile, mock.Mock(), threading.Event(),
+                                               lambda: False, mock.Mock()), 0)
+            worker.return_value.assert_not_called()
+        service.clear_account.assert_called_once_with()
+        session.logout.assert_called_once_with(forget=True)
+
     def test_run_owned_runtime_evaluation_trigger_dispatches_award(self):
         args = mock.Mock(
             mode="xerabora",
