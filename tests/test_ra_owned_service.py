@@ -364,7 +364,7 @@ class EvaluatedOwnedServiceTests(unittest.TestCase):
         self.assertTrue(self.ready().startswith(b"RAA1 OK 20 1"))
         self.assertEqual(len(calls), 3)
 
-    def test_evaluation_overflow_and_game_switch_discard_stale_evaluations(self):
+    def test_routine_evaluations_coalesce_and_game_switch_discards_stale_output(self):
         service = self.start(lambda job, cancel: self.qualified(image_hash=job.image_hash),
                              frame_capacity=2)
         service.bind_account("Synthetic", 1)
@@ -373,7 +373,7 @@ class EvaluatedOwnedServiceTests(unittest.TestCase):
         for sequence in (1, 2, 3):
             self.client.sendto(packet(b"\1", count=1, sequence=sequence), self.address)
         self.request(b"RAP1 127.0.0.1 18195")
-        self.assertEqual(service.dropped_evaluations, 2)
+        self.assertEqual(service.dropped_evaluations, 0)
         evaluated = service.take_evaluation()
         self.assertEqual(evaluated.wire.sequence, 3)
         self.assertIsNone(service.take_evaluation())
@@ -382,6 +382,45 @@ class EvaluatedOwnedServiceTests(unittest.TestCase):
         self.request(self.query.replace(b"a" * 32, b"b" * 32))
         self.assertIsNone(service.take_evaluation())
         self.assertIsNone(service.take_frame())
+
+    def test_routine_telemetry_cannot_evict_an_unread_unlock(self):
+        service = self.start(lambda job, cancel: self.qualified(image_hash=job.image_hash),
+                             frame_capacity=2)
+        service.bind_account("Synthetic", 1)
+        self.ready()
+        self.request(b"RAG1 " + b"a" * 32 + b" 0")
+        self.client.sendto(packet(b"\0", count=1, sequence=1), self.address)
+        self.client.sendto(packet(b"\1", count=1, sequence=2), self.address)
+        self.assertTrue(self.client.recvfrom(2000)[0].startswith(b"RAU1 10 "))
+        for sequence in range(3, 13):
+            self.client.sendto(packet(b"\1", count=1, sequence=sequence), self.address)
+        self.assertTrue(self.request(b"RAP1 127.0.0.1 18195").startswith(b"RAO1"))
+        unlock = service.take_evaluation()
+        self.assertEqual(unlock.evaluation.triggered, (10,))
+        self.assertEqual(unlock.wire.sequence, 2)
+        self.assertEqual(unlock.context.image_hash, "a" * 32)
+        latest = service.take_evaluation()
+        self.assertEqual(latest.wire.sequence, 12)
+        self.assertFalse(latest.evaluation.triggered)
+        self.assertIsNone(service.take_evaluation())
+        self.assertEqual(service.dropped_evaluations, 0)
+
+    def test_unlock_only_overflow_preserves_existing_events_and_reports_rejection(self):
+        service = self.start(lambda job, cancel: self.qualified(
+            ("0xH080000=1", "0xH080000=2", "0xH080000=3"), image_hash=job.image_hash),
+            frame_capacity=2)
+        service.bind_account("Synthetic", 1)
+        self.ready()
+        self.request(b"RAG1 " + b"a" * 32 + b" 0")
+        self.client.sendto(packet(b"\0", count=1, sequence=1), self.address)
+        for value in (1, 2, 3):
+            self.client.sendto(packet(bytes([value]), count=1, sequence=value + 1), self.address)
+            self.assertTrue(self.client.recvfrom(2000)[0].startswith(f"RAU1 {value + 9} ".encode()))
+        self.assertTrue(self.request(b"RAP1 127.0.0.1 18195").startswith(b"RAO1"))
+        self.assertEqual(service.dropped_evaluations, 1)
+        self.assertEqual(service.take_evaluation().evaluation.triggered, (10,))
+        self.assertEqual(service.take_evaluation().evaluation.triggered, (11,))
+        self.assertIsNone(service.take_evaluation())
 
     def test_end_to_end_unlock_notice_delivery_base_opl_profile(self):
         service = self.start(lambda job, cancel: self.qualified(

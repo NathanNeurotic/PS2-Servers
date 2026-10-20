@@ -15,7 +15,7 @@ console acceptance or an independently owned runtime.
 
 | Capability | Status | Acceptance |
 | --- | --- | --- |
-| Independent PS2-Servers RA runtime (no xeRAbora client executable or embedded page) | **Not implemented** | Own protocol receiver, snapshot assembly, watch-list lifecycle, rcheevos integration, account/RA API workflow and native/local UI. Keep upstream protocol and MIT dependency attribution. Confirm no bundled xeRAbora runtime remains. |
+| Independent PS2-Servers RA runtime (no xeRAbora client executable or embedded page) | **Opt-in preview implemented; replacement incomplete** | #232–252 add owned receiver/evaluation, account worker, session/award client, supervisor and local dashboard. Managed runtime remains the default and is still bundled. See RA-ACCOUNT.md for current bounds; account/UI parity and console acceptance remain open. |
 | True console-mode isolation | Protocol adapters only | One engine in both modes today; xeRAbora-compatible mode must not start CADQ/CADA listeners, while Caduceus mode must explicitly add them and send correct title notifications. Changing the GUI selector requires a stop/restart. |
 | Shared xeRAbora telemetry and rcheevos evaluation | Implemented in #216 | Host wire tests; real console unlock pending |
 | Local account, live progress, game sets, library, boards, follow account | Bundled upstream UI | Real account/runtime validation pending |

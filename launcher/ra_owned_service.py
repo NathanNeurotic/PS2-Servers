@@ -29,7 +29,7 @@ class IdentificationResult:
 
 
 class OwnedService:
-    """One UDP owner, one resolver and bounded FIFOs of frames and evaluations.
+    """One UDP owner, one resolver, bounded unlock FIFO and latest routine state.
 
     resolve(job, cancel_event) returns IdentificationResult (or QualifiedSet /
     AccountResult when library is configured). Exceptions and invalid results
@@ -52,6 +52,7 @@ class OwnedService:
         self._loop = self._worker = None
         self._frames = queue.Queue(maxsize=frame_capacity)
         self._evaluations = queue.Queue(maxsize=frame_capacity)
+        self._latest_evaluation = None
         self.dropped_frames = 0
         self.dropped_evaluations = 0
         self._reset = threading.Event()
@@ -119,6 +120,7 @@ class OwnedService:
 
     def _discard_frame(self):
         self._frame_generation = None
+        self._latest_evaluation = None
         for fifo in (self._frames, self._evaluations):
             while True:
                 try:
@@ -200,14 +202,16 @@ class OwnedService:
                 return None
 
     def take_evaluation(self):
-        """Return the oldest queued EvaluatedOutput, or None; never block."""
+        """Return an unread unlock first, otherwise the latest routine evaluation."""
         with self._frame_lock:
             if self._reset.is_set():
                 return None
             try:
                 return self._evaluations.get_nowait()
             except queue.Empty:
-                return None
+                latest = self._latest_evaluation
+                self._latest_evaluation = None
+                return latest
 
     def stop(self, timeout=1):
         """Return whether BOTH threads stopped; listener closes independently."""
@@ -404,14 +408,15 @@ class OwnedService:
                                         break
                             self._frames.put_nowait(output)
                             if evaluated is not None:
-                                if self._evaluations.full():
-                                    self.dropped_evaluations += self._evaluations.qsize()
-                                    while True:
-                                        try:
-                                            self._evaluations.get_nowait()
-                                        except queue.Empty:
-                                            break
-                                self._evaluations.put_nowait(evaluated)
+                                if evaluated.evaluation and evaluated.evaluation.triggered:
+                                    self._latest_evaluation = None
+                                    try:
+                                        self._evaluations.put_nowait(evaluated)
+                                    except queue.Full:
+                                        self.dropped_evaluations += 1
+                                        print("RetroAchievements: unread unlock queue full; event not queued.", flush=True)
+                                else:
+                                    self._latest_evaluation = evaluated
                             self._frame_generation = output.generation
         finally:
             with self._frame_lock:

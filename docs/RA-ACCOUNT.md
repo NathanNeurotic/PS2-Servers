@@ -58,6 +58,14 @@ does not grow or silently overwrite an award. Failed or ambiguous requests are
 attempted once, with no automatic retry or durable replay queue. Local unlock
 display is not remote award acceptance. This bounds submissions separately from
 identification; it does not claim one global HTTP scheduler for all account work.
+
+The UDP owner retains unread unlock evaluations in a bounded FIFO and coalesces
+ordinary evaluations into one latest-state slot. Routine telemetry cannot evict
+an unlock before the supervisor sees it. The unlock FIFO uses `frame_capacity`
+(256 by default); if it contains only unlock events and fills, the new event is
+rejected with a diagnostic and `dropped_evaluations` increment. Existing events
+are preserved. Account/game reset clears both paths. This is an in-memory bound,
+not durable award delivery or proof of remote acceptance.
 The HTTPS transport spaces requests by at least one second per client, uses a
 fixed verified HTTPS endpoint and POST fields, rejects redirects, bounds bodies,
 sanitizes errors and performs no automatic retries. Backoff is bounded to 1--300
