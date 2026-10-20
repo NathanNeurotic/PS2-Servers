@@ -272,6 +272,8 @@ h1 { font-size: 1.5rem; color: var(--text-bright); display: flex; align-items: c
       <span class="badge badge-softcore">Softcore Only</span>
     </h1>
     <div id="account-status" class="account-badge">Checking account...</div>
+    <button id="logout" type="button" hidden>Sign out</button>
+    <span id="account-error" role="status"></span>
   </header>
 
   <div id="unlock-banner" class="unlock-banner">
@@ -319,6 +321,7 @@ h1 { font-size: 1.5rem; color: var(--text-bright); display: flex; align-items: c
 <script>
 function render(state) {
   const accountEl = document.getElementById('account-status');
+  document.getElementById('logout').hidden = !(state.login && state.login.ok);
   if (state.login && state.login.ok) {
     accountEl.textContent = 'Signed in: ' + state.login.user;
   } else {
@@ -371,6 +374,8 @@ function render(state) {
     const u = state.unlocks[0];
     document.getElementById('unlock-text').textContent = 'Recent unlock: ' + u.title + ' (' + u.points + ' points)';
     banner.style.display = 'block';
+  } else {
+    document.getElementById('unlock-banner').style.display = 'none';
   }
 
   const container = document.getElementById('achievements-container');
@@ -388,6 +393,23 @@ function render(state) {
     `).join('');
   }
 }
+
+document.getElementById('logout').onclick = async function() {
+  this.disabled = true;
+  const error = document.getElementById('account-error');
+  error.textContent = '';
+  try {
+    const response = await fetch('/logout', {method: 'POST'});
+    if (!response.ok) throw new Error('logout failed');
+    const state = await fetch('/state', {cache: 'no-store'});
+    if (!state.ok) throw new Error('state unavailable');
+    render(await state.json());
+  } catch (_) {
+    error.textContent = 'Sign out could not be completed. Please try again.';
+  } finally {
+    this.disabled = false;
+  }
+};
 
 function initSSE() {
   const source = new EventSource('/events');
