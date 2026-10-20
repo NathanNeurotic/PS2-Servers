@@ -46,8 +46,18 @@ cancels subsequent session requests and prevents pending lookup/evaluation outpu
 from restoring the displayed game. The dashboard remains available signed out;
 restart with `--login` or explicit import to sign in again. HTTP logout reports
 failure if the owner cannot complete credential removal. Cancellation cannot undo
-an unlock request already accepted remotely. Bounded submission scheduling remains
-separate work; logout adds no new worker, queue, or PS2 protocol messages.
+an unlock request already accepted remotely. Logout adds no PS2 protocol messages.
+
+Awards and periodic pings share one bounded submission consumer (64 waiting tasks
+plus one active task), replacing per-request threads. It reuses `AccountWorker`
+for killable requests, retained pacing/backoff and cancellation. Each evaluation
+carries the immutable account/game context of its accepted set, so a queued
+unlock cannot be relabelled with a later game's hash. Logout and shutdown cancel
+the worker and discard pending submissions. A full queue reports rejection; it
+does not grow or silently overwrite an award. Failed or ambiguous requests are
+attempted once, with no automatic retry or durable replay queue. Local unlock
+display is not remote award acceptance. This bounds submissions separately from
+identification; it does not claim one global HTTP scheduler for all account work.
 The HTTPS transport spaces requests by at least one second per client, uses a
 fixed verified HTTPS endpoint and POST fields, rejects redirects, bounds bodies,
 sanitizes errors and performs no automatic retries. Backoff is bounded to 1--300
