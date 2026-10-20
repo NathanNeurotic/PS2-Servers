@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from launcher.ra_evaluator import Evaluation, Evaluator
 from launcher.ra_receiver import Receiver, ReceiverOutput
+from launcher.ra_sets import SetContext
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class EvaluatedOutput:
     wire: ReceiverOutput
     evaluation: Evaluation = None
     notices: tuple = ()
+    context: SetContext = None
 
 
 class EvaluatedReceiver:
@@ -34,6 +36,7 @@ class EvaluatedReceiver:
         self._account = None
         self._profile = "opl"
         self._metadata = {}
+        self._context = None
 
     def bind_account(self, account, epoch):
         """Revoke jobs/native state before accepting a new non-secret account epoch."""
@@ -74,9 +77,12 @@ class EvaluatedReceiver:
             self._reconcile()
             raise
         metadata_map = {aid: (pts, title) for aid, pts, title in qualified.metadata}
-        return self.complete(job, watch, dict(qualified.definitions),
+        accepted = self.complete(job, watch, dict(qualified.definitions),
                              title=qualified.title, achievements=len(qualified.selected_ids),
                              profile=profile, achievement_metadata=metadata_map)
+        if accepted:
+            self._context = context
+        return accepted
 
     def _reconcile(self):
         runtime = self._evaluator
@@ -85,6 +91,7 @@ class EvaluatedReceiver:
                 runtime.generation != self._receiver.session.generation):
             runtime.close()
             self._evaluator = None
+            self._context = None
 
     def _check_open(self):
         if self._closed:
@@ -137,6 +144,7 @@ class EvaluatedReceiver:
             return False
         self._reconcile()
         self._evaluator = candidate
+        self._context = None
         self._profile = profile
         self._metadata = dict(achievement_metadata) if achievement_metadata is not None else {}
         return True
@@ -160,7 +168,8 @@ class EvaluatedReceiver:
                     else:
                         formatted.append(format_unlock_notice(achievement_id, pts))
                 notices = tuple(formatted)
-        return EvaluatedOutput(output, evaluation, notices)
+        return EvaluatedOutput(output, evaluation, notices,
+                               self._context if evaluation is not None else None)
 
     def reset(self):
         """Revoke account/game jobs, wire ownership and native history together."""

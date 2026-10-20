@@ -110,7 +110,7 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
     from launcher.ra_account_worker import AccountWorker, AccountTask
     from launcher.ra_owned_service import OwnedService, IdentificationResult
     from launcher.ra_credentials import CredentialStore
-    from launcher.ra_session_client import RASessionClient
+    from launcher.ra_submissions import Submissions
     from launcher.ra_http import Transport
     from launcher.ra_sets import decode_response, SetContext
     from launcher.ra_web import RAState, RAWebServer
@@ -242,6 +242,8 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
     viewer = None
     web_server = None
     ui_port = available_account_port()
+    submissions = Submissions(profile, account_cancel)
+    submission_id = 0
     def logout():
         nonlocal active_context
         with context_lock:
@@ -250,6 +252,8 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
             account_cancel.set()
             active_context = None
         service.run_account(lambda session: session.logout(forget=True))
+        if not submissions.close():
+            raise TimeoutError("Submission worker is still stopping")
 
     try:
         (profile / "account-port").write_text(str(ui_port), encoding="ascii")
@@ -283,21 +287,18 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                         with context_lock:
                             if account_cancel.is_set():
                                 break
-                            state.note_unlock(aid)
-                            ctx = active_context
+                            if evaluated.context is not None and evaluated.context == active_context:
+                                state.note_unlock(aid)
                         print(f"RetroAchievements: achievement {aid} triggered on console!", flush=True)
                         current_creds = store.load()
-                        if current_creds and ctx and not account_cancel.is_set():
-                            def submit(aid=aid, ctx=ctx, c=current_creds):
-                                try:
-                                    client = RASessionClient(c.username, c.token)
-                                    award = client.award_achievement(ctx, aid, cancel=account_cancel)
-                                    if award.awarded:
-                                        status = "already unlocked" if award.already_unlocked else "awarded"
-                                        print(f"RetroAchievements: achievement {aid} {status} on server (softcore score: {award.softcore_score}).", flush=True)
-                                except Exception as err:
-                                    print(f"RetroAchievements: unlock submission failed for {aid} ({err}).", flush=True)
-                            threading.Thread(target=submit, daemon=True).start()
+                        ctx = evaluated.context
+                        if (current_creds and ctx and ctx.account == current_creds.username
+                                and not account_cancel.is_set()):
+                            submission_id += 1
+                            task = AccountTask(submission_id, ctx.epoch, "award",
+                                               credentials=current_creds, context=ctx, achievement_id=aid)
+                            if not submissions.offer(task):
+                                print(f"RetroAchievements: unlock {aid} not queued (full or signed out).", flush=True)
 
             now = time.monotonic()
             if now - last_ping >= 120:
@@ -306,16 +307,16 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                     ctx = active_context
                 current_creds = store.load()
                 if current_creds and ctx and not account_cancel.is_set():
-                    def ping(ctx=ctx, c=current_creds):
-                        try:
-                            client = RASessionClient(c.username, c.token)
-                            client.ping(ctx, cancel=account_cancel)
-                        except Exception:
-                            pass
-                    threading.Thread(target=ping, daemon=True).start()
+                    submission_id += 1
+                    task = AccountTask(submission_id, ctx.epoch, "ping", credentials=current_creds, context=ctx)
+                    if not submissions.offer(task):
+                        print("RetroAchievements: ping not queued (full or signed out).", flush=True)
+
         return 0
     finally:
         account_cancel.set()
+        if not submissions.close():
+            print("RetroAchievements: submission worker did not stop within deadline.", flush=True)
         if web_server:
             web_server.close()
         if viewer:

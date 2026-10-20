@@ -10,7 +10,7 @@ from launcher.servers import _achievements_argv, RETROACHIEVEMENTS
 from launcher.ra_account_worker import AccountResult
 from launcher.ra_credentials import Credentials
 from launcher.ra_receiver import IdentificationJob
-from launcher.ra_sets import QualifiedSet
+from launcher.ra_sets import QualifiedSet, SetContext
 
 
 class SupervisorTests(unittest.TestCase):
@@ -237,21 +237,19 @@ class SupervisorTests(unittest.TestCase):
              mock.patch("launcher.ra_owned_service.OwnedService") as service_cls, \
              mock.patch("launcher.ra_credentials.CredentialStore") as store_cls, \
              mock.patch("launcher.ra_account_worker.AccountWorker") as worker_cls, \
-             mock.patch("launcher.ra_session_client.RASessionClient") as client_cls:
+             mock.patch("launcher.ra_submissions.Submissions") as submissions_cls:
 
             service = service_cls.return_value
             service.account = "TestUser"
 
             mock_eval = mock.Mock()
+            mock_eval.context = SetContext("TestUser", 1, "a" * 32, 123, 21)
             mock_eval.evaluation.triggered = (42,)
             service.take_evaluation.side_effect = [mock_eval, None]
 
             store = store_cls.return_value
-            creds = mock.Mock(username="TestUser", token="dummy-token")
+            creds = Credentials("TestUser", "dummy-token")
             store.load.return_value = creds
-
-            client = client_cls.return_value
-            client.award_achievement.return_value = mock.Mock(awarded=True, already_unlocked=False, softcore_score=10)
 
             # Let the loop run once then stop
             owner_alive = mock.Mock(side_effect=[True, True, False])
@@ -259,6 +257,11 @@ class SupervisorTests(unittest.TestCase):
             ret = run_owned_runtime(args, self.profile, lease, stopped, owner_alive, close_owner)
             self.assertEqual(ret, 0)
             service.stop.assert_called_once()
+            submissions_cls.return_value.offer.assert_called_once()
+            task = submissions_cls.return_value.offer.call_args.args[0]
+            self.assertEqual(task.context, mock_eval.context)
+            self.assertEqual(task.credentials, creds)
+            self.assertEqual(task.achievement_id, 42)
 
     def test_run_owned_runtime_serves_state_http(self):
         import urllib.request
