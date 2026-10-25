@@ -1,0 +1,24 @@
+#!/sbin/openrc-run
+
+name="PS2-Servers Core UDPFS"
+description="PS2-Servers Core file service with automatic protocol compatibility"
+supervisor="supervise-daemon"
+command="/usr/bin/python3"
+directory="/opt/ps2-servers"
+command_args="-u /opt/ps2-servers/ps2servers.py serve udpfs ${ps2servers_args:---root-dir /srv/ps2}"
+command_user="ps2servers:ps2servers"
+output_log="/var/log/ps2servers/udpfs.log"
+error_log="/var/log/ps2servers/udpfs-error.log"
+respawn_delay=5
+respawn_max=3
+respawn_period=60
+
+depend() {
+    need net
+    use localmount netmount
+    after localmount netmount
+}
+
+start_pre() {
+    checkpath --directory --owner ps2servers:ps2servers --mode 0750 /var/log/ps2servers
+}

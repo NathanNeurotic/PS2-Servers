@@ -57,6 +57,17 @@ SOCKET_DISCOVERY = "discovery"
 DEFAULT_FALLBACK_SECONDS = 0.25
 
 
+def _startup_version():
+    """Reuse launcher build identity without requiring it for direct Core runs."""
+    try:
+        from launcher.release_metadata import version_label
+    except ModuleNotFoundError as exc:
+        if exc.name not in ("launcher", "launcher.release_metadata"):
+            raise
+        return "version unavailable (use ps2servers.py serve udpfs for build identity)"
+    return version_label()
+
+
 def classify_profile(discovery_sequence: int, first_data_sequence: int) -> str:
     """Classify a peer from observable sequence behavior.
 
@@ -454,12 +465,19 @@ class AutoUdpfsServer(UdpfsServer):
     def run(self):
         """Receive DISCOVERY or DATA through either relevant local socket."""
         print("PS2 Servers Core — UDPFS")
+        print(f"  Build: {_startup_version()}")
         if self.root_dir:
             print(f"  Root: {self.root_dir}")
+        if self.bd_fh is not None:
+            print(f"  Block device: handle={BLOCK_DEVICE_HANDLE}, "
+                  f"sectors={self.bd_sector_count:,}, sector_size={self.bd_sector_size}")
         print(f"  Protocol mode: {self.protocol_mode}")
-        print(f"  Discovery bind: 0.0.0.0:{self.port}")
+        print(f"  Discovery bind: {self.sock.getsockname()[0]}:{self.sock.getsockname()[1]}")
         print(f"  Data bind: {self.dsock.getsockname()[0]}:{self.dsock.getsockname()[1]}")
-        print("  Listening...\n")
+        print(f"  Mode: {'read-only' if self.read_only else 'read-write'}")
+        print(f"  Idle timeout: {self.session_timeout:g}s (expiry closes open files)")
+        print(f"  Verbose: {'enabled' if self.verbose else 'disabled'}")
+        print("  Listening...\n", flush=True)
         while not self._shutdown:
             try:
                 sockets = [self.sock] if self.single_port else [self.sock, self.dsock]
