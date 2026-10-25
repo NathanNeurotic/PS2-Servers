@@ -3054,6 +3054,7 @@ def split_bind(value) -> Tuple[str, Optional[int]]:
 
 
 def main():
+    """Validate standalone CLI options, show Core guidance, and run UDPFS."""
     parser = argparse.ArgumentParser(
         description='UDPFS Server - Unified file and block device server over UDPRDMA',
         formatter_class=argparse.RawDescriptionHelpFormatter,
