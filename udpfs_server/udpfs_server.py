@@ -3054,6 +3054,7 @@ def split_bind(value) -> Tuple[str, Optional[int]]:
 
 
 def main():
+    """Validate standalone CLI options, show Core guidance, and run UDPFS."""
     parser = argparse.ArgumentParser(
         description='UDPFS Server - Unified file and block device server over UDPRDMA',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -3214,6 +3215,14 @@ def main():
     if args.block_device and not os.path.exists(args.block_device):
         print(f"Error: '{args.block_device}' not found")
         sys.exit(1)
+
+    print("Notice: running the standalone UDPFS server. PS2-Servers Core provides "
+          "automatic per-session protocol compatibility handling.")
+    print("Core command (run from the PS2-Servers directory): "
+          "python3 ps2servers.py serve udpfs --root-dir /path/to/games "
+          "--protocol-mode auto")
+    print("Use your games path and carry over your bind, data-port, timeout and "
+          "other applicable options when switching to Core.", flush=True)
 
     # Check LZ4 availability if compression is enabled
     if args.enable_compression and not LZ4_AVAILABLE:

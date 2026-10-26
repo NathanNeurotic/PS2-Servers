@@ -1,5 +1,10 @@
 # Edge UDPFS operation and handoff diagnostics
 
+For Python Desktop/Core deployments, use the
+[Core troubleshooting guide](UDPFS-CORE-TROUBLESHOOTING.md). For Alpine service
+deployments, see the [OpenRC example](../packaging/openrc/README.md).
+The UCI commands and Edge-specific log markers below apply to the Go deployment.
+
 For ordinary Desktop launch failures, try the [PC bind-address steps](../README.md#udpfs-games-list-but-fail-to-launch)
 first. This is an optional advanced trace, not required setup. The A5-V11
 addresses below are a historical example, not defaults to copy onto your LAN.

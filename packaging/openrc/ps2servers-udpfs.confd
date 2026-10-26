@@ -1,0 +1,11 @@
+# Install as /etc/conf.d/ps2servers-udpfs. This is trusted shell configuration.
+# Choose a root that is mounted before startup and accessible to ps2servers.
+# A fixed, unprivileged data port is optional; 0 chooses a port automatically.
+ps2servers_args="--root-dir /srv/ps2 --data-port 62967 --protocol-mode auto --peer-timeout 3600"
+
+# For a controlled failure capture, append --verbose. Disable it afterward.
+# For pause/resume beyond an hour, replace 3600 with 86400 (24h).
+# Expiry closes open handles; 0 does not disable it. Restart the console session
+# after restarting the service. Restarting cannot restore expired handles.
+# The default permits writes (settings/VMC etc.) when filesystem permissions do.
+# Append --read-only only if those writes are not needed.
