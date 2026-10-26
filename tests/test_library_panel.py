@@ -9,6 +9,47 @@ from launcher import library_panel
 
 
 class LibraryStartupTests(unittest.TestCase):
+    def test_recursive_scan_captures_options_and_cancel_keeps_ui_responsive(self):
+        tk = library_panel.tk
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("No graphical display")
+        try:
+            with tempfile.TemporaryDirectory() as profile, \
+                 mock.patch.object(library_panel, "config_dir", return_value=profile), \
+                 mock.patch.object(library_panel.LibraryPanel, "_run") as run, \
+                 mock.patch.object(library_panel.LibraryPanel, "_drain"):
+                panel = library_panel.LibraryPanel(root, SimpleNamespace(_open_ps2_setup_guide=lambda: None))
+                self.assertFalse(panel.recursive.get())
+                panel.path.set(profile)
+                panel.recursive.set(True)
+                panel.scan_depth.set(3)
+                panel._scan()
+                action = run.call_args.args[0]
+                # Tk state can change after scheduling; worker uses captured values.
+                panel.recursive.set(False)
+                panel.scan_depth.set(0)
+                db = mock.Mock()
+                action(db)
+                options = db.scan_detailed.call_args.kwargs
+                self.assertTrue(options["recursive"])
+                self.assertEqual(options["max_depth"], 3)
+                self.assertIs(options["cancel"], panel._scan_cancel)
+                self.assertFalse(panel._scan_cancel.is_set())
+                panel.cancel_scan.invoke()
+                self.assertTrue(panel._scan_cancel.is_set())
+                for i in range(100):
+                    options["progress"](library_panel.library_catalog.ScanResult(visited=i))
+                self.assertEqual(panel._scan_progress.qsize(), 1)
+                self.assertEqual(panel._scan_progress.get_nowait().visited, 99)
+                panel._busy = True
+                run.reset_mock()
+                panel._scan()
+                run.assert_not_called()
+        finally:
+            root.destroy()
+
     def test_panel_preserves_tk_root_method(self):
         self.assertIs(library_panel.LibraryPanel._root, library_panel.ttk.Frame._root)
 
