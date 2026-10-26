@@ -6,12 +6,14 @@ No game-serving hot path imports this module.
 from __future__ import annotations
 
 from contextlib import closing
+from dataclasses import dataclass, field, replace
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import sqlite3
+import stat
 import tempfile
 import time
 
@@ -19,9 +21,58 @@ from .config import config_dir
 
 IMAGE_EXTENSIONS = frozenset({".iso", ".zso", ".cso", ".chd"})
 MEDIA = ("DVD", "CD")
+INDEX_MEDIA = (*MEDIA, "UNKNOWN")
+MAX_SCAN_DEPTH = 8
+MAX_SCAN_ENTRIES = 100_000
 ART_TYPES = frozenset({"COV", "ICO", "LAB", "COV3"})
 KEY_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_. ()\[\]-]{0,95}$")
 SERIAL_PREFIX = re.compile(r"^[A-Z]{4}[_-]\d{3}\.\d{2}[. _-]+", re.I)
+
+
+@dataclass
+class ScanResult:
+    """Bounded scan outcome; indexed rows survive cancellation for safe rescans."""
+    indexed: int = 0
+    visited: int = 0
+    skipped_links: int = 0
+    skipped_depth: int = 0
+    skipped_unsupported: int = 0
+    skipped_invalid: int = 0
+    errors: int = 0
+    cancelled: bool = False
+    limit_reached: bool = False
+    details: list = field(default_factory=list)
+
+    def __str__(self):
+        state = "Cancelled" if self.cancelled else (
+            "Entry limit reached" if self.limit_reached else "Scan complete")
+        text = (f"{state}: {self.indexed} indexed, {self.visited} inspected; "
+                f"{self.skipped_links} links, {self.skipped_depth} depth-limited folders, "
+                f"{self.skipped_unsupported} unsupported, {self.skipped_invalid} invalid, "
+                f"{self.errors} errors.")
+        if self.details:
+            text += " First issue: " + self.details[0]
+        return text
+
+
+def _linked(info):
+    """Reject Unix links and Windows junctions/other reparse points."""
+    return (stat.S_ISLNK(info.st_mode) or
+            bool(getattr(info, "st_file_attributes", 0) &
+                 getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)))
+
+
+def _scan_path(base, path):
+    """Recheck containment and every descendant component before indexing."""
+    relative = path.relative_to(base)
+    current = base
+    for part in relative.parts:
+        current = current / part
+        if _linked(current.lstat()):
+            raise ValueError("Symlink or reparse point skipped")
+    resolved = path.resolve(strict=True)
+    resolved.relative_to(base)
+    return resolved
 
 
 def default_database():
@@ -85,8 +136,8 @@ class Catalog:
         return dict(record) if record else None
 
     def upsert(self, filename, media="DVD"):
-        if media not in MEDIA:
-            raise ValueError("Choose CD or DVD.")
+        if media not in INDEX_MEDIA:
+            raise ValueError("Choose CD, DVD or UNKNOWN media.")
         source = Path(filename).resolve(strict=True)
         if source.is_symlink() or not source.is_file() or source.suffix.lower() not in IMAGE_EXTENSIONS:
             raise ValueError("Choose a supported PS2 ISO/CSO/ZSO/CHD file.")
@@ -97,29 +148,121 @@ class Catalog:
             """INSERT INTO games(image_path,title,media,image_bytes,updated)
                VALUES(?,?,?,?,?)
                ON CONFLICT(image_path) DO UPDATE SET
-                   image_bytes=excluded.image_bytes, media=excluded.media,
+                   image_bytes=excluded.image_bytes,
+                   media=CASE WHEN excluded.media='UNKNOWN' THEN games.media ELSE excluded.media END,
                    updated=excluded.updated""",
             (str(source), visible_title(source), media, size, int(time.time())))
         self.db.commit()
         return self.db.execute("SELECT id FROM games WHERE image_path=?", (str(source),)).fetchone()[0]
 
     def scan(self, root):
-        """Top-level CD/DVD folders only; no symlinks or unexpected folder trees."""
+        """Keep the existing top-level CD/DVD scan API and integer result."""
+        return self.scan_detailed(root).indexed
+
+    def scan_detailed(self, root, *, recursive=False, max_depth=4,
+                      max_entries=10_000, cancel=None, progress=None):
+        """Index metadata with bounded traversal; never infer launch capability.
+
+        Recursive mode includes root images and at most max_depth directory
+        levels below the selected root. Only a top-level CD/DVD ancestor supplies
+        media; arbitrary-root images remain UNKNOWN until identity inspection.
+        Progress receives snapshots at most once per 128 entries, plus completion.
+        The scanner does not open image payloads, follow links, or delete rows.
+        """
+        if type(max_depth) is not int or not 0 <= max_depth <= MAX_SCAN_DEPTH:
+            raise ValueError(f"Scan depth must be 0 through {MAX_SCAN_DEPTH}.")
+        if type(max_entries) is not int or not 1 <= max_entries <= MAX_SCAN_ENTRIES:
+            raise ValueError(f"Entry limit must be 1 through {MAX_SCAN_ENTRIES}.")
         base = require_directory(root)
-        count = 0
-        for media in MEDIA:
-            directory = base / media
-            if directory.is_symlink() or not directory.is_dir():
-                continue
-            for entry in directory.iterdir():
-                if entry.is_symlink() or not entry.is_file() or entry.suffix.lower() not in IMAGE_EXTENSIONS:
-                    continue
+        result = ScanResult()
+        stack = []
+
+        def issue(path, exc):
+            result.errors += 1
+            if len(result.details) < 20:
+                result.details.append(f"{path.relative_to(base)}: {exc}")
+
+        def notify():
+            if progress:
+                progress(replace(result, details=list(result.details)))
+
+        def open_directory(path, depth, media):
+            try:
+                _scan_path(base, path)
+                stack.append((os.scandir(path), depth, media, path))
+            except ValueError:
+                result.skipped_links += 1
+            except OSError as exc:
+                issue(path, exc)
+
+        # Iterators keep memory bounded even for a directory with many entries.
+        if recursive:
+            open_directory(base, 0, "UNKNOWN")
+        else:
+            for media in reversed(MEDIA):
+                path = base / media
                 try:
-                    self.upsert(entry, media)
-                    count += 1
-                except (OSError, ValueError):
+                    info = path.lstat()
+                    if _linked(info):
+                        result.skipped_links += 1
+                    elif stat.S_ISDIR(info.st_mode):
+                        open_directory(path, max_depth, media)
+                except FileNotFoundError:
                     continue
-        return count
+                except OSError as exc:
+                    issue(path, exc)
+        try:
+            while stack:
+                if cancel is not None and cancel.is_set():
+                    result.cancelled = True
+                    break
+                iterator, depth, media, directory = stack[-1]
+                try:
+                    entry = next(iterator)
+                except StopIteration:
+                    iterator.close()
+                    stack.pop()
+                    continue
+                except OSError as exc:
+                    issue(directory, exc)
+                    iterator.close()
+                    stack.pop()
+                    continue
+                if result.visited >= max_entries:
+                    result.limit_reached = True
+                    break
+                result.visited += 1
+                path = Path(entry.path)
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                    if _linked(info):
+                        result.skipped_links += 1
+                    elif stat.S_ISDIR(info.st_mode):
+                        if recursive and depth < max_depth:
+                            child_media = entry.name.upper() if depth == 0 and entry.name.upper() in MEDIA else media
+                            open_directory(path, depth + 1, child_media)
+                        else:
+                            result.skipped_depth += 1
+                    elif stat.S_ISREG(info.st_mode) and path.suffix.lower() in IMAGE_EXTENSIONS:
+                        source = _scan_path(base, path)
+                        if info.st_size <= 0:
+                            result.skipped_invalid += 1
+                        else:
+                            self.upsert(source, media)
+                            result.indexed += 1
+                    else:
+                        result.skipped_unsupported += 1
+                except ValueError:
+                    result.skipped_invalid += 1
+                except OSError as exc:
+                    issue(path, exc)
+                if result.visited % 128 == 0:
+                    notify()
+        finally:
+            for iterator, _, _, _ in stack:
+                iterator.close()
+        notify()
+        return result
 
     def edit(self, row_id, title, disc_id="", notes=""):
         title = str(title).strip()
@@ -270,7 +413,7 @@ class Catalog:
                 image = item.get("image_path")
                 title = item.get("title")
                 media = item.get("media")
-                if not isinstance(image, str) or len(image) > 4096 or not isinstance(title, str) or not title.strip() or len(title) > 160 or media not in MEDIA:
+                if not isinstance(image, str) or len(image) > 4096 or not isinstance(title, str) or not title.strip() or len(title) > 160 or media not in INDEX_MEDIA:
                     raise ValueError("Invalid catalogue entry.")
                 disc_id = str(item.get("disc_id", ""))[:64]
                 notes = str(item.get("notes", ""))[:2000]

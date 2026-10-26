@@ -33,13 +33,19 @@ class LibraryPanel(ttk.Frame):
         self.app = app
         self._results = queue.Queue()
         self._busy = False
+        self._scan_active = False
+        self._scan_cancel = threading.Event()
+        self._scan_progress = queue.Queue(maxsize=1)
         self._buttons = []
         self.root_file = Path(config_dir()) / "library" / "games_root.txt"
         self.guide_marker = Path(config_dir()) / "library" / "first_run_complete"
         self.path = tk.StringVar(value=self._load_root())
         self.search = tk.StringVar()
+        self.recursive = tk.BooleanVar(value=False)
+        self.scan_depth = tk.IntVar(value=4)
         self.status = tk.StringVar(value="Catalogue stores metadata; no ISO or save is modified by scanning.")
         self._build()
+        self.bind("<Destroy>", lambda _event: self._scan_cancel.set(), add="+")
         self._drain()
         self._run(lambda db: db.list_games(), "Loading catalogue")
         # First-run tutorial is voluntary and never configures network or starts a server.
@@ -79,6 +85,23 @@ class LibraryPanel(ttk.Frame):
         self._button(controls, "Repair ART", self._repair_art)
         self._button(controls, "Edit metadata", self._edit)
         self._button(controls, "Setup guide", self._guide)
+        scan_options = ttk.Frame(self)
+        scan_options.pack(fill="x", padx=12, pady=(0, 4))
+        recursive = ttk.Checkbutton(scan_options, text="Include root and subfolders",
+                                    variable=self.recursive)
+        recursive.pack(side="left")
+        self._buttons.append(recursive)
+        ttk.Label(scan_options, text="Maximum depth").pack(side="left", padx=(12, 4))
+        depth = ttk.Spinbox(scan_options, from_=0, to=library_catalog.MAX_SCAN_DEPTH,
+                            textvariable=self.scan_depth, width=3)
+        depth.pack(side="left")
+        self._buttons.append(depth)
+        self.cancel_scan = ttk.Button(scan_options, text="Cancel scan", command=self._scan_cancel.set)
+        self.cancel_scan.pack(side="left", padx=8)
+        self.cancel_scan.state(["disabled"])
+        ttk.Label(self, text="Recursive scan indexes metadata only (10,000 entries per run). "
+                  "Nested paths may not launch on your console client. Media outside CD/DVD is unknown.",
+                  wraplength=740).pack(fill="x", padx=12)
         searchrow = ttk.Frame(self)
         searchrow.pack(fill="x", padx=12, pady=5)
         ttk.Label(searchrow, text="Search").pack(side="left")
@@ -108,7 +131,7 @@ class LibraryPanel(ttk.Frame):
             anchor="w", padx=12, pady=(3, 10))
 
     def _browse_root(self):
-        root = filedialog.askdirectory(title="Choose games root containing DVD and CD")
+        root = filedialog.askdirectory(title="Choose games root")
         if root:
             self.path.set(root)
             self.root_file.parent.mkdir(parents=True, exist_ok=True)
@@ -144,9 +167,18 @@ class LibraryPanel(ttk.Frame):
 
     def _drain(self):
         try:
+            progress = self._scan_progress.get_nowait()
+            if self._scan_active:
+                self.status.set(f"Scanning: {progress.visited} inspected, {progress.indexed} indexed; "
+                                f"{progress.errors} errors. Cancel keeps indexed metadata.")
+        except queue.Empty:
+            pass
+        try:
             while True:
                 ok, value, rows = self._results.get_nowait()
                 self._busy = False
+                self._scan_active = False
+                self.cancel_scan.state(["disabled"])
                 self.progress.stop()
                 for btn in self._buttons:
                     btn.state(["!disabled"])
@@ -170,12 +202,32 @@ class LibraryPanel(ttk.Frame):
             self.after(125, self._drain)
 
     def _scan(self):
+        if self._busy:
+            return
         try:
             root = self._games_root()
-        except (OSError, ValueError) as exc:
+            recursive = self.recursive.get()
+            depth = self.scan_depth.get()
+            if not 0 <= depth <= library_catalog.MAX_SCAN_DEPTH:
+                raise ValueError(f"Maximum depth must be 0 through {library_catalog.MAX_SCAN_DEPTH}.")
+        except (OSError, ValueError, tk.TclError) as exc:
             messagebox.showerror("Games root", str(exc))
             return
-        self._run(lambda db: db.scan(root), "Scanning top-level DVD and CD folders", True)
+        self._scan_cancel.clear()
+        self._scan_active = True
+
+        def progress(value):
+            try:
+                self._scan_progress.get_nowait()
+            except queue.Empty:
+                pass
+            self._scan_progress.put_nowait(value)
+
+        self._run(lambda db: db.scan_detailed(
+            root, recursive=recursive, max_depth=depth,
+            cancel=self._scan_cancel, progress=progress),
+            "Scanning root and subfolders" if recursive else "Scanning top-level DVD and CD folders", True)
+        self.cancel_scan.state(["!disabled"])
 
     def _import_image(self):
         try:
