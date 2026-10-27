@@ -1952,22 +1952,25 @@ class UdpfsServer:
             return
 
         dir_data = fh.obj
-        if dir_data['index'] >= len(dir_data['entries']):
-            if self.verbose:
-                self._print_event(f"[{addr[0]}:{addr[1]}] DREAD handle={handle} -> end of dir")
-            self._send_dread_reply(addr, result=0)
-            return
+        # An entry that cannot be stat'ed (removed since the listing was taken, a
+        # dangling reparse point, a permission error) is skipped, and the next one
+        # is served. Answering end-of-dir for it cut the listing short, and the
+        # console cannot tell that from a complete one: OPL took every later cover
+        # in ART/ to be missing, and later games never appeared in the list.
+        while dir_data['index'] < len(dir_data['entries']):
+            entry = dir_data['entries'][dir_data['index']]
+            dir_data['index'] += 1
 
-        entry = dir_data['entries'][dir_data['index']]
-        dir_data['index'] += 1
+            try:
+                st = entry.stat(follow_symlinks=False)
+            except OSError as e:
+                self._print_event(f"[{addr[0]}:{addr[1]}] DREAD stat error, skipping '{entry.name}': {e}")
+                continue
 
-        try:
-            st = entry.stat(follow_symlinks=False)
-            
             # Check if this is a compressed file and transform display
             display_name = entry.name
             stat_info = self._stat_to_bytes(st)
-            
+
             if self.enable_compression:
                 # Present supported compressed files as .iso with their
                 # uncompressed size (the transform is a no-op for other names)
@@ -1984,10 +1987,11 @@ class UdpfsServer:
                     self._print_event(f"[{addr[0]}:{addr[1]}] DREAD handle={handle} -> '{entry.name}'")
 
             self._send_dread_reply(addr, result=1, name=display_name, stat_info=stat_info)
-        except OSError as e:
-            self._print_event(f"[{addr[0]}:{addr[1]}] DREAD stat error: {e}")
-            # Skip this entry and return end-of-dir
-            self._send_dread_reply(addr, result=0)
+            return
+
+        if self.verbose:
+            self._print_event(f"[{addr[0]}:{addr[1]}] DREAD handle={handle} -> end of dir")
+        self._send_dread_reply(addr, result=0)
 
     def _handle_getstat(self, addr: Tuple[str, int], payload: bytes):
         """Handle GETSTAT_REQ"""
