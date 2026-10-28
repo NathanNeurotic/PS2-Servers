@@ -9,6 +9,47 @@ from launcher import library_panel
 
 
 class LibraryStartupTests(unittest.TestCase):
+    def test_identity_action_captures_root_and_supports_cancel_and_details(self):
+        tk = library_panel.tk
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("No graphical display")
+        try:
+            with tempfile.TemporaryDirectory() as profile, \
+                 mock.patch.object(library_panel, "config_dir", return_value=profile), \
+                 mock.patch.object(library_panel.LibraryPanel, "_run") as run, \
+                 mock.patch.object(library_panel.LibraryPanel, "_drain"):
+                panel = library_panel.LibraryPanel(root, SimpleNamespace(_open_ps2_setup_guide=lambda: None))
+                panel.path.set(profile)
+                panel._scan_cancel.set()
+                panel._inspect_ids()
+                self.assertFalse(panel._scan_cancel.is_set())
+                action = run.call_args.args[0]
+                panel.path.set("does not exist")
+                db = mock.Mock()
+                action(db)
+                self.assertEqual(db.inspect_identities.call_args.args[0], Path(profile).resolve())
+                self.assertIs(db.inspect_identities.call_args.kwargs["cancel"], panel._scan_cancel)
+                panel.cancel_scan.invoke()
+                self.assertTrue(panel._scan_cancel.is_set())
+                row = {"id": 1, "image_path": "/games/Game.iso", "disc_id": "SLES_111.11",
+                       "detected_disc_id": "SLUS_123.45", "identity_status": "conflict",
+                       "boot_path": "SLUS_123.45", "identity_detail": "Manual ID differs."}
+                panel._display_rows = {"1": row}
+                panel.tree.insert("", "end", iid="1", values=("Game",))
+                panel.tree.selection_set("1")
+                with mock.patch.object(library_panel.messagebox, "showinfo") as show:
+                    panel._show_identity()
+                    self.assertIn("Manual ID differs", show.call_args.args[1])
+                    self.assertIn("SLUS_123.45", show.call_args.args[1])
+                panel._busy = True
+                run.reset_mock()
+                panel._inspect_ids()
+                run.assert_not_called()
+        finally:
+            root.destroy()
+
     def test_recursive_scan_captures_options_and_cancel_keeps_ui_responsive(self):
         tk = library_panel.tk
         try:

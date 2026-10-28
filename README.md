@@ -42,6 +42,12 @@ also supports JSON metadata import/export and online SQLite backups.
 
 The **Import images** action supports a batch of local image files (up to 1,000 per run),
 records skips without overwriting any destination, and leaves original images intact.
+After scanning, **Inspect disc IDs** reads plain ISO boot metadata in a background
+worker and shows an **Inspected ID** alongside the existing **Manual ID**. It checks
+`SYSTEM.CNF` and the referenced ELF signature, flags conflicting IDs, and preserves
+custom titles, IDs and notes. Double-click a row for the result. CSO/ZSO/CHD remain
+indexable; this inspection action currently supports plain ISO only. See the
+[library indexing and inspection guide](docs/LIBRARY-INDEXING.md) for limits and caching.
 The **Repair ART** action converts legacy `_COV.jpg`, `_ICO.jpg`, `_LAB.jpg`,
 `_COV3.jpg` (or JPEG/WebP/BMP equivalents) to 8-bit indexed PNG without deleting
 sources or replacing existing PNGs. The current companion does not queue remote

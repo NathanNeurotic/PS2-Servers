@@ -132,6 +132,11 @@ For best compatibility, name your games using the standard OPL startup identifie
 
 <p><b>For UDPBD:</b> do <b>not</b> select this library directory. Select <b>one image file</b> in the UDPBD card instead. Its internal format must match what the console-side block driver expects. Enable <b>Read-only</b> for your first test. See the <a href="udpbd.html#setup-steps">UDPBD setup steps</a>.</p>
 
+<div class="callout info"><div class="h">Optional Desktop library and disc IDs</div>
+<p>In the <b>LIBRARY</b> tab, scan your games root, then use <b>Inspect disc IDs</b> to read plain ISO boot metadata. <b>Manual ID</b>, <b>Inspected ID</b> and <b>ID status</b> are shown separately; double-click a row for conflicts or errors. This preserves your filenames and metadata. Inspection runs in the background with cancellation and a 1,000-entry limit. CSO/ZSO/CHD are indexable, but this action currently inspects plain ISO only.</p>
+<p>Indexed or inspected does not prove console launch compatibility. Recursive discovery does not reconfigure server roots or enable nested paths in a loader. See the <a href="https://github.com/NathanNeurotic/PS2-Servers/blob/main/docs/LIBRARY-INDEXING.md">library indexing and inspection guide</a> for limits, cached results and supported layouts.</p>
+</div>
+
 <h2 id="launching-server">3. Start PS2 Servers</h2>
 <div class="steps">
   <div class="step">

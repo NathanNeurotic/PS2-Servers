@@ -36,6 +36,7 @@ class LibraryPanel(ttk.Frame):
         self._scan_active = False
         self._scan_cancel = threading.Event()
         self._scan_progress = queue.Queue(maxsize=1)
+        self._display_rows = {}
         self._buttons = []
         self.root_file = Path(config_dir()) / "library" / "games_root.txt"
         self.guide_marker = Path(config_dir()) / "library" / "first_run_complete"
@@ -99,8 +100,10 @@ class LibraryPanel(ttk.Frame):
         self.cancel_scan = ttk.Button(scan_options, text="Cancel scan", command=self._scan_cancel.set)
         self.cancel_scan.pack(side="left", padx=8)
         self.cancel_scan.state(["disabled"])
+        self._button(scan_options, "Inspect disc IDs", self._inspect_ids)
         ttk.Label(self, text="Recursive scan indexes metadata only (10,000 entries per run). "
-                  "Nested paths may not launch on your console client. Media outside CD/DVD is unknown.",
+                  "Nested paths may not launch on your console client. Media outside CD/DVD is unknown. "
+                  "Inspect disc IDs reads plain ISOs separately; double-click a row for results.",
                   wraplength=740).pack(fill="x", padx=12)
         searchrow = ttk.Frame(self)
         searchrow.pack(fill="x", padx=12, pady=5)
@@ -108,18 +111,25 @@ class LibraryPanel(ttk.Frame):
         ttk.Entry(searchrow, textvariable=self.search).pack(side="left", fill="x", expand=True, padx=8)
         self._button(searchrow, "Find", lambda: self._run(
             lambda db: db.list_games(self.search.get()), "Searching catalogue"))
-        cols = ("title", "disc_id", "media", "bytes", "file")
+        cols = ("title", "disc_id", "detected_id", "identity_status", "media", "bytes", "file")
         table = ttk.Frame(self)
         table.pack(fill="both", expand=True, padx=12, pady=(4, 5))
         self.tree = ttk.Treeview(table, columns=cols, show="headings", height=10, selectmode="browse")
-        widths = {"title": 240, "disc_id": 100, "media": 60, "bytes": 80, "file": 330}
+        widths = {"title": 180, "disc_id": 100, "detected_id": 100, "identity_status": 90,
+                  "media": 65, "bytes": 80, "file": 250}
         for col in cols:
-            self.tree.heading(col, text=col.replace("_", " ").title())
+            label = {"disc_id": "Manual ID", "detected_id": "Inspected ID", "identity_status": "ID status"}.get(
+                col, col.replace("_", " ").title())
+            self.tree.heading(col, text=label)
             self.tree.column(col, width=widths[col], stretch=col in ("title", "file"))
         scroll = ttk.Scrollbar(table, command=self.tree.yview)
+        horizontal = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.configure(xscrollcommand=horizontal.set)
         self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.bind("<Double-1>", self._show_identity)
         scroll.pack(side="right", fill="y")
+        horizontal.pack(fill="x", padx=12)
         exports = ttk.Frame(self)
         exports.pack(fill="x", padx=12, pady=5)
         self._button(exports, "Backup SQLite", self._backup)
@@ -169,8 +179,12 @@ class LibraryPanel(ttk.Frame):
         try:
             progress = self._scan_progress.get_nowait()
             if self._scan_active:
-                self.status.set(f"Scanning: {progress.visited} inspected, {progress.indexed} indexed; "
-                                f"{progress.errors} errors. Cancel keeps indexed metadata.")
+                if isinstance(progress, library_catalog.IdentityScanResult):
+                    self.status.set(f"Inspecting IDs: {progress.visited} entries, {progress.cached} cached, "
+                                    f"{progress.conflicts} conflicts, {progress.errors} errors.")
+                else:
+                    self.status.set(f"Scanning: {progress.visited} inspected, {progress.indexed} indexed; "
+                                    f"{progress.errors} errors. Cancel keeps indexed metadata.")
         except queue.Empty:
             pass
         try:
@@ -185,9 +199,11 @@ class LibraryPanel(ttk.Frame):
                 if ok:
                     if rows is not None:
                         self.tree.delete(*self.tree.get_children())
+                        self._display_rows = {str(r["id"]): r for r in rows[:2000]}
                         for record in rows[:2000]:
                             self.tree.insert("", "end", iid=str(record["id"]),
                                              values=(record["title"], record["disc_id"],
+                                                     record["detected_disc_id"], record["identity_status"],
                                                      record["media"], "{:.1f} MiB".format(record["image_bytes"] / 1048576),
                                                      record["image_path"]))
                     self.status.set("{} · {} visible entries (max 2000 displayed).".format(
@@ -216,18 +232,43 @@ class LibraryPanel(ttk.Frame):
         self._scan_cancel.clear()
         self._scan_active = True
 
-        def progress(value):
-            try:
-                self._scan_progress.get_nowait()
-            except queue.Empty:
-                pass
-            self._scan_progress.put_nowait(value)
-
         self._run(lambda db: db.scan_detailed(
             root, recursive=recursive, max_depth=depth,
-            cancel=self._scan_cancel, progress=progress),
+            cancel=self._scan_cancel, progress=self._queue_scan_progress),
             "Scanning root and subfolders" if recursive else "Scanning top-level DVD and CD folders", True)
         self.cancel_scan.state(["!disabled"])
+
+    def _queue_scan_progress(self, value):
+        try:
+            self._scan_progress.get_nowait()
+        except queue.Empty:
+            pass
+        self._scan_progress.put_nowait(value)
+
+    def _inspect_ids(self):
+        if self._busy:
+            return
+        try:
+            root = self._games_root()
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Games root", str(exc))
+            return
+        self._scan_cancel.clear()
+        self._scan_active = True
+        self._run(lambda db: db.inspect_identities(
+            root, cancel=self._scan_cancel, progress=self._queue_scan_progress),
+            "Inspecting disc IDs (up to 1,000 indexed entries; plain ISO only)", True)
+        self.cancel_scan.state(["!disabled"])
+
+    def _show_identity(self, _event=None):
+        selected = self.tree.selection()
+        row = self._display_rows.get(selected[0]) if selected else None
+        if row:
+            messagebox.showinfo("Disc ID inspection", "{}\n\nStatus: {}\nManual ID: {}\n"
+                                "Inspected ID: {}\nBOOT2: {}\n\n{}".format(
+                                    row["image_path"], row["identity_status"], row["disc_id"] or "(empty)",
+                                    row["detected_disc_id"] or "(unknown)", row["boot_path"] or "(unknown)",
+                                    row["identity_detail"] or "Use Inspect disc IDs after scanning the library."))
 
     def _import_image(self):
         try:
@@ -308,7 +349,9 @@ class LibraryPanel(ttk.Frame):
         if not source:
             return
         selected = self.tree.selection()
-        identifier = self.tree.item(selected[0], "values")[1] if selected else ""
+        row = self._display_rows.get(selected[0], {}) if selected else {}
+        identifier = row.get("disc_id", "") or (
+            row.get("detected_disc_id", "") if row.get("identity_status") == "verified" else "")
         key = simpledialog.askstring("Artwork identity",
              "Enter exact identity: PS2 disc ID, PS1 VCD filename or ELF filename.\n"
              "No automatic renaming of your games is performed.",

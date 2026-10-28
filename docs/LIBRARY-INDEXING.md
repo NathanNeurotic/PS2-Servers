@@ -58,9 +58,10 @@ Images beneath a top-level `CD/` or `DVD/` folder inherit that layout hint.
 Images elsewhere are marked **UNKNOWN**. A directory name is not verified disc
 identity, and arbitrary-root images are not guessed as DVD from size or filename.
 A rescan with unknown media does not erase a previously known CD/DVD value.
-Actual `SYSTEM.CNF` identity extraction is separate follow-up work.
+The separate **Inspect disc IDs** action below can inspect plain ISO boot identity;
+it does not infer CD versus DVD from that identity.
 
-SQLite keeps its existing schema and user edits; the independent achievements
+SQLite keeps the existing games schema and user edits; the independent achievements
 catalogue is not migrated or merged. JSON exports can round-trip UNKNOWN media
 in this version. Older builds may reject those new rows on JSON import; retain
 your SQLite backup and previous exports when moving between builds.
@@ -72,7 +73,84 @@ a loader. Verify the exact client and server path contract before changing a
 working game layout. No console-hardware compatibility claim follows from an
 indexing test.
 
-This is the recursive-discovery increment of
+## Inspect disc IDs
+
+After scanning, choose **Inspect disc IDs** to inspect the entries already indexed
+under the selected games root. This is a separate, opt-in background operation:
+ordinary scans still read file metadata only. It needs no server, network access,
+RetroAchievements account or native achievement engine. It opens game images
+read-only and preserves manual IDs, custom titles, notes, media hints and server
+configuration.
+
+The inspector supports **cooked plain ISO images with 2048-byte ISO9660 logical
+blocks**. It finds the primary volume descriptor, root `SYSTEM.CNF`, exactly one
+`BOOT2 = cdrom0:\\...;1` setting, and the referenced executable. An **Inspected ID**
+requires a canonical `AAAA_123.45` boot filename and an ELF signature at its
+validated extent. Filename prefixes are comparison hints only. An ELF signature
+is not a full executable validation, content hash, retail-disc authenticity check,
+or evidence that the console can launch/read the game.
+
+The table keeps **Manual ID**, **Inspected ID**, and **ID status** separate.
+Double-click a row for the boot path and explanation. Statuses distinguish:
+
+- **verified**: boot serial and referenced ELF signature were inspected;
+- **conflict**: a manual ID or serial prefix in the filename disagrees with that
+  boot serial; both values remain available for the user to review;
+- **unknown**: no supported `SYSTEM.CNF`/`BOOT2` identity, or a homebrew ELF with
+  no canonical serial; PS1 `BOOT` is not interpreted as PS2 `BOOT2`;
+- **invalid**: malformed/truncated metadata, an ambiguous ISO9660 path, or a
+  missing executable/ELF signature;
+- **unsupported**: a compressed image or a layout/resource limit outside the
+  inspector's contract;
+- **unavailable / changed**: filesystem access failed or the file changed while
+  being inspected; another inspection retries it;
+- **not inspected**: no current inspector result, including after a rescan
+  invalidates a changed image's cache entry.
+
+The artwork import prompt can suggest an inspected ID when no manual ID is set
+and the status is verified. Conflicting automatic IDs are not suggested. The
+prompt still asks for the exact identity and preserves existing artwork.
+Images with the same basename or serial at different paths remain distinct rows.
+
+Each UI run considers at most **1,000 indexed entries**, including cached and
+unsupported entries, and reports when that limit is reached. The Python
+`inspect_identities(root, max_entries=...)` API accepts 1 through 10,000. Select a
+smaller root to inspect a subset of a larger catalogue, or raise that limit via
+the API. Repeating a limited run does not advance a durable cursor. **Cancel scan**
+also cancels inspection between sparse reads/files; completed results remain for
+the next invocation. A blocked filesystem call cannot be interrupted by this flag.
+
+Each ISO inspection has these independent limits: image size at most 16 GiB,
+32 volume descriptors, 1 MiB per directory, 8,192 directory records in total,
+16 KiB `SYSTEM.CNF`, eight boot-path components, and 4 MiB of logical reads.
+Both byte-order copies of sizes/offsets must agree, and extents must lie inside
+the image and declared volume. Extended attributes, interleaving, multi-extent
+boot metadata, raw CD sector images, non-2048-byte logical blocks and alternate
+file versions are outside the supported contract. The ISO9660 field layout
+follows [ECMA-119](https://ecma-international.org/publications-and-standards/standards/ecma-119/).
+
+CSO/ZSO/CHD remain available to existing indexing, serving and achievement hashing.
+This action reports them as **unsupported** without invoking a decoder. Inspection
+of malformed compressed images needs a bounded decompression contract before it
+can safely join the batch inspector; existing decoder availability alone does
+not establish that contract.
+
+Results are cached in a separate `disc_identity` table in `catalog.sqlite3`.
+The existing `games` table/schema and the achievements database remain unchanged.
+The cache uses the inspector version and a filesystem fingerprint (device/inode,
+size, modification time, plus change time on POSIX). The pathname and open handle
+are checked for replacement/mutation around inspection. This is not a content
+checksum and cannot detect a modification that preserves all observed metadata.
+Displayed results describe the last observation; run inspection/rescan again
+after changing images. The table view does not open every image to refresh it.
+
+Rescans invalidate changed fingerprints, and unavailable/changed results are
+retried. SQLite backups include the cache and can still be opened by older builds,
+which ignore the extra table. JSON exports include the observed result for review,
+but JSON import deliberately ignores inspected-ID claims: inspect the local image
+again to establish its identity. A forged JSON field cannot mark a file verified.
+
+This implements recursive discovery and the plain-ISO identity increment of
 [companion issue #249](https://github.com/NathanNeurotic/PS2-Servers/issues/249).
-Shared RA/general descriptors, authoritative disc IDs, artwork providers,
-server-profile export and path-aware HTTP remain separate work.
+Shared RA/general descriptors, bounded compressed identity inspection, artwork
+providers, server-profile export and path-aware HTTP remain separate work.
