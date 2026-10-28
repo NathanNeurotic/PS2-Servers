@@ -153,5 +153,17 @@ class ServerRegistryTests(unittest.TestCase):
             hint_fallback = gui.opl_hint(key, "192.168.1.100", {"share_name": "games", "username": "", "password": ""})
             self.assertIn("Port 1025", hint_fallback)
 
+    def test_opl_hint_udpfs_names_no_server_ip(self):
+        # OPL finds UDPFS by broadcast and never asks for a server IP; the hint
+        # must not tell the user to enter one.
+        hint = gui.opl_hint("udpfs", "192.168.1.7", {"bind": ""})
+        self.assertNotIn("if prompted", hint)
+        self.assertIn("no server IP", hint)
+        self.assertIn("same network as 192.168.1.7", hint)
+        # A bind address is what the server answers from, so it wins over the LAN IP.
+        hint = gui.opl_hint("udpfs", "192.168.1.7", {"bind": "192.168.0.4"})
+        self.assertIn("same network as 192.168.0.4", hint)
+        self.assertNotIn("192.168.1.7", hint)
+
 if __name__ == "__main__":
     unittest.main()
