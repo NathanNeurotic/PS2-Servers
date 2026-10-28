@@ -164,6 +164,14 @@ class ServerRegistryTests(unittest.TestCase):
         hint = gui.opl_hint("udpfs", "192.168.1.7", {"bind": "192.168.0.4"})
         self.assertIn("same network as 192.168.0.4", hint)
         self.assertNotIn("192.168.1.7", hint)
+        # udpfsd's IP:PORT grammar: the port is not part of the network, and a
+        # wildcard or bare :PORT names no network, so the LAN IP stands in.
+        hint = gui.opl_hint("udpfs", "192.168.1.7", {"bind": "192.168.0.4:41233"})
+        self.assertIn("same network as 192.168.0.4", hint)
+        self.assertNotIn("41233", hint)
+        for bind in (":41233", "0.0.0.0:62966", "0.0.0.0"):
+            hint = gui.opl_hint("udpfs", "192.168.1.7", {"bind": bind})
+            self.assertIn("same network as 192.168.1.7", hint, bind)
 
 if __name__ == "__main__":
     unittest.main()

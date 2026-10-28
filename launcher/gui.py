@@ -288,7 +288,11 @@ def opl_hint(key, ip, values):
         # to type it somewhere, and the field is not even what this server binds
         # to. What has to match is the PS2's own address: on the same network as
         # the address the server answers from, so the broadcast reaches it.
-        here = (values.get("bind") or "").strip() or ip
+        # The bind field takes udpfsd's IP[:PORT] grammar; only the host names
+        # a network, and an empty or wildcard host means "every interface".
+        bind = (values.get("bind") or "").strip()
+        bind_host = bind.rpartition(":")[0].strip() if ":" in bind else bind
+        here = bind_host if bind_host not in ("", "0.0.0.0") else ip
         return ("In OPL → Network:  Protocol 'UDPFS'  ·  no server IP needed (found by broadcast)  "
                 "·  PS2 IP on the same network as {}".format(here))
     if key == "http":
