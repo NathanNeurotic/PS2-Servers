@@ -55,7 +55,7 @@ def _preflight(path):
             raise ValueError("Unsupported or oversized CHD image.")
 
 
-def open_compressed(path):
+def open_compressed(path, *, strict=False, cancel=None):
     # UDPFS is a standalone module, not a Python package. Its sibling
     # compressed_iso/ is imported as a top-level package by UDPFS itself,
     # and Nuitka compiles that same package in frozen releases.
@@ -69,7 +69,7 @@ def open_compressed(path):
     kind = path.suffix.lower()
     reader = {".cso": CsoFileWrapper, ".zso": ZsoFileWrapper,
               ".chd": ChdFileWrapper}[kind]
-    return reader(str(path))
+    return reader(str(path), strict=True, cancel=cancel) if strict else reader(str(path))
 
 
 class Ps2CompressedImage(VcdImage):

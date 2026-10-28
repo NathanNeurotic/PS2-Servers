@@ -39,7 +39,7 @@ class ZsoFileWrapper(CompressedFileWrapper):
     ZSO_MAGIC = b'ZSO\x00'
     ZISO_MAGIC = b'ZISO'
     
-    def __init__(self, file_path: str, cache_size: int = None):
+    def __init__(self, file_path: str, cache_size: int = None, *, strict=False, cancel=None):
         """Initialize ZSO wrapper.
         
         Args:
@@ -52,10 +52,14 @@ class ZsoFileWrapper(CompressedFileWrapper):
         """
         if not LZ4_AVAILABLE:
             raise ImportError("LZ4 library not available. Install with: pip install lz4")
-        super().__init__(file_path, cache_size)
+        super().__init__(file_path, cache_size, strict=strict, cancel=cancel)
         self.align = 0
         self._is_ziso = False
-        self._parse_header()
+        try:
+            self._parse_header()
+        except BaseException:
+            self.close()
+            raise
     
     def _parse_header(self):
         """Parse ZSO/ZISO header and block offset table."""
@@ -70,6 +74,10 @@ class ZsoFileWrapper(CompressedFileWrapper):
             self._is_ziso = True
         elif magic != self.ZSO_MAGIC:
             raise ValueError(f"Invalid ZSO magic: {magic!r}, expected {self.ZSO_MAGIC!r} or {self.ZISO_MAGIC!r}")
+        if self._strict:
+            from .limits import indexed_header
+            indexed_header(self, header, zso=True)
+            return
         
         header_size = struct.unpack('<I', header[4:8])[0]
         self.uncompressed_size = struct.unpack('<Q', header[8:16])[0]
@@ -113,6 +121,9 @@ class ZsoFileWrapper(CompressedFileWrapper):
         Raises:
             ValueError: If block index is out of range or decompression fails
         """
+        if self._strict:
+            from .limits import indexed_block
+            return indexed_block(self, block_idx, lz4_block=lz4.block)
         if block_idx >= self._num_blocks:
             raise ValueError(f"Block index {block_idx} out of range (0-{self._num_blocks-1})")
         

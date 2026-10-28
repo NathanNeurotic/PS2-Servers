@@ -13,6 +13,7 @@ import sys
 # Explicitly import standard library modules required by dynamic server engines
 # so PyInstaller, Nuitka, and static bundlers include them in frozen builds.
 import argparse
+import array
 import pathlib
 import signal
 import collections

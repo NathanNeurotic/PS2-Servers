@@ -58,7 +58,7 @@ Images beneath a top-level `CD/` or `DVD/` folder inherit that layout hint.
 Images elsewhere are marked **UNKNOWN**. A directory name is not verified disc
 identity, and arbitrary-root images are not guessed as DVD from size or filename.
 A rescan with unknown media does not erase a previously known CD/DVD value.
-The separate **Inspect disc IDs** action below can inspect plain ISO boot identity;
+The separate **Inspect disc IDs** action below can inspect ISO/CSO/ZSO/CHD boot identity;
 it does not infer CD versus DVD from that identity.
 
 SQLite keeps the existing games schema and user edits; the independent achievements
@@ -82,8 +82,8 @@ RetroAchievements account or native achievement engine. It opens game images
 read-only and preserves manual IDs, custom titles, notes, media hints and server
 configuration.
 
-The inspector supports **cooked plain ISO images with 2048-byte ISO9660 logical
-blocks**. It finds the primary volume descriptor, root `SYSTEM.CNF`, exactly one
+The inspector supports **cooked ISO images with 2048-byte ISO9660 logical
+blocks**, including sparse reads through CSO/ZSO/CHD adapters. It finds the primary volume descriptor, root `SYSTEM.CNF`, exactly one
 `BOOT2 = cdrom0:\\...;1` setting, and the referenced executable. An **Inspected ID**
 requires a canonical `AAAA_123.45` boot filename and an ELF signature at its
 validated extent. Filename prefixes are comparison hints only. An ELF signature
@@ -100,7 +100,7 @@ Double-click a row or press Enter for the boot path and explanation. Statuses di
   no canonical serial; PS1 `BOOT` is not interpreted as PS2 `BOOT2`;
 - **invalid**: malformed/truncated metadata, an ambiguous ISO9660 path, or a
   missing executable/ELF signature;
-- **unsupported**: a compressed image or a layout/resource limit outside the
+- **unsupported**: a layout/resource limit outside the
   inspector's contract;
 - **unavailable / changed**: filesystem access failed or the file changed while
   being inspected; another inspection retries it;
@@ -129,11 +129,18 @@ boot metadata, raw CD sector images, non-2048-byte logical blocks and alternate
 file versions are outside the supported contract. The ISO9660 field layout
 follows [ECMA-119](https://ecma-international.org/publications-and-standards/standards/ecma-119/).
 
-CSO/ZSO/CHD remain available to existing indexing, serving and achievement hashing.
-This action reports them as **unsupported** without invoking a decoder. Inspection
-of malformed compressed images needs a bounded decompression contract before it
-can safely join the batch inspector; existing decoder availability alone does
-not establish that contract.
+CSO/ZSO/CHD inspection uses an opt-in strict mode of the existing compressed
+readers; ordinary serving and achievement hashing retain their existing mode.
+Inspection caps indexes at 32 MiB, each block/hunk at 16 MiB, total decoded
+blocks at 64 MiB and the cache at two blocks. CSO/ZISO version 1 and alignment
+up to 64 bytes are supported; indexed input spans and deflate/LZ4 output lengths
+are checked. CHD v5 geometry and its native map are bounded (at most 1,048,576
+hunks) before libchdr opens the image. Nonstandard geometry can report
+**unsupported** even when another reader accepts it. Missing LZ4/libchdr reports
+**unavailable** and can be retried after installing the decoder. No temporary
+full ISO or whole-game hash is produced. Cancellation occurs between bounded
+reads/blocks and cannot interrupt an in-progress native decoder/filesystem call.
+Inspector version 2 invalidates previous cached plain-only inspection results.
 
 Results are cached in a separate `disc_identity` table in `catalog.sqlite3`.
 The existing `games` table/schema and the achievements database remain unchanged.
@@ -220,10 +227,10 @@ enabled. A BOOT2 serial never substitutes for the official RA image hash or
 proves telemetry, unlocks, console launchability or nested-path transport support.
 Existing servers continue to operate independently of SQLite and this preference.
 
-This implements recursive discovery, plain-ISO identity inspection and the shared
+This implements recursive discovery, bounded image identity inspection and the shared
 metadata/RA view increment of
 [companion issue #249](https://github.com/NathanNeurotic/PS2-Servers/issues/249).
-Bounded compressed identity inspection, PS1/Ember indexing, artwork providers,
+PS1/Ember indexing, artwork providers,
 server-profile export and path-aware HTTP remain separate work. These Desktop
 features do not change Core/Edge serving protocols or their documented capability
 matrix in [editions](EDITIONS.md), and host tests do not establish hardware acceptance.

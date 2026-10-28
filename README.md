@@ -42,11 +42,11 @@ also supports JSON metadata import/export and online SQLite backups.
 
 The **Import images** action supports a batch of local image files (up to 1,000 per run),
 records skips without overwriting any destination, and leaves original images intact.
-After scanning, **Inspect disc IDs** reads plain ISO boot metadata in a background
+After scanning, **Inspect disc IDs** reads ISO/CSO/ZSO/CHD boot metadata in a background
 worker and shows an **Inspected ID** alongside the existing **Manual ID**. It checks
 `SYSTEM.CNF` and the referenced ELF signature, flags conflicting IDs, and preserves
-custom titles, IDs and notes. Double-click a row or press Enter for the result. CSO/ZSO/CHD remain
-indexable; this inspection action currently supports plain ISO only. See the
+custom titles, IDs and notes. Double-click a row or press Enter for the result.
+Compressed inspection uses bounded sparse reads and requires the format's decoder. See the
 [library indexing and inspection guide](docs/LIBRARY-INDEXING.md) for limits and caching.
 **Review indexed paths** lists duplicate basenames, inspected serials, and
 case/Unicode path collisions without changing files. In RetroAchievements'

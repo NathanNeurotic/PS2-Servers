@@ -33,7 +33,7 @@ class CsoFileWrapper(CompressedFileWrapper):
     tries raw deflate first, then falls back to standard zlib decompression.
     """
     
-    def __init__(self, file_path: str, cache_size: int = None):
+    def __init__(self, file_path: str, cache_size: int = None, *, strict=False, cancel=None):
         """Initialize CSO wrapper.
         
         Args:
@@ -43,9 +43,13 @@ class CsoFileWrapper(CompressedFileWrapper):
         Raises:
             ValueError: If file is not a valid CSO file
         """
-        super().__init__(file_path, cache_size)
+        super().__init__(file_path, cache_size, strict=strict, cancel=cancel)
         self.align = 0
-        self._parse_header()
+        try:
+            self._parse_header()
+        except BaseException:
+            self.close()
+            raise
     
     def _parse_header(self):
         """Parse CSO header and block offset table."""
@@ -58,6 +62,10 @@ class CsoFileWrapper(CompressedFileWrapper):
         magic = struct.unpack('<I', header[0:4])[0]
         if magic != CSO_MAGIC:
             raise ValueError(f"Invalid CSO magic: 0x{magic:08X}, expected 0x{CSO_MAGIC:08X}")
+        if self._strict:
+            from .limits import indexed_header
+            indexed_header(self, header)
+            return
         
         self.uncompressed_size = struct.unpack('<Q', header[8:16])[0]
         self.block_size = struct.unpack('<I', header[16:20])[0]
@@ -95,6 +103,9 @@ class CsoFileWrapper(CompressedFileWrapper):
         Raises:
             ValueError: If block index is out of range or decompression fails
         """
+        if self._strict:
+            from .limits import indexed_block
+            return indexed_block(self, block_idx)
         if block_idx >= self._num_blocks:
             raise ValueError(f"Block index {block_idx} out of range (0-{self._num_blocks-1})")
         

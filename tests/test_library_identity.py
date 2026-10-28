@@ -150,13 +150,13 @@ class LibraryIdentityTests(unittest.TestCase):
         with mock.patch.object(disc_identity, "inspect_disc", side_effect=AssertionError("must not open")):
             self.assertEqual(self.db.inspect_identities(self.root).errors, 1)
 
-    def test_compressed_unknown_and_malformed_have_separate_counts(self):
+    def test_compressed_with_wrong_magic_is_invalid_and_homebrew_is_unknown(self):
         self.image("DVD/Game.cso")
         self.image("DVD/Homebrew.iso", boot="MAIN.ELF")
         path = self.image("DVD/Invalid.iso")
         path.write_bytes(b"invalid")
         result = self.scan_and_inspect()
-        self.assertEqual((result.unsupported, result.unknown, result.invalid, result.errors), (1, 1, 1, 0))
+        self.assertEqual((result.unsupported, result.unknown, result.invalid, result.errors), (0, 1, 2, 0))
 
     def test_limit_cancel_progress_and_safe_resumption(self):
         for i in range(20):

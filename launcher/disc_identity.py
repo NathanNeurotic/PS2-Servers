@@ -10,7 +10,7 @@ import re
 import stat
 
 
-INSPECTOR_VERSION = 1
+INSPECTOR_VERSION = 2
 SECTOR = 2048
 MAX_DISC_BYTES = 16 * 1024**3
 MAX_READ_BYTES = 4 * 1024**2
@@ -184,12 +184,7 @@ class _IsoReader:
 
 
 def inspect_disc(path, *, cancel=None):
-    """Inspect a cooked ISO without writing or inferring identity from its name.
-
-    Compressed images remain indexable but are explicitly unsupported here.
-    Sharing their serving readers would need a separate bounded decompression
-    contract before exposing those readers to batches of malformed library files.
-    """
+    """Inspect ISO/CSO/ZSO/CHD through sparse, bounded logical-sector reads."""
     _check_cancel(cancel)
     path = Path(path)
     try:
@@ -197,21 +192,40 @@ def inspect_disc(path, *, cancel=None):
         if (not stat.S_ISREG(info.st_mode) or
                 getattr(info, "st_file_attributes", 0) & 0x400):
             raise ValueError("Disc inspection requires a regular file, without links/reparse points.")
-        if path.suffix.lower() != ".iso":
-            return DiscIdentity("unsupported", detail="Disc ID inspection currently supports plain ISO only.")
+        compressed = path.suffix.lower() in (".cso", ".zso", ".chd")
+        if not compressed and path.suffix.lower() != ".iso":
+            return DiscIdentity("unsupported", detail="No PS2 inspection adapter for this image format.")
         if info.st_size > MAX_DISC_BYTES:
             return DiscIdentity("unsupported", detail="ISO size exceeds the inspection limit.")
-        if info.st_size < 17 * SECTOR:
+        if not compressed and info.st_size < 17 * SECTOR:
             raise ValueError("Truncated ISO image.")
         with path.open("rb") as source:
             if fingerprint(os.fstat(source.fileno())) != fingerprint(info):
                 return DiscIdentity("changed", detail="Image changed before inspection; retry.")
+            logical = None
             try:
-                result = _IsoReader(source, info.st_size, cancel).inspect()
+                if compressed:
+                    from .ra_compressed_hash import open_compressed
+                    logical = open_compressed(path, strict=True, cancel=cancel)
+                    if fingerprint(os.fstat(logical.file.fileno())) != fingerprint(info):
+                        return DiscIdentity("changed", detail="Image changed while opening decoder; retry.")
+                result = _IsoReader(logical or source,
+                                    logical.uncompressed_size if logical else info.st_size, cancel).inspect()
+            except ImportError as exc:
+                result = DiscIdentity("unavailable", detail=str(exc))
             except UnsupportedImage as exc:
                 result = DiscIdentity("unsupported", detail=str(exc))
             except (ValueError, UnicodeError) as exc:
-                result = DiscIdentity("invalid", detail=str(exc))
+                # Resource limits describe an unsupported layout, not corrupt media.
+                if compressed:
+                    from compressed_iso.limits import InspectionLimit
+                    status = "unsupported" if isinstance(exc, InspectionLimit) else "invalid"
+                else:
+                    status = "invalid"
+                result = DiscIdentity(status, detail=str(exc))
+            finally:
+                if logical is not None:
+                    logical.close()
             if (fingerprint(os.fstat(source.fileno())) != fingerprint(info) or
                     fingerprint(path.lstat()) != fingerprint(info)):
                 return DiscIdentity("changed", detail="Image changed during inspection; retry.")

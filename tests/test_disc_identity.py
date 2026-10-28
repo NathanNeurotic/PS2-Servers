@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 import tempfile
 import threading
+import struct
 import unittest
 from unittest import mock
 
@@ -146,12 +147,74 @@ class DiscIdentityTests(unittest.TestCase):
                 self.assertEqual(result.status, "unsupported")
                 self.assertEqual(result.disc_id, "")
 
-    def test_compressed_files_report_unsupported_without_opening_readers(self):
+    def test_malformed_compressed_files_are_not_verified(self):
         for suffix in (".cso", ".zso", ".chd"):
             self.path = self.path.with_suffix(suffix)
             self.path.write_bytes(b"malformed compressed image")
-            with mock.patch.object(Path, "open", side_effect=AssertionError("Must not decode")):
-                self.assertEqual(identity.inspect_disc(self.path).status, "unsupported")
+            self.assertIn(identity.inspect_disc(self.path).status, ("invalid", "unavailable"))
+
+    def test_cso_inspection_uses_logical_sectors_without_staging(self):
+        from tests.test_ra_compressed_hash import make_indexed
+        self.path = self.path.with_suffix('.cso')
+        result = self.inspect(make_indexed(bytes(iso_fixture(nested=True))))
+        self.assertEqual((result.status, result.disc_id), ('verified', 'SLUS_123.45'))
+        self.assertEqual(result.boot_path, 'GAME/SLUS_123.45')
+
+    def test_zso_and_ziso_inspection_when_decoder_installed(self):
+        from tests.test_ra_compressed_hash import make_indexed
+        from launcher.ra_compressed_hash import open_compressed
+        self.path = self.path.with_suffix('.zso')
+        for magic in (b'ZISO', b'ZSO\0'):
+            self.path.write_bytes(make_indexed(bytes(iso_fixture()), magic=magic))
+            try:
+                stream = open_compressed(self.path, strict=True)
+            except ImportError:
+                self.skipTest('LZ4 is not installed')
+            stream.close()
+            self.assertEqual(identity.inspect_disc(self.path).status, 'verified')
+
+    def test_cso_resource_limits_and_bad_offsets_are_distinct(self):
+        from tests.test_ra_compressed_hash import make_indexed
+        self.path = self.path.with_suffix('.cso')
+        data = bytearray(make_indexed(bytes(iso_fixture())))
+        struct.pack_into('<Q', data, 8, 32 * 1024**3)
+        self.assertEqual(self.inspect(data).status, 'unsupported')
+        data = bytearray(make_indexed(bytes(iso_fixture())))
+        # The PVD block points into the index rather than the payload.
+        struct.pack_into('<I', data, 24 + 16 * 4, 0x80000018)
+        self.assertEqual(self.inspect(data).status, 'invalid')
+
+    def test_cso_decode_budget_and_cancel_close_handles(self):
+        from tests.test_ra_compressed_hash import make_indexed
+        from launcher.ra_compressed_hash import open_compressed
+        self.path = self.path.with_suffix('.cso')
+        self.path.write_bytes(make_indexed(bytes(iso_fixture())))
+        stream = open_compressed(self.path, strict=True)
+        stream.close()
+        from compressed_iso import limits
+        with mock.patch.object(limits, 'MAX_DECODE', SECTOR):
+            self.assertEqual(identity.inspect_disc(self.path).status, 'unsupported')
+        event = threading.Event()
+        stream = open_compressed(self.path, strict=True, cancel=event)
+        event.set()
+        try:
+            with self.assertRaises(InterruptedError):
+                stream.read(SECTOR)
+        finally:
+            stream.close()
+        self.path.unlink()
+
+    def test_cso_inflation_cannot_exceed_declared_block(self):
+        from tests.test_ra_compressed_hash import make_indexed
+        import zlib
+        self.path = self.path.with_suffix('.cso')
+        data = bytearray(make_indexed(bytes(iso_fixture())))
+        offset = len(data)
+        compressor = zlib.compressobj(wbits=-15)
+        bomb = compressor.compress(b'A' * (SECTOR * 200)) + compressor.flush()
+        data.extend(bomb)
+        struct.pack_into('<II', data, 24 + 16 * 4, offset, offset + len(bomb))
+        self.assertEqual(self.inspect(data).status, 'invalid')
 
     def test_missing_and_denied_files_are_unavailable(self):
         self.assertEqual(identity.inspect_disc(self.path).status, "unavailable")
