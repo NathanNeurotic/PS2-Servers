@@ -103,7 +103,7 @@ class LibraryPanel(ttk.Frame):
         self._button(scan_options, "Inspect disc IDs", self._inspect_ids)
         ttk.Label(self, text="Recursive scan indexes metadata only (10,000 entries per run). "
                   "Nested paths may not launch on your console client. Media outside CD/DVD is unknown. "
-                  "Inspect disc IDs reads plain ISOs separately; double-click a row for results.",
+                  "Inspect disc IDs reads plain ISOs separately; double-click a row or press Enter for results.",
                   wraplength=740).pack(fill="x", padx=12)
         searchrow = ttk.Frame(self)
         searchrow.pack(fill="x", padx=12, pady=5)
@@ -128,6 +128,7 @@ class LibraryPanel(ttk.Frame):
         self.tree.configure(xscrollcommand=horizontal.set)
         self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<Double-1>", self._show_identity)
+        self.tree.bind("<Return>", self._show_identity)
         scroll.pack(side="right", fill="y")
         horizontal.pack(fill="x", padx=12)
         exports = ttk.Frame(self)

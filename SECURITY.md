@@ -86,7 +86,7 @@ Get-NetFirewallRule -DisplayName "PS2 Servers - *" -ErrorAction SilentlyContinue
   Remove-NetFirewallRule
 ```
 
-## Release verification
+## Disc ID inspection
 
 The optional Desktop library's **Inspect disc IDs** action reads plain ISO boot
 metadata without changing images or starting a network service. Directory work,
@@ -96,6 +96,8 @@ changes are not an OS sandbox. Compressed images are explicitly unsupported by
 this inspection action. Cached IDs describe a filesystem observation, not a
 content checksum or proof of console bootability. See
 [library indexing and inspection](docs/LIBRARY-INDEXING.md) for the exact limits.
+
+## Release verification
 
 Release assets are built by GitHub Actions from this public repository.
 

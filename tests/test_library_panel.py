@@ -39,8 +39,14 @@ class LibraryStartupTests(unittest.TestCase):
                 panel._display_rows = {"1": row}
                 panel.tree.insert("", "end", iid="1", values=("Game",))
                 panel.tree.selection_set("1")
+                panel.pack()
+                root.update()
+                panel.tree.focus_force()
+                root.update()
                 with mock.patch.object(library_panel.messagebox, "showinfo") as show:
-                    panel._show_identity()
+                    panel.tree.event_generate("<Return>")
+                    root.update()
+                    show.assert_called_once()
                     self.assertIn("Manual ID differs", show.call_args.args[1])
                     self.assertIn("SLUS_123.45", show.call_args.args[1])
                 panel._busy = True

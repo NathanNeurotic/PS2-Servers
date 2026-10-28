@@ -45,7 +45,7 @@ records skips without overwriting any destination, and leaves original images in
 After scanning, **Inspect disc IDs** reads plain ISO boot metadata in a background
 worker and shows an **Inspected ID** alongside the existing **Manual ID**. It checks
 `SYSTEM.CNF` and the referenced ELF signature, flags conflicting IDs, and preserves
-custom titles, IDs and notes. Double-click a row for the result. CSO/ZSO/CHD remain
+custom titles, IDs and notes. Double-click a row or press Enter for the result. CSO/ZSO/CHD remain
 indexable; this inspection action currently supports plain ISO only. See the
 [library indexing and inspection guide](docs/LIBRARY-INDEXING.md) for limits and caching.
 The **Repair ART** action converts legacy `_COV.jpg`, `_ICO.jpg`, `_LAB.jpg`,

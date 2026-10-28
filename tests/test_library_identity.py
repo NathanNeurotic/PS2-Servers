@@ -135,7 +135,7 @@ class LibraryIdentityTests(unittest.TestCase):
         self.db.upsert(other)
         self.assertEqual(self.scan_and_inspect().visited, 1)
         rows = {r["image_path"]: r for r in self.db.list_games()}
-        self.assertEqual(rows[str(other)]["identity_status"], "not inspected")
+        self.assertEqual(rows[str(other.resolve())]["identity_status"], "not inspected")
 
     def test_symlink_swapped_in_after_scan_is_not_opened(self):
         path = self.image()

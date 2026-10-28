@@ -91,7 +91,7 @@ is not a full executable validation, content hash, retail-disc authenticity chec
 or evidence that the console can launch/read the game.
 
 The table keeps **Manual ID**, **Inspected ID**, and **ID status** separate.
-Double-click a row for the boot path and explanation. Statuses distinguish:
+Double-click a row or press Enter for the boot path and explanation. Statuses distinguish:
 
 - **verified**: boot serial and referenced ELF signature were inspected;
 - **conflict**: a manual ID or serial prefix in the filename disagrees with that
