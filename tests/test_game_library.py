@@ -118,7 +118,7 @@ class LibraryTests(unittest.TestCase):
         outside = self.root / "outside"
         outside.mkdir()
         (outside / "Outside.iso").write_bytes(b"outside library root")
-        linked = folder / "DVD"
+        linked = folder.resolve() / "DVD"
         try:
             linked.symlink_to(outside, target_is_directory=True)
         except OSError:

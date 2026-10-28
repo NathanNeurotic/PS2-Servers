@@ -132,9 +132,21 @@ class LibraryIndexTests(unittest.TestCase):
         self.assertEqual((snapshot.examined, len(snapshot.games)), (1, 1))
 
     def test_noncanonical_imported_alias_cannot_duplicate_a_source(self):
+        self.check_noncanonical_alias()
+
+    def test_noncanonical_alias_under_a_selected_root_symlink(self):
+        alias = Path(self.tmp.name) / "selected-root"
+        try:
+            alias.symlink_to(self.root, target_is_directory=True)
+        except OSError:
+            self.skipTest("Host cannot create directory symlinks")
+        self.root = alias
+        self.check_noncanonical_alias()
+
+    def check_noncanonical_alias(self):
         path = self.image()
         self.snapshot()
-        alias = str(path.parent) + os.sep + ".." + os.sep + "DVD" + os.sep + path.name
+        alias = str(path.parent.resolve()) + os.sep + ".." + os.sep + "DVD" + os.sep + path.name
         self.catalog.db.execute("INSERT INTO games(image_path,title,media,image_bytes,updated) VALUES(?,?,?,?,?)",
                                 (alias, "Alias title", "DVD", path.stat().st_size, 0))
         self.catalog.db.commit()
