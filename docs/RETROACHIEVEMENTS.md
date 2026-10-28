@@ -108,6 +108,16 @@ a database snapshot is saved first. Backups contain catalogue metadata, not
 game images, covers, credentials or saves. Catalogue deletion never removes
 game files.
 
+The optional **Include Desktop indexed paths and titles** checkbox reads the
+general Desktop Library's PS2 index, including nested paths and custom titles,
+without merging or migrating either catalogue. It is off by default. Ordinary
+top-level PS2 images and PS1 `POPS/*.VCD` remain available; RA support continues
+to depend on the image hash, not the inspected BOOT2 serial. Browsing this view
+requires no account/network request and does not configure a server or establish
+that a console can launch nested paths. See
+[shared library metadata](LIBRARY-INDEXING.md#shared-metadata-view-and-duplicate-review)
+for current limits, stale-ID handling, duplicate reports and rollback.
+
 Choose the same OPL folder as the game-server tab. Imports and downloads stage
 files with a `.part` suffix, publish only complete images, and refuse to replace
 an existing destination. Cancelled and failed transfers remove their partial
@@ -123,7 +133,7 @@ Sign in and enter your Web API key first. Hashes are cached against file size
 and timestamps; the remote index refreshes daily and a prior PS2-only cache
 is refreshed before PS1 checks. Either API request failing leaves the old
 catalogue intact rather than incorrectly reporting unsupported games.
-Compressed-image compatibility scans are not yet implemented.
+PS2 CSO/ZSO/CHD support and required decoders are described below.
 
 VCDs are imported to `POPS/`, never `CD/` or `DVD/`. PS1 artwork identity is
 the VCD filename, not the PS2 serial; importing a VCD does not alter existing

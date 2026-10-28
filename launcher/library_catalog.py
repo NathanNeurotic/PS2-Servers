@@ -411,6 +411,11 @@ class Catalog:
              identity.disc_id, identity.boot_path, identity.detail, int(time.time())))
         self.db.commit()
 
+    def indexed_games(self, root, *, max_entries=10_000, cancel=None):
+        """Expose the same read-only descriptors as the optional RA adapter."""
+        from .library_index import read_index
+        return read_index(self.path, root, max_entries=max_entries, cancel=cancel)
+
     def edit(self, row_id, title, disc_id="", notes=""):
         title = str(title).strip()
         if not title or len(title) > 160 or len(disc_id) > 64 or len(notes) > 2000:

@@ -3262,7 +3262,7 @@ class LauncherApp:
                 "last_active_servers": active}
         latest = config.load()
         for key in ("game_library_folder", "library_guide_seen",
-                    "game_library_view", "game_library_kind"):
+                    "game_library_view", "game_library_kind", "game_library_use_index"):
             if key in latest:
                 data[key] = latest[key]
         guide_status = self.saved.get(

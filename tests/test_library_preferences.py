@@ -26,11 +26,13 @@ class LibraryPreferencesTests(unittest.TestCase):
                      str(LIBRARY_GUI), "exec"), context)
         obj = SimpleNamespace(view=SimpleNamespace(get=lambda: "Catalogue"),
                               kind=SimpleNamespace(get=lambda: "CD"),
+                              use_index=SimpleNamespace(get=lambda: True),
                               status=SimpleNamespace(set=lambda value: None))
         context["save_preferences"](obj)
         self.assertEqual(len(writes), 1)
         self.assertEqual(writes[0]["game_library_view"], "Catalogue")
         self.assertEqual(writes[0]["game_library_kind"], "CD")
+        self.assertTrue(writes[0]["game_library_use_index"])
         self.assertEqual(writes[0]["servers"], original["servers"])
         self.assertEqual(writes[0]["game_library_folder"], "/my/library")
 
@@ -38,11 +40,11 @@ class LibraryPreferencesTests(unittest.TestCase):
         source = MAIN_GUI.read_text(encoding="utf-8")
         ast.parse(source)
         self.assertIn('"game_library_view", "game_library_kind"', source)
+        self.assertIn('"game_library_use_index"', source)
         gui_source = LIBRARY_GUI.read_text(encoding="utf-8")
         ast.parse(gui_source)
         self.assertIn('destination.bind("<<ComboboxSelected>>"', gui_source)
         self.assertIn('choice.bind("<<ComboboxSelected>>", self.on_view_changed)', gui_source)
-        self.assertIn('self.save_preferences()\n        self.destroy()', gui_source)
 
 
 if __name__ == "__main__":

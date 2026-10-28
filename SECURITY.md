@@ -97,6 +97,13 @@ this inspection action. Cached IDs describe a filesystem observation, not a
 content checksum or proof of console bootability. See
 [library indexing and inspection](docs/LIBRARY-INDEXING.md) for the exact limits.
 
+The optional achievements-library shared view uses a read-only, rooted catalogue
+adapter with bounded metadata enumeration and no image-payload reads. It creates
+no missing general catalogue and performs no schema migration. Stale inspected
+serials are withheld, duplicate paths are reported without collapsing files, and
+RA compatibility continues to use its independent hash/account workflow. Browsing
+shared metadata performs no account request or service configuration change.
+
 ## Release verification
 
 Release assets are built by GitHub Actions from this public repository.

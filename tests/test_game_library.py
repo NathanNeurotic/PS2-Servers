@@ -36,6 +36,105 @@ class LibraryTests(unittest.TestCase):
         with library_catalog.Catalog(common / "catalog.sqlite3") as general:
             self.assertEqual(general.list_games(), [])
 
+    def test_opt_in_shared_index_adds_nested_metadata_without_merging_ra_ids(self):
+        from launcher.library_catalog import Catalog
+        from tests.test_disc_identity import iso_fixture
+        folder = self.root / "games"
+        (folder / "DVD").mkdir(parents=True)
+        (folder / "POPS").mkdir()
+        (folder / "DVD" / "Live.iso").write_bytes(iso_fixture())
+        (folder / "POPS" / "PS1.vcd").write_bytes(b"Existing PS1 image")
+        nested = folder / "RPG" / "Nested.iso"
+        nested.parent.mkdir()
+        nested.write_bytes(iso_fixture())
+        with Catalog(self.library.directory / "catalog.sqlite3") as general:
+            row_id = general.upsert(nested, "UNKNOWN")
+            general.edit(row_id, "My custom PS2 title", "", "Notes stay in the general DB")
+            general.inspect_identities(folder)
+            self.library.save_game({"title": "Independent RA catalogue"})
+            before_general = general.path.read_bytes()
+            before_ra = self.library.database.read_bytes()
+            legacy = Library.installed(folder)
+            self.assertEqual({row["name"] for row in legacy}, {"Live.iso", "PS1.vcd"})
+            snapshot = self.library.shared_index(folder)
+            images = Library.installed(folder, index=snapshot)
+            self.assertEqual(len(images), 3)
+            shared = next(row for row in images if "source_id" in row)
+            self.assertEqual(shared["relative_path"], "RPG/Nested.iso")
+            self.assertEqual(shared["catalog_title"], "My custom PS2 title")
+            self.assertEqual((shared["kind"], shared["boot_serial"]), ("UNKNOWN", "SLUS_123.45"))
+            self.assertNotIn("id", shared)
+            self.assertNotIn("game_id", shared)
+            self.assertEqual(general.path.read_bytes(), before_general)
+            self.assertEqual(self.library.database.read_bytes(), before_ra)
+            self.assertEqual(self.library.games()[0]["title"], "Independent RA catalogue")
+
+    def test_shared_index_overlays_a_flat_image_once_and_preserves_default_api(self):
+        from launcher.library_catalog import Catalog
+        from tests.test_disc_identity import iso_fixture
+        folder = self.root / "games"
+        (folder / "DVD").mkdir(parents=True)
+        image = folder / "DVD" / "Flat.iso"
+        image.write_bytes(iso_fixture())
+        with Catalog(self.library.directory / "catalog.sqlite3") as general:
+            general.upsert(image)
+            snapshot = self.library.shared_index(folder)
+            self.assertEqual(len(Library.installed(folder, index=snapshot)), 1)
+            self.assertNotIn("source_id", Library.installed(folder)[0])
+            other = self.root / "other"
+            other.mkdir()
+            with self.assertRaisesRegex(ValueError, "different games root"):
+                Library.installed(other, index=snapshot)
+            cancel = threading.Event()
+            cancel.set()
+            self.assertEqual(Library.installed(folder, index=snapshot, cancel=cancel), [])
+
+    def test_shared_index_missing_catalogue_does_not_create_or_migrate_it(self):
+        folder = self.root / "games"
+        folder.mkdir()
+        with self.assertRaisesRegex(ValueError, "Desktop LIBRARY"):
+            self.library.shared_index(folder)
+        self.assertFalse((self.library.directory / "catalog.sqlite3").exists())
+
+    def test_shared_index_selected_root_alias_keeps_ordinary_ps1_images(self):
+        from launcher.library_catalog import Catalog
+        folder = self.root / "games"
+        (folder / "POPS").mkdir(parents=True)
+        (folder / "POPS" / "PS1.vcd").write_bytes(b"POPS image")
+        alias = self.root / "alias"
+        try:
+            alias.symlink_to(folder, target_is_directory=True)
+        except OSError:
+            self.skipTest("Host cannot create directory symlinks")
+        with Catalog(self.library.directory / "catalog.sqlite3"):
+            index = self.library.shared_index(alias)
+            rows = Library.installed(alias, index=index)
+        self.assertEqual([(row["kind"], row["name"]) for row in rows], [("POPS", "PS1.vcd")])
+
+    def test_shared_discovery_rejects_linked_media_directory_before_listing_it(self):
+        from launcher.library_catalog import Catalog
+        folder = self.root / "games"
+        folder.mkdir()
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "Outside.iso").write_bytes(b"outside library root")
+        linked = folder / "DVD"
+        try:
+            linked.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest("Host cannot create directory symlinks")
+        with Catalog(self.library.directory / "catalog.sqlite3"):
+            index = self.library.shared_index(folder)
+        iterdir = Path.iterdir
+
+        def contained(path):
+            if path == linked:
+                raise AssertionError("Shared discovery traversed a linked directory")
+            return iterdir(path)
+
+        with mock.patch.object(Path, "iterdir", contained):
+            self.assertEqual(Library.installed(folder, index=index), [])
+
     def test_caduceus_import_preserves_existing_and_backups_committed_data(self):
         self.library.save_game({"title": "Existing", "downloadUrl": "https://example.com/game.iso"})
         source = self.root / "catalog.json"

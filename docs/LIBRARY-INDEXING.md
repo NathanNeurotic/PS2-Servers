@@ -150,7 +150,80 @@ which ignore the extra table. JSON exports include the observed result for revie
 but JSON import deliberately ignores inspected-ID claims: inspect the local image
 again to establish its identity. A forged JSON field cannot mark a file verified.
 
-This implements recursive discovery and the plain-ISO identity increment of
+## Shared metadata view and duplicate review
+
+**Review indexed paths** in the Desktop Library uses the same read-only
+descriptor API as the optional achievements-library bridge. It lists available
+rooted paths and reports groups with the same basename, inspected boot serial,
+or relative path after case-folding and Unicode NFC normalization. These are
+warnings for review: rows remain separate and no image/title is renamed,
+replaced, merged or automatically chosen as the winner. The report displays the
+first 20 groups (10 paths each), the first 20 skipped entries and the first 200
+available paths; the API retains all groups within the bounded snapshot.
+
+Each immutable `IndexedGame` describes one canonical path: stable `source_id`,
+canonical image/root paths, POSIX-style rooted `relative_path`, current byte size,
+mtime and RA-compatible observation stamp, format, media hint, title/display
+override, manual ID, inspected boot serial, identity status/detail, safe artwork
+identity, layout hint and provenance. `source_id` is a versioned SHA-256 of the
+canonical path, not game content or an RA game ID. Changing a title, rescanning,
+or selecting a smaller root keeps that ID; moving a file changes it. Hard links
+at different paths remain separate sources.
+
+`Catalog.indexed_games(root, max_entries=10000, cancel=...)` and
+`launcher.library_index.read_index(database, root, ...)` expose the same
+`IndexSnapshot`. They stat files without reading image payloads, inspect at most
+10,000 catalogue rows in the selected root (including skipped rows), reject
+descendant links/reparse points, and report missing/invalid entries. Outside
+roots and prefix siblings such as `games-other/` are excluded. Imported aliases
+whose stored path differs from its canonical form are skipped until a rescan
+establishes the canonical row. Limits and cancellation are explicitly reported;
+no durable traversal cursor is implied.
+
+The reader opens SQLite with `mode=ro` and `query_only`, never creates a missing
+catalogue or migrates an older one, and supports catalogues without the new
+identity cache. Current stat metadata is compared to the cached inspection
+fingerprint: a mismatch yields **stale** and withholds boot/artwork IDs until
+inspection refreshes them. Both databases' schemas, manual edits, and backup
+semantics remain owned by their existing writers. These are observations, not
+filesystem snapshots against concurrent adversarial changes.
+
+## Use the index in the achievements library
+
+1. Scan the games root in Desktop **LIBRARY**, enabling recursion if needed.
+2. Inspect disc IDs if you want boot identity/conflict information.
+3. Open RetroAchievements **Manage game library**, select the same root, and
+   enable **Include Desktop indexed paths and titles**. This is off by default
+   and is saved as a local preference. Disable it to return to ordinary discovery.
+4. Use **Search / refresh**. Custom Desktop titles and rooted paths distinguish
+   nested images with the same basename. ID status is separate from the RA
+   compatibility column. General-catalogue row IDs and boot serials are never
+   copied into the achievements catalogue's ID namespace.
+
+The bridge supplements ordinary top-level `CD/`/`DVD/` images and `POPS/*.VCD`;
+it overlays a known PS2 path once and preserves unindexed ordinary images. The
+shared index currently describes PS2 ISO/CSO/ZSO/CHD only; VCDs keep the existing
+PS1 discovery and hashing path. A missing Desktop catalogue produces an error
+in the opted-in view rather than silently creating or merging a database.
+
+Refresh and filesystem/DB enumeration run in the existing worker. Changing the
+view/search/index setting while loading cancels the older refresh, coalesces
+requests, and discards its result; a failed refresh clears old selections. The
+window displays at most 2,000 rows. **Cancel transfer** also cancels refresh
+between entries; already blocked OS calls cannot be interrupted. No account or
+network request is required for browsing shared metadata.
+
+**Check RA compatibility** still requires its existing explicit account/hash
+workflow. Selecting rows checks those images; with no selection it discovers the
+whole current library scope in the worker, including indexed paths only when
+enabled. A BOOT2 serial never substitutes for the official RA image hash or
+proves telemetry, unlocks, console launchability or nested-path transport support.
+Existing servers continue to operate independently of SQLite and this preference.
+
+This implements recursive discovery, plain-ISO identity inspection and the shared
+metadata/RA view increment of
 [companion issue #249](https://github.com/NathanNeurotic/PS2-Servers/issues/249).
-Shared RA/general descriptors, bounded compressed identity inspection, artwork
-providers, server-profile export and path-aware HTTP remain separate work.
+Bounded compressed identity inspection, PS1/Ember indexing, artwork providers,
+server-profile export and path-aware HTTP remain separate work. These Desktop
+features do not change Core/Edge serving protocols or their documented capability
+matrix in [editions](EDITIONS.md), and host tests do not establish hardware acceptance.

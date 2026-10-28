@@ -6,8 +6,10 @@ import queue
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter.scrolledtext import ScrolledText
 
 from . import library_catalog
+from .library_index import IndexSnapshot
 from .config import config_dir
 
 
@@ -136,6 +138,7 @@ class LibraryPanel(ttk.Frame):
         self._button(exports, "Backup SQLite", self._backup)
         self._button(exports, "Export JSON", self._export)
         self._button(exports, "Import JSON", self._restore)
+        self._button(exports, "Review indexed paths", self._review_index)
         self.progress = ttk.Progressbar(exports, mode="indeterminate", length=105)
         self.progress.pack(side="right", padx=4)
         ttk.Label(self, textvariable=self.status, wraplength=740).pack(
@@ -198,6 +201,14 @@ class LibraryPanel(ttk.Frame):
                 for btn in self._buttons:
                     btn.state(["!disabled"])
                 if ok:
+                    if isinstance(value, IndexSnapshot):
+                        window = tk.Toplevel(self)
+                        window.title("Indexed paths and duplicates")
+                        window.geometry("800x480")
+                        output = ScrolledText(window, wrap="word")
+                        output.pack(fill="both", expand=True, padx=10, pady=10)
+                        output.insert("1.0", value.report())
+                        output.configure(state="disabled")
                     if rows is not None:
                         self.tree.delete(*self.tree.get_children())
                         self._display_rows = {str(r["id"]): r for r in rows[:2000]}
@@ -270,6 +281,20 @@ class LibraryPanel(ttk.Frame):
                                     row["image_path"], row["identity_status"], row["disc_id"] or "(empty)",
                                     row["detected_disc_id"] or "(unknown)", row["boot_path"] or "(unknown)",
                                     row["identity_detail"] or "Use Inspect disc IDs after scanning the library."))
+
+    def _review_index(self):
+        if self._busy:
+            return
+        try:
+            root = self._games_root()
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Games root", str(exc))
+            return
+        self._scan_cancel.clear()
+        self._scan_active = True
+        self._run(lambda db: db.indexed_games(root, cancel=self._scan_cancel),
+                  "Reviewing shared indexed paths", False)
+        self.cancel_scan.state(["!disabled"])
 
     def _import_image(self):
         try:

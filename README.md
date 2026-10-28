@@ -48,6 +48,13 @@ worker and shows an **Inspected ID** alongside the existing **Manual ID**. It ch
 custom titles, IDs and notes. Double-click a row or press Enter for the result. CSO/ZSO/CHD remain
 indexable; this inspection action currently supports plain ISO only. See the
 [library indexing and inspection guide](docs/LIBRARY-INDEXING.md) for limits and caching.
+**Review indexed paths** lists duplicate basenames, inspected serials, and
+case/Unicode path collisions without changing files. In RetroAchievements'
+**Manage game library**, opt into **Include Desktop indexed paths and titles**
+to reuse these PS2 paths and custom titles, including nested images. The shared
+view reads the Desktop catalogue without merging either database; RA support
+still requires the image hash. Existing top-level PS2 images and PS1 POPS VCDs
+remain available. Indexing a nested path does not establish console launch support.
 The **Repair ART** action converts legacy `_COV.jpg`, `_ICO.jpg`, `_LAB.jpg`,
 `_COV3.jpg` (or JPEG/WebP/BMP equivalents) to 8-bit indexed PNG without deleting
 sources or replacing existing PNGs. The current companion does not queue remote
