@@ -66,6 +66,26 @@ def iso_fixture(boot="SLUS_123.45", *, cnf=None, elf=b"\x7fELF" + b"fixture" * 2
     return image
 
 
+def lz4_fixture(image, magic=b'ZISO', align=0):
+    """Encode owned ISO sectors as LZ4 blocks, including real alignment padding."""
+    import lz4.block
+    count = len(image) // SECTOR
+    entries = count + (magic == b'ZISO')
+    alignment = 1 << align
+    start = 24 + entries * 4
+    payload = bytearray(bytes((-start) % alignment))
+    offsets = []
+    for index in range(count):
+        offsets.append((start + len(payload)) >> align)
+        block = image[index * SECTOR:(index + 1) * SECTOR]
+        payload.extend(lz4.block.compress(bytes(block), store_size=False))
+        payload.extend(bytes((-(start + len(payload))) % alignment))
+    if magic == b'ZISO':
+        offsets.append((start + len(payload)) >> align)
+    header = struct.pack('<4sIQIBBH', magic, 24, len(image), SECTOR, 1, align, 0)
+    return header + struct.pack('<{}I'.format(entries), *offsets) + payload
+
+
 class DiscIdentityTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -183,6 +203,67 @@ class DiscIdentityTests(unittest.TestCase):
         # The PVD block points into the index rather than the payload.
         struct.pack_into('<I', data, 24 + 16 * 4, 0x80000018)
         self.assertEqual(self.inspect(data).status, 'invalid')
+
+    def test_real_lz4_identity_and_sparse_reads_with_alignment(self):
+        try:
+            import lz4.block
+        except ImportError:
+            self.skipTest('LZ4 is not installed')
+        from launcher.ra_compressed_hash import open_compressed
+        self.path = self.path.with_suffix('.zso')
+        image = bytes(iso_fixture(nested=True))
+        for magic, align in ((b'ZSO\0', 0), (b'ZISO', 0), (b'ZISO', 6)):
+            with self.subTest(magic=magic, align=align):
+                data = lz4_fixture(image, magic, align)
+                self.assertLess(len(data), len(image) // 2)
+                result = self.inspect(data)
+                self.assertEqual((result.status, result.disc_id, result.boot_path),
+                                 ('verified', 'SLUS_123.45', 'GAME/SLUS_123.45'))
+                reader = open_compressed(self.path, strict=True)
+                try:
+                    # Cross block boundaries and revisit evicted blocks.
+                    for offset in (SECTOR - 7, 20 * SECTOR - 3, 0, len(image) - 9):
+                        reader.seek(offset)
+                        self.assertEqual(reader.read(41), image[offset:offset + 41])
+                        self.assertLessEqual(len(reader._cache), 2)
+                finally:
+                    reader.close()
+
+    def test_malformed_lz4_and_oversized_output_are_invalid(self):
+        try:
+            import lz4.block
+        except ImportError:
+            self.skipTest('LZ4 is not installed')
+        self.path = self.path.with_suffix('.zso')
+        for payload in (b'\xff' * 16,
+                        lz4.block.compress(bytes(SECTOR + 1), store_size=False)):
+            with self.subTest(payload_length=len(payload)):
+                data = bytearray(lz4_fixture(bytes(iso_fixture())))
+                start = struct.unpack_from('<I', data, 24 + 16 * 4)[0]
+                end = struct.unpack_from('<I', data, 24 + 17 * 4)[0]
+                # Replace the PVD payload and update all subsequent offsets.
+                delta = len(payload) - (end - start)
+                data[start:end] = payload
+                for index in range(17, 33):
+                    old = struct.unpack_from('<I', data, 24 + index * 4)[0]
+                    struct.pack_into('<I', data, 24 + index * 4, old + delta)
+                self.assertEqual(self.inspect(data).status, 'invalid')
+        self.path.unlink()  # Failed decoding released the file on Windows.
+
+    def test_real_chd_identity_matches_iso_without_changing_source(self):
+        from launcher.ra_compressed_hash import open_compressed
+        self.path = self.path.with_suffix('.chd')
+        data = (Path(__file__).parent / 'fixtures/ra_hash/synthetic-identity.chd').read_bytes()
+        self.path.write_bytes(data)
+        try:
+            reader = open_compressed(self.path, strict=True)
+        except ImportError:
+            self.skipTest('build the pinned libchdr to exercise the real decoder')
+        reader.close()
+        result = self.inspect(data)
+        self.assertEqual((result.status, result.disc_id, result.boot_path),
+                         ('verified', 'SLUS_123.45', 'GAME/SLUS_123.45'))
+        self.path.unlink()
 
     def test_cso_decode_budget_and_cancel_close_handles(self):
         from tests.test_ra_compressed_hash import make_indexed

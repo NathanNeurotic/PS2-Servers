@@ -48,9 +48,34 @@ unavailable in this local interpreter and one environment-dependent case):
 `tests.test_ra_compressed_hash`, `tests.test_http_server`. Real CSO decoding and
 raw ZSO/ZISO logical reads were exercised with LZ4 installed. Malformed offsets,
 oversized headers, deflate output limits, decode budget, cancellation and file
-closure have regression coverage. Finish full CI/review, real compressed-LZ4
-fixtures, strict native-CHD inspection coverage and packaged checks before calling
-compressed inspection fully validated. No physical-console tests were run.
+closure have regression coverage. No physical-console tests were run.
+
+### Paused continuation, 2026-10-30
+
+The user requested pausing and pushing the current work for the next agent.
+The original exact-head CI (`741c41c6`, run `40739398985`) subsequently passed;
+Edge and UDPFS replay workflows also passed. Both inline review findings were
+already resolved. Remote `main` remains `81ff0956` at this checkpoint.
+
+This continuation adds real compressed-LZ4 identity fixtures for both ZSO
+layouts, ZISO alignment padding, cross-block reads, bounded cache checks and
+malformed/oversized decoded payload rejection. A new owned synthetic CHD fixture
+exercises nested BOOT2 identity through the actual strict native reader. Native
+CHD sparse reads, cancellation/closure and decode-budget enforcement are covered.
+CI now installs LZ4 and explicitly reruns the CHD tests after building libchdr.
+No production decoder behavior changed.
+
+Focused Windows validation: 104 tests, two skips, no failures, using an existing
+libchdr build at `scratch/ra-compatibility-audit/build/native` whose source checkout
+matches the project's pinned commit `04a177ee3cea055d93da2d5839d3413168837c6f`.
+Set `PS2SERVERS_NATIVE_LIB_DIR` to that absolute directory to reproduce locally.
+Release compliance and whitespace checks passed. A broader full-suite attempt
+reported Zig native-build/cache-write errors and was interrupted at the user's
+pause request; it is not a full-suite pass. Its local log is
+`.test-tmp.build/full-suite.log`. Prefer `RA_CC=gcc` for a fresh local full run, as
+noted below. Finish final-head CI/review and packaged checks before calling
+compressed inspection fully validated. The remaining software list below still
+applies; no HTTP/provider/setup/telemetry implementation was added here.
 
 Local test recipe: Python 3.12 with `-S`, `PYTHONPATH=.test-deps.build`, and
 `TEMP`/`TMP=.test-tmp.build` (create directories first). The ignored dependency
