@@ -509,7 +509,8 @@ class GameIndex(object):
         except UnicodeEncodeError:
             # An undecodable POSIX name arrives as lone surrogates; RiptOPL
             # could not request it, and encoding it later would abort the scan.
-            _log("  skipped (name is not valid UTF-8; rename it): {!a}".format(name))
+            _log("  skipped (name is not valid UTF-8; rename it): {!a}".format(
+                os.path.relpath(path, self.root_dir).replace(os.sep, "/")))
             return None
         startup, title = parse_startup(stem)
         conventional = bool(_STARTUP_RE.match(stem))
@@ -643,25 +644,13 @@ class GameIndex(object):
         self._ambiguous_names = set()
         unconventional = [e.rel_path for e in exact.values() if not e.conventional]
         disk_csv = self._disk_csv_path()
-        dropped = 0
-        self._csv = None
         if disk_csv:
-            try:
-                with open(disk_csv, "rb") as f:
-                    disk_data = f.read()
-                if len(disk_data) > RIPTOPL_CATALOG_BYTES_MAX:
-                    _log("WARNING: disk-resident games.csv exceeds {} bytes ({} bytes); "
-                         "falling back to auto-generated catalog"
-                         .format(RIPTOPL_CATALOG_BYTES_MAX, len(disk_data)))
-                else:
-                    self._csv = disk_data
-                    _log("Using disk-resident games.csv from {}".format(disk_csv))
-            except OSError as exc:
-                _log("Error reading disk games.csv: {}, falling back to auto-generation"
-                     .format(exc))
-                signature = None
-        if self._csv is None:
-            self._csv, dropped = self._build_riptopl_csv(exact.values())
+            # A games.csv on disk is almost always a legacy three-field list,
+            # which RiptOPL would reject row by row; this profile always
+            # generates its own.
+            _log("Ignoring {} in the RiptOPL path-aware profile; the list is generated."
+                 .format(disk_csv))
+        self._csv, dropped = self._build_riptopl_csv(exact.values())
         self._signature = signature
         return exact, unconventional, dropped, "{} bytes and {} rows".format(
             RIPTOPL_CATALOG_BYTES_MAX, RIPTOPL_CATALOG_ROWS_MAX)

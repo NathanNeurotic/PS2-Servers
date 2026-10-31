@@ -119,6 +119,7 @@ and the server cannot tell them apart on the wire, so the choice is explicit.
 | Row | `STARTUP,FILENAME.iso,MEDIA` | `"STARTUP","Title",MEDIA,"DVD/Path/To/Game.iso"`, text fields quoted, `MEDIA` bare |
 | Game requested as | `/<filename>` at the web root | `<base path>/<relative path>`, percent-encoded |
 | Commas, quotes, a leading `#` | file skipped | listed |
+| A `games.csv` you put in the folder | served instead of the generated list | ignored; the list is always generated |
 | List size | 8192 bytes | 262144 bytes and 2048 rows |
 | ZSO | passed through; the console decodes it | decoded here to a virtual `.iso` when `lz4` is installed, because RiptOPL refuses to launch ZSO over HTTP; without `lz4` it lists as `.zso` and RiptOPL says it cannot launch it |
 | Nested folders | no | opt-in **Include nested folders** (`--recursive`), up to 4 levels |

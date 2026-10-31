@@ -376,6 +376,14 @@ class LibraryPanel(ttk.Frame):
             return
         selected = self.tree.selection()
         row = self._display_rows.get(selected[0], {}) if selected else {}
+        if selected:
+            # The table can predate a change to the image; only suggest an
+            # inspected ID that still matches it.
+            try:
+                with library_catalog.Catalog() as db:
+                    row = db.get_game(int(selected[0])) or {}
+            except Exception:
+                row = dict(row, detected_disc_id="")
         identifier = row.get("disc_id", "") or (
             row.get("detected_disc_id", "") if row.get("identity_status") == "verified" else "")
         key = simpledialog.askstring("Artwork identity",

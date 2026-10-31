@@ -159,6 +159,35 @@ class LibraryStartupTests(unittest.TestCase):
             root.destroy()
 
 
+    def test_artwork_identity_is_refreshed_before_it_is_suggested(self):
+        tk = library_panel.tk
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("No graphical display")
+        try:
+            with tempfile.TemporaryDirectory() as profile, \
+                 mock.patch.object(library_panel, "config_dir", return_value=profile), \
+                 mock.patch.object(library_panel.LibraryPanel, "_run"), \
+                 mock.patch.object(library_panel.LibraryPanel, "_drain"), \
+                 mock.patch.object(library_panel.filedialog, "askopenfilename", return_value="art.png"), \
+                 mock.patch.object(library_panel.simpledialog, "askstring", return_value=None) as ask, \
+                 mock.patch.object(library_panel.library_catalog, "Catalog") as catalog:
+                panel = library_panel.LibraryPanel(root, SimpleNamespace(_open_ps2_setup_guide=lambda: None))
+                panel.path.set(profile)
+                panel.tree.insert("", "end", iid="7", values=("Game",))
+                panel.tree.selection_set("7")
+                panel._display_rows = {"7": {"disc_id": "", "detected_disc_id": "SLUS_123.45",
+                                             "identity_status": "verified"}}
+                catalog.return_value.__enter__.return_value.get_game.return_value = {
+                    "disc_id": "", "detected_disc_id": "", "identity_status": "stale"}
+                panel._import_art()
+                catalog.return_value.__enter__.return_value.get_game.assert_called_once_with(7)
+                self.assertEqual(ask.call_args.kwargs["initialvalue"], "")
+        finally:
+            root.destroy()
+
+
 class AchievementLibraryIndexTests(unittest.TestCase):
     def setUp(self):
         try:

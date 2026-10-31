@@ -106,12 +106,25 @@ class CatalogueTests(_Tree):
         self.write("DVD/SLUS_201.74.Rumble Racing.iso")
         bad = os.fsdecode(b"SLES_500.01.Caf\xe9.iso")
         try:
+            bad.encode("utf-8")
+            self.skipTest("filesystem encoding decodes the name without surrogates")
+        except UnicodeEncodeError:
+            pass
+        try:
             with open(os.path.join(self.work, "DVD", bad), "wb") as handle:
                 handle.write(b"\0" * 4096)
         except (OSError, UnicodeError):
             self.skipTest("filesystem rejects non-UTF-8 names")
         rows = [_parse_row(l) for l in self.index().games_csv().decode("utf-8").splitlines()]
         self.assertEqual([r[3] for r in rows], ["DVD/SLUS_201.74.Rumble Racing.iso"])
+
+    def test_legacy_disk_list_is_not_served_to_riptopl(self):
+        self.write("DVD/SLUS_201.74.Rumble Racing.iso")
+        self.write("games.csv", b"SLUS_999.99,Other.iso,DVD\n")
+        rows = [_parse_row(l) for l in self.index().games_csv().decode("utf-8").splitlines()]
+        self.assertEqual([r[3] for r in rows], ["DVD/SLUS_201.74.Rumble Racing.iso"])
+        flat = self.index(profile=hs.PROFILE_LEGACY_FLAT, recursive=False)
+        self.assertEqual(flat.games_csv(), b"SLUS_999.99,Other.iso,DVD\n")
 
     def test_flat_default_is_unchanged(self):
         self.write("DVD/SLUS_201.74.Rumble Racing.iso")
