@@ -139,6 +139,16 @@ class CatalogueTests(_Tree):
         self.assertEqual([r[3] for r in self.rows(index)], ["CD/SLUS_201.74.Rumble Racing.iso"])
         self.assertTrue(any("already used" in str(c) for c in log.call_args_list))
 
+    def test_a_row_left_out_of_the_list_is_not_served(self):
+        self.write("CD/SLUS_201.74.Rumble Racing.iso")
+        self.write("DVD/SLUS_201.74.Rumble Racing.iso")
+        self.write(" leading space.iso")
+        index = self.index()
+        self.assertIsNotNone(index.lookup("CD/SLUS_201.74.Rumble Racing.iso"))
+        self.assertIsNone(index.lookup("DVD/SLUS_201.74.Rumble Racing.iso"))
+        self.assertIsNone(index.lookup("dvd/slus_201.74.rumble racing.iso"))
+        self.assertIsNone(index.lookup(" leading space.iso"))
+
     def test_rows_the_client_would_refuse_are_left_out(self):
         self.write(" leading space.iso")  # a root path the client would trim
         # 254 bytes is a legal filename but 258 bytes as a catalogue path.

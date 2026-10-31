@@ -619,15 +619,31 @@ class GameIndex(object):
                 if entry is not None:
                     found.append(entry)
 
+        candidates = {}
+        for entry in found:
+            if entry.rel_path in candidates:
+                # Game.chd and Game.iso side by side both advertise Game.iso.
+                _log("  duplicate path '{}': serving {}, ignoring {}"
+                     .format(entry.rel_path, candidates[entry.rel_path].path, entry.path))
+                continue
+            candidates[entry.rel_path] = entry
+
+        disk_csv = self._disk_csv_path()
+        if disk_csv:
+            # A games.csv on disk is almost always a legacy three-field list,
+            # which RiptOPL would reject row by row; this profile always
+            # generates its own.
+            _log("Ignoring {} in the RiptOPL path-aware profile; the list is generated."
+                 .format(disk_csv))
+        retained = []
+        self._csv, dropped = self._build_riptopl_csv(candidates.values(), retained)
+
+        # Only what the list advertises is served: a row the list left out
+        # (invalid, a repeated STARTUP, past the caps) answers 404.
         exact = {}
         folded = {}
         ambiguous = set()
-        for entry in found:
-            if entry.rel_path in exact:
-                # Game.chd and Game.iso side by side both advertise Game.iso.
-                _log("  duplicate path '{}': serving {}, ignoring {}"
-                     .format(entry.rel_path, exact[entry.rel_path].path, entry.path))
-                continue
+        for entry in retained:
             exact[entry.rel_path] = entry
             key = entry.rel_path.lower()
             if key in folded:
@@ -642,20 +658,12 @@ class GameIndex(object):
         self._path_entries = folded
         self._ambiguous_paths = ambiguous
         self._ambiguous_names = set()
-        unconventional = [e.rel_path for e in exact.values() if not e.conventional]
-        disk_csv = self._disk_csv_path()
-        if disk_csv:
-            # A games.csv on disk is almost always a legacy three-field list,
-            # which RiptOPL would reject row by row; this profile always
-            # generates its own.
-            _log("Ignoring {} in the RiptOPL path-aware profile; the list is generated."
-                 .format(disk_csv))
-        self._csv, dropped = self._build_riptopl_csv(exact.values())
+        unconventional = [e.rel_path for e in retained if not e.conventional]
         self._signature = signature
         return exact, unconventional, dropped, "{} bytes and {} rows".format(
             RIPTOPL_CATALOG_BYTES_MAX, RIPTOPL_CATALOG_ROWS_MAX)
 
-    def _build_riptopl_csv(self, entries):
+    def _build_riptopl_csv(self, entries, retained=None):
         """(bytes, dropped_count) for a four-field RiptOPL games.csv.
 
         Every row is checked against the client's own parser rules first, so a
@@ -686,6 +694,8 @@ class GameIndex(object):
             startups[entry.startup] = entry.rel_path
             body += line
             rows += 1
+            if retained is not None:
+                retained.append(entry)
         return bytes(body), dropped
 
     def _report(self, entries, unconventional, dropped, cap="8192 bytes"):
