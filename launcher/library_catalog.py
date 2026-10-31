@@ -161,9 +161,10 @@ class Catalog:
 
     def list_games(self, search=""):
         value = "%" + search.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        return [self._identity_record(r) for r in self.db.execute(
+        return [self._current_identity(r) for r in self.db.execute(
             """SELECT g.*, d.status AS inspected_status, d.detected_disc_id,
-                      d.boot_path, d.detail AS identity_detail, d.checked AS identity_checked
+                      d.boot_path, d.detail AS identity_detail, d.checked AS identity_checked,
+                      d.fingerprint AS identity_fingerprint
                FROM games g LEFT JOIN disc_identity d ON g.image_path=d.image_path
                     AND d.inspector_version=?
                WHERE lower(g.title) LIKE ? ESCAPE '\\' OR lower(g.disc_id) LIKE ? ESCAPE '\\'
@@ -174,11 +175,27 @@ class Catalog:
     def get_game(self, row_id):
         record = self.db.execute(
             """SELECT g.*, d.status AS inspected_status, d.detected_disc_id,
-                      d.boot_path, d.detail AS identity_detail, d.checked AS identity_checked
+                      d.boot_path, d.detail AS identity_detail, d.checked AS identity_checked,
+                      d.fingerprint AS identity_fingerprint
                FROM games g LEFT JOIN disc_identity d ON g.image_path=d.image_path
                     AND d.inspector_version=?
                WHERE g.id=?""", (disc_identity.INSPECTOR_VERSION, int(row_id))).fetchone()
-        return self._identity_record(record) if record else None
+        return self._current_identity(record) if record else None
+
+    @classmethod
+    def _current_identity(cls, record):
+        """Withhold a cached BOOT2 serial once the image no longer matches it."""
+        row = cls._identity_record(record)
+        stamp = row.pop("identity_fingerprint", None)
+        if stamp and row["identity_status"] in ("verified", "conflict"):
+            try:
+                current = disc_identity.fingerprint(Path(row["image_path"]).stat())
+            except OSError:
+                current = ""
+            if current != stamp:
+                row.update(identity_status="stale", detected_disc_id="", boot_path="",
+                           identity_detail="Image changed since inspection; inspect disc IDs again.")
+        return row
 
     @staticmethod
     def _identity_record(record):
@@ -393,7 +410,7 @@ class Catalog:
                                     disc_identity.DiscIdentity("unavailable", detail=str(exc)))
             row = self.get_game(record["id"])
             status = row["identity_status"]
-            counter = {"conflict": "conflicts", "unavailable": "errors", "changed": "errors"}.get(status, status)
+            counter = {"conflict": "conflicts", "unavailable": "errors", "changed": "errors", "stale": "errors"}.get(status, status)
             setattr(result, counter, getattr(result, counter) + 1)
             if status != "verified" and len(result.details) < 20:
                 result.details.append(f"{source.relative_to(base)}: {row['identity_detail']}")

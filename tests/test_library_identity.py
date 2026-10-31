@@ -86,6 +86,27 @@ class LibraryIdentityTests(unittest.TestCase):
         self.assertEqual(self.db.inspect_identities(self.root).inspected, 1)
         self.assertEqual(self.db.list_games()[0]["detected_disc_id"], "SLES_543.21")
 
+    def test_image_changed_without_rescan_withholds_old_id(self):
+        path = self.image()
+        self.scan_and_inspect()
+        row = self.db.list_games()[0]
+        self.assertEqual(row["identity_status"], "verified")
+        self.assertNotIn("identity_fingerprint", row)
+        path.write_bytes(iso_fixture(boot="SLES_543.21"))
+        before = path.stat()
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+        for current in (self.db.list_games()[0], self.db.get_game(row["id"])):
+            self.assertEqual(current["identity_status"], "stale")
+            self.assertEqual((current["detected_disc_id"], current["boot_path"]), ("", ""))
+        exported = Path(self.tmp.name) / "export.json"
+        self.db.export_json(exported)
+        self.assertNotIn("SLUS_123.45", exported.read_text(encoding="utf-8"))
+        result = self.db.inspect_identities(self.root)
+        self.assertEqual((result.inspected, result.verified), (1, 1))
+        self.assertEqual(self.db.list_games()[0]["detected_disc_id"], "SLES_543.21")
+        path.unlink()
+        self.assertEqual(self.db.list_games()[0]["identity_status"], "stale")
+
     def test_parser_version_change_invalidates_cached_inspection(self):
         self.image()
         self.scan_and_inspect()

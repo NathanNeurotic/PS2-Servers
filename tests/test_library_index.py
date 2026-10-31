@@ -103,7 +103,8 @@ class LibraryIndexTests(unittest.TestCase):
         game, = read_index(self.database, self.root).games
         self.assertEqual((game.identity_status, game.boot_serial, game.artwork_identity), ("stale", "", ""))
         # Sharing is read-only; a real rescan/inspection owns cache invalidation.
-        self.assertEqual(self.catalog.list_games()[0]["detected_disc_id"], "SLUS_123.45")
+        cached = self.catalog.db.execute("SELECT detected_disc_id FROM disc_identity").fetchone()
+        self.assertEqual(cached[0], "SLUS_123.45")
 
     def test_missing_and_linked_images_are_skipped_and_reported(self):
         path = self.image()

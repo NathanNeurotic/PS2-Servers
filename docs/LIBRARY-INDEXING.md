@@ -104,6 +104,8 @@ Double-click a row or press Enter for the boot path and explanation. Statuses di
   inspector's contract;
 - **unavailable / changed**: filesystem access failed or the file changed while
   being inspected; another inspection retries it;
+- **stale**: the image was changed, replaced or removed after a verified or
+  conflicting result; its boot serial is withheld until the next inspection;
 - **not inspected**: no current inspector result, including after a rescan
   invalidates a changed image's cache entry.
 
