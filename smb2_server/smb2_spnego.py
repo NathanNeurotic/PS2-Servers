@@ -112,6 +112,16 @@ def extract_ntlm(blob):
     return blob[at:]
 
 
+def is_raw_ntlmssp(blob):
+    """True when a security buffer is a bare NTLMSSP message, not SPNEGO.
+
+    SPNEGO always starts with a DER tag (0x60 for the initial token, 0xa1 for a
+    response), never with the NTLMSSP signature, so the first eight bytes
+    decide it without parsing anything.
+    """
+    return bytes(blob[:len(NTLMSSP_SIGNATURE)]) == NTLMSSP_SIGNATURE
+
+
 def message_type(token):
     if not token or len(token) < 12:
         return None
@@ -133,19 +143,25 @@ def _av_pair(kind, value):
     return struct.pack("<HH", kind, len(value)) + value
 
 
-def build_challenge(challenge, target_name="WORKGROUP", computer="PS2SERVERS"):
+def build_challenge(challenge, target_name="WORKGROUP", computer="PS2SERVERS",
+                    compact=False):
     """The CHALLENGE (type 2) message.
 
     TargetInfo is not decoration: an NTLMv2 client folds these very bytes into
     the blob it signs, so a server that omits them gets a proof it cannot
     reproduce and every login fails with the password correct.
+
+    compact keeps only the NetBIOS domain and computer pairs, the two MS-NLMP
+    says a server MUST send. It exists for tiny clients that build their
+    AUTHENTICATE in a fixed buffer -- see h_session_setup.
     """
     target = target_name.encode("utf-16-le")
     info = (_av_pair(MSV_AV_NB_DOMAIN_NAME, target)
-            + _av_pair(MSV_AV_NB_COMPUTER_NAME, computer.encode("utf-16-le"))
-            + _av_pair(MSV_AV_DNS_DOMAIN_NAME, target)
-            + _av_pair(MSV_AV_DNS_COMPUTER_NAME, computer.encode("utf-16-le"))
-            + _av_pair(MSV_AV_EOL, b""))
+            + _av_pair(MSV_AV_NB_COMPUTER_NAME, computer.encode("utf-16-le")))
+    if not compact:
+        info += (_av_pair(MSV_AV_DNS_DOMAIN_NAME, target)
+                 + _av_pair(MSV_AV_DNS_COMPUTER_NAME, computer.encode("utf-16-le")))
+    info += _av_pair(MSV_AV_EOL, b"")
 
     fixed = 56                      # signature..version, before the payload
     target_at = fixed

@@ -291,6 +291,22 @@ class Smb2Server:
             note("internal error handling", hdr, "->", repr(e))
             return wire.STATUS_INVALID_PARAMETER, wire.error_body(), None
 
+    def share_named(self, name):
+        """The share a TREE_CONNECT names, matched without regard to case.
+
+        Share names are case-insensitive in SMB. A console types its share name
+        into a settings screen, and Neutrino passes it through as given, so
+        "GAMES" on the PS2 and "games" in the launcher are the same share.
+        """
+        share = self.shares.get(name)
+        if share is not None:
+            return share
+        folded = name.casefold()
+        for key, candidate in self.shares.items():
+            if key.casefold() == folded:
+                return candidate
+        return None
+
     # -- guards ------------------------------------------------------------ #
     def _require_session(self, conn):
         if not conn.authenticated:
@@ -372,9 +388,18 @@ def h_negotiate(srv, conn, hdr, body):
 
     dialect = wire.pick_dialect(offered, srv.ceiling)
     if dialect is None:
+        offered_text = ", ".join("0x%04x" % d for d in offered)
+        if (srv.ceiling < wire.DIALECT_300
+                and wire.pick_dialect(offered, wire.CEILING_SMB3) is not None):
+            # Said at normal volume, not only under -v: a client that speaks
+            # nothing below SMB 3.0 is a configuration problem the operator can
+            # fix in one click, and silence here looks like a dead server.
+            # Neutrino's SMB driver (usmb2) is such a client: it offers 3.0 only.
+            note("%s offered only SMB 3.x (%s); this server is in SMBv2 mode. "
+                 "Run the SMBv3 server for this client (Neutrino needs it)."
+                 % (conn.peer[0], offered_text))
         raise Smb2Error(wire.STATUS_NOT_SUPPORTED,
-                        "no common dialect; client offered %s" %
-                        ", ".join("0x%04x" % d for d in offered))
+                        "no common dialect; client offered %s" % offered_text)
     conn.dialect = dialect
     log("negotiated dialect 0x%04x with %s" % (dialect, conn.peer))
 
@@ -407,6 +432,12 @@ def h_session_setup(srv, conn, hdr, body):
     token = spnego.extract_ntlm(blob)
     if token is None:
         raise Smb2Error(wire.STATUS_LOGON_FAILURE, "no NTLMSSP token offered")
+    # Answer in the framing the client used. A client that sent bare NTLMSSP
+    # reads the CHALLENGE at the very start of the security buffer and has no
+    # DER parser; Neutrino's usmb2 is one, and it takes the TargetName and
+    # TargetInfo offsets from whatever bytes sit there. Wrapped in SPNEGO it
+    # reads DER as NTLMSSP and computes its proof over garbage.
+    raw = spnego.is_raw_ntlmssp(blob)
 
     kind = spnego.message_type(token)
     if kind == spnego.NTLM_NEGOTIATE:
@@ -415,8 +446,17 @@ def h_session_setup(srv, conn, hdr, body):
         # against, so a shared or reused one would let a captured response be
         # replayed onto another connection.
         conn.challenge = server_challenge()
-        chal = spnego.build_challenge(conn.challenge, srv.domain, srv.server_name)
-        out = spnego.neg_token_resp(spnego.ACCEPT_INCOMPLETE, chal, with_mech=True)
+        # A bare-NTLMSSP client gets only the two AV pairs MS-NLMP requires.
+        # usmb2 receives this reply and builds its AUTHENTICATE in one 512-byte
+        # buffer, and copies TargetInfo into it; the DNS pairs are optional
+        # and would only eat that room.
+        chal = spnego.build_challenge(conn.challenge, srv.domain, srv.server_name,
+                                      compact=raw)
+        if raw:
+            out = chal
+        else:
+            out = spnego.neg_token_resp(spnego.ACCEPT_INCOMPLETE, chal,
+                                        with_mech=True)
         if conn.session_id == 0:
             conn.session_id = int.from_bytes(os.urandom(8), "little") or 1
         body_out = struct.pack("<HHHH", 9, 0, wire.HEADER_SIZE + 8, len(out))
@@ -457,8 +497,11 @@ def h_session_setup(srv, conn, hdr, body):
     note("session established for %r from %s (dialect 0x%04x)"
          % (conn.user, conn.peer[0], conn.dialect or 0))
 
-    out = spnego.neg_token_resp(spnego.ACCEPT_COMPLETED)
-    body_out = struct.pack("<HHHH", 9, session_flags, wire.HEADER_SIZE + 8, len(out))
+    # No SPNEGO accept-completed for a bare-NTLMSSP client: there is no SPNEGO
+    # exchange to complete, and NTLMSSP has no fourth message.
+    out = b"" if raw else spnego.neg_token_resp(spnego.ACCEPT_COMPLETED)
+    body_out = struct.pack("<HHHH", 9, session_flags,
+                           wire.HEADER_SIZE + 8 if out else 0, len(out))
     return wire.STATUS_SUCCESS, body_out + out
 
 
@@ -485,7 +528,7 @@ def h_tree_connect(srv, conn, hdr, body):
         # correct for a server with no named pipes; refusing it with the wrong
         # status makes the client abandon the whole connection.
         raise Smb2Error(wire.STATUS_BAD_NETWORK_NAME, "no IPC$ on this server")
-    share = srv.shares.get(name) or srv.shares.get(name.lower())
+    share = srv.share_named(name)
     if share is None:
         raise Smb2Error(wire.STATUS_BAD_NETWORK_NAME, "no share named %r" % name)
 
@@ -929,6 +972,31 @@ def take_445():
     return restore
 
 
+def bind_hint(port, err):
+    """What to do about a failed bind, or "" when there is nothing specific.
+
+    Port 445 is the case worth explaining. Neutrino's SMB driver and Windows'
+    own client can only connect there, and the two ways it fails have
+    different fixes on every OS.
+    """
+    if port != 445:
+        return ""
+    if err.errno in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", -1)):
+        if os.name == "nt":
+            return ("Port 445 belongs to Windows file sharing. Tick 'Take port "
+                    "445 (admin)' (--take-445) and run as Administrator.")
+        return ("Something already serves port 445 -- usually Samba (smbd). "
+                "Stop it while this server runs, e.g. 'sudo systemctl stop smbd'.")
+    if err.errno in (errno.EACCES, errno.EPERM, getattr(errno, "WSAEACCES", -1)):
+        if os.name == "nt":
+            return "Run as Administrator to bind port 445."
+        return ("Ports below 1024 need root on Linux and macOS. Either run this "
+                "server with sudo, or keep it on 1445 unprivileged and forward "
+                "445 to it once (Linux): 'sudo iptables -t nat -A PREROUTING -p "
+                "tcp --dport 445 -j REDIRECT --to-ports 1445'.")
+    return ""
+
+
 def build_authenticator(user_specs, allow_open):
     users = {}
     for spec in user_specs or []:
@@ -1006,6 +1074,9 @@ def main(argv=None):
     except OSError as e:
         print("ERROR: cannot bind %s:%d -- %s" % (args.bind, want_port, e),
               file=sys.stderr)
+        hint = bind_hint(want_port, e)
+        if hint:
+            print(hint, file=sys.stderr)
         if restore is not None:
             restore()
         return 1
@@ -1019,8 +1090,12 @@ def main(argv=None):
     else:
         note("  users: " + ", ".join(sorted(args.user and
                                             [u.split(":", 1)[0] for u in args.user])))
-    note("  Windows cannot connect to a non-445 port. Map it, or run the SMBv1 "
-         "mode for a console.")
+    if port != 445:
+        note("  Windows and Neutrino can only connect on port 445; this is %d. "
+             "Map it, or run the SMBv1 mode for OPL." % port)
+    if ceiling < wire.DIALECT_300:
+        note("  SMBv2 mode: Neutrino's SMB driver offers only SMB 3.0 and needs "
+             "the SMBv3 server.")
 
     try:
         server.serve_forever()
