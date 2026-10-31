@@ -43,14 +43,13 @@ USMB2_HASHES = {
     "hmac-md5.c": "a35a32659be090b03da156f24bfe8928d419988b99cfa1a2f2583c0575c66119",
     "hmac-md5.h": "ed1f0a07f541019ccbbf343bcca3a4823bebb4e496cc86929ac7cb89db06f7f2",
 }
-# The commit PR #236 had when this check was written. The PR is unmerged, so
-# this is a fork commit reachable through the base repository.
-NEUTRINO_COMMIT = "211e032aa7e30b18af8aa1d908349868afa66f81"
+# Merged PR #236, including its final path-length and initialization fixes.
+NEUTRINO_COMMIT = "1bff25bcfa02e192f5b35cadbe53648786813974"
 NEUTRINO_BASE = ("https://raw.githubusercontent.com/ps2max32/neutrino/"
                  + NEUTRINO_COMMIT + "/")
 NEUTRINO_HASHES = {
     "iop/smb/src/smb_conn.c":
-        "45b6f82510d5d2bd231b4c62b50decdfda174127f328ca3d2b6eb79ce67c44b3",
+        "715d89b8c34cffacbb9e0e382cc2ba69fba6f1aafec0fadc627e582c86afe89d",
 }
 # Neutrino's iop/smb/Makefile: -DUSMB2_FEATURE_TINY_TCP -DUSMB2_FEATURE_REASSEMBLY
 # -DUSMB2_FEATURE_NTLM. The first two select the PS2 TCP stack, which the host
@@ -150,7 +149,7 @@ def generate(work):
             (work / name).write_text(usmb2[name], encoding="utf-8", newline="\n")
 
     conn = neutrino["iop/smb/src/smb_conn.c"]
-    io_code = between(conn, "uint8_t *smb_open(const char *path)\n{")
+    io_code = "#define SMB_NAME_MAX 127\n" + between(conn, "uint8_t *smb_open(const char *path)\n{")
     template = (HERE / "probe.c.in").read_text(encoding="utf-8")
     if template.count("@UPSTREAM_SMB_IO@") != 1:
         raise ValueError("probe.c.in must contain the marker exactly once")

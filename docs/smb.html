@@ -139,14 +139,14 @@ Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (a
 </div>
 
 <h3 id="neutrino-smb">Neutrino SMB</h3>
-<p><a href="https://github.com/rickgaiser/neutrino">Neutrino</a>'s SMB driver (<a href="https://github.com/ps2max32/neutrino/pull/236">ps2max32/neutrino PR #236</a>, by Ronnie Sahlberg &mdash; <a href="https://github.com/sahlberg">@sahlberg</a>; not merged yet) reads games with <a href="https://github.com/sahlberg/usmb2">usmb2</a>. It needs:</p>
+<p><a href="https://github.com/rickgaiser/neutrino">Neutrino</a>'s SMB driver (<a href="https://github.com/ps2max32/neutrino/pull/236">ps2max32/neutrino PR #236</a>, by Ronnie Sahlberg &mdash; <a href="https://github.com/sahlberg">@sahlberg</a>; merged 2026-10-31; use the latest complete nightly) reads games with <a href="https://github.com/sahlberg/usmb2">usmb2</a>. It needs:</p>
 <ul>
   <li><b>The SMBv3 card.</b> usmb2 offers only SMB 3.0, so the SMBv2 card refuses it and says so in the log.</li>
   <li><b>Port 445.</b> The driver has no port setting. On Windows, tick <b>Take port 445 (admin)</b> and run as Administrator. On Linux or macOS, set the port to 445 and run with <code>sudo</code> (stop Samba first if it is installed), or on Linux keep 1445 and forward 445 to it: <code>sudo iptables -t nat -A PREROUTING -p tcp --dport 445 -j REDIRECT --to-ports 1445</code>. Stopping the card does not remove that rule; remove it yourself, for example before starting Samba again: <code>sudo iptables -t nat -D PREROUTING -p tcp --dport 445 -j REDIRECT --to-ports 1445</code>.</li>
   <li><b>The share name</b> the loader passes (<code>share=</code> in <code>bsd-smb.toml</code>). The cards serve <code>games</code>; case does not matter.</li>
   <li><b>A login</b> the card accepts: its username and password, or a <b>No password</b> card with any user, such as Neutrino's default <code>guest</code> with a blank password. Neutrino keeps at most 31 bytes of the user name and of the password, and hashes the password byte by byte rather than as UTF-8, so use plain ASCII for both, 31 characters or fewer.</li>
 </ul>
-<p>A CI check builds the pinned usmb2 and Neutrino PR #236 sources on the host and reads a game through them. That is a host check of the protocol, not a test on a PS2.</p>
+<p>A CI check builds the pinned usmb2 and merged Neutrino SMB sources on the host and reads a game through them. That is a host check of the protocol, not a test on a PS2.</p>
 
 <h2 id="vmc-writes">3. Writes &amp; Virtual Memory Cards (VMC)</h2>
 <p>Both SMBv1 and SMB2/3 in PS2 Servers allow write access by default:</p>

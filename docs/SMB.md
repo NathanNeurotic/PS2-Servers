@@ -49,7 +49,7 @@ bug reports. Authentication is not a reason to expose the server to the internet
 
 [Neutrino](https://github.com/rickgaiser/neutrino)'s SMB driver
 ([ps2max32/neutrino PR #236](https://github.com/ps2max32/neutrino/pull/236), by
-Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg); not merged yet)
+Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg); merged 2026-10-31; use the latest complete nightly)
 reads games with [usmb2](https://github.com/sahlberg/usmb2). It needs:
 
 | Setting | Value |
@@ -73,7 +73,7 @@ Port 445 on each OS:
 
 The server answers a client that sends bare NTLMSSP with a bare NTLMSSP
 challenge, as usmb2 requires. `conformance/integration/neutrino_smb/run.py`
-builds the pinned usmb2 and Neutrino PR #236 sources on the host and reads a
+builds the pinned usmb2 and merged Neutrino SMB sources on the host and reads a
 game through them; it runs in CI. That is a host check of the protocol, not a
 test on a PS2.
 
