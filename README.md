@@ -57,8 +57,11 @@ still requires the image hash. Existing top-level PS2 images and PS1 POPS VCDs
 remain available. Indexing a nested path does not establish console launch support.
 The **Repair ART** action converts legacy `_COV.jpg`, `_ICO.jpg`, `_LAB.jpg`,
 `_COV3.jpg` (or JPEG/WebP/BMP equivalents) to 8-bit indexed PNG without deleting
-sources or replacing existing PNGs. The current companion does not queue remote
-ISO URLs or automatically download covers from an online provider.
+sources or replacing existing PNGs. Transparent logos and discs keep their
+alpha. **Download missing art** is opt-in. It has no built-in source: you paste
+an `https://` URL template containing `{serial}` and confirm a preview before
+anything is fetched. Existing files are never replaced. The companion does not
+queue remote ISO URLs or download anything automatically.
 
 This is **separate from game serving**: selecting a games root here does not
 reconfigure SMB, UDPFS, UDPBD or HTTP cards. The catalogue contains paths and

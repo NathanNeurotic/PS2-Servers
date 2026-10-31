@@ -117,6 +117,14 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
    disc transparency with tested palette PNG conversion. Keep offline import.
    Bound downloads, redirects, content/decode sizes, retries/backoff, cache,
    provenance, progress and cancellation; no automatic startup download.
+   **Started after #261 merged:** `write_art` keeps alpha (RGBA art is quantised
+   with fast octree and saved with tRNS, which RiptOPL `src/gfx/textures.cpp`
+   reads as CLUT alpha). `launcher/art_fetch.py` plus **Download missing art**
+   does a confirmed, bounded batch from a user-supplied `https://` template
+   (`{serial}`/`{opl_id}`). No provider is built in, because the common PCSX2
+   cover repository has no licence file and holds retail box scans. Still open:
+   previews of individual images, multiple art types per run and provenance
+   recorded beyond the report window.
 4. Extend integrated setup using existing setup guide, server cards, adapter,
    firewall/direct-link and access-check engines. Preview and explicit UI
    confirmation before saved/active-root or OS changes; atomic settings and failed

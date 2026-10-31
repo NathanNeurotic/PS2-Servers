@@ -112,6 +112,31 @@ Double-click a row or press Enter for the boot path and explanation. Statuses di
 The artwork import prompt can suggest an inspected ID when no manual ID is set
 and the status is verified. Conflicting automatic IDs are not suggested. The
 prompt still asks for the exact identity and preserves existing artwork.
+Artwork keeps its transparency: a logo or disc image with a transparent
+background is saved as an 8-bit palette PNG with per-colour alpha (tRNS),
+which RiptOPL reads as texture alpha. Opaque covers convert as before.
+
+### Download missing art (opt-in)
+
+**Download missing art** fetches one artwork type for every catalogue entry
+that does not have it yet. **No source is built in.** Paste an `https://` URL
+template that contains `{serial}` (written `SLUS-20174`) or `{opl_id}`
+(written `SLUS_201.74`). For example, PCSX2-style cover repositories use
+`https://<host>/<path>/{serial}.jpg`. Use a source you are allowed to download
+from; entering a URL here does not grant any rights to its images. The template
+is remembered for next time.
+
+Before anything is fetched, a preview shows how many images would be
+downloaded, the first request URLs, how many entries already have the file and
+how many were skipped. The identity is chosen in this order: a **verified**
+inspected serial, then the manual ID. Entries with a **conflict**, **stale** or
+no ID, a non-PS2 ID, or a repeated serial are skipped and listed in the report.
+Each download is limited to HTTPS (redirects must stay on HTTPS, at most 3),
+8 MB, 15 seconds, one retry after a 429/5xx (waiting at most 10 seconds), and
+500 images per run. The response must be an image. **Cancel scan** stops
+after the current file. Images go through the same converter as **Import
+cover** and never replace an existing `ART/` file. Nothing is downloaded at
+startup or in the background.
 Images with the same basename or serial at different paths remain distinct rows.
 
 Each UI run considers at most **1,000 indexed entries**, including cached and
@@ -232,7 +257,8 @@ Existing servers continue to operate independently of SQLite and this preference
 This implements recursive discovery, bounded image identity inspection and the shared
 metadata/RA view increment of
 [companion issue #249](https://github.com/NathanNeurotic/PS2-Servers/issues/249).
-PS1/Ember indexing, artwork providers,
-server-profile export and path-aware HTTP remain separate work. These Desktop
+PS1/Ember indexing and server-profile export remain separate work. The
+path-aware HTTP list is described in [HTTP](HTTP.md), and missing-art download is
+described above. These Desktop
 features do not change Core/Edge serving protocols or their documented capability
 matrix in [editions](EDITIONS.md), and host tests do not establish hardware acceptance.
