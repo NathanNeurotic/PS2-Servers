@@ -89,7 +89,14 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
 
 1. Add source-pinned capability/acceptance matrix and representative fixtures for
    all #249 cases, including PS1 VCD/Ember descriptors without mixing PS2 identity.
-2. Implement explicit HTTP `legacy-flat` (default, unchanged three columns) and
+2. DONE in this PR (commit "feat(http): add an opt-in RiptOPL path-aware game
+   list"): `--catalog-profile riptopl-path-aware`, opt-in `--recursive`, a
+   Desktop card choice, `conformance/integration/riptopl_http` against the C
+   parser pinned at Open-PS2-Loader `bfebafdd`, and `tests/test_http_path_aware.py`.
+   Limits follow the client header (262144 bytes / 2048 rows). STARTUP still comes
+   from the filename, not the inspected BOOT2 serial. NOT TESTED on a PS2. The
+   original plan for this item follows.
+   Implement explicit HTTP `legacy-flat` (default, unchanged three columns) and
    `riptopl-path-aware` (four columns) profiles, Desktop/Core configuration parity,
    shared validated index, safe nested whitelist routes and virtual ISO decoding.
    Keep 8,192-byte catalogue protection until a larger client contract is proved.
@@ -126,7 +133,7 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
    virtual-exFAT promises. Update all required source/docs/site surfaces, run full
    suite/release gates and review exact PR head. Preserve physical-console gates.
 
-No HTTP/provider/setup/telemetry implementation was started in this checkpoint.
+Of the remaining items, only HTTP (item 2) has been implemented since this checkpoint.
 The user explicitly requested pushing now for handoff; continue those areas in
 the same PR within the file limit. Host/CI results alone cannot close the nested
 launch, gameplay-transition, reset, artwork-loader or writable-save hardware gates.
