@@ -256,8 +256,10 @@ def main():
                         help="Fail instead of skipping when the pinned upstream "
                              "source cannot be fetched.")
     args = parser.parse_args()
-    if os.name == "nt":
-        print("SKIP  the usmb2 host build uses BSD sockets; run this on Linux or macOS.")
+    if not sys.platform.startswith("linux"):
+        # The pinned usmb2 sources include <endian.h>, which only glibc/musl
+        # ship; macOS and Windows hosts cannot build them unpatched.
+        print("SKIP  the pinned usmb2 host build needs Linux (<endian.h>); run this on Linux.")
         return 0
     compiler = shutil.which(args.cc)
     if not compiler:

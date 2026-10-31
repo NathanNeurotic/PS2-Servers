@@ -192,6 +192,12 @@ class Smb2Server:
     def stop(self):
         self._stop.set()
         if self.sock is not None:
+            # On Linux, close() alone does not wake a thread blocked in
+            # accept(); shutdown() does (accept fails with EINVAL).
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             try:
                 self.sock.close()
             except OSError:
