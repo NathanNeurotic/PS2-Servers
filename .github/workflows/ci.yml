@@ -104,7 +104,7 @@ jobs:
       - name: Run pinned Neutrino SMB client (usmb2) conformance
         # Builds the real client from Neutrino PR #236 and reads a game through
         # smb2_server on loopback. Host protocol check, not PS2 hardware.
-        run: python conformance/integration/neutrino_smb/run.py
+        run: python conformance/integration/neutrino_smb/run.py --require-upstream
 
       - name: Run UDPBD protocol selftest
         run: python udpbd_server/selftest.py

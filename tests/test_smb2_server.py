@@ -82,10 +82,14 @@ class Client:
         return struct.unpack_from("<H", reply, 4)[0]
 
     def session_setup(self, user, password, anonymous=False,
-                      domain="WORKGROUP"):
+                      domain="WORKGROUP", wrap=False):
+        """Log in. wrap=True sends both NTLM messages inside SPNEGO, as
+        Windows does; the default sends them bare, as Neutrino's usmb2 does."""
         negotiate = (spnego.NTLMSSP_SIGNATURE + struct.pack("<I", 1)
                      + struct.pack("<I", spnego.CHALLENGE_FLAGS)
                      + struct.pack("<HHI", 0, 0, 32) + struct.pack("<HHI", 0, 0, 32))
+        if wrap:
+            negotiate = _spnego_wrap(negotiate)
         head, reply = self._session_blob(negotiate)
         assert head.status == wire.STATUS_MORE_PROCESSING_REQUIRED, (
             "expected a challenge, got 0x%08X" % head.status)
@@ -109,6 +113,10 @@ class Client:
             ntowf = ntowfv2(password, user, domain)
             proof = ntlmv2_proof(ntowf, challenge, blob_body)
             auth = self._authenticate(proof + blob_body, user, domain)
+        if wrap:
+            # The client's NegTokenResp: responseToken [2] OCTET STRING.
+            tlv = spnego._tlv
+            auth = tlv(0xa1, tlv(0x30, tlv(0xa2, tlv(0x04, auth))))
         head, self.last_session_reply = self._session_blob(auth)
         return head.status
 
@@ -834,6 +842,17 @@ class SecurityBufferFraming(ServerFixture):
         # SecurityBufferOffset and SecurityBufferLength both zero.
         self.assertEqual(struct.unpack_from("<HH", c.last_session_reply, 4), (0, 0))
 
+    def test_spnego_login_completes_with_accept_completed(self):
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        c.negotiate()
+        self.assertEqual(c.session_setup(USER, PASSWORD, wrap=True), 0)
+        reply = c.last_session_reply
+        off, length = struct.unpack_from("<HH", reply, 4)
+        self.assertNotEqual((off, length), (0, 0))
+        blob = reply[off - wire.HEADER_SIZE:off - wire.HEADER_SIZE + length]
+        self.assertEqual(blob, spnego.neg_token_resp(spnego.ACCEPT_COMPLETED))
+
     def test_a_bare_challenge_fits_a_512_byte_client(self):
         """usmb2 reads everything after the SMB2 header into 512 bytes."""
         c = Client(self.port)
@@ -904,3 +923,17 @@ class BindHint(unittest.TestCase):
         denied = bind_hint(445, self._err(errno.EACCES))
         self.assertTrue(in_use and denied)
         self.assertNotEqual(in_use, denied)
+
+    def test_445_in_use_names_each_platforms_own_owner(self):
+        import errno
+        from unittest import mock
+        import smb2_server as mod
+        err = self._err(errno.EADDRINUSE)
+        with mock.patch.object(mod.os, "name", "posix"), \
+                mock.patch.object(mod.sys, "platform", "linux"):
+            self.assertIn("systemctl stop smbd", mod.bind_hint(445, err))
+        with mock.patch.object(mod.os, "name", "posix"), \
+                mock.patch.object(mod.sys, "platform", "darwin"):
+            mac = mod.bind_hint(445, err)
+        self.assertIn("File Sharing", mac)
+        self.assertNotIn("systemctl", mac)

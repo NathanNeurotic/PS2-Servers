@@ -994,6 +994,10 @@ def bind_hint(port, err):
         if os.name == "nt":
             return ("Port 445 belongs to Windows file sharing. Tick 'Take port "
                     "445 (admin)' (--take-445) and run as Administrator.")
+        if sys.platform == "darwin":
+            return ("Something already serves port 445 -- usually macOS File "
+                    "Sharing. Turn it off in System Settings > General > "
+                    "Sharing while this server runs.")
         return ("Something already serves port 445 -- usually Samba (smbd). "
                 "Stop it while this server runs, e.g. 'sudo systemctl stop smbd'.")
     if err.errno in (errno.EACCES, errno.EPERM, getattr(errno, "WSAEACCES", -1)):
