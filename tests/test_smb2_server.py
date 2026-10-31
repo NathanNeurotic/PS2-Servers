@@ -109,7 +109,7 @@ class Client:
             ntowf = ntowfv2(password, user, domain)
             proof = ntlmv2_proof(ntowf, challenge, blob_body)
             auth = self._authenticate(proof + blob_body, user, domain)
-        head, _ = self._session_blob(auth)
+        head, self.last_session_reply = self._session_blob(auth)
         return head.status
 
     def _authenticate(self, nt_response, user, domain):
@@ -831,6 +831,8 @@ class SecurityBufferFraming(ServerFixture):
         self.addCleanup(c.close)
         c.negotiate()
         self.assertEqual(c.session_setup(USER, PASSWORD), 0)
+        # SecurityBufferOffset and SecurityBufferLength both zero.
+        self.assertEqual(struct.unpack_from("<HH", c.last_session_reply, 4), (0, 0))
 
     def test_a_bare_challenge_fits_a_512_byte_client(self):
         """usmb2 reads everything after the SMB2 header into 512 bytes."""
@@ -875,6 +877,15 @@ class NeutrinoClientShape(ServerFixture):
             head, _ = c.call(wire.CMD_NEGOTIATE, body)
         self.assertEqual(head.status, wire.STATUS_NOT_SUPPORTED)
         self.assertIn("SMBv3", captured.getvalue())
+
+
+class ShareNameCollisions(unittest.TestCase):
+    def test_names_that_differ_only_by_case_are_refused(self):
+        d = tempfile.mkdtemp(prefix="ps2smb2-")
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        with self.assertRaises(ValueError):
+            Smb2Server({"games": Share("games", d), "GAMES": Share("GAMES", d)},
+                       Authenticator.open())
 
 
 class BindHint(unittest.TestCase):

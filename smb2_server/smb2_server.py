@@ -149,6 +149,15 @@ class Connection:
 class Smb2Server:
     def __init__(self, shares, authenticator, ceiling=wire.CEILING_SMB2,
                  read_only=False, server_name="PS2SERVERS", domain="WORKGROUP"):
+        # Share names are matched without regard to case (share_named), so two
+        # names that differ only by case would make the choice between two
+        # directories depend on configuration order. Refuse that up front.
+        folded = {}
+        for name in shares:
+            other = folded.setdefault(name.casefold(), name)
+            if other != name:
+                raise ValueError("share names %r and %r differ only by case"
+                                 % (other, name))
         self.shares = shares
         self.auth = authenticator
         self.ceiling = ceiling
@@ -1061,8 +1070,11 @@ def main(argv=None):
     auth = build_authenticator(args.user, args.open)
     ceiling = wire.CEILING_SMB3 if args.smb_version == 3 else wire.CEILING_SMB2
 
-    server = Smb2Server(shares, auth, ceiling=ceiling, read_only=args.read_only,
-                        server_name=args.server_name, domain=args.domain)
+    try:
+        server = Smb2Server(shares, auth, ceiling=ceiling, read_only=args.read_only,
+                            server_name=args.server_name, domain=args.domain)
+    except ValueError as e:
+        ap.error(str(e))
 
     restore = None
     want_port = args.port

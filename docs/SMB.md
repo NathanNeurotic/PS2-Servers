@@ -57,7 +57,7 @@ reads games with [usmb2](https://github.com/sahlberg/usmb2). It needs:
 | Card | **SMBv3**. usmb2 offers only SMB 3.0, so the SMBv2 card refuses it and says so in the log. |
 | Port | **445**. The driver has no port setting. |
 | Share | The share name the loader passes (`share=` in `bsd-smb.toml`). The cards serve `games`; case does not matter. |
-| Login | The card's username and password, or a **No password** card with any user, such as Neutrino's default `guest` and a blank password. |
+| Login | The card's username and password, or a **No password** card with any user, such as Neutrino's default `guest` and a blank password. Neutrino keeps at most 31 bytes of the user name and of the password, so use a password of 31 characters or fewer. |
 
 Port 445 on each OS:
 
@@ -67,6 +67,9 @@ Port 445 on each OS:
   (`smbd`) first if it is installed. On Linux you can instead keep the card on
   1445 unprivileged and forward 445 to it:
   `sudo iptables -t nat -A PREROUTING -p tcp --dport 445 -j REDIRECT --to-ports 1445`.
+  Stopping the card does not remove that rule; remove it yourself (for example
+  before starting Samba again):
+  `sudo iptables -t nat -D PREROUTING -p tcp --dport 445 -j REDIRECT --to-ports 1445`.
 
 The server answers a client that sends bare NTLMSSP with a bare NTLMSSP
 challenge, as usmb2 requires. `conformance/integration/neutrino_smb/run.py`
