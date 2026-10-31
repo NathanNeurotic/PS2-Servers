@@ -13,8 +13,14 @@ from launcher.library_catalog import Catalog
 TEMPLATE = "https://covers.example/{serial}.jpg"
 
 
+FAKE_IMAGE = b"\x89PNG\r\n\x1a\nnot decoded by fetch()"
+
+
 def _png():
-    from PIL import Image
+    try:
+        from PIL import Image
+    except ImportError:
+        raise unittest.SkipTest("Pillow is optional for source checkout")
     out = io.BytesIO()
     Image.new("RGB", (8, 8), (1, 2, 3)).save(out, format="PNG")
     return out.getvalue()
@@ -67,7 +73,7 @@ class TemplateTests(unittest.TestCase):
 
 class FetchTests(unittest.TestCase):
     def test_returns_image_bytes(self):
-        body = _png()
+        body = FAKE_IMAGE
         self.assertEqual(art_fetch.fetch("https://x", opener=_Opener(_Response(body))), body)
 
     def test_missing_cover_is_none(self):
@@ -85,12 +91,23 @@ class FetchTests(unittest.TestCase):
 
     def test_one_bounded_retry_on_rate_limit(self):
         waits = []
-        opener = _Opener(_http_error(429, "999"), _Response(_png()))
+        opener = _Opener(_http_error(429, "999"), _Response(FAKE_IMAGE))
         self.assertIsNotNone(art_fetch.fetch("https://x", opener=opener, sleep=waits.append))
         self.assertEqual(waits, [art_fetch.MAX_RETRY_WAIT])
         with self.assertRaises(art_fetch.FetchError):
             art_fetch.fetch("https://x", opener=_Opener(_http_error(503), _http_error(503)),
                             sleep=lambda _s: None)
+
+    def test_whole_download_has_a_deadline(self):
+        ticks = iter([0.0, 0.0, 100.0])
+
+        class Slow(_Response):
+            def read1(self, size):
+                return b"x"
+
+        with self.assertRaisesRegex(art_fetch.FetchError, "longer than"):
+            art_fetch.fetch("https://x", opener=_Opener(Slow(b"")), timeout=15,
+                            clock=lambda: next(ticks))
 
     def test_cancel_before_start(self):
         cancel = threading.Event()
@@ -138,6 +155,7 @@ class PlanAndRunTests(unittest.TestCase):
         self.assertEqual(len(result.skipped), 5)
 
     def test_run_installs_keeps_existing_and_survives_failures(self):
+        _png()  # skips without Pillow
         rows = [self.row(manual="SLUS_201.74"), self.row(manual="SLUS_202.02"),
                 self.row(manual="SLUS_203.03"), self.row(manual="SLUS_204.04")]
         the_plan = art_fetch.plan(rows, self.root, TEMPLATE)
@@ -158,6 +176,20 @@ class PlanAndRunTests(unittest.TestCase):
         # A second run keeps the file it already wrote.
         again = dict(art_fetch.run(self.catalog, the_plan, self.root, fetcher=fetcher))
         self.assertEqual(again["SLUS_201.74"], "kept the existing file")
+
+    def test_missing_converter_stops_the_batch(self):
+        rows = [self.row(manual="SLUS_201.74"), self.row(manual="SLUS_202.02")]
+        the_plan = art_fetch.plan(rows, self.root, TEMPLATE)
+        calls = []
+
+        class NoPillow:
+            def write_art(self, *_a, **_k):
+                raise RuntimeError("Cover conversion requires Pillow")
+
+        report = art_fetch.run(NoPillow(), the_plan, self.root,
+                               fetcher=lambda url, cancel=None: calls.append(url) or FAKE_IMAGE)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual([o for _i, o in report][1], "not attempted")
 
     def test_cancel_stops_the_rest(self):
         rows = [self.row(manual="SLUS_201.74"), self.row(manual="SLUS_202.02")]

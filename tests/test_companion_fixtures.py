@@ -79,6 +79,7 @@ class CompanionFixtureTests(unittest.TestCase):
         # standard images carry the right one, so they verify too.
         self.assertEqual(self.rows["Games/A/Same Name.iso"]["identity_status"], "verified")
         self.assertEqual(self.rows["DVD/SLUS_201.74.Standard DVD.iso"]["identity_status"], "verified")
+        self.assertEqual(self.rows[fx.MISNAMED]["identity_status"], "conflict")
 
     # Shared index ------------------------------------------------------------
 

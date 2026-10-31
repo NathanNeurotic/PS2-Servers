@@ -1501,12 +1501,13 @@ class LauncherApp:
     def _open_riptopl_export(self):
         """Show the cards' connection values as RiptOPL settings. Read-only."""
         from .riptopl_export import RiptoplExport
+        values = {key: card.values() for key, card in self.cards.items()}
         existing = getattr(self, "_riptopl_export", None)
         if existing is not None and existing.winfo_exists():
+            existing.update_source(values, self.current_ip())
             existing.lift()
             existing.focus_set()
             return
-        values = {key: card.values() for key, card in self.cards.items()}
         self._riptopl_export = RiptoplExport(self.root, values, self.current_ip())
 
     def _open_url(self, url):

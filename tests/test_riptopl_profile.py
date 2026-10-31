@@ -8,7 +8,7 @@ from launcher import riptopl_export, riptopl_profile as rp
 
 # Every key RiptOPL rebuild/main 4ec6c68 reads from conf_network.cfg
 # (include/config.h CONFIG_NET_*, read in src/app/settingsio.cpp) and the
-# network keys it reads from conf_opl.cfg.
+# network keys it reads from settings_riptopl.cfg (CONFIG_OPL_FILENAME).
 RIPTOPL_NETWORK_KEYS = {
     "eth_linkmode", "ps2_ip_use_dhcp", "ps2_ip_addr", "ps2_netmask", "ps2_gateway", "ps2_dns",
     "smb_share_nb_addr", "smb_ip", "smb_share_use_nbns", "smb_share", "smb_user", "smb_pass",
@@ -91,6 +91,8 @@ class RenderTests(unittest.TestCase):
         self.assertIn("profile version {}".format(rp.PROFILE_VERSION), text)
         self.assertIn(rp.RIPTOPL_REF, text)
         self.assertNotIn("ps2_ip", text)
+        self.assertIn("settings_riptopl.cfg (A: key=value)", text)
+        self.assertNotIn("conf_opl.cfg", text)
 
     def test_window_text_explains_a_refusal(self):
         self.assertTrue(riptopl_export.profile_text("smbv2", {}, IP).startswith("Not exported:"))

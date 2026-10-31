@@ -20,7 +20,7 @@ PROFILE_VERSION = 1
 RIPTOPL_REF = "4ec6c68"
 
 NETWORK_FILE = "conf_network.cfg"
-OPL_FILE = "conf_opl.cfg"
+OPL_FILE = "settings_riptopl.cfg"  # CONFIG_OPL_FILENAME (include/config.h)
 
 # include/opl.h
 NET_PROTO_SMB = 1
@@ -43,7 +43,7 @@ class Profile:
     server: str
     protocol_label: str
     network: list = field(default_factory=list)   # (key, value) for conf_network.cfg
-    opl: list = field(default_factory=list)       # (key, value) for conf_opl.cfg
+    opl: list = field(default_factory=list)       # (key, value) for settings_riptopl.cfg
     menu: list = field(default_factory=list)      # (label, value) as the console menu shows it
     notes: list = field(default_factory=list)
     warnings: list = field(default_factory=list)

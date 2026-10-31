@@ -4,6 +4,7 @@ It only reads the cards. Copy puts the text on the clipboard; Save writes one
 text file, wherever the user picks, and never a RiptOPL config file itself.
 """
 import os
+import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -23,14 +24,15 @@ def profile_text(server_key, values, pc_ip):
 
 def write_text(path, text):
     """Write atomically, so a failed save never leaves half a file."""
-    tmp = path + ".tmp"
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(prefix=".riptopl-", suffix=".tmp", dir=directory)
     try:
-        with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
         os.replace(tmp, path)
-    except OSError:
+    except BaseException:
         try:
-            os.remove(tmp)
+            os.remove(tmp)  # only the file this call created
         except OSError:
             pass
         raise
@@ -66,6 +68,12 @@ class RiptoplExport(tk.Toplevel):
         ttk.Button(buttons, text="Save as…", command=self.save_as).pack(side="right", padx=(0, 8))
         ttk.Button(buttons, text="Copy", command=self.copy).pack(side="right", padx=(0, 8))
         self.bind("<Escape>", lambda _e: self.destroy())
+        self.refresh()
+
+    def update_source(self, card_values, pc_ip):
+        """Take the cards' current values, so Copy and Save never use stale ones."""
+        self.card_values = dict(card_values)
+        self.pc_ip = pc_ip
         self.refresh()
 
     def selected_key(self):

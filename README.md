@@ -40,7 +40,7 @@ and disc IDs, and 8-bit PNG artwork conversion to the chosen `ART/` folder.
 Use **Setup guide** for a six-step LAN/share/console walkthrough. The companion
 also supports JSON metadata import/export and online SQLite backups.
 **RiptOPL settings…** (ABOUT tab) shows a server card's values as the exact
-`conf_network.cfg` / `conf_opl.cfg` lines RiptOPL reads, to type in on the console
+`conf_network.cfg` / `settings_riptopl.cfg` lines RiptOPL reads, to type in on the console
 or copy into those files. It never includes the PS2's own address or a password.
 
 The **Import images** action supports a batch of local image files (up to 1,000 per run),

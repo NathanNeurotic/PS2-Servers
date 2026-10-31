@@ -54,7 +54,7 @@ def ember_name_problem(name):
         return "starts with '..'"
     if any(c in name for c in "/:\\"):
         return "contains '/', ':' or '\\'"
-    if len(name.encode("utf-8")) > EMBER_NAME_LAUNCH_MAX:
+    if len(os.fsencode(name)) > EMBER_NAME_LAUNCH_MAX:
         return "longer than {} bytes".format(EMBER_NAME_LAUNCH_MAX)
     return ""
 

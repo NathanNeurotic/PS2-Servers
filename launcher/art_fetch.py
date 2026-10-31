@@ -14,6 +14,7 @@ supplying a URL here does not grant any rights.
 import io
 import re
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -80,7 +81,8 @@ def _opener():
     return urllib.request.build_opener(_HttpsOnlyRedirects())
 
 
-def fetch(url, *, cancel=None, opener=None, max_bytes=MAX_BYTES, timeout=TIMEOUT, sleep=None):
+def fetch(url, *, cancel=None, opener=None, max_bytes=MAX_BYTES, timeout=TIMEOUT, sleep=None,
+          clock=time.monotonic):
     """Bytes of one image, or FetchError. 404 returns None (not on the source)."""
     opener = opener or _opener()
     cancel = cancel or threading.Event()
@@ -89,6 +91,7 @@ def fetch(url, *, cancel=None, opener=None, max_bytes=MAX_BYTES, timeout=TIMEOUT
         if cancel.is_set():
             raise Cancelled()
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        deadline = clock() + timeout  # the whole attempt, not each socket wait
         try:
             with opener.open(request, timeout=timeout) as response:
                 kind = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
@@ -101,7 +104,10 @@ def fetch(url, *, cancel=None, opener=None, max_bytes=MAX_BYTES, timeout=TIMEOUT
                 while True:
                     if cancel.is_set():
                         raise Cancelled()
-                    chunk = response.read(65536)
+                    if clock() > deadline:
+                        raise FetchError("Download took longer than {} s: {}".format(timeout, url))
+                    read = getattr(response, "read1", None) or response.read
+                    chunk = read(65536)
                     if not chunk:
                         return bytes(body)
                     body += chunk
@@ -190,6 +196,11 @@ def run(catalog, the_plan, root, art_type="COV", *, cancel=None, progress=None, 
             report.append((opl_id, "cancelled"))
         except FileExistsError:
             report.append((opl_id, "kept the existing file"))
+        except RuntimeError as exc:  # the converter itself is unavailable: stop, do not keep downloading
+            report.append((opl_id, "failed: {}".format(exc)))
+            for _r, rest_id, _s, _u in the_plan.fetch[done + 1:]:
+                report.append((rest_id, "not attempted"))
+            break
         except Exception as exc:  # one bad image must not stop the batch
             report.append((opl_id, "failed: {}".format(exc)))
     if progress:

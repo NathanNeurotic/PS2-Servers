@@ -15,6 +15,7 @@ Layout (paths relative to the root):
     Games/A/Same Name.iso, Games/B/Same Name.iso same basename, two paths
     Games/Serial/Copy One.iso, Copy Two.iso      same inspected serial
     Games/Ünïcode, comma.iso                      UTF-8, space and comma
+    Games/SLUS_555.55.Wrong Name.iso             filename serial != boot serial
     Games/Compressed/Game.chd|.cso|.zso          compressed containers
     Games/Broken/Truncated.iso                   truncated, no volume descriptor
     POPS/SLUS_007.08.PS1 Game.VCD                PS1 for POPSTARTER
@@ -39,7 +40,10 @@ INSPECTED = {
     "Games/Serial/Copy One.iso": "SLUS_233.33",
     "Games/Serial/Copy Two.iso": "SLUS_233.33",
     "Games/Ünïcode, comma.iso": "SLES_544.44",
+    "Games/SLUS_555.55.Wrong Name.iso": "SLUS_566.66",
 }
+# The filename claims SLUS_555.55 but SYSTEM.CNF boots SLUS_566.66.
+MISNAMED = "Games/SLUS_555.55.Wrong Name.iso"
 TOO_DEEP = "Games/RPG/Deep/Four/Five/TooDeep.iso"
 COMPRESSED = ("Games/Compressed/Game.chd", "Games/Compressed/Game.cso", "Games/Compressed/Game.zso")
 TRUNCATED = "Games/Broken/Truncated.iso"
