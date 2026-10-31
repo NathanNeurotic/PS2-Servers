@@ -165,6 +165,32 @@ row at the URI RiptOPL builds. The skip and `--require-upstream` rules are the s
 as for the Docmine17 runner. **This is PC-hosted evidence only.** No console has
 listed, launched or played a game through this profile yet.
 
+## Session summary (opt-in)
+
+Tick **Session summary** in the HTTP card's advanced options, or pass
+`--session-summary`. The server then prints one line per console when it has
+been quiet for 60 seconds, is pushed out by a newer one (at most 64 are
+tracked), or when the server stops:
+
+```
+SESSION http client=192.168.1.30 seconds=412 connections=3 list=1 open=1 read=5120 bytes=41943040 write=0 close=1 errors=0 ended=idle
+```
+
+- Nothing is logged per request. Each request is one counter update.
+- `read` and `bytes` count only whole responses. A send that was cut off is
+  counted as nothing, not as a partial read.
+- `errors` counts 400, 404 and 416 answers, server-side read failures and
+  dropped connections.
+- HTTP is read-only, so `write` is always 0.
+- These are counts of what the PC served. They do not prove that a game ran.
+- On Linux and macOS, **Stop** in the launcher still prints the final lines.
+  On Windows, **Stop** ends the server process outright, so consoles that
+  have not gone quiet yet get no final line. Stop with Ctrl+C in a terminal
+  to keep them.
+
+The format is shared by every server that adds it (`http_server/session_stats.py`),
+so one parser reads all of them.
+
 ## Direct PS2-to-PC link
 
 The same server configuration can be used over a direct cable — enable

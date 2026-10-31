@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 
-from . import library_catalog
+from . import art_fetch, library_catalog
 from .library_index import IndexSnapshot
 from .config import config_dir
 
@@ -29,6 +29,32 @@ GUIDE = (
 )
 
 
+class ArtProgress:
+    def __init__(self, done, total, current):
+        self.done, self.total, self.current = done, total, current
+
+
+class ArtReport:
+    window_title = "Artwork download"
+
+    def __init__(self, the_plan, outcomes):
+        self.plan = the_plan
+        self.outcomes = outcomes
+
+    def __str__(self):
+        saved = sum(1 for _i, o in self.outcomes if o.startswith("saved"))
+        return "Artwork: {} saved, {} not found or failed".format(saved, len(self.outcomes) - saved)
+
+    def report(self):
+        lines = [str(self), ""]
+        lines += ["{}: {}".format(i, o) for i, o in self.outcomes]
+        if self.plan.skipped:
+            lines += ["", "Skipped:"]
+            lines += ["{}: {}".format(r.get("title") or r.get("image_path", "?"), why)
+                      for r, why in self.plan.skipped]
+        return "\n".join(lines)
+
+
 class LibraryPanel(ttk.Frame):
     def __init__(self, master, app):
         super().__init__(master)
@@ -42,6 +68,7 @@ class LibraryPanel(ttk.Frame):
         self._buttons = []
         self.root_file = Path(config_dir()) / "library" / "games_root.txt"
         self.guide_marker = Path(config_dir()) / "library" / "first_run_complete"
+        self.art_template_file = Path(config_dir()) / "library" / "art_url_template.txt"
         self.path = tk.StringVar(value=self._load_root())
         self.search = tk.StringVar()
         self.recursive = tk.BooleanVar(value=False)
@@ -86,6 +113,7 @@ class LibraryPanel(ttk.Frame):
         self._button(controls, "Import images", self._import_image)
         self._button(controls, "Import cover", self._import_art)
         self._button(controls, "Repair ART", self._repair_art)
+        self._button(controls, "Download missing art", self._download_art)
         self._button(controls, "Edit metadata", self._edit)
         self._button(controls, "Setup guide", self._guide)
         scan_options = ttk.Frame(self)
@@ -183,7 +211,10 @@ class LibraryPanel(ttk.Frame):
         try:
             progress = self._scan_progress.get_nowait()
             if self._scan_active:
-                if isinstance(progress, library_catalog.IdentityScanResult):
+                if isinstance(progress, ArtProgress):
+                    self.status.set(f"Downloading artwork {progress.done + 1} of {progress.total}: "
+                                    f"{progress.current}. Cancel scan stops after this file.")
+                elif isinstance(progress, library_catalog.IdentityScanResult):
                     self.status.set(f"Inspecting IDs: {progress.visited} entries, {progress.cached} cached, "
                                     f"{progress.conflicts} conflicts, {progress.errors} errors.")
                 else:
@@ -201,9 +232,9 @@ class LibraryPanel(ttk.Frame):
                 for btn in self._buttons:
                     btn.state(["!disabled"])
                 if ok:
-                    if isinstance(value, IndexSnapshot):
+                    if isinstance(value, (IndexSnapshot, ArtReport)):
                         window = tk.Toplevel(self)
-                        window.title("Indexed paths and duplicates")
+                        window.title(getattr(value, "window_title", "Indexed paths and duplicates"))
                         window.geometry("800x480")
                         output = ScrolledText(window, wrap="word")
                         output.pack(fill="both", expand=True, padx=10, pady=10)
@@ -294,6 +325,62 @@ class LibraryPanel(ttk.Frame):
         self._scan_active = True
         self._run(lambda db: db.indexed_games(root, cancel=self._scan_cancel),
                   "Reviewing shared indexed paths", False)
+        self.cancel_scan.state(["!disabled"])
+
+    def _download_art(self):
+        """Opt-in: the user supplies the source URL and confirms a preview first."""
+        if self._busy:
+            return
+        try:
+            root = self._games_root()
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Games root", str(exc))
+            return
+        try:
+            saved = self.art_template_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            saved = ""
+        template = simpledialog.askstring(
+            "Artwork source",
+            "Paste an https:// URL for one image, with {serial} (SLUS-20174) or {opl_id} "
+            "(SLUS_201.74) where the disc ID goes.\n\nNo source is built in. Use one you "
+            "are allowed to download from. Existing files in ART/ are never replaced.",
+            initialvalue=saved, parent=self)
+        if not template:
+            return
+        art_type = simpledialog.askstring("Artwork type", "COV / ICO / LAB / COV3",
+                                          initialvalue="COV", parent=self)
+        if not art_type:
+            return
+        art_type = art_type.strip().upper()
+        try:
+            with library_catalog.Catalog() as db:
+                rows = db.list_games()
+            the_plan = art_fetch.plan(rows, root, template, art_type)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Download missing art", str(exc))
+            return
+        self.art_template_file.parent.mkdir(parents=True, exist_ok=True)
+        self.art_template_file.write_text(template.strip(), encoding="utf-8")
+        if not the_plan.fetch:
+            messagebox.showinfo("Download missing art", "Nothing to download: {} already have {} art, "
+                                "{} have no usable disc ID.".format(len(the_plan.have_art), art_type,
+                                                                     len(the_plan.skipped)))
+            return
+        sample = "\n".join(url for _r, _i, _s, url in the_plan.fetch[:3])
+        if not messagebox.askokcancel(
+                "Download missing art",
+                "Download {} {} image(s) into {}?\n\nFirst requests:\n{}\n\n{} already have art. "
+                "{} skipped (no verified or manual disc ID, or a conflict).".format(
+                    len(the_plan.fetch), art_type, root / "ART", sample,
+                    len(the_plan.have_art), len(the_plan.skipped)), parent=self):
+            return
+        self._scan_cancel.clear()
+        self._scan_active = True
+        progress = lambda done, total, current: self._queue_scan_progress(ArtProgress(done, total, current))
+        self._run(lambda db: ArtReport(the_plan, art_fetch.run(
+            db, the_plan, root, art_type, cancel=self._scan_cancel, progress=progress)),
+            "Downloading missing artwork", False)
         self.cancel_scan.state(["!disabled"])
 
     def _import_image(self):

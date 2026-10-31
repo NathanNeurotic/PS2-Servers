@@ -1425,6 +1425,12 @@ class LauncherApp:
             b_col = 0
         ttk.Button(behavior, text="PS2 setup guide…", command=self._open_ps2_setup_guide).grid(
             row=b_row, column=b_col, sticky="w", padx=(6 if b_col == 0 else 0, 12), pady=6)
+        b_col += 1
+        if b_col >= 3:
+            b_row += 1
+            b_col = 0
+        ttk.Button(behavior, text="RiptOPL settings…", command=self._open_riptopl_export).grid(
+            row=b_row, column=b_col, sticky="w", padx=(6 if b_col == 0 else 0, 12), pady=6)
 
         text_frame = ttk.Frame(about)
         about.rowconfigure(row, weight=1)
@@ -1491,6 +1497,18 @@ class LauncherApp:
         self._ps2_setup_guide = SetupGuide(
             self.root, self.current_ip(),
             on_close=self._on_ps2_setup_guide_closed)
+
+    def _open_riptopl_export(self):
+        """Show the cards' connection values as RiptOPL settings. Read-only."""
+        from .riptopl_export import RiptoplExport
+        values = {key: card.values() for key, card in self.cards.items()}
+        existing = getattr(self, "_riptopl_export", None)
+        if existing is not None and existing.winfo_exists():
+            existing.update_source(values, self.current_ip())
+            existing.lift()
+            existing.focus_set()
+            return
+        self._riptopl_export = RiptoplExport(self.root, values, self.current_ip())
 
     def _open_url(self, url):
         try:

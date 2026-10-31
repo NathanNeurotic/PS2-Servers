@@ -89,6 +89,9 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
 
 1. Add source-pinned capability/acceptance matrix and representative fixtures for
    all #249 cases, including PS1 VCD/Ember descriptors without mixing PS2 identity.
+   DONE in the follow-up PR: [COMPANION-CAPABILITY-MATRIX.md](COMPANION-CAPABILITY-MATRIX.md),
+   `tests/library_fixtures.py`, `tests/test_companion_fixtures.py` and the read-only
+   `launcher/ps1_index.py`. Host-tested only.
 2. DONE in this PR (commit "feat(http): add an opt-in RiptOPL path-aware game
    list"): `--catalog-profile riptopl-path-aware`, opt-in `--recursive`, a
    Desktop card choice, `conformance/integration/riptopl_http` against the C
@@ -117,17 +120,34 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
    disc transparency with tested palette PNG conversion. Keep offline import.
    Bound downloads, redirects, content/decode sizes, retries/backoff, cache,
    provenance, progress and cancellation; no automatic startup download.
+   **Started after #261 merged:** `write_art` keeps alpha (RGBA art is quantised
+   with fast octree and saved with tRNS, which RiptOPL `src/gfx/textures.cpp`
+   reads as CLUT alpha). `launcher/art_fetch.py` plus **Download missing art**
+   does a confirmed, bounded batch from a user-supplied `https://` template
+   (`{serial}`/`{opl_id}`). No provider is built in, because the common PCSX2
+   cover repository has no licence file and holds retail box scans. Still open:
+   previews of individual images, multiple art types per run and provenance
+   recorded beyond the report window.
 4. Extend integrated setup using existing setup guide, server cards, adapter,
    firewall/direct-link and access-check engines. Preview and explicit UI
    confirmation before saved/active-root or OS changes; atomic settings and failed
    start rollback. Export only verified versioned RiptOPL keys with backup/import
    instructions; do not guess PS2 IP or expose credentials. Preserve independent
    roots and correct protocol/port distinctions from the issue.
+   PARTLY DONE in the follow-up PR: ABOUT -> **RiptOPL settings…** shows a card's
+   values as RiptOPL settings (`launcher/riptopl_profile.py`, profile version 1,
+   keys checked against RiptOPL rebuild/main 4ec6c68). Read-only: copy or save a
+   text file. No PS2 address or password is exported, SMB2/SMB3 cards are refused
+   (the rebuild speaks SMBv1 only), and UDPFS/UDPBD port mismatches are warned.
+   Still open: binding a library root to cards with preview and rollback.
 5. Inventory existing protocol diagnostics, then add opt-in bounded cross-service
    session aggregation/view. Avoid per-packet logging, synchronous DB writes and
    throughput changes. Track discovery/list/open/read/write/close/errors distinctly;
    host reads do not prove gameplay. Test multiple clients, reconnect, errors,
    shutdown/cancel, packaged Windows and Core logs.
+   STARTED in the follow-up PR: a shared, bounded `SESSION` summary line
+   (`http_server/session_stats.py`), opt-in on HTTP. SMBv1, UDPFS and UDPBD and a
+   launcher view that reads the lines are still to do.
 6. Optional P3 VMC/packaging conveniences need a justified, safe disposition;
    do not add an unvetted formatter, automatic card assignments or writable HTTP/
    virtual-exFAT promises. Update all required source/docs/site surfaces, run full
