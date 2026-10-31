@@ -116,7 +116,7 @@ and the server cannot tell them apart on the wire, so the choice is explicit.
 
 | | Legacy flat (default) | RiptOPL path-aware |
 |---|---|---|
-| Row | `STARTUP,FILENAME.iso,MEDIA` | `"STARTUP","Title","MEDIA","DVD/Path/To/Game.iso"`, every field quoted |
+| Row | `STARTUP,FILENAME.iso,MEDIA` | `"STARTUP","Title",MEDIA,"DVD/Path/To/Game.iso"`, text fields quoted, `MEDIA` bare |
 | Game requested as | `/<filename>` at the web root | `<base path>/<relative path>`, percent-encoded |
 | Commas, quotes, a leading `#` | file skipped | listed |
 | List size | 8192 bytes | 262144 bytes and 2048 rows |

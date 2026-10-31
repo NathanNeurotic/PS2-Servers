@@ -161,7 +161,8 @@ class Catalog:
 
     def list_games(self, search=""):
         value = "%" + search.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        return [self._current_identity(r) for r in self.db.execute(
+        needle = search.lower()
+        rows = [self._current_identity(r) for r in self.db.execute(
             """SELECT g.*, d.status AS inspected_status, d.detected_disc_id,
                       d.boot_path, d.detail AS identity_detail, d.checked AS identity_checked,
                       d.fingerprint AS identity_fingerprint
@@ -171,6 +172,9 @@ class Catalog:
                   OR lower(d.detected_disc_id) LIKE ? ESCAPE '\\'
                ORDER BY g.title COLLATE NOCASE, g.id LIMIT 10000""",
             (disc_identity.INSPECTOR_VERSION, value, value, value))]
+        # A row found only by an inspected ID that is now stale no longer matches.
+        return [r for r in rows if not needle or r["identity_status"] != "stale"
+                or needle in (r["title"] or "").lower() or needle in (r["disc_id"] or "").lower()]
 
     def get_game(self, row_id):
         record = self.db.execute(

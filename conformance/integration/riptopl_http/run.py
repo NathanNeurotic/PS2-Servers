@@ -112,11 +112,13 @@ def exercise(work, exe):
 
     root = work / "games"
     plain = bytes(range(256)) * 512
+    # Windows cannot create a name containing a double quote.
+    uni = "\u00dcnicode Quoted" if os.name == "nt" else "\u00dcnicode \"Quoted\""
     files = {
         "DVD/SLUS_201.74.Rumble Racing.iso": plain,
         "CD/SCUS_971.24.Ratchet & Clank, The.iso": plain[::-1],
         "Games/RPG/Deep/SLES_500.01.Nested #1 100%.iso": plain[1:] + b"\0",
-        "SLPM_123.45.Ünicode \"Quoted\".iso": plain[2:] + b"\0\0",
+        "SLPM_123.45." + uni + ".iso": plain[2:] + b"\0\0",
         # Same STARTUP as the first row: the client keeps only the first.
         "DVD/SLUS_201.74.Rumble Racing.v2.iso": b"\x55" * 4096,
     }
@@ -130,8 +132,7 @@ def exercise(work, exe):
             ("SCUS_971.24", "Ratchet & Clank, The", "CD", plain[::-1]),
         "Games/RPG/Deep/SLES_500.01.Nested #1 100%.iso":
             ("SLES_500.01", "Nested #1 100%", "CD", plain[1:] + b"\0"),
-        "SLPM_123.45.Ünicode \"Quoted\".iso":
-            ("SLPM_123.45", "Ünicode \"Quoted\"", "CD", plain[2:] + b"\0\0"),
+        "SLPM_123.45." + uni + ".iso": ("SLPM_123.45", uni, "CD", plain[2:] + b"\0\0"),
         "DVD/SLUS_209.99.Compressed Game.iso": ("SLUS_209.99", "Compressed Game", "DVD", plain),
     }
 

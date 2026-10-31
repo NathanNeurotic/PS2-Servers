@@ -93,11 +93,25 @@ class CatalogueTests(_Tree):
             ["Loose", "Loose", "CD", "Loose.iso"],
         ])
 
-    def test_every_field_is_quoted_so_a_leading_hash_is_not_a_comment(self):
-        self.write("DVD/#Hash, \"Quote\".iso")
+    def test_text_fields_are_quoted_so_a_leading_hash_is_not_a_comment(self):
+        # Windows cannot create a name containing a double quote.
+        name = "#Hash, Quote.iso" if os.name == "nt" else "#Hash, \"Quote\".iso"
+        self.write("DVD/" + name)
         line = self.index().games_csv().decode("utf-8").splitlines()[0]
         self.assertTrue(line.startswith('"'))
-        self.assertEqual(_parse_row(line)[3], 'DVD/#Hash, "Quote".iso')
+        self.assertEqual(_parse_row(line)[3], "DVD/" + name)
+
+    @unittest.skipIf(os.name == "nt", "POSIX surrogate-escaped names only")
+    def test_undecodable_name_is_skipped_not_fatal(self):
+        self.write("DVD/SLUS_201.74.Rumble Racing.iso")
+        bad = os.fsdecode(b"SLES_500.01.Caf\xe9.iso")
+        try:
+            with open(os.path.join(self.work, "DVD", bad), "wb") as handle:
+                handle.write(b"\0" * 4096)
+        except (OSError, UnicodeError):
+            self.skipTest("filesystem rejects non-UTF-8 names")
+        rows = [_parse_row(l) for l in self.index().games_csv().decode("utf-8").splitlines()]
+        self.assertEqual([r[3] for r in rows], ["DVD/SLUS_201.74.Rumble Racing.iso"])
 
     def test_flat_default_is_unchanged(self):
         self.write("DVD/SLUS_201.74.Rumble Racing.iso")

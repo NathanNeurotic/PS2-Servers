@@ -504,6 +504,13 @@ class GameIndex(object):
             return None
         rel_dir = os.path.relpath(directory, self.root_dir).replace(os.sep, "/")
         rel_path = advertised if rel_dir == "." else rel_dir + "/" + advertised
+        try:
+            rel_path.encode("utf-8")
+        except UnicodeEncodeError:
+            # An undecodable POSIX name arrives as lone surrogates; RiptOPL
+            # could not request it, and encoding it later would abort the scan.
+            _log("  skipped (name is not valid UTF-8; rename it): {!a}".format(name))
+            return None
         startup, title = parse_startup(stem)
         conventional = bool(_STARTUP_RE.match(stem))
         if not conventional:

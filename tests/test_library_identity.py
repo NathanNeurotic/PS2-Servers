@@ -92,12 +92,19 @@ class LibraryIdentityTests(unittest.TestCase):
         row = self.db.list_games()[0]
         self.assertEqual(row["identity_status"], "verified")
         self.assertNotIn("identity_fingerprint", row)
+        self.assertEqual(len(self.db.list_games("sles_543")), 0)
+        found_by_id = len(self.db.list_games("slus_123.45"))
         path.write_bytes(iso_fixture(boot="SLES_543.21"))
         before = path.stat()
         os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
         for current in (self.db.list_games()[0], self.db.get_game(row["id"])):
             self.assertEqual(current["identity_status"], "stale")
             self.assertEqual((current["detected_disc_id"], current["boot_path"]), ("", ""))
+        # The search no longer finds the row by the withheld ID alone.
+        self.assertNotIn("slus_123.45", (row["title"] + row["disc_id"]).lower())
+        self.assertEqual(found_by_id, 1)
+        self.assertEqual(self.db.list_games("slus_123.45"), [])
+        self.assertEqual(len(self.db.list_games(row["title"])), 1)
         exported = Path(self.tmp.name) / "export.json"
         self.db.export_json(exported)
         self.assertNotIn("SLUS_123.45", exported.read_text(encoding="utf-8"))

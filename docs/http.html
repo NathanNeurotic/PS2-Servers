@@ -129,7 +129,7 @@ In the pinned Docmine17 HTTP client, leaving <b>Port</b> set to <code>0</code> c
 <h3 id="riptopl-path-aware">RiptOPL path-aware game list</h3>
 <p>RiptOPL reads a richer, four-field <code>games.csv</code>. On the HTTP card set <b>Game list format</b> to <b>RiptOPL path-aware</b> (headless: <code>--catalog-profile riptopl-path-aware</code>). Keep <b>Legacy flat</b> for Docmine17's OPL-HTTP. Neither client can read the other's list, so the choice is explicit.</p>
 <ul>
-  <li>Each game is listed and requested by its real folder path (<code>DVD/Game.iso</code>), with every field quoted. Names with commas, quotes or a leading <code>#</code> work.</li>
+  <li>Each game is listed and requested by its real folder path (<code>DVD/Game.iso</code>), with the STARTUP, title and path fields quoted (<code>MEDIA</code> is a bare <code>CD</code> or <code>DVD</code>). Names with commas, quotes or a leading <code>#</code> work.</li>
   <li>There is no bare-filename fallback. A request that does not name a listed path gets a 404 instead of a different disc.</li>
   <li>The list holds up to 262144 bytes and 2048 rows, the limits in RiptOPL's own client. Rows RiptOPL would refuse, and later rows that reuse a STARTUP id, are left out and named in the server log.</li>
   <li>ZSO is decoded to a virtual <code>.iso</code> when <code>lz4</code> is installed, because RiptOPL cannot launch ZSO over HTTP.</li>
