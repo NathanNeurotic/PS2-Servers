@@ -1,0 +1,109 @@
+/*
+ * Host probe for Neutrino's SMB driver against smb2_server.
+ *
+ * The SMB client is usmb2, built from the pinned upstream files with the same
+ * feature flags Neutrino's iop/smb/Makefile uses, minus the PS2 TCP stack: the
+ * host build talks through BSD sockets instead. smb_open() and smb_pread() are
+ * pasted in from Neutrino's pinned iop/smb/src/smb_conn.c, and main() makes the
+ * calls smb_ioman.c makes: connect, tree connect, open, size, read, close.
+ *
+ * The limits of the PS2 build that the socket build does not have on its own
+ * (a 2132-byte reassembly buffer and the 512-byte usmb2 buffer) are enforced by
+ * checks run.py splices into the pinned usmb2.c and ntlm.c.
+ *
+ * Usage: probe PORT USER PASS SHARE PATH OUTFILE
+ * Prints one status word; the exit code says which step failed.
+ */
+#define _GNU_SOURCE
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "usmb2.h"
+
+int usmb2_test_port;
+struct usmb2_context *smb;
+
+/* ---- pasted from Neutrino iop/smb/src/smb_conn.c (pinned) ---- */
+@UPSTREAM_SMB_IO@
+/* ---- end of pasted code ---- */
+
+int main(int argc, char *argv[])
+{
+        static char user[32], pass[32], share[64];
+        char unc[96];
+        uint8_t *fid;
+        int64_t size, pos;
+        FILE *out;
+        static uint8_t buf[64 * 1024];
+        /* Request sizes the loader produces: whole sectors, odd tails. */
+        static const int sizes[] = { 2048, 16 * 2048, 4096 + 7, 1, 2047, 2049, 32768 };
+        int i = 0, rc;
+
+        if (argc != 7) {
+                fprintf(stderr, "usage: probe PORT USER PASS SHARE PATH OUTFILE\n");
+                return 2;
+        }
+        usmb2_test_port = atoi(argv[1]);
+        /* The same truncation smb_args() applies to the module args. */
+        strncpy(user, argv[2], sizeof(user) - 1);
+        strncpy(pass, argv[3], sizeof(pass) - 1);
+        strncpy(share, argv[4], sizeof(share) - 1);
+
+        smb = usmb2_init_context(htonl(0x7f000001), user, pass);
+        if (smb == NULL) {
+                printf("LOGIN_FAILED\n");
+                return 3;
+        }
+        sprintf(unc, "\\\\127.0.0.1\\%s", share);
+        if (usmb2_treeconnect(smb, unc)) {
+                printf("TREE_FAILED\n");
+                return 4;
+        }
+        fid = smb_open(argv[5]);
+        if (fid == NULL) {
+                printf("OPEN_FAILED\n");
+                return 5;
+        }
+        if (usmb2_size(smb, fid) == -1) {
+                printf("SIZE_FAILED\n");
+                return 6;
+        }
+        /* smb_ioman.c takes all 64 bits of EndOfFile from here. */
+        memcpy(&size, &smb->buf[16], 8);
+
+        out = fopen(argv[6], "wb");
+        if (out == NULL) {
+                return 2;
+        }
+        for (pos = 0; pos < size; i++) {
+                /* smb_dev_read() clamps to the size it was told at open. */
+                int n = sizes[i % (sizeof(sizes) / sizeof(sizes[0]))];
+                if (n > size - pos) {
+                        n = (int)(size - pos);
+                }
+                rc = smb_pread(fid, buf, n, (uint64_t)pos);
+                if (rc <= 0) {
+                        printf("READ_FAILED at %lld\n", (long long)pos);
+                        fclose(out);
+                        return 7;
+                }
+                fwrite(buf, 1, rc, out);
+                pos += rc;
+        }
+        fclose(out);
+
+        /* A read that starts at the end must fail rather than hang or loop. */
+        rc = smb_pread(fid, buf, 2048, (uint64_t)size);
+        if (rc > 0) {
+                printf("READ_PAST_END_RETURNED %d\n", rc);
+                return 8;
+        }
+
+        usmb2_close(smb, fid);
+        printf("OK %lld\n", (long long)size);
+        return 0;
+}
