@@ -89,9 +89,17 @@ class HttpWiringTests(unittest.TestCase):
         self.lines = []
         self.stats = ss.SessionStats("http", emit=self.lines.append)
         self.server = hs.Ps2HTTPServer(("127.0.0.1", 0), hs.GameIndex(tmp.name), stats=self.stats)
+        # Track handler threads so _finish() can join them: a client can read the
+        # whole body before its handler records the read.
+        self.server.daemon_threads = False
+        self.server.block_on_close = True
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
+
+    def _finish(self):
+        self.server.shutdown()
+        self.server.server_close()  # joins every handler thread (block_on_close)
 
     def _get(self, conn, path, headers=None):
         conn.request("GET", path, headers=headers or {})
@@ -108,7 +116,7 @@ class HttpWiringTests(unittest.TestCase):
         self.assertEqual(self._get(conn, "/missing.iso"), 404)
         self.assertEqual(self._get(conn, "/SLUS_201.74.Game.iso", {"Range": "bytes=9000-9001"}), 416)
         conn.close()
-        self.server.shutdown()
+        self._finish()
         fields = ss.parse_line(self.stats.stop()[0])
         self.assertEqual((fields["list"], fields["open"], fields["read"], fields["bytes"], fields["errors"]),
                          (1, 1, 2, 8192, 2))
@@ -119,7 +127,7 @@ class HttpWiringTests(unittest.TestCase):
         self.assertEqual(self._get(conn, "/SLUS_201.74.Game.iso",
                                    {"Range": "bytes=0-4095", "Connection": "close"}), 206)
         conn.close()
-        self.server.shutdown()
+        self._finish()
         fields = ss.parse_line(self.stats.stop()[0])
         self.assertEqual((fields["read"], fields["bytes"], fields["errors"]), (1, 4096, 0))
 
