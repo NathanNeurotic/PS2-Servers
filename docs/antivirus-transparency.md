@@ -10,7 +10,7 @@ information is published at [falsepositives.html](falsepositives.html).
 
 ## Vendor and release identity
 
-- Vendor / company name: [NathanNeurotic](https://github.com/NathanNeurotic)
+- Vendor / company name: NathanNeurotic
 - Product name: PS2 Servers
 - Windows executable: PS2Servers.exe
 - Windows release package: PS2Servers-windows-x64.zip
