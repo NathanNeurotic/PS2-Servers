@@ -8,8 +8,9 @@ a directory, read a file back byte for byte, write one, and delete it.
 What this cannot prove, stated plainly: both sides are this project's reading of
 the protocol, so a structure that is wrong in the same way twice still passes.
 The layouts are pinned against MS-SMB2's stated StructureSize values in
-test_smb2_wire.py for that reason, and the only complete answer is a real client
--- which needs port 445, so it cannot run here.
+test_smb2_wire.py for that reason, and the only complete answer is a real client.
+One real client does run in CI: conformance/integration/neutrino_smb/run.py
+builds Neutrino's usmb2 from pinned sources and reads a game through this server.
 
 Run:  python -m unittest tests.test_smb2_server -v
 """
@@ -81,10 +82,14 @@ class Client:
         return struct.unpack_from("<H", reply, 4)[0]
 
     def session_setup(self, user, password, anonymous=False,
-                      domain="WORKGROUP"):
+                      domain="WORKGROUP", wrap=False):
+        """Log in. wrap=True sends both NTLM messages inside SPNEGO, as
+        Windows does; the default sends them bare, as Neutrino's usmb2 does."""
         negotiate = (spnego.NTLMSSP_SIGNATURE + struct.pack("<I", 1)
                      + struct.pack("<I", spnego.CHALLENGE_FLAGS)
                      + struct.pack("<HHI", 0, 0, 32) + struct.pack("<HHI", 0, 0, 32))
+        if wrap:
+            negotiate = _spnego_wrap(negotiate)
         head, reply = self._session_blob(negotiate)
         assert head.status == wire.STATUS_MORE_PROCESSING_REQUIRED, (
             "expected a challenge, got 0x%08X" % head.status)
@@ -108,7 +113,11 @@ class Client:
             ntowf = ntowfv2(password, user, domain)
             proof = ntlmv2_proof(ntowf, challenge, blob_body)
             auth = self._authenticate(proof + blob_body, user, domain)
-        head, _ = self._session_blob(auth)
+        if wrap:
+            # The client's NegTokenResp: responseToken [2] OCTET STRING.
+            tlv = spnego._tlv
+            auth = tlv(0xa1, tlv(0x30, tlv(0xa2, tlv(0x04, auth))))
+        head, self.last_session_reply = self._session_blob(auth)
         return head.status
 
     def _authenticate(self, nt_response, user, domain):
@@ -765,3 +774,166 @@ class DomainHandling(ServerFixture):
                 c.negotiate()
                 self.assertEqual(c.session_setup(USER, "wrong", domain=domain),
                                  wire.STATUS_LOGON_FAILURE)
+
+
+def _spnego_wrap(ntlm):
+    """A NegTokenInit carrying an NTLMSSP mechToken, as Windows sends it."""
+    tlv = spnego._tlv
+    inner = tlv(0x30, tlv(0xa0, tlv(0x30, spnego.NTLMSSP_OID))
+                + tlv(0xa2, tlv(0x04, ntlm)))
+    return tlv(0x60, spnego.SPNEGO_OID + tlv(0xa0, inner))
+
+
+_NTLM_NEGOTIATE = (spnego.NTLMSSP_SIGNATURE + struct.pack("<I", 1)
+                   + struct.pack("<I", spnego.CHALLENGE_FLAGS)
+                   + struct.pack("<HHI", 0, 0, 32) + struct.pack("<HHI", 0, 0, 32))
+
+
+def _av_ids(challenge_msg):
+    info_len, _max, info_at = struct.unpack_from("<HHI", challenge_msg, 40)
+    info = challenge_msg[info_at:info_at + info_len]
+    ids, at = [], 0
+    while at + 4 <= len(info):
+        kind, length = struct.unpack_from("<HH", info, at)
+        ids.append(kind)
+        at += 4 + length
+    return ids
+
+
+class SecurityBufferFraming(ServerFixture):
+    """The challenge comes back in the framing the client used.
+
+    Neutrino's SMB driver (usmb2) sends bare NTLMSSP and reads the CHALLENGE
+    from the first byte of the security buffer, with no DER parser. Wrapped in
+    SPNEGO it read DER as NTLMSSP and overran its 512-byte buffer building the
+    reply -- conformance/integration/neutrino_smb/run.py reproduces that with
+    the real client.
+    """
+
+    def _challenge_blob(self, token):
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        c.negotiate()
+        head, reply = c._session_blob(token)
+        self.assertEqual(head.status, wire.STATUS_MORE_PROCESSING_REQUIRED)
+        off, length = struct.unpack_from("<HH", reply, 4)
+        return reply[off - wire.HEADER_SIZE:off - wire.HEADER_SIZE + length]
+
+    def test_bare_ntlmssp_gets_a_bare_compact_challenge(self):
+        blob = self._challenge_blob(_NTLM_NEGOTIATE)
+        self.assertTrue(blob.startswith(spnego.NTLMSSP_SIGNATURE))
+        self.assertEqual(spnego.message_type(blob), spnego.NTLM_CHALLENGE)
+        # Only the two pairs MS-NLMP requires, then the terminator.
+        self.assertEqual(_av_ids(blob), [spnego.MSV_AV_NB_DOMAIN_NAME,
+                                         spnego.MSV_AV_NB_COMPUTER_NAME,
+                                         spnego.MSV_AV_EOL])
+
+    def test_spnego_gets_spnego_with_the_full_target_info(self):
+        blob = self._challenge_blob(_spnego_wrap(_NTLM_NEGOTIATE))
+        self.assertEqual(blob[0], 0xa1, "expected a NegTokenResp")
+        challenge = spnego.extract_ntlm(blob)
+        self.assertIn(spnego.MSV_AV_DNS_COMPUTER_NAME, _av_ids(challenge))
+
+    def test_bare_ntlmssp_login_completes_with_no_security_buffer(self):
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        c.negotiate()
+        self.assertEqual(c.session_setup(USER, PASSWORD), 0)
+        # SecurityBufferOffset and SecurityBufferLength both zero.
+        self.assertEqual(struct.unpack_from("<HH", c.last_session_reply, 4), (0, 0))
+
+    def test_spnego_login_completes_with_accept_completed(self):
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        c.negotiate()
+        self.assertEqual(c.session_setup(USER, PASSWORD, wrap=True), 0)
+        reply = c.last_session_reply
+        off, length = struct.unpack_from("<HH", reply, 4)
+        self.assertNotEqual((off, length), (0, 0))
+        blob = reply[off - wire.HEADER_SIZE:off - wire.HEADER_SIZE + length]
+        self.assertEqual(blob, spnego.neg_token_resp(spnego.ACCEPT_COMPLETED))
+
+    def test_a_bare_challenge_fits_a_512_byte_client(self):
+        """usmb2 reads everything after the SMB2 header into 512 bytes."""
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        c.negotiate()
+        _head, reply = c._session_blob(_NTLM_NEGOTIATE)
+        self.assertLessEqual(len(reply), 512)
+
+
+class NeutrinoClientShape(ServerFixture):
+    """What Neutrino's usmb2 asks for, short of running it (run.py does that)."""
+
+    def test_a_30_only_client_gets_30(self):
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        self.assertEqual(c.negotiate((wire.DIALECT_300,)), wire.DIALECT_300)
+
+    def test_share_names_match_without_regard_to_case(self):
+        c = Client(self.port)
+        self.addCleanup(c.close)
+        c.negotiate()
+        self.assertEqual(c.session_setup(USER, PASSWORD), 0)
+        self.assertEqual(c.tree_connect("GAMES"), 0)
+
+    def test_smbv2_mode_refuses_a_30_only_client_and_says_why(self):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        server = Smb2Server({"games": Share("games", self.dir)},
+                            Authenticator({USER: PASSWORD}),
+                            ceiling=wire.CEILING_SMB2)
+        port = server.listen("127.0.0.1", 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.stop)
+        c = Client(port)
+        self.addCleanup(c.close)
+        body = struct.pack("<HHHHI16sQ", 36, 1, 0, 0, 0, b"\x00" * 16, 0)
+        body += struct.pack("<H", wire.DIALECT_300)
+        captured = io.StringIO()
+        with redirect_stdout(captured), redirect_stderr(captured):
+            head, _ = c.call(wire.CMD_NEGOTIATE, body)
+        self.assertEqual(head.status, wire.STATUS_NOT_SUPPORTED)
+        self.assertIn("SMBv3", captured.getvalue())
+
+
+class ShareNameCollisions(unittest.TestCase):
+    def test_names_that_differ_only_by_case_are_refused(self):
+        d = tempfile.mkdtemp(prefix="ps2smb2-")
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        with self.assertRaises(ValueError):
+            Smb2Server({"games": Share("games", d), "GAMES": Share("GAMES", d)},
+                       Authenticator.open())
+
+
+class BindHint(unittest.TestCase):
+    def _err(self, code):
+        return OSError(code, os.strerror(code))
+
+    def test_only_445_gets_advice(self):
+        from smb2_server import bind_hint
+        import errno
+        self.assertEqual(bind_hint(1445, self._err(errno.EACCES)), "")
+
+    def test_445_in_use_and_445_denied_get_different_advice(self):
+        from smb2_server import bind_hint
+        import errno
+        in_use = bind_hint(445, self._err(errno.EADDRINUSE))
+        denied = bind_hint(445, self._err(errno.EACCES))
+        self.assertTrue(in_use and denied)
+        self.assertNotEqual(in_use, denied)
+
+    def test_445_in_use_names_each_platforms_own_owner(self):
+        import errno
+        from unittest import mock
+        import smb2_server as mod
+        err = self._err(errno.EADDRINUSE)
+        with mock.patch.object(mod.os, "name", "posix"), \
+                mock.patch.object(mod.sys, "platform", "linux"):
+            self.assertIn("systemctl stop smbd", mod.bind_hint(445, err))
+        with mock.patch.object(mod.os, "name", "posix"), \
+                mock.patch.object(mod.sys, "platform", "darwin"):
+            mac = mod.bind_hint(445, err)
+        self.assertIn("File Sharing", mac)
+        self.assertNotIn("systemctl", mac)

@@ -196,8 +196,9 @@ _SMB2_FIELDS = [
     Field("games_folder", "Games folder", "folder", required=True,
           help="Root folder containing OPL structure (DVD/ and CD/ subfolders with your .iso games). Browsable from a modern PC, unlike SMBv1."),
     Field("port", "Port", "port", default=1445, advanced=False,
-          help="TCP port (default 1445). Windows itself can only connect on "
-               "445 -- use the advanced option below for that."),
+          help="TCP port (default 1445). Windows itself and Neutrino's SMB "
+               "driver can only connect on 445 -- on Windows use the advanced "
+               "option below; on Linux/macOS set 445 here and run with sudo."),
     Field("username", "Username", "text", default="ps2",
           help="The name to enter on the client. SMB2/SMB3 clients require a "
                "login; there is no guest mode as in SMBv1."),
@@ -405,7 +406,8 @@ SMBV3 = ServerDef(
     key="smbv3",
     label="SMBv3 server",
     blurb="The same server negotiating up to SMB 3.0.2. Pick this unless a "
-          "client refuses it and needs SMB2.",
+          "client refuses it and needs SMB2. Neutrino's SMB driver needs this "
+          "mode on port 445.",
     runtime="python",
     default_port=1445,
     share_hint="games",

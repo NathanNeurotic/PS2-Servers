@@ -45,6 +45,38 @@ The launcher saves credentials in its per-user configuration. Treat that file
 as private, and avoid including credentials or the full saved configuration in
 bug reports. Authentication is not a reason to expose the server to the internet.
 
+## Neutrino SMB
+
+[Neutrino](https://github.com/rickgaiser/neutrino)'s SMB driver
+([ps2max32/neutrino PR #236](https://github.com/ps2max32/neutrino/pull/236), by
+Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg); not merged yet)
+reads games with [usmb2](https://github.com/sahlberg/usmb2). It needs:
+
+| Setting | Value |
+|---|---|
+| Card | **SMBv3**. usmb2 offers only SMB 3.0, so the SMBv2 card refuses it and says so in the log. |
+| Port | **445**. The driver has no port setting. |
+| Share | The share name the loader passes (`share=` in `bsd-smb.toml`). The cards serve `games`; case does not matter. |
+| Login | The card's username and password, or a **No password** card with any user, such as Neutrino's default `guest` and a blank password. Neutrino keeps at most 31 bytes of the user name and of the password, and hashes the password byte by byte rather than as UTF-8, so use plain ASCII for both, 31 characters or fewer. |
+
+Port 445 on each OS:
+
+- **Windows:** tick **Take port 445 (admin)** and run as Administrator. Windows
+  file sharing is paused while the card runs and restarted when it stops.
+- **Linux / macOS:** set the port to 445 and run with `sudo`, and stop Samba
+  (`smbd`) first if it is installed. On Linux you can instead keep the card on
+  1445 unprivileged and forward 445 to it:
+  `sudo iptables -t nat -A PREROUTING -p tcp --dport 445 -j REDIRECT --to-ports 1445`.
+  Stopping the card does not remove that rule; remove it yourself (for example
+  before starting Samba again):
+  `sudo iptables -t nat -D PREROUTING -p tcp --dport 445 -j REDIRECT --to-ports 1445`.
+
+The server answers a client that sends bare NTLMSSP with a bare NTLMSSP
+challenge, as usmb2 requires. `conformance/integration/neutrino_smb/run.py`
+builds the pinned usmb2 and Neutrino PR #236 sources on the host and reads a
+game through them; it runs in CI. That is a host check of the protocol, not a
+test on a PS2.
+
 ## Writes and testing
 
 Writable is the default for the bare servers. The OS account running the server
