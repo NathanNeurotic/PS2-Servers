@@ -40,6 +40,8 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
+import session_stats
+
 # Compressed-image support is shared with UDPFS rather than reimplemented. The
 # extension table there carries a standing warning against second copies: a
 # hardcoded list at a call site is exactly how CHD files silently vanished from
@@ -828,6 +830,7 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
         BaseHTTPRequestHandler.setup(self)
         self._cached_path = None
         self._cached_handle = None
+        self._stat("connections")
         try:
             self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except OSError:
@@ -842,8 +845,14 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
             # reset here is routine rather than a fault worth a traceback.
             pass
 
+    def _stat(self, kind, count=1):
+        stats = self.server.stats
+        if stats is not None:
+            stats.record(self.client_address[0], kind, count)
+
     def _close_cached(self):
         if self._cached_handle is not None:
+            self._stat("close")
             try:
                 self._cached_handle.close()
             except Exception:
@@ -864,6 +873,7 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
             handle = open(entry.path, "rb")
         self._cached_path = entry.path
         self._cached_handle = handle
+        self._stat("open")
         return handle
 
     def log_message(self, fmt, *args):
@@ -885,13 +895,16 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
         try:
             path = self._normalised_path()
             if path is None:
+                self._stat("errors")
                 self._send_short(400, "Bad Request")
                 return
             if self._is_games_csv(path):
+                self._stat("list")
                 self._serve_games_csv(body)
                 return
             entry = self.server.index.lookup(path)
             if entry is None:
+                self._stat("errors")
                 self.log_error("404 %s", path)
                 self._send_short(404, "Not Found")
                 return
@@ -903,10 +916,13 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
                                  self.headers.get("Range") or path)
             self._serve_game(entry, body)
         except (ConnectionResetError, BrokenPipeError):
+            self._stat("errors")
             self.close_connection = True
         except _RangeError:
+            self._stat("errors")
             self._send_short(416, "Requested Range Not Satisfiable")
         except OSError as exc:
+            self._stat("errors")
             self.log_error("%s", exc)
             self._send_short(500, "Internal Server Error")
 
@@ -998,6 +1014,7 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             if body:
                 self._send_bytes(entry, 0, total)
+                self._count_read(total)
             return
 
         start, end = span
@@ -1012,6 +1029,13 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if body:
             self._send_bytes(entry, start, length)
+            self._count_read(length)
+
+    def _count_read(self, length):
+        # A dropped send sets close_connection; only whole responses count.
+        if self.server.stats is not None and not self.close_connection:
+            self._stat("read")
+            self._stat("bytes", length)
 
     def _send_bytes(self, entry, offset, length):
         """Write exactly `length` bytes starting at `offset`.
@@ -1068,9 +1092,10 @@ class Ps2HTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, index, verbose=False):
+    def __init__(self, address, index, verbose=False, stats=None):
         self.index = index
         self.verbose = verbose
+        self.stats = stats
         ThreadingHTTPServer.__init__(self, address, Ps2HTTPRequestHandler)
 
     def handle_error(self, request, client_address):
@@ -1121,6 +1146,10 @@ def build_parser():
                              "folders deep".format(RECURSIVE_MAX_DEPTH))
     parser.add_argument("--verbose", action="store_true",
                         help="Log every request")
+    parser.add_argument("--session-summary", action="store_true",
+                        help="Print one SESSION line per console when it goes quiet "
+                             "for {:g} s or the server stops (no per-request logging)"
+                             .format(session_stats.IDLE_SECONDS))
     return parser
 
 
@@ -1145,9 +1174,10 @@ def main(argv=None):
     index = GameIndex(root, enable_compression=enable_compression,
                       profile=args.catalog_profile, recursive=args.recursive)
 
+    stats = session_stats.SessionStats("http", emit=_log) if args.session_summary else None
     try:
         server = Ps2HTTPServer((args.bind, args.port), index,
-                               verbose=args.verbose)
+                               verbose=args.verbose, stats=stats)
     except OSError as exc:
         _log("Cannot bind {}:{} -- {}".format(args.bind or "0.0.0.0",
                                               args.port, exc))
@@ -1164,12 +1194,19 @@ def main(argv=None):
         _log("In OPL: Network -> Protocol HTTP, Port {}. Set the Port explicitly; "
              "OPL's game-list and in-game defaults disagree when it is left at 0."
              .format(args.port))
+    expiry_stop = threading.Event()
+    if stats is not None:
+        threading.Thread(target=stats.run_expiry, args=(expiry_stop,), daemon=True,
+                         name="http-session-expiry").start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         _log("Stopping.")
     finally:
+        expiry_stop.set()
         server.server_close()
+        if stats is not None:
+            stats.stop()
     return 0
 
 

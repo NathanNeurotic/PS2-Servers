@@ -502,6 +502,8 @@ def _http_argv(v):
         args += ["--no-compression"]
     if v.get("verbose"):
         args += ["--verbose"]
+    if v.get("session_summary"):
+        args += ["--session-summary"]
     return args
 
 
@@ -546,6 +548,11 @@ HTTP = ServerDef(
         Field("bind", "Bind address", "text", default="", advanced=True,
               help="Interface to bind (blank = all)."),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+        Field("session_summary", "Session summary", "bool", default=False, advanced=True,
+              help="Print one SESSION line per console when it goes quiet for a "
+                   "minute or the server stops: list, open, read and error counts. "
+                   "Nothing is logged per request. Counts are what the PC served, "
+                   "not proof a game ran."),
     ],
     _build_argv=_http_argv,
 )
