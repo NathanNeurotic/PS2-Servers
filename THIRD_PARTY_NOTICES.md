@@ -6,7 +6,7 @@ Technical reference reviewed for UDPFS behavior, deployment targets, and the
 optional CHD/CGO build boundary. No source file is copied into the current PS2
 Servers Edge implementation. Notice is retained proactively for provenance.
 
-Copyright 2026 Ivan V (pcm720)
+Copyright 2026 Ivan V ([pcm720](https://github.com/pcm720))
 
 Redistribution and use in source and binary forms, with or without modification,
 are permitted provided that the following conditions are met:

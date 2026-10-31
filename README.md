@@ -463,7 +463,7 @@ PS2 Servers builds on the following projects and contributions:
   [`udpbd_server/udpbd_server.py`](udpbd_server/udpbd_server.py) is our independent
   Python re‑implementation of his UDPBD v2 protocol. The network game‑loading here
   simply does not exist without his work — thank you.
-- **pcm720 — [@pcm720](https://github.com/pcm720)** — a core Neutrino contributor and
+- **pcm720 — [@pcm720](https://github.com/pcm720)** — a core [Neutrino](https://github.com/rickgaiser/neutrino) contributor and
   author of **[udpfsd](https://github.com/pcm720/udpfsd)**, a UDPFS server written in
   Go. If you'd rather not run our Python UDPFS server — e.g. on a low‑end device, or
   to sidestep the antivirus heuristics that hit unsigned packaged Python builds —
@@ -474,7 +474,7 @@ PS2 Servers builds on the following projects and contributions:
 - **El_isra — [@israpps](https://github.com/israpps)** — maintains the canonical
   **[udpbd-server](https://github.com/israpps/udpbd-server)** on GitHub (Rick's code,
   with CI), which is the reference we ported from.
-- **Alex Parrado** — the Windows port of udpbd-server.
+- **[Alex Parrado](https://github.com/parrado)** — the Windows port of udpbd-server.
 - **Aerosol** — tested UDPFS across Linux, Windows, and direct connections, identified the
   explicit-bind workaround, and isolated a shared-config line-ending issue affecting VMC paths.
 - **[Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)** and the

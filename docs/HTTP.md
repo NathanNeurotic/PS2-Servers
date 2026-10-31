@@ -6,8 +6,8 @@ an OPL fork that streams ISOs with HTTP Range requests instead of SMB. There are
 shares, no logins, and no SMB dialects to negotiate. This is the Desktop/Core
 HTTP game server, not Edge’s `webui` management port.
 
-The exact client limits below refer to the pinned Docmine17 revision in the
-conformance harness. Other HTTP loaders have different limits. RiptOPL also
+The exact client limits below refer to the pinned [Docmine17](https://github.com/Docmine17) revision in the
+conformance harness. Other HTTP loaders have different limits. [RiptOPL](https://github.com/NathanNeurotic/RiptOPL) also
 implements HTTP, but its own [HTTP guide](https://github.com/NathanNeurotic/Open-PS2-Loader/blob/rebuild/main/docs/HTTP.md)
 is authoritative for its settings and restrictions: it rejects client-side ZSO
 and uses Network Start Mode plus Network → Protocol. PS2-Servers host conformance
@@ -34,7 +34,7 @@ does not establish RiptOPL gameplay.
 
 3. Save and reload the game list.
 
-**Set the Port explicitly.** In the pinned Docmine17 client, if Port is left
+**Set the Port explicitly.** In the pinned [Docmine17](https://github.com/Docmine17) client, if Port is left
 at `0`, its game-list code falls
 back to 8080 while its in-game driver falls back to 1100 — so the list loads from one
 port and the games stream from another, and the symptom is a game list that appears
