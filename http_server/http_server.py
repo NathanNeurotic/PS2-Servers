@@ -1065,6 +1065,7 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
                 # and desynchronise every later read, so the only safe move is
                 # to drop the connection. The driver reconnects and retries,
                 # which is recoverable; a duplicated range is not.
+                self._stat("errors")
                 self.close_connection = True
                 return
             if sent == length:
