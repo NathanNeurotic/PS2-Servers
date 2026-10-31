@@ -89,6 +89,9 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
 
 1. Add source-pinned capability/acceptance matrix and representative fixtures for
    all #249 cases, including PS1 VCD/Ember descriptors without mixing PS2 identity.
+   DONE in the follow-up PR: [COMPANION-CAPABILITY-MATRIX.md](COMPANION-CAPABILITY-MATRIX.md),
+   `tests/library_fixtures.py`, `tests/test_companion_fixtures.py` and the read-only
+   `launcher/ps1_index.py`. Host-tested only.
 2. DONE in this PR (commit "feat(http): add an opt-in RiptOPL path-aware game
    list"): `--catalog-profile riptopl-path-aware`, opt-in `--recursive`, a
    Desktop card choice, `conformance/integration/riptopl_http` against the C
