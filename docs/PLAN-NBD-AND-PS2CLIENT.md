@@ -38,7 +38,7 @@ have no consumer — OPL ships the server. The thing with real value is a PC-sid
 NBD **client**, and specifically a Windows-native one, because today Windows
 users need WSL or Ceph-for-Windows to reach their own PS2 drive.
 
-**DECIDED (Ripto, 2026-09-05): the target is a PC-side NBD client speaking to
+**DECIDED ([Ripto](https://github.com/NathanNeurotic), 2026-09-05): the target is a PC-side NBD client speaking to
 OPL's lwNBD export.** Not a server, and not a role toggle — see "Shouldn't NBD
 go both ways?" below for why, and for what to do so the server half stays cheap
 to add if that ever changes.
@@ -91,7 +91,7 @@ Three facts from `loadLwnbdSvr()` that shape the client:
 
 ### "Shouldn't NBD go both ways?" — two questions, one answer each
 
-Asked by Ripto 2026-09-05, and worth recording because the answer is not
+Asked by [Ripto](https://github.com/NathanNeurotic) 2026-09-05, and worth recording because the answer is not
 obvious.
 
 **Read vs write is bidirectional, and that IS a toggle.** One NBD connection
@@ -155,7 +155,7 @@ drive as a disk" is off the table for a Python launcher. Three options:
 The existing `ServerCard` is built around Start/Stop on a long-running listener.
 An NBD client run is a **transfer with a beginning, an end, and progress**. Do
 not force it into the server card without asking; a progress bar and a
-byte/percentage readout are the honest UI. Raise this with Ripto.
+byte/percentage readout are the honest UI. Raise this with [Ripto](https://github.com/NathanNeurotic).
 
 Suggested fields: PS2 IP (required), Port (10809), Export (a dropdown filled
 from `NBD_OPT_LIST`), Destination file, Read-only (default **on** — this is
@@ -218,7 +218,7 @@ Three supporting rules, without which the gates are theatre:
    read-only, say so up front instead of failing partway through a write.
 
 A verify-after-write pass (read the export back and compare) is the honest
-fourth thing, but do not let it hold up the read path — mention it to Ripto and
+fourth thing, but do not let it hold up the read path — mention it to [Ripto](https://github.com/NathanNeurotic) and
 scope it separately.
 
 ---
@@ -267,7 +267,7 @@ This is what makes file management on the console's own drives possible
 
 ### The interactive terminal is new UI work
 
-Ripto asked for this tab to have its own interactive terminal. **Nothing in the
+[Ripto](https://github.com/NathanNeurotic) asked for this tab to have its own interactive terminal. **Nothing in the
 launcher can do that today:**
 
 - `LauncherApp._append_log()` (`launcher/gui.py:2460`) writes into a `Text`

@@ -31,7 +31,7 @@ job/session abstraction rather than being forced into that lifecycle.
 
 “OPLServer” here means [elmariolo/OPL-Server](https://github.com/elmariolo/OPL-Server).
 If another product was intended, add its exact source/build to the compatibility
-matrix before claiming parity. Docmine17's OPLServer4Linux wraps this application
+matrix before claiming parity. [Docmine17](https://github.com/Docmine17)'s OPLServer4Linux wraps this application
 through Wine; it does not establish a separate network protocol.
 
 ## Source evidence and pins

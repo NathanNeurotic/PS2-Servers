@@ -66,7 +66,7 @@
   </nav>
   <main class="content">
 <h1>HTTP Game Streaming</h1>
-<p class="lead">HTTP Mode serves your PS2 game collection over standard plain HTTP for compatible OPL forks (such as <b>Docmine17's Open-PS2-Loader-HTTP</b> and <b>RiptOPL</b>). By replacing SMB with standard HTTP Range requests, it eliminates complex network authentication entirely.</p>
+<p class="lead">HTTP Mode serves your PS2 game collection over standard plain HTTP for compatible OPL forks (such as <b><a href="https://github.com/Docmine17">Docmine17</a>'s <a href="https://github.com/Docmine17/Open-PS2-Loader-HTTP">Open-PS2-Loader-HTTP</a></b> and <b><a href="https://github.com/NathanNeurotic/RiptOPL">RiptOPL</a></b>). By replacing SMB with standard HTTP Range requests, it eliminates complex network authentication entirely.</p>
 
 <div class="callout warn"><div class="h">Experimental Status</div>
 HTTP game serving is host-tested and functional across compliant clients. Because loader support across diverse hardware remains under active community development, report findings to the project issue tracker.
@@ -115,7 +115,7 @@ HTTP game serving is host-tested and functional across compliant clients. Becaus
 </div>
 
 <div class="callout danger"><div class="h">Critical Client Quirk: Set Port Explicitly</div>
-In the pinned Docmine17 HTTP client, leaving <b>Port</b> set to <code>0</code> causes its game-list loader to default to port <b>8080</b> while its in-game driver defaults to port <b>1100</b>! The result is that your game list populates, but selecting a game produces an immediate black screen. <b>Always set Port to 1100 explicitly in your loader.</b>
+In the pinned <a href="https://github.com/Docmine17">Docmine17</a> HTTP client, leaving <b>Port</b> set to <code>0</code> causes its game-list loader to default to port <b>8080</b> while its in-game driver defaults to port <b>1100</b>! The result is that your game list populates, but selecting a game produces an immediate black screen. <b>Always set Port to 1100 explicitly in your loader.</b>
 </div>
 
 <h2 id="architecture">2. What the Server Serves</h2>

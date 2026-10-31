@@ -7,9 +7,9 @@ Linux and macOS.
 
 ## Credit
 
-The UDPBD protocol and the original server are by **Rick Gaiser**.
+The UDPBD protocol and the original server are by **[Rick Gaiser](https://github.com/rickgaiser)**.
 Upstream: https://github.com/israpps/udpbd-server (brought to GitHub with CI by
-El_isra; Windows port by Alex Parrado). UDPBD has largely been superseded by
+[El_isra](https://github.com/israpps); Windows port by [Alex Parrado](https://github.com/parrado)). UDPBD has largely been superseded by
 UDPFS (also Rick Gaiser) — see `../udpfs_server/`.
 
 This port was written from the protocol definitions (`udpbd.h`) and documented
@@ -23,7 +23,7 @@ their code.
 - `selftest.py` — protocol self-test (no PS2 needed): `python selftest.py`.
 
 The launcher uses **only** the pure-Python server above. A legacy Windows
-`udpbd-server.exe` (Alex Parrado's build) was previously vendored here but was
+`udpbd-server.exe` ([Alex Parrado](https://github.com/parrado)'s build) was previously vendored here but was
 never used by the launcher and has been removed to keep the repository free of
 unsigned third-party binaries. If you specifically want that native build, it
 remains available upstream at https://github.com/israpps/udpbd-server (note it is

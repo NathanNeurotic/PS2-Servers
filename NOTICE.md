@@ -10,7 +10,7 @@ Unless otherwise stated, PS2 Servers is licensed under the **Academic Free
 License 3.0 (AFL-3.0)**. See [`LICENSE`](LICENSE).
 
 AFL-3.0 was selected because this repository redistributes upstream UDPFS code
-from Rick Gaiser's Neutrino project, which is licensed under AFL-3.0.
+from [Rick Gaiser](https://github.com/rickgaiser)'s [Neutrino](https://github.com/rickgaiser/neutrino) project, which is licensed under AFL-3.0.
 
 ## Original PS2 Servers code
 
@@ -30,7 +30,7 @@ was copied into that implementation.
 
 ### UDPFS server from Neutrino
 
-`udpfs_server/udpfs_server.py` is redistributed from Rick Gaiser's Neutrino host
+`udpfs_server/udpfs_server.py` is redistributed from [Rick Gaiser](https://github.com/rickgaiser)'s [Neutrino](https://github.com/rickgaiser/neutrino) host
 tools:
 
 - upstream project: https://github.com/rickgaiser/neutrino
@@ -47,15 +47,15 @@ upstream-derived engine has local extensions; Desktop/Core launches it through
 ### UDPBD
 
 `udpbd_server/udpbd_server.py` is a pure-Python implementation of the UDPBD v2
-protocol. The protocol and original server are by Rick Gaiser. The GitHub-hosted
-reference repository is maintained by El_isra:
+protocol. The protocol and original server are by [Rick Gaiser](https://github.com/rickgaiser). The GitHub-hosted
+reference repository is maintained by [El_isra](https://github.com/israpps):
 
 - reference repository: https://github.com/israpps/udpbd-server
 - note: the reference repository did not contain a license file when reviewed;
   this repository does not redistribute its source code in the Python UDPBD
   implementation.
 
-A legacy `udpbd-server.exe` Windows binary (Alex Parrado's build of the upstream
+A legacy `udpbd-server.exe` Windows binary ([Alex Parrado](https://github.com/parrado)'s build of the upstream
 project) was previously vendored in this repository but was never used by the
 launcher. It has been removed so the source tree carries no unsigned third-party
 executables; the launcher uses only the pure-Python UDPBD implementation. The
