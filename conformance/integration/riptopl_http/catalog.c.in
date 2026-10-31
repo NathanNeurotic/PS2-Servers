@@ -1,0 +1,85 @@
+/* Host driver for RiptOPL's pinned games.csv parser and request-path builder.
+ *
+ * httpcatalog.c is compiled unchanged. httpBuildPath is static inside
+ * httpsupport.c, so it is extracted verbatim between fixed anchors. The line
+ * loop below mirrors httpParseCatalog (CR strip, blank/comment skip, first
+ * STARTUP wins); that loop needs the menu's game structures, so it is not
+ * extracted.
+ *
+ * Usage: catalog <base path> < games.csv
+ * Prints one ROW line per accepted row and one REJECT line per refused row.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "include/httpcatalog.h"
+
+#define HTTP_BASE_PATH_MAX 64
+#define HTTP_CLIENT_STREAM_URI_MAX 768
+#define ROWS_MAX 4096
+
+typedef struct
+{
+    int ip[4];
+    int port;
+    char base[HTTP_BASE_PATH_MAX];
+} http_endpoint_t;
+
+@UPSTREAM_BUILD_PATH@
+
+static char startups[ROWS_MAX][HTTP_CAT_STARTUP_MAX + 1];
+
+int main(int argc, char **argv)
+{
+    static char buf[1 << 20];
+    http_endpoint_t endpoint;
+    size_t len = fread(buf, 1, sizeof(buf) - 1, stdin);
+    char *line = buf, *end;
+    int rows = 0, lineNo = 0;
+
+    memset(&endpoint, 0, sizeof(endpoint));
+    snprintf(endpoint.base, sizeof(endpoint.base), "%s", argc > 1 ? argv[1] : "/");
+    httpNormalizeBasePath(endpoint.base, sizeof(endpoint.base));
+    buf[len] = '\0';
+    end = buf + len;
+
+    while (line < end) {
+        char *nl = line, *trimmed;
+        lineNo++;
+        while (nl < end && *nl != '\n')
+            nl++;
+        *nl = '\0';
+        if (nl > line && *(nl - 1) == '\r')
+            *(nl - 1) = '\0';
+
+        trimmed = httpCatalogSkipBlankOrComment(line);
+        if (trimmed != NULL) {
+            http_catalog_row_t row;
+            char uri[HTTP_CLIENT_STREAM_URI_MAX];
+            int i, err = httpCatalogParseLine(trimmed, &row), duplicate = 0;
+
+            if (err != HTTP_CAT_OK) {
+                printf("REJECT\t%d\t%d\n", lineNo, err);
+            } else {
+                for (i = 0; i < rows; i++) {
+                    if (!strcmp(startups[i], row.startup))
+                        duplicate = 1;
+                }
+                if (duplicate) {
+                    printf("DUPLICATE\t%d\t%s\n", lineNo, row.startup);
+                } else if (rows >= ROWS_MAX) {
+                    printf("REJECT\t%d\tlimit\n", lineNo);
+                } else if (!httpBuildPath(&endpoint, row.path, uri, sizeof(uri))) {
+                    printf("REJECT\t%d\turi\n", lineNo);
+                } else {
+                    snprintf(startups[rows++], sizeof(startups[0]), "%s", row.startup);
+                    printf("ROW\t%s\t%s\t%d\t%s\t%d\t%s\n", row.startup, row.title,
+                           row.media, row.path, row.supported, uri);
+                }
+            }
+        }
+        line = nl + 1;
+    }
+    return 0;
+}

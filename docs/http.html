@@ -126,6 +126,18 @@ In the pinned Docmine17 HTTP client, leaving <b>Port</b> set to <code>0</code> c
   <li><b>Bare Game ISOs:</b> Disc images are flattened at the web root (e.g. <code>GET /SLUS_201.74.Rumble Racing.iso</code>) to accommodate the console driver's hardcoded root path.</li>
 </ul>
 
+<h3 id="riptopl-path-aware">RiptOPL path-aware game list</h3>
+<p>RiptOPL reads a richer, four-field <code>games.csv</code>. On the HTTP card set <b>Game list format</b> to <b>RiptOPL path-aware</b> (headless: <code>--catalog-profile riptopl-path-aware</code>). Keep <b>Legacy flat</b> for Docmine17's OPL-HTTP. Neither client can read the other's list, so the choice is explicit.</p>
+<ul>
+  <li>Each game is listed and requested by its real folder path (<code>DVD/Game.iso</code>), with every field quoted. Names with commas, quotes or a leading <code>#</code> work.</li>
+  <li>There is no bare-filename fallback. A request that does not name a listed path gets a 404 instead of a different disc.</li>
+  <li>The list holds up to 262144 bytes and 2048 rows, the limits in RiptOPL's own client. Rows RiptOPL would refuse, and later rows that reuse a STARTUP id, are left out and named in the server log.</li>
+  <li>ZSO is decoded to a virtual <code>.iso</code> when <code>lz4</code> is installed, because RiptOPL cannot launch ZSO over HTTP.</li>
+  <li>Opt-in <b>Include nested folders</b> (<code>--recursive</code>) lists games up to 4 folders deep. It does not follow linked folders.</li>
+  <li>In RiptOPL, set the base path to <code>/</code> or leave it blank.</li>
+</ul>
+<p><b>Not tested on a PS2 yet.</b> The list is checked against RiptOPL's compiled parser on a PC only.</p>
+
 <h2 id="compression">3. Compressed Format Streaming</h2>
 <table data-sortable>
   <thead>
@@ -155,7 +167,7 @@ In the pinned Docmine17 HTTP client, leaving <b>Port</b> set to <code>0</code> c
   <li><b>Read-Only Protocol:</b> The HTTP client driver does not support WebDAV or HTTP PUT; Virtual Memory Cards (VMC) cannot be written over HTTP. Saves require a physical memory card.</li>
   <li><b>No Authentication:</b> Never expose port 1100 to the public internet; keep it strictly on your local private subnet.</li>
   <li><b>Single-Layer Discs Only:</b> The client driver hardcodes <code>layer1_start = 0</code>, so dual-layer DVD9 titles will not transition beyond the layer break.</li>
-  <li><b>Game List Buffer Limit:</b> The console's receive buffer for <code>games.csv</code> is 8192 bytes (approximately 80&ndash;100 titles). Libraries exceeding this count should be categorized or curated.</li>
+  <li><b>Game List Buffer Limit:</b> Docmine17's client has an 8192-byte receive buffer for <code>games.csv</code> (approximately 80&ndash;100 titles). Larger libraries need curating. The RiptOPL path-aware list allows 262144 bytes.</li>
 </ul>
 
 </main>

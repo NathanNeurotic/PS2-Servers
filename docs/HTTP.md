@@ -11,7 +11,8 @@ conformance harness. Other HTTP loaders have different limits. RiptOPL also
 implements HTTP, but its own [HTTP guide](https://github.com/NathanNeurotic/Open-PS2-Loader/blob/rebuild/main/docs/HTTP.md)
 is authoritative for its settings and restrictions: it rejects client-side ZSO
 and uses Network Start Mode plus Network → Protocol. PS2-Servers host conformance
-does not establish RiptOPL gameplay.
+does not establish RiptOPL gameplay. RiptOPL reads its own four-field list; see
+[RiptOPL path-aware game list](#riptopl-path-aware-game-list).
 
 > **Status: experimental.** This integration has no recorded console validation
 > in the conformance evidence. The pinned client's range-read
@@ -104,6 +105,64 @@ byte ranges of a raw file, so those only work if the server decodes them. Untick
   profile has no CSV escaping. Keep names within the server’s encoded-name limit.
 - Filenames must stay under 160 characters; longer ones are skipped, because the
   console truncates them and the resulting request would 404 with no clue why.
+
+## RiptOPL path-aware game list
+
+RiptOPL reads a different, richer `games.csv` than Docmine17's client. Choose
+**Game list format → RiptOPL path-aware** on the HTTP card, or pass
+`--catalog-profile riptopl-path-aware` to `ps2servers serve http`. Leave it on
+**Legacy flat** for Docmine17's OPL-HTTP: neither client can read the other's list,
+and the server cannot tell them apart on the wire, so the choice is explicit.
+
+| | Legacy flat (default) | RiptOPL path-aware |
+|---|---|---|
+| Row | `STARTUP,FILENAME.iso,MEDIA` | `"STARTUP","Title","MEDIA","DVD/Path/To/Game.iso"`, every field quoted |
+| Game requested as | `/<filename>` at the web root | `<base path>/<relative path>`, percent-encoded |
+| Commas, quotes, a leading `#` | file skipped | listed |
+| List size | 8192 bytes | 262144 bytes and 2048 rows |
+| ZSO | passed through; the console decodes it | decoded here to a virtual `.iso` when `lz4` is installed, because RiptOPL refuses to launch ZSO over HTTP; without `lz4` it lists as `.zso` and RiptOPL says it cannot launch it |
+| Nested folders | no | opt-in **Include nested folders** (`--recursive`), up to 4 levels |
+
+In RiptOPL set Network → Protocol to HTTP, the same **Port** as the card, and the
+base path to `/` (or leave it blank). The server ignores any leading base-path
+folders, so `/PS2/DVD/Game.iso` also finds `DVD/Game.iso`.
+
+Rules this profile follows, all taken from RiptOPL's own parser and request
+builder (`src/httpcatalog.c`, `src/httpsupport.c` at Open-PS2-Loader
+`bfebafdd`):
+
+- A row's path is authoritative, so there is **no bare-filename fallback**. A
+  request that does not name a listed path is a 404.
+- Matching is exact. A case-insensitive match is used only when it names exactly
+  one file, because a case-sensitive disk can hold `Game.iso` and `GAME.iso` side
+  by side.
+- RiptOPL keeps only the first row for each STARTUP id, so later games with the
+  same id are left out of the list. The server log names each one. Rows are sorted
+  by path. Renaming the file to its real disc id is the fix.
+- A row RiptOPL would refuse is left out and logged instead of silently missing on
+  the console. That covers a STARTUP over 12 bytes, a title over 160 bytes, a path
+  over 255 bytes or too long once URL-encoded, control characters, and a name that
+  starts or ends with a blank. Long titles are shortened on a UTF-8 boundary
+  instead of being dropped.
+- Past 2048 rows or 262144 bytes the server drops whole rows and logs the count.
+  RiptOPL rejects the whole list when either limit is exceeded.
+- Nested scanning does not enter linked folders or junctions, and it skips files
+  that link outside the games folder. Media comes from a top-level `CD/` or `DVD/`
+  folder, and anything else falls back to the size heuristic.
+
+Run the RiptOPL check from the repository root with Python 3 and GCC:
+
+```
+python conformance/integration/riptopl_http/run.py
+```
+
+It fetches the pinned parser and path builder, verifies their SHA256, compiles
+them on the host, and checks that the server's limits match the client's. It then
+parses a generated list, with commas, quotes, `#`, `%`, non-ASCII names, a nested
+game, a CSO and a duplicate id, under two base paths, and fetches every accepted
+row at the URI RiptOPL builds. The skip and `--require-upstream` rules are the same
+as for the Docmine17 runner. **This is PC-hosted evidence only.** No console has
+listed, launched or played a game through this profile yet.
 
 ## Direct PS2-to-PC link
 
