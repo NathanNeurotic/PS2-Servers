@@ -16,7 +16,7 @@ level yet. **Every row is NOT TESTED on a PS2.**
 | Source | Commit | Used for |
 |---|---|---|
 | PS2-Servers `main` | `d862ffa` (#261 merge) | Everything in this file |
-| [RiptOPL](https://github.com/NathanNeurotic/RiptOPL) `rebuild/main` | `4ec6c68` (2026-10-31) | Ember layout (`include/cuesupport.h`, `src/sources/cuesupport.cpp`), PNG/CLUT alpha (`src/gfx/textures.cpp`) |
+| [RiptOPL](https://github.com/NathanNeurotic/RiptOPL) `rebuild/main` | `4ec6c68` (2026-10-31) | Ember layout (`include/cuesupport.h`, `src/sources/cuesupport.cpp`), PNG/CLUT alpha (`src/gfx/textures.cpp`), network keys (`include/config.h`, `include/opl.h`, `src/app/settingsio.cpp`) |
 | [Open-PS2-Loader](https://github.com/NathanNeurotic/Open-PS2-Loader) | `bfebafdd` | HTTP list parser `src/httpcatalog.c`, compiled by `conformance/integration/riptopl_http/run.py` |
 | [PS2TVCRT / FastLoader](https://github.com/NathanNeurotic/PS2TVCRT) README | `1844bd1` | Feature targets only (its claims are not hardware results) |
 
@@ -58,7 +58,8 @@ descriptors. The cases are:
 | Missing-art download from a URL the user supplies | partial | `launcher/art_fetch.py`, Library **Download missing art** | `test_art_fetch.py`, `test_library_panel.py` | host-tested; one art type per run, no per-image preview |
 | Built-in artwork provider | intentionally missing | none | none | No provider with clear rights to retail box art was found |
 | Library root bound to server profiles (opt-in, with preview and rollback) | missing | none | none | none |
-| Guided setup and exportable RiptOPL settings | partial | `launcher/setup_guide.py` (read-only text guide) | `test_setup_guide.py` | host-tested; no export |
+| Guided setup | present | `launcher/setup_guide.py` (read-only text guide) | `test_setup_guide.py` | host-tested |
+| RiptOPL settings export (versioned, read-only) | present | `launcher/riptopl_profile.py`, `launcher/riptopl_export.py`, ABOUT **RiptOPL settings…** | `test_riptopl_profile.py` | host-tested; keys checked against RiptOPL `settingsio.cpp`; SMB2/SMB3 refused |
 | Cross-service session telemetry | partial | Per-protocol logs; UDPFS stall report (`test_udpfs_stall_report.py`) | per protocol | host-tested per protocol; no combined view |
 | Offline VMC creation | intentionally missing for now | none | none | RiptOPL already creates per-game VMCs; HTTP and virtual exFAT stay read-only |
 

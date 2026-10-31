@@ -134,6 +134,12 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
    start rollback. Export only verified versioned RiptOPL keys with backup/import
    instructions; do not guess PS2 IP or expose credentials. Preserve independent
    roots and correct protocol/port distinctions from the issue.
+   PARTLY DONE in the follow-up PR: ABOUT -> **RiptOPL settings…** shows a card's
+   values as RiptOPL settings (`launcher/riptopl_profile.py`, profile version 1,
+   keys checked against RiptOPL rebuild/main 4ec6c68). Read-only: copy or save a
+   text file. No PS2 address or password is exported, SMB2/SMB3 cards are refused
+   (the rebuild speaks SMBv1 only), and UDPFS/UDPBD port mismatches are warned.
+   Still open: binding a library root to cards with preview and rollback.
 5. Inventory existing protocol diagnostics, then add opt-in bounded cross-service
    session aggregation/view. Avoid per-packet logging, synchronous DB writes and
    throughput changes. Track discovery/list/open/read/write/close/errors distinctly;
