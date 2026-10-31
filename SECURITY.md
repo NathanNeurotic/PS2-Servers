@@ -86,6 +86,26 @@ Get-NetFirewallRule -DisplayName "PS2 Servers - *" -ErrorAction SilentlyContinue
   Remove-NetFirewallRule
 ```
 
+## Disc ID inspection
+
+The optional Desktop library's **Inspect disc IDs** action reads ISO/CSO/ZSO/CHD boot
+metadata without changing images or starting a network service. Directory work,
+logical reads, image size and boot-path depth are bounded. Descendant links and
+Windows reparse points are rejected under the selected root; concurrent tree
+changes are not an OS sandbox. Compressed inspection additionally caps index,
+block and total decode sizes, and uses a two-block cache. CHD uses the existing
+native libchdr decoder after header/geometry checks; cancellation cannot interrupt
+an in-progress native call. Cached IDs describe a filesystem observation, not a
+content checksum or proof of console bootability. See
+[library indexing and inspection](docs/LIBRARY-INDEXING.md) for the exact limits.
+
+The optional achievements-library shared view uses a read-only, rooted catalogue
+adapter with bounded metadata enumeration and no image-payload reads. It creates
+no missing general catalogue and performs no schema migration. Stale inspected
+serials are withheld, duplicate paths are reported without collapsing files, and
+RA compatibility continues to use its independent hash/account workflow. Browsing
+shared metadata performs no account request or service configuration change.
+
 ## Release verification
 
 Release assets are built by GitHub Actions from this public repository.

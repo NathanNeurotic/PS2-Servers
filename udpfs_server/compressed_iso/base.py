@@ -28,7 +28,7 @@ class CompressedFileWrapper:
     DEFAULT_BLOCK_SIZE = 2048
     DEFAULT_CACHE_SIZE = 32  # Number of blocks to cache
     
-    def __init__(self, file_path: str, cache_size: int = None):
+    def __init__(self, file_path: str, cache_size: int = None, *, strict=False, cancel=None):
         """Initialize the compressed file wrapper.
         
         Args:
@@ -44,6 +44,11 @@ class CompressedFileWrapper:
         self._cache: OrderedDict = OrderedDict()
         self._cache_size = cache_size or self.DEFAULT_CACHE_SIZE
         self._num_blocks = 0
+        self._strict = strict
+        self._cancel = cancel
+        self._decoded = 0
+        if strict:
+            self._cache_size = 2
         
     def read(self, size: int) -> bytes:
         """Read from current position, decompressing blocks as needed.
@@ -135,13 +140,25 @@ class CompressedFileWrapper:
         Returns:
             Decompressed block data (block_size bytes)
         """
+        if self._strict:
+            if self._cancel is not None and self._cancel.is_set():
+                raise InterruptedError('Compressed inspection cancelled.')
         if block_idx in self._cache:
             # Move to end (most recently used)
             self._cache.move_to_end(block_idx)
             return self._cache[block_idx]
         
         # Decompress and cache
+        if self._strict:
+            from .limits import MAX_DECODE, InspectionLimit
+            self._decoded += self.block_size
+            if self._decoded > MAX_DECODE:
+                raise InspectionLimit('Compressed inspection decode budget exhausted.')
         data = self._decompress_block(block_idx)
+        if self._strict:
+            expected = min(self.block_size, self.uncompressed_size - block_idx * self.block_size)
+            if not expected <= len(data) <= self.block_size:
+                raise ValueError('Compressed block has an invalid decoded length.')
         
         # Evict oldest if cache is full
         while len(self._cache) >= self._cache_size:

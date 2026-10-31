@@ -115,6 +115,7 @@ INCLUDE_MODULES = [
     "launcher.raw_storage",
     "launcher.virtual_exfat",
     "argparse",
+    "array",
     "collections",
     "ctypes",
     "dataclasses",

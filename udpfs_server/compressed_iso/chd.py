@@ -219,10 +219,10 @@ class ChdFileWrapper(CompressedFileWrapper):
     Supports both HD-type (lzma/zlib/huff/flac) and CD-type (cdlz/cdzl/cdfl) CHDs.
     """
 
-    def __init__(self, file_path: str, cache_size: int = None):
+    def __init__(self, file_path: str, cache_size: int = None, *, strict=False, cancel=None):
         if not LIBCHDR_AVAILABLE:
             raise ImportError(_libchdr_error)
-        super().__init__(file_path, cache_size)
+        super().__init__(file_path, cache_size, strict=strict, cancel=cancel)
         self._chd_handle      = None
         self._is_cd_format    = False
         self._frames_per_hunk = 0
@@ -237,6 +237,9 @@ class ChdFileWrapper(CompressedFileWrapper):
         # Parse CHD v5 header bytes directly — format is stable across libchdr versions
         self.file.seek(0)
         header = self.file.read(124)
+        if self._strict:
+            from .limits import chd_header
+            chd_header(header)
         if len(header) < 64 or header[0:8] != b'MComprHD':
             raise ValueError("Not a valid CHD file")
         version = struct.unpack('>I', header[12:16])[0]

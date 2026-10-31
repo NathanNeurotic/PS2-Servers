@@ -224,18 +224,76 @@ class Library:
         return added, skipped, str(backup)
 
     @staticmethod
-    def installed(folder):
+    def installed(folder, *, index=None, cancel=None):
         root = Path(folder)
+        if index is not None:
+            from .library_catalog import _scan_path, require_directory
+            root = require_directory(root)
+            if index.root and Path(index.root) != root:
+                raise ValueError("The shared index belongs to a different games root.")
         result = []
         for kind, extensions in MEDIA_TYPES.items():
+            if cancel is not None and cancel.is_set():
+                break
             directory = root / kind
+            if index is not None:
+                try:
+                    _scan_path(root, directory)
+                except (OSError, ValueError):
+                    continue
             if directory.is_dir():
                 for path in directory.iterdir():
+                    if cancel is not None and cancel.is_set():
+                        break
+                    if index is not None:
+                        try:
+                            _scan_path(root, path)
+                        except (OSError, ValueError):
+                            continue
                     if path.is_file() and path.suffix.lower() in extensions:
                         stat = path.stat()
                         result.append({"path": str(path), "name": path.name, "kind": kind, "size": stat.st_size,
                                        "stamp": "{}:{}:{}".format(stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)})
-        return sorted(result, key=lambda row: row["name"].casefold())
+        if index is not None:
+            base = root
+            available = {}
+            for row in result:
+                try:
+                    path = _scan_path(base, Path(row["path"]).absolute())
+                except (OSError, ValueError):
+                    continue
+                available[str(path)] = dict(row, path=str(path))
+            for game in index.games:
+                if cancel is not None and cancel.is_set():
+                    break
+                if Path(game.root) != base:
+                    raise ValueError("The shared index belongs to a different games root.")
+                try:
+                    _scan_path(base, Path(game.image_path))
+                except (OSError, ValueError):
+                    continue
+                # Keep general catalogue row IDs/serials out of the independent
+                # achievement catalogue namespace. RA matching still hashes the
+                # image; a BOOT2 serial is never treated as an RA game ID.
+                available[game.image_path] = {
+                    "path": game.image_path, "name": Path(game.image_path).name,
+                    "kind": game.media, "size": game.size, "stamp": game.stamp,
+                    "source_id": game.source_id, "relative_path": game.relative_path,
+                    "catalog_title": game.title, "boot_serial": game.boot_serial,
+                    "identity_status": game.identity_status, "layout": game.layout,
+                }
+            result = list(available.values())
+        return sorted(result, key=lambda row: (row.get("catalog_title", row["name"]).casefold(), row["path"]))
+
+    def shared_index(self, folder, *, cancel=None):
+        """Optional one-way metadata view; never open/migrate the other DB writable."""
+        from .library_index import read_index
+        try:
+            return read_index(self.directory / "catalog.sqlite3", folder, cancel=cancel)
+        except FileNotFoundError as exc:
+            if not (self.directory / "catalog.sqlite3").exists():
+                raise ValueError("Scan your games in the Desktop LIBRARY tab before enabling its shared index.") from exc
+            raise
 
     @staticmethod
     def install(source, folder, kind="DVD", name=None, cancel=None, progress=None):

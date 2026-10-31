@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 import struct
 import tempfile
+import threading
 import unittest
 from unittest import mock
 import zlib
@@ -140,6 +141,37 @@ class CompressionHashTests(unittest.TestCase):
                                side_effect=lambda p: FakeChdStream(self.iso_data)) as reader:
             self.assertEqual(hash_image(path), self.expected)
         reader.assert_called_once_with(path)
+
+    def test_real_chd_strict_sparse_reads_limits_and_cancellation(self):
+        path = Path(__file__).parent / "fixtures/ra_hash/synthetic-dvd.chd"
+        cancel = threading.Event()
+        try:
+            reader = compressed.open_compressed(path, strict=True, cancel=cancel)
+        except ImportError:
+            self.skipTest("build the pinned libchdr to exercise the real decoder")
+        from compressed_iso import limits
+        try:
+            for offset in (16 * SECTOR - 3, 21 * SECTOR, 0, len(self.iso_data) - 5):
+                reader.seek(offset)
+                self.assertEqual(reader.read(53), self.iso_data[offset:offset + 53])
+                self.assertLessEqual(len(reader._cache), 2)
+            cancel.set()
+            reader.seek(0)
+            with self.assertRaises(InterruptedError):
+                reader.read(1)
+        finally:
+            reader.close()
+        self.assertIsNone(reader._chd_handle)
+        self.assertIsNone(reader.file)
+        reader = compressed.open_compressed(path, strict=True)
+        try:
+            with mock.patch.object(limits, 'MAX_DECODE', reader.block_size):
+                self.assertEqual(reader.read(1), self.iso_data[:1])
+                reader.seek(reader.block_size)
+                with self.assertRaises(limits.InspectionLimit):
+                    reader.read(1)
+        finally:
+            reader.close()
 
     def test_compressed_compatibility_uses_same_ps2_catalogue_hash(self):
         path = self.root / "My PS2 Game.cso"

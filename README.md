@@ -24,7 +24,7 @@ does not add that protocol to a PS2 application.
 | UDPFS | UDP 62966 (`0xF5F6`), plus an automatic data port | File and optional block-image serving for UDPFS clients such as NHDDL/Neutrino and RiptOPL; automatic Standard/Modulo negotiation |
 | SMBv1 | TCP 1025 in Desktop; 1111 in Core/standalone | Guest file sharing for OPL and other SMBv1 clients |
 | SMBv2 / SMBv3 | TCP 1445 | Authenticated file sharing for clients that support these dialects; not a replacement for SMBv1 in an SMBv1-only loader |
-| HTTP | TCP 1100 | Experimental game streaming for compatible OPL HTTP clients; see [HTTP setup and validation](docs/HTTP.md) |
+| HTTP | TCP 1100 | Experimental game streaming for compatible OPL HTTP clients, with an opt-in RiptOPL path-aware game list; see [HTTP setup and validation](docs/HTTP.md) |
 | UDPBD | UDP 48573 (`0xBDBD`) | Image, raw drive or virtual exFAT folder served as a block device |
 
 Desktop has six game/file server cards plus [RetroAchievements](docs/RETROACHIEVEMENTS.md)
@@ -42,6 +42,19 @@ also supports JSON metadata import/export and online SQLite backups.
 
 The **Import images** action supports a batch of local image files (up to 1,000 per run),
 records skips without overwriting any destination, and leaves original images intact.
+After scanning, **Inspect disc IDs** reads ISO/CSO/ZSO/CHD boot metadata in a background
+worker and shows an **Inspected ID** alongside the existing **Manual ID**. It checks
+`SYSTEM.CNF` and the referenced ELF signature, flags conflicting IDs, and preserves
+custom titles, IDs and notes. Double-click a row or press Enter for the result.
+Compressed inspection uses bounded sparse reads and requires the format's decoder. See the
+[library indexing and inspection guide](docs/LIBRARY-INDEXING.md) for limits and caching.
+**Review indexed paths** lists duplicate basenames, inspected serials, and
+case/Unicode path collisions without changing files. In RetroAchievements'
+**Manage game library**, opt into **Include Desktop indexed paths and titles**
+to reuse these PS2 paths and custom titles, including nested images. The shared
+view reads the Desktop catalogue without merging either database; RA support
+still requires the image hash. Existing top-level PS2 images and PS1 POPS VCDs
+remain available. Indexing a nested path does not establish console launch support.
 The **Repair ART** action converts legacy `_COV.jpg`, `_ICO.jpg`, `_LAB.jpg`,
 `_COV3.jpg` (or JPEG/WebP/BMP equivalents) to 8-bit indexed PNG without deleting
 sources or replacing existing PNGs. The current companion does not queue remote
@@ -368,7 +381,8 @@ CSO uses the standard library, ZSO needs `lz4`, and CHD needs native `libchdr`.
 Release builds bundle the optional libraries; use the **Compression support**
 panel to check the running build. Missing libraries leave those UDPFS formats
 unadvertised. Edge supports CSO/ZSO but not CHD. HTTP decodes CHD/CSO on the
-server and passes ZSO through for the client to decode.
+server. Its default flat game list passes ZSO through for the client to decode;
+the RiptOPL path-aware list decodes ZSO too, because RiptOPL cannot.
 
 See [compression dependencies](docs/optional-compression-dependencies.md).
 

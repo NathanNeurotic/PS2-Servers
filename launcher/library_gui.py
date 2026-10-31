@@ -21,9 +21,13 @@ class LibraryWindow(tk.Toplevel):
         self.events = queue.Queue()
         self.cancel = threading.Event()
         self.busy = False
+        self._refresh_pending = False
+        self._loading_rows = False
+        self._closed = False
         settings = config.load()
         self.folder = tk.StringVar(value=folder or settings.get("game_library_folder", ""))
         self.query = tk.StringVar()
+        self.use_index = tk.BooleanVar(value=settings.get("game_library_use_index") is True)
         self.view_options = ("Installed images", "Recognized achievement sets",
                              "Unmatched image hashes", "Catalogue")
         saved_view = settings.get("game_library_view")
@@ -49,6 +53,9 @@ class LibraryWindow(tk.Toplevel):
                                    values=("DVD", "CD", "POPS"), state="readonly", width=8)
         destination.grid(row=1, column=1, sticky="w", padx=4)
         destination.bind("<<ComboboxSelected>>", lambda _event: self.save_preferences())
+        ttk.Checkbutton(header, text="Include Desktop indexed paths and titles",
+                        variable=self.use_index, command=self.on_view_changed).grid(
+                            row=2, column=0, columnspan=3, sticky="w", padx=4, pady=(0, 4))
 
         search = ttk.Frame(self, padding=(10, 0))
         search.grid(row=1, column=0, sticky="ew")
@@ -106,13 +113,14 @@ class LibraryWindow(tk.Toplevel):
         self.cover.grid(row=1, column=0, sticky="w", pady=4)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.refresh()
-        self.after(100, self.poll)
+        self._poll_after = self.after(100, self.poll)
 
     def save_preferences(self):
         """Save local choices without discarding main-window settings."""
         settings = config.load()
         settings["game_library_view"] = self.view.get()
         settings["game_library_kind"] = self.kind.get()
+        settings["game_library_use_index"] = bool(self.use_index.get())
         try:
             config.save(settings)
         except OSError:
@@ -143,41 +151,64 @@ class LibraryWindow(tk.Toplevel):
         return [self.rows[key] for key in self.tree.selection() if key in self.rows]
 
     def refresh(self):
-        self.tree.delete(*self.tree.get_children())
-        self.rows.clear()
-        try:
-            if self.view.get() == "Catalogue":
-                rows = self.library.games(self.query.get(), limit=500)
-                for row in rows:
-                    key = "catalog-" + str(row["id"])
-                    self.rows[key] = row
-                    self.tree.insert("", "end", iid=key, values=(row["title"], row["game_id"], ""))
-            elif self.folder.get().strip():
-                with self.library.connect() as db:
-                    states = {row["path"]: dict(row) for row in db.execute("SELECT * FROM image_status")}
-                for row in self.library.installed(self.game_folder()):
-                    if self.query.get().casefold() not in row["name"].casefold():
-                        continue
-                    key = "image-" + str(len(self.rows))
-                    self.rows[key] = row
-                    state = states.get(str(Path(row["path"]).resolve()), {})
-                    if state.get("stamp") != row["stamp"]:
-                        state = {}
-                    if self.view.get() == "Recognized achievement sets" and state.get("status") != "compatible":
-                        continue
-                    if self.view.get() == "Unmatched image hashes" and state.get("status") != "unmatched":
-                        continue
-                    label = state.get("status", "Not checked")
-                    if label == "compatible":
-                        label = "{} achievements".format(state["count"])
-                    self.tree.insert("", "end", iid=key, values=(row["name"], "{} · {:.1f} GB".format(row["kind"], row["size"] / 1e9), label))
-        except (OSError, ValueError) as error:
-            self.status.set(str(error))
+        if self.busy:
+            self._refresh_pending = True
+            if self._loading_rows:
+                self.cancel.set()
+            return
+        self._refresh_pending = False
+        # Capture Tk state here; all database/filesystem work stays in the worker.
+        view, query, folder, use_index = self.view.get(), self.query.get(), self.folder.get().strip(), self.use_index.get()
+        self.run(lambda: self.load_rows(view, query, folder, use_index), loading_rows=True)
 
-    def run(self, operation):
+    def load_rows(self, view, query, folder, use_index):
+        result = []
+        if view == "Catalogue":
+            for row in self.library.games(query, limit=500):
+                result.append(("catalog-" + str(row["id"]), row, (row["title"], row["game_id"], "")))
+            return result, "Catalogue loaded."
+        if not folder:
+            return [], "Choose the same OPL folder used by your game server."
+        if not Path(folder).is_dir():
+            raise ValueError("Choose an existing OPL games folder first.")
+        index = self.library.shared_index(folder, cancel=self.cancel) if use_index else None
+        images = self.library.installed(folder, index=index, cancel=self.cancel)
+        with self.library.connect() as db:
+            return self._image_rows(db, images, index, view, query)
+
+    def _image_rows(self, db, images, index, view, query):
+        result = []
+        for row in images:
+            if self.cancel.is_set():
+                break
+            title = row.get("catalog_title", row["name"])
+            relative = row.get("relative_path", row["name"])
+            if query.casefold() not in (title + " " + relative).casefold():
+                continue
+            cached = db.execute("SELECT * FROM image_status WHERE path=? AND stamp=?",
+                                (str(Path(row["path"]).resolve()), row["stamp"])).fetchone()
+            state = dict(cached) if cached else {}
+            if view == "Recognized achievement sets" and state.get("status") != "compatible":
+                continue
+            if view == "Unmatched image hashes" and state.get("status") != "unmatched":
+                continue
+            label = state.get("status", "Not checked")
+            if label == "compatible":
+                label = "{} achievements".format(state["count"])
+            details = "{} · {:.1f} GB".format(row["kind"], row["size"] / 1e9)
+            if "source_id" in row:
+                details += " · " + relative + " · " + (row["boot_serial"] or "unknown ID") + " / " + row["identity_status"]
+            result.append(("image-" + str(len(result)), row, (title, details, label)))
+        message = str(index) + " Console launch support is not established by indexing." if index is not None else "Images loaded."
+        if self.cancel.is_set():
+            message = "Image refresh cancelled; partial results shown."
+        return result[:2000], message
+
+    def run(self, operation, *, loading_rows=False):
         if self.busy:
             return
         self.busy = True
+        self._loading_rows = loading_rows
         self.cancel.clear()
         for button in self.actions:
             button.configure(state="disabled")
@@ -185,7 +216,7 @@ class LibraryWindow(tk.Toplevel):
 
         def worker():
             try:
-                self.events.put(("done", operation()))
+                self.events.put(("rows" if loading_rows else "done", operation()))
             except Exception as error:
                 # Network exception text can contain a private download URL.
                 from urllib.error import URLError
@@ -206,15 +237,29 @@ class LibraryWindow(tk.Toplevel):
                 kind, text = self.events.get_nowait()
             except queue.Empty:
                 break
-            self.status.set(str(text))
-            if kind in ("done", "error"):
+            if kind != "rows":
+                self.status.set(str(text))
+            if kind in ("done", "error", "rows"):
                 self.busy = False
                 for button in self.actions:
                     button.configure(state="normal")
-                self.refresh()
-                if kind == "error":
+                stale = self._loading_rows and self._refresh_pending
+                if kind == "error" and self._loading_rows and not stale:
+                    self.tree.delete(*self.tree.get_children())
+                    self.rows.clear()
+                if kind == "rows" and not stale:
+                    self.tree.delete(*self.tree.get_children())
+                    entries, message = text
+                    self.rows = {key: row for key, row, values in entries}
+                    for key, row, values in entries:
+                        self.tree.insert("", "end", iid=key, values=values)
+                    self.status.set(message + f" {len(entries)} displayed (max 2000).")
+                if kind == "done" or self._refresh_pending:
+                    self.refresh()
+                if kind == "error" and not stale:
                     messagebox.showerror("Game library", text, parent=self)
-        self.after(100, self.poll)
+        if not self._closed:
+            self._poll_after = self.after(100, self.poll)
 
     def import_image(self):
         try:
@@ -325,13 +370,26 @@ class LibraryWindow(tk.Toplevel):
                     self.cover.configure(text="Cover needs repair")
 
     def scan(self):
+        if self.busy:
+            return
         try:
-            images = [row for row in self.selected() if "path" in row] or self.library.installed(self.game_folder())
+            chosen = [row for row in self.selected() if "path" in row]
+            folder, use_index = self.folder.get().strip(), self.use_index.get()
+            if not chosen and not folder:
+                raise ValueError("Choose an existing OPL games folder first.")
         except ValueError as error:
             messagebox.showerror("Compatibility", str(error), parent=self)
             return
 
         def operation():
+            images = chosen
+            if not images:
+                index = self.library.shared_index(folder, cancel=self.cancel) if use_index else None
+                images = self.library.installed(folder, index=index, cancel=self.cancel)
+            if self.cancel.is_set():
+                return "Compatibility scan cancelled."
+            if not images:
+                return "No installed images to check."
             scanner = Compatibility(self.library)
             count = 0
             for index, row in enumerate(images):
@@ -371,4 +429,6 @@ class LibraryWindow(tk.Toplevel):
             self.status.set("Cancelling; wait for the current operation before closing.")
             return
         self.save_preferences()
+        self._closed = True
+        self.after_cancel(self._poll_after)
         self.destroy()

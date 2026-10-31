@@ -18,6 +18,7 @@ import tempfile
 import time
 
 from .config import config_dir
+from . import disc_identity
 
 IMAGE_EXTENSIONS = frozenset({".iso", ".zso", ".cso", ".chd"})
 MEDIA = ("DVD", "CD")
@@ -50,6 +51,32 @@ class ScanResult:
                 f"{self.skipped_links} links, {self.skipped_depth} depth-limited folders, "
                 f"{self.skipped_unsupported} unsupported, {self.skipped_invalid} invalid, "
                 f"{self.errors} errors.")
+        if self.details:
+            text += " First issue: " + self.details[0]
+        return text
+
+
+@dataclass
+class IdentityScanResult:
+    visited: int = 0
+    inspected: int = 0
+    cached: int = 0
+    verified: int = 0
+    conflicts: int = 0
+    unknown: int = 0
+    invalid: int = 0
+    unsupported: int = 0
+    errors: int = 0
+    cancelled: bool = False
+    limit_reached: bool = False
+    details: list = field(default_factory=list)
+
+    def __str__(self):
+        state = "Inspection cancelled" if self.cancelled else (
+            "Inspection limit reached" if self.limit_reached else "Inspection complete")
+        text = (f"{state}: {self.visited} entries, {self.inspected} inspected, {self.cached} cached; "
+                f"{self.verified} verified, {self.conflicts} conflicts, {self.unknown} unknown, "
+                f"{self.invalid} invalid, {self.unsupported} unsupported, {self.errors} errors.")
         if self.details:
             text += " First issue: " + self.details[0]
         return text
@@ -116,6 +143,14 @@ class Catalog:
             notes TEXT NOT NULL DEFAULT '',
             updated INTEGER NOT NULL
         )""")
+        # A separate, disposable cache preserves the existing games schema and
+        # manually edited IDs. Older builds can still open the same catalogue.
+        self.db.execute("""CREATE TABLE IF NOT EXISTS disc_identity (
+            image_path TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
+            inspector_version INTEGER NOT NULL, status TEXT NOT NULL,
+            detected_disc_id TEXT NOT NULL, boot_path TEXT NOT NULL,
+            detail TEXT NOT NULL, checked INTEGER NOT NULL
+        )""")
         self.db.commit()
 
     def __enter__(self):
@@ -126,14 +161,64 @@ class Catalog:
 
     def list_games(self, search=""):
         value = "%" + search.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        return [dict(r) for r in self.db.execute(
-            """SELECT * FROM games
-               WHERE lower(title) LIKE ? ESCAPE '\\' OR lower(disc_id) LIKE ? ESCAPE '\\'
-               ORDER BY title COLLATE NOCASE, id LIMIT 10000""", (value, value))]
+        needle = search.lower()
+        rows = [self._current_identity(r) for r in self.db.execute(
+            """SELECT g.*, d.status AS inspected_status, d.detected_disc_id,
+                      d.boot_path, d.detail AS identity_detail, d.checked AS identity_checked,
+                      d.fingerprint AS identity_fingerprint
+               FROM games g LEFT JOIN disc_identity d ON g.image_path=d.image_path
+                    AND d.inspector_version=?
+               WHERE lower(g.title) LIKE ? ESCAPE '\\' OR lower(g.disc_id) LIKE ? ESCAPE '\\'
+                  OR lower(d.detected_disc_id) LIKE ? ESCAPE '\\'
+               ORDER BY g.title COLLATE NOCASE, g.id LIMIT 10000""",
+            (disc_identity.INSPECTOR_VERSION, value, value, value))]
+        # A row found only by an inspected ID that is now stale no longer matches.
+        return [r for r in rows if not needle or r["identity_status"] != "stale"
+                or needle in (r["title"] or "").lower() or needle in (r["disc_id"] or "").lower()]
 
     def get_game(self, row_id):
-        record = self.db.execute("SELECT * FROM games WHERE id=?", (int(row_id),)).fetchone()
-        return dict(record) if record else None
+        record = self.db.execute(
+            """SELECT g.*, d.status AS inspected_status, d.detected_disc_id,
+                      d.boot_path, d.detail AS identity_detail, d.checked AS identity_checked,
+                      d.fingerprint AS identity_fingerprint
+               FROM games g LEFT JOIN disc_identity d ON g.image_path=d.image_path
+                    AND d.inspector_version=?
+               WHERE g.id=?""", (disc_identity.INSPECTOR_VERSION, int(row_id))).fetchone()
+        return self._current_identity(record) if record else None
+
+    @classmethod
+    def _current_identity(cls, record):
+        """Withhold a cached BOOT2 serial once the image no longer matches it."""
+        row = cls._identity_record(record)
+        stamp = row.pop("identity_fingerprint", None)
+        if stamp and row["identity_status"] in ("verified", "conflict"):
+            try:
+                current = disc_identity.fingerprint(Path(row["image_path"]).stat())
+            except OSError:
+                current = ""
+            if current != stamp:
+                row.update(identity_status="stale", detected_disc_id="", boot_path="",
+                           identity_detail="Image changed since inspection; inspect disc IDs again.")
+        return row
+
+    @staticmethod
+    def _identity_record(record):
+        row = dict(record)
+        row["identity_status"] = row.pop("inspected_status") or "not inspected"
+        for key in ("detected_disc_id", "boot_path", "identity_detail"):
+            row[key] = row[key] or ""
+        if row["identity_status"] == "verified":
+            conflicts = []
+            manual = row["disc_id"].upper().replace("-", "_")
+            if manual and manual != row["detected_disc_id"]:
+                conflicts.append("Manual ID differs from the inspected BOOT2 serial.")
+            named = disc_identity.filename_serial(row["image_path"])
+            if named and named != row["detected_disc_id"]:
+                conflicts.append(f"Filename ID {named} differs from the inspected BOOT2 serial.")
+            if conflicts:
+                row["identity_status"] = "conflict"
+                row["identity_detail"] = " ".join(conflicts) + " " + row["identity_detail"]
+        return row
 
     def upsert(self, filename, media="DVD"):
         if media not in INDEX_MEDIA:
@@ -141,7 +226,8 @@ class Catalog:
         source = Path(filename).resolve(strict=True)
         if source.is_symlink() or not source.is_file() or source.suffix.lower() not in IMAGE_EXTENSIONS:
             raise ValueError("Choose a supported PS2 ISO/CSO/ZSO/CHD file.")
-        size = source.stat().st_size
+        info = source.stat()
+        size = info.st_size
         if size <= 0:
             raise ValueError("An empty image cannot be installed.")
         self.db.execute(
@@ -152,6 +238,8 @@ class Catalog:
                    media=CASE WHEN excluded.media='UNKNOWN' THEN games.media ELSE excluded.media END,
                    updated=excluded.updated""",
             (str(source), visible_title(source), media, size, int(time.time())))
+        self.db.execute("DELETE FROM disc_identity WHERE image_path=? AND fingerprint<>?",
+                        (str(source), disc_identity.fingerprint(info)))
         self.db.commit()
         return self.db.execute("SELECT id FROM games WHERE image_path=?", (str(source),)).fetchone()[0]
 
@@ -165,7 +253,7 @@ class Catalog:
 
         Recursive mode includes root images and at most max_depth directory
         levels below the selected root. Only a top-level CD/DVD ancestor supplies
-        media; arbitrary-root images remain UNKNOWN until identity inspection.
+        media; arbitrary-root images remain UNKNOWN (no size/identity inference).
         Progress receives snapshots at most once per 128 entries, plus completion.
         The scanner does not open image payloads, follow links, or delete rows.
         """
@@ -263,6 +351,91 @@ class Catalog:
                 iterator.close()
         notify()
         return result
+
+    def inspect_identities(self, root, *, max_entries=1000, cancel=None, progress=None):
+        """Opt-in sparse inspection of indexed entries under one selected root.
+
+        No image is installed or renamed, and no manually entered ID is changed.
+        A matching filesystem fingerprint reuses a completed inspection. Errors
+        and files changed during inspection are retried on the next invocation.
+        """
+        if type(max_entries) is not int or not 1 <= max_entries <= 10_000:
+            raise ValueError("Inspection limit must be 1 through 10000.")
+        base = require_directory(root)
+        prefix = str(base)
+        if not prefix.endswith(os.sep):
+            prefix += os.sep
+        collation = "COLLATE NOCASE" if os.name == "nt" else ""
+        entries = self.db.execute(
+            f"""SELECT id, image_path FROM games
+                WHERE substr(image_path,1,?)=? {collation} ORDER BY id LIMIT ?""",
+            (len(prefix), prefix, max_entries + 1)).fetchall()
+        result = IdentityScanResult()
+
+        def notify():
+            if progress:
+                progress(replace(result, details=list(result.details)))
+
+        for record in entries:
+            if cancel is not None and cancel.is_set():
+                result.cancelled = True
+                break
+            if result.visited >= max_entries:
+                result.limit_reached = True
+                break
+            result.visited += 1
+            source = Path(record["image_path"])
+            stamp = ""
+            try:
+                source = _scan_path(base, source)
+                info = source.stat()
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError("Image path is no longer a regular file.")
+                stamp = disc_identity.fingerprint(info)
+                cached = self.db.execute(
+                    """SELECT status FROM disc_identity WHERE image_path=?
+                       AND fingerprint=? AND inspector_version=?""",
+                    (record["image_path"], stamp, disc_identity.INSPECTOR_VERSION)).fetchone()
+                if cached and cached["status"] in ("verified", "unknown", "invalid", "unsupported"):
+                    result.cached += 1
+                else:
+                    identity = disc_identity.inspect_disc(source, cancel=cancel)
+                    result.inspected += 1
+                    # Include the interval between our cache lookup and the
+                    # inspector opening the file in the mutation check.
+                    if disc_identity.fingerprint(_scan_path(base, source).stat()) != stamp:
+                        identity = disc_identity.DiscIdentity("changed", detail="Image changed; retry inspection.")
+                    self._save_identity(record["image_path"], stamp, identity)
+            except InterruptedError:
+                result.cancelled = True
+                break
+            except (OSError, ValueError) as exc:
+                self._save_identity(record["image_path"], stamp,
+                                    disc_identity.DiscIdentity("unavailable", detail=str(exc)))
+            row = self.get_game(record["id"])
+            status = row["identity_status"]
+            counter = {"conflict": "conflicts", "unavailable": "errors", "changed": "errors", "stale": "errors"}.get(status, status)
+            setattr(result, counter, getattr(result, counter) + 1)
+            if status != "verified" and len(result.details) < 20:
+                result.details.append(f"{source.relative_to(base)}: {row['identity_detail']}")
+            if result.visited % 16 == 0:
+                notify()
+        notify()
+        return result
+
+    def _save_identity(self, path, stamp, identity):
+        self.db.execute(
+            """INSERT OR REPLACE INTO disc_identity
+               (image_path,fingerprint,inspector_version,status,detected_disc_id,boot_path,detail,checked)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (path, stamp, disc_identity.INSPECTOR_VERSION, identity.status,
+             identity.disc_id, identity.boot_path, identity.detail, int(time.time())))
+        self.db.commit()
+
+    def indexed_games(self, root, *, max_entries=10_000, cancel=None):
+        """Expose the same read-only descriptors as the optional RA adapter."""
+        from .library_index import read_index
+        return read_index(self.path, root, max_entries=max_entries, cancel=cancel)
 
     def edit(self, row_id, title, disc_id="", notes=""):
         title = str(title).strip()
