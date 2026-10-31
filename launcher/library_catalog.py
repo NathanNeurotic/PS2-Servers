@@ -117,6 +117,22 @@ def visible_title(path):
     return SERIAL_PREFIX.sub("", Path(path).stem).replace("_", " ").strip() or Path(path).stem
 
 
+def _artwork_palette_image(Image, img):
+    """8-bit palette image for RiptOPL artwork, keeping transparency.
+
+    RiptOPL loads an 8-bit palette PNG as a T8 texture whose CLUT alpha comes
+    from the tRNS chunk (src/gfx/textures.cpp), so a logo or disc with a
+    transparent background keeps it. Opaque art takes the same path as before.
+    """
+    if img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
+        rgba = img.convert("RGBA")
+        if rgba.getchannel("A").getextrema()[0] < 255:
+            # Median cut cannot quantize RGBA; fast octree keeps the alpha
+            # in the palette and Pillow writes it as tRNS.
+            return rgba.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
+    return img.convert("RGB").quantize(colors=256, method=Image.Quantize.MEDIANCUT)
+
+
 def artwork_filename(identity, art_type="COV"):
     """Explicit identity; PS2 disc-ID, VCD basename and ELF filename are different keys."""
     if art_type not in ART_TYPES or not KEY_PATTERN.fullmatch(identity):
@@ -549,9 +565,7 @@ class Catalog:
                 if src.width > 10000 or src.height > 10000 or src.width * src.height > 50_000_000:
                     raise ValueError("Artwork dimensions exceed safety limits.")
                 src.load()
-                img = ImageOps.exif_transpose(src).convert("RGB")
-                # 8-bit palette PNG, as required by the RiptOPL artwork pipeline.
-                img = img.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
+                img = _artwork_palette_image(Image, ImageOps.exif_transpose(src))
                 with target.open("xb") as out:
                     created = True
                     img.save(out, format="PNG", optimize=True)

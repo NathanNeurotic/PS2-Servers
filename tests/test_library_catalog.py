@@ -174,6 +174,39 @@ class LibraryCatalogTests(unittest.TestCase):
                 db.write_art(artwork, self.games, "SLUS_123.45", "COV")
         self.assertTrue(artwork.exists())
 
+    def test_transparent_logo_keeps_its_alpha(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is optional for source checkout")
+        logo = self.root / "logo.png"
+        img = Image.new("RGBA", (64, 32), (0, 0, 0, 0))
+        img.paste((220, 40, 40, 255), (16, 8, 48, 24))
+        img.paste((40, 220, 40, 128), (0, 28, 8, 32))
+        img.save(logo)
+        with self.catalog() as db:
+            target = db.write_art(logo, self.games, "SLUS_123.45", "ICO")
+        with Image.open(target) as read:
+            self.assertEqual(read.mode, "P")
+            self.assertIn("transparency", read.info)  # tRNS: RiptOPL's CLUT alpha
+            rgba = read.convert("RGBA")
+        self.assertEqual(rgba.getpixel((0, 0))[3], 0)
+        self.assertEqual(rgba.getpixel((32, 16)), (220, 40, 40, 255))
+        self.assertEqual(rgba.getpixel((2, 30))[3], 128)
+
+    def test_opaque_cover_has_no_transparency(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is optional for source checkout")
+        cover = self.root / "opaque.png"
+        Image.new("RGBA", (16, 16), (10, 20, 30, 255)).save(cover)
+        with self.catalog() as db:
+            target = db.write_art(cover, self.games, "SLUS_123.45", "COV")
+        with Image.open(target) as read:
+            self.assertEqual(read.mode, "P")
+            self.assertNotIn("transparency", read.info)
+
 
 if __name__ == "__main__":
     unittest.main()

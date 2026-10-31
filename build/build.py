@@ -109,6 +109,8 @@ INCLUDE_MODULES = [
     "launcher.game_library",
     "launcher.library_gui",
     "launcher.setup_guide",
+    "launcher.riptopl_profile",
+    "launcher.riptopl_export",
     "launcher.achievement_loader",
     "launcher.discord_presence",
     "sqlite3",

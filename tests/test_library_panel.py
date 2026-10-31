@@ -187,6 +187,43 @@ class LibraryStartupTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_artwork_download_needs_a_confirmed_preview(self):
+        tk = library_panel.tk
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("No graphical display")
+        try:
+            with tempfile.TemporaryDirectory() as profile, \
+                 mock.patch.object(library_panel, "config_dir", return_value=profile), \
+                 mock.patch.object(library_panel.LibraryPanel, "_run") as run, \
+                 mock.patch.object(library_panel.LibraryPanel, "_drain"), \
+                 mock.patch.object(library_panel.simpledialog, "askstring",
+                                   side_effect=["https://covers.example/{serial}.jpg", "cov"] * 2), \
+                 mock.patch.object(library_panel.messagebox, "askokcancel",
+                                   side_effect=[False, True]) as confirm, \
+                 mock.patch.object(library_panel.library_catalog, "Catalog") as catalog:
+                catalog.return_value.__enter__.return_value.list_games.return_value = [
+                    {"identity_status": "verified", "detected_disc_id": "SLUS_201.74", "disc_id": ""}]
+                panel = library_panel.LibraryPanel(root, SimpleNamespace(_open_ps2_setup_guide=lambda: None))
+                run.reset_mock()
+                panel.path.set(profile)
+                panel._download_art()
+                self.assertIn("https://covers.example/SLUS-20174.jpg", confirm.call_args.args[1])
+                run.assert_not_called()  # declined: nothing is fetched
+                self.assertEqual(panel.art_template_file.read_text(encoding="utf-8"),
+                                 "https://covers.example/{serial}.jpg")
+                panel._download_art()
+                run.assert_called_once()
+                fake = mock.Mock()
+                with mock.patch.object(library_panel.art_fetch, "run", return_value=[]) as fetch_run:
+                    report = run.call_args.args[0](fake)
+                self.assertEqual(fetch_run.call_args.args[3], "COV")
+                self.assertIs(fetch_run.call_args.kwargs["cancel"], panel._scan_cancel)
+                self.assertIsInstance(report, library_panel.ArtReport)
+        finally:
+            root.destroy()
+
 
 class AchievementLibraryIndexTests(unittest.TestCase):
     def setUp(self):
