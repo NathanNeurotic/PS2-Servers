@@ -24,7 +24,7 @@ does not add that protocol to a PS2 application.
 | UDPFS | UDP 62966 (`0xF5F6`), plus an automatic data port | File and optional block-image serving for UDPFS clients such as NHDDL/Neutrino and RiptOPL; automatic Standard/Modulo negotiation |
 | SMBv1 | TCP 1025 in Desktop; 1111 in Core/standalone | Guest file sharing for OPL and other SMBv1 clients |
 | SMBv2 / SMBv3 | TCP 1445 | Authenticated file sharing for clients that support these dialects; not a replacement for SMBv1 in an SMBv1-only loader |
-| HTTP | TCP 1100 | Experimental game streaming for compatible OPL HTTP clients; see [HTTP setup and validation](docs/HTTP.md) |
+| HTTP | TCP 1100 | Experimental game streaming for compatible OPL HTTP clients, with an opt-in RiptOPL path-aware game list; see [HTTP setup and validation](docs/HTTP.md) |
 | UDPBD | UDP 48573 (`0xBDBD`) | Image, raw drive or virtual exFAT folder served as a block device |
 
 Desktop has six game/file server cards plus [RetroAchievements](docs/RETROACHIEVEMENTS.md)
@@ -368,7 +368,8 @@ CSO uses the standard library, ZSO needs `lz4`, and CHD needs native `libchdr`.
 Release builds bundle the optional libraries; use the **Compression support**
 panel to check the running build. Missing libraries leave those UDPFS formats
 unadvertised. Edge supports CSO/ZSO but not CHD. HTTP decodes CHD/CSO on the
-server and passes ZSO through for the client to decode.
+server. Its default flat game list passes ZSO through for the client to decode;
+the RiptOPL path-aware list decodes ZSO too, because RiptOPL cannot.
 
 See [compression dependencies](docs/optional-compression-dependencies.md).
 

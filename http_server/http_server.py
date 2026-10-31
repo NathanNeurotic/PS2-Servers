@@ -95,6 +95,39 @@ CD_SIZE_LIMIT = 800 * 1024 * 1024
 MEDIA_CD = "CD"
 MEDIA_DVD = "DVD"
 
+#: Catalogue profiles. The flat profile is the default and is unchanged: it is
+#: what the pinned Docmine17 client parses. The path-aware profile is for
+#: RiptOPL only, whose parser (src/httpcatalog.c) reads a quoted four-field
+#: STARTUP,TITLE,MEDIA,RELATIVE_PATH row and requests <base>/<path>. Neither
+#: client can be told apart on the wire, so the choice is explicit.
+PROFILE_LEGACY_FLAT = "legacy-flat"
+PROFILE_RIPTOPL_PATH_AWARE = "riptopl-path-aware"
+PROFILES = (PROFILE_LEGACY_FLAT, PROFILE_RIPTOPL_PATH_AWARE)
+
+#: RiptOPL's catalogue contract, from NathanNeurotic/Open-PS2-Loader at
+#: 4cfde79ca604af11fe8b610c12514f818c99b689 (include/httpcatalog.h and
+#: include/httpsupport.h). Limits are UTF-8 bytes, as the C side measures
+#: them with strlen. Exceeding the row or byte limit fails the client's WHOLE
+#: catalogue rather than truncating it, so this server drops rows and says so.
+RIPTOPL_STARTUP_MAX = 12
+RIPTOPL_TITLE_MAX = 160
+RIPTOPL_PATH_MAX = 255
+RIPTOPL_CATALOG_BYTES_MAX = 262144
+RIPTOPL_CATALOG_ROWS_MAX = 2048
+#: modules/network/common/httpclient.h HTTP_CLIENT_STREAM_URI_MAX and
+#: include/opl.h HTTP_BASE_PATH_MAX at the same commit. The client percent-
+#: encodes the path into a URI buffer after its base path; a path that cannot
+#: fit is refused at launch, after it has already listed.
+RIPTOPL_URI_MAX = 768
+RIPTOPL_BASE_PATH_MAX = 64
+_RIPTOPL_UNRESERVED = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~/")
+
+#: How far below the games folder --recursive looks. Matches the four levels
+#: the library indexer offers.
+RECURSIVE_MAX_DEPTH = 4
+RECURSIVE_MAX_DIRS = 2000
+
 #: Fixed rather than a mimetypes lookup: one less per-request call on the hot
 #: path, and a deterministic contribution to the 512-byte header budget.
 CONTENT_TYPE = "application/octet-stream"
@@ -120,14 +153,81 @@ def parse_startup(stem):
     return stem[:STARTUP_MAX], stem
 
 
+def _utf8_prefix(text, limit):
+    """The longest prefix of text that encodes to at most limit UTF-8 bytes."""
+    data = text.encode("utf-8")
+    if len(data) <= limit:
+        return text
+    return data[:limit].decode("utf-8", "ignore")
+
+
+def _csv_quote(text):
+    """RFC 4180 quoting, which RiptOPL's parser accepts for every field.
+
+    Always quoting is what keeps a title or path starting with '#' from
+    reading as a comment line, and a comma or quote from splitting a field.
+    """
+    return '"' + text.replace('"', '""') + '"'
+
+
+def _has_control(text):
+    return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text)
+
+
+def riptopl_encoded_path(rel_path):
+    """rel_path percent-encoded exactly as RiptOPL's httpBuildPath does it."""
+    return "".join(ch if ch in _RIPTOPL_UNRESERVED else "%{:02X}".format(byte)
+                   for ch in rel_path for byte in ch.encode("utf-8"))
+
+
+def riptopl_row_problem(startup, title, rel_path):
+    """Why RiptOPL's httpCatalogParseLine would refuse this row, or None.
+
+    Mirrors the pinned parser: fields are trimmed of blanks and tabs (even
+    inside quotes), control bytes are refused, and the path must be a
+    relative .iso/.zso path with no empty, '.' or '..' segment.
+    """
+    for label, value, limit in (("startup", startup, RIPTOPL_STARTUP_MAX),
+                                ("title", title, RIPTOPL_TITLE_MAX),
+                                ("path", rel_path, RIPTOPL_PATH_MAX)):
+        if value != value.strip(" \t"):
+            return "{} starts or ends with a blank, which the console trims".format(label)
+        if not value:
+            return "empty " + label
+        if _has_control(value):
+            return "control character in " + label
+        try:
+            size = len(value.encode("utf-8"))
+        except UnicodeEncodeError:
+            return "{} is not valid UTF-8".format(label)
+        if size > limit:
+            return "{} over {} bytes".format(label, limit)
+    if "://" in rel_path:
+        return "path looks like a URL"
+    if rel_path.startswith("/"):
+        return "absolute path"
+    if "\\" in rel_path:
+        return "backslash in path"
+    for segment in rel_path.split("/"):
+        if segment in ("", "."):
+            return "empty path segment"
+        if segment == "..":
+            return "parent path segment"
+    if not rel_path.lower().endswith((".iso", ".zso")) or len(rel_path) <= 4:
+        return "path does not end in .iso or .zso"
+    if len(riptopl_encoded_path(rel_path)) + RIPTOPL_BASE_PATH_MAX >= RIPTOPL_URI_MAX:
+        return "path too long once URL-encoded"
+    return None
+
+
 class GameEntry(object):
     """One row of games.csv and the host file behind it."""
 
     __slots__ = ("startup", "advertised", "path", "media", "size",
-                 "compressed", "conventional")
+                 "compressed", "conventional", "rel_path", "title")
 
     def __init__(self, startup, advertised, path, media, size, compressed,
-                 conventional):
+                 conventional, rel_path=None, title=None):
         self.startup = startup
         self.advertised = advertised   # the name in games.csv and in the URL
         self.path = path               # the real file on disk
@@ -135,9 +235,17 @@ class GameEntry(object):
         self.size = size               # uncompressed size, i.e. what we serve
         self.compressed = compressed   # decompressed by us, not by the console
         self.conventional = conventional
+        # Path-aware profile only: the advertised path relative to the games
+        # folder ("DVD/Game.iso", a CHD renamed to .iso) and the display title.
+        self.rel_path = rel_path if rel_path is not None else advertised
+        self.title = title if title is not None else advertised
 
     def csv_line(self):
         return "{},{},{}".format(self.startup, self.advertised, self.media)
+
+    def riptopl_csv_line(self):
+        return "{},{},{},{}".format(_csv_quote(self.startup), _csv_quote(self.title),
+                                    self.media, _csv_quote(self.rel_path))
 
 
 class GameIndex(object):
@@ -159,12 +267,25 @@ class GameIndex(object):
     #: still browsing shows up without a restart.
     RESCAN_INTERVAL = 5.0
 
-    def __init__(self, root_dir, enable_compression=True):
+    def __init__(self, root_dir, enable_compression=True,
+                 profile=PROFILE_LEGACY_FLAT, recursive=False):
+        if profile not in PROFILES:
+            raise ValueError("unknown catalogue profile: {}".format(profile))
+        if recursive and profile != PROFILE_RIPTOPL_PATH_AWARE:
+            # A flat client requests bare filenames, so nested games it cannot
+            # tell apart would list and then launch the wrong disc or none.
+            raise ValueError("recursive scanning needs the {} profile"
+                             .format(PROFILE_RIPTOPL_PATH_AWARE))
         self.root_dir = os.path.realpath(root_dir)
         self.enable_compression = enable_compression and COMPRESSION_AVAILABLE
+        self.profile = profile
+        self.path_aware = profile == PROFILE_RIPTOPL_PATH_AWARE
+        self.recursive = recursive
         self._lock = threading.Lock()
         self._entries = {}
         self._path_entries = {}
+        self._exact_paths = {}
+        self._ambiguous_paths = set()
         self._ambiguous_names = set()
         self._csv = b""
         self._signature = None
@@ -182,6 +303,10 @@ class GameIndex(object):
         """
         if not self.enable_compression:
             return ()
+        if self.path_aware:
+            # RiptOPL lists a .zso but refuses to launch it (httpsupport.c
+            # streams raw sectors only), so decode it here when lz4 is present.
+            return tuple(_COMPRESSED_EXTENSIONS)
         return tuple(ext for ext in _COMPRESSED_EXTENSIONS
                      if ext not in (".zso", ".ziso"))
 
@@ -191,6 +316,8 @@ class GameIndex(object):
         The DVD/CD lookup is case-insensitive because the folders are created
         by OPL on one platform and read by us on another.
         """
+        if self.recursive:
+            return self._walk_dirs()
         try:
             listing = os.listdir(self.root_dir)
         except OSError:
@@ -208,6 +335,55 @@ class GameIndex(object):
             if os.path.isdir(path):
                 result.append((path, media))
         return result
+
+    def _walk_dirs(self):
+        """Every directory up to RECURSIVE_MAX_DEPTH below the root, bounded.
+
+        Symlinked and junctioned directories are not entered, so a link cannot
+        pull a tree outside the games folder into the catalogue or form a
+        cycle. Media comes from a top-level CD/ or DVD/ ancestor only; anything
+        else falls back to the size heuristic, exactly as a root image does.
+        """
+        result = [(self.root_dir, None)]
+        pending = [(self.root_dir, None, 0)]
+        while pending and len(result) < RECURSIVE_MAX_DIRS:
+            directory, media, depth = pending.pop(0)
+            if depth >= RECURSIVE_MAX_DEPTH:
+                continue
+            try:
+                with os.scandir(directory) as it:
+                    children = sorted((e for e in it if self._is_real_dir(e)),
+                                      key=lambda e: e.name)
+            except OSError as exc:
+                _log("cannot read {}: {}".format(directory, exc))
+                continue
+            for child in children:
+                if len(result) >= RECURSIVE_MAX_DIRS:
+                    _log("WARNING: stopped after {} folders; deeper games are not listed"
+                         .format(RECURSIVE_MAX_DIRS))
+                    break
+                implied = media
+                if depth == 0 and child.name.upper() in (MEDIA_CD, MEDIA_DVD):
+                    implied = child.name.upper()
+                result.append((child.path, implied))
+                pending.append((child.path, implied, depth + 1))
+        return result
+
+    @staticmethod
+    def _is_real_dir(entry):
+        try:
+            if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                return False
+            # A Windows junction is not a symlink to os.scandir.
+            is_junction = getattr(entry, "is_junction", None)
+            return not (is_junction and is_junction())
+        except OSError:
+            return False
+
+    def _contained(self, path):
+        """The real file is inside the games folder (no link escapes it)."""
+        real = os.path.realpath(path)
+        return real == self.root_dir or real.startswith(self.root_dir.rstrip(os.sep) + os.sep)
 
     def _disk_csv_path(self):
         p = os.path.join(self.root_dir, "games.csv")
@@ -260,14 +436,7 @@ class GameIndex(object):
         stem, ext = os.path.splitext(name)
         lower = ext.lower()
 
-        if lower in RAW_EXTENSIONS:
-            advertised = stem + _ADVERTISED_RAW_EXTENSION[lower]
-            try:
-                size = os.path.getsize(path)
-            except OSError:
-                return None
-            compressed = False
-        elif lower in decompressible:
+        if lower in decompressible:
             advertised = stem + ".iso"
             # The uncompressed size is what Content-Range must describe, and
             # what decides CD vs DVD. A header we cannot parse means we cannot
@@ -279,11 +448,22 @@ class GameIndex(object):
                 return None
             size = info[0]
             compressed = True
+        elif lower in RAW_EXTENSIONS:
+            advertised = stem + _ADVERTISED_RAW_EXTENSION[lower]
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                return None
+            compressed = False
         else:
             return None
 
         if not os.path.isfile(path):
             return None
+
+        if self.path_aware:
+            return self._path_aware_entry(directory, name, stem, advertised, path,
+                                          implied_media, size, compressed)
 
         if len(advertised) > FILENAME_MAX:
             _log("  skipped (name over {} chars, the console truncates it): "
@@ -312,6 +492,27 @@ class GameIndex(object):
                          self._media_for(implied_media, size), size,
                          compressed, conventional)
 
+    def _path_aware_entry(self, directory, name, stem, advertised, path,
+                          implied_media, size, compressed):
+        """A GameEntry addressed by its real relative path, for RiptOPL.
+
+        Row validity (lengths, control bytes, blank edges) is checked when the
+        catalogue is built, so every refusal is reported in one place.
+        """
+        if not self._contained(path):
+            _log("  skipped (links outside the games folder): {}".format(name))
+            return None
+        rel_dir = os.path.relpath(directory, self.root_dir).replace(os.sep, "/")
+        rel_path = advertised if rel_dir == "." else rel_dir + "/" + advertised
+        startup, title = parse_startup(stem)
+        conventional = bool(_STARTUP_RE.match(stem))
+        if not conventional:
+            startup = _utf8_prefix(stem.strip(" \t"), RIPTOPL_STARTUP_MAX).strip(" \t")
+        title = _utf8_prefix(title.strip(" \t"), RIPTOPL_TITLE_MAX).strip(" \t")
+        return GameEntry(startup, advertised, path,
+                         self._media_for(implied_media, size), size,
+                         compressed, conventional, rel_path=rel_path, title=title)
+
     def refresh(self, force=False):
         """Rebuild the index if the scanned directories changed."""
         scan_dirs = self._scan_dirs()
@@ -319,70 +520,179 @@ class GameIndex(object):
         with self._lock:
             if not force and signature == self._signature:
                 return
-            entries = {}
-            path_entries = {}
-            seen_names = {}
-            ambiguous_names = set()
-            unconventional = []
-            for directory, implied_media in scan_dirs:
-                try:
-                    names = sorted(os.listdir(directory))
-                except OSError as exc:
-                    _log("cannot read {}: {}".format(directory, exc))
-                    continue
-                rel_dir = os.path.relpath(directory, self.root_dir).replace("\\", "/")
-                for name in names:
-                    entry = self._entry_for(directory, name, implied_media,
-                                            self._decompressible())
-                    if entry is None:
-                        continue
-                    if rel_dir != ".":
-                        rel_path_key = posixpath.normpath(posixpath.join(rel_dir, name)).lstrip("/").lower()
-                        path_entries[rel_path_key] = entry
-
-                    key = entry.advertised.lower()
-                    existing = seen_names.get(key)
-                    if existing is not None:
-                        ambiguous_names.add(key)
-                        _log("  duplicate name '{}': serving {}, ignoring {}"
-                             .format(entry.advertised, existing.path,
-                                     entry.path))
-                        continue
-                    seen_names[key] = entry
-                    entries[key] = entry
-                    if not entry.conventional:
-                        unconventional.append(entry.advertised)
-
-            self._entries = entries
-            self._path_entries = path_entries
-            self._ambiguous_names = ambiguous_names
-            disk_csv = self._disk_csv_path()
-            if disk_csv:
-                try:
-                    with open(disk_csv, "rb") as f:
-                        disk_data = f.read()
-                    if len(disk_data) > GAMES_CSV_MAX:
-                        _log("WARNING: disk-resident games.csv exceeds {} bytes ({} bytes); "
-                             "falling back to auto-generated catalog"
-                             .format(GAMES_CSV_MAX, len(disk_data)))
-                        self._csv, dropped = self._build_csv(entries)
-                    else:
-                        self._csv = disk_data
-                        dropped = 0
-                        _log("Using disk-resident games.csv from {}".format(disk_csv))
-                    self._signature = signature
-                except OSError as exc:
-                    self._signature = None
-                    _log("Error reading disk games.csv: {}, falling back to auto-generation"
-                         .format(exc))
-                    self._csv, dropped = self._build_csv(entries)
+            if self.path_aware:
+                report = self._rebuild_path_aware(scan_dirs, signature)
             else:
-                self._csv, dropped = self._build_csv(entries)
+                report = self._rebuild_flat(scan_dirs, signature)
+        self._report(*report)
+
+    def _rebuild_flat(self, scan_dirs, signature):
+        """The legacy flat index, unchanged. Caller holds the lock."""
+        entries = {}
+        path_entries = {}
+        seen_names = {}
+        ambiguous_names = set()
+        unconventional = []
+        for directory, implied_media in scan_dirs:
+            try:
+                names = sorted(os.listdir(directory))
+            except OSError as exc:
+                _log("cannot read {}: {}".format(directory, exc))
+                continue
+            rel_dir = os.path.relpath(directory, self.root_dir).replace("\\", "/")
+            for name in names:
+                entry = self._entry_for(directory, name, implied_media,
+                                        self._decompressible())
+                if entry is None:
+                    continue
+                if rel_dir != ".":
+                    rel_path_key = posixpath.normpath(posixpath.join(rel_dir, name)).lstrip("/").lower()
+                    path_entries[rel_path_key] = entry
+
+                key = entry.advertised.lower()
+                existing = seen_names.get(key)
+                if existing is not None:
+                    ambiguous_names.add(key)
+                    _log("  duplicate name '{}': serving {}, ignoring {}"
+                         .format(entry.advertised, existing.path,
+                                 entry.path))
+                    continue
+                seen_names[key] = entry
+                entries[key] = entry
+                if not entry.conventional:
+                    unconventional.append(entry.advertised)
+
+        self._entries = entries
+        self._path_entries = path_entries
+        self._ambiguous_names = ambiguous_names
+        disk_csv = self._disk_csv_path()
+        if disk_csv:
+            try:
+                with open(disk_csv, "rb") as f:
+                    disk_data = f.read()
+                if len(disk_data) > GAMES_CSV_MAX:
+                    _log("WARNING: disk-resident games.csv exceeds {} bytes ({} bytes); "
+                         "falling back to auto-generated catalog"
+                         .format(GAMES_CSV_MAX, len(disk_data)))
+                    self._csv, dropped = self._build_csv(entries)
+                else:
+                    self._csv = disk_data
+                    dropped = 0
+                    _log("Using disk-resident games.csv from {}".format(disk_csv))
                 self._signature = signature
+            except OSError as exc:
+                self._signature = None
+                _log("Error reading disk games.csv: {}, falling back to auto-generation"
+                     .format(exc))
+                self._csv, dropped = self._build_csv(entries)
+        else:
+            self._csv, dropped = self._build_csv(entries)
+            self._signature = signature
+        return entries, unconventional, dropped, "{} bytes".format(GAMES_CSV_MAX)
 
-        self._report(entries, unconventional, dropped)
+    def _rebuild_path_aware(self, scan_dirs, signature):
+        """Index every game by its own relative path. Caller holds the lock.
 
-    def _report(self, entries, unconventional, dropped):
+        Nothing is flattened, so two games with the same filename in different
+        folders both list and both launch. Matching is exact first; a
+        case-insensitive match is used only when it names one file, because a
+        case-sensitive filesystem can hold Game.iso and GAME.iso side by side.
+        """
+        found = []
+        for directory, implied_media in scan_dirs:
+            try:
+                names = sorted(os.listdir(directory))
+            except OSError as exc:
+                _log("cannot read {}: {}".format(directory, exc))
+                continue
+            for name in names:
+                entry = self._entry_for(directory, name, implied_media,
+                                        self._decompressible())
+                if entry is not None:
+                    found.append(entry)
+
+        exact = {}
+        folded = {}
+        ambiguous = set()
+        for entry in found:
+            if entry.rel_path in exact:
+                # Game.chd and Game.iso side by side both advertise Game.iso.
+                _log("  duplicate path '{}': serving {}, ignoring {}"
+                     .format(entry.rel_path, exact[entry.rel_path].path, entry.path))
+                continue
+            exact[entry.rel_path] = entry
+            key = entry.rel_path.lower()
+            if key in folded:
+                ambiguous.add(key)
+            else:
+                folded[key] = entry
+        for key in ambiguous:
+            folded.pop(key, None)
+
+        self._entries = {}
+        self._exact_paths = exact
+        self._path_entries = folded
+        self._ambiguous_paths = ambiguous
+        self._ambiguous_names = set()
+        unconventional = [e.rel_path for e in exact.values() if not e.conventional]
+        disk_csv = self._disk_csv_path()
+        dropped = 0
+        self._csv = None
+        if disk_csv:
+            try:
+                with open(disk_csv, "rb") as f:
+                    disk_data = f.read()
+                if len(disk_data) > RIPTOPL_CATALOG_BYTES_MAX:
+                    _log("WARNING: disk-resident games.csv exceeds {} bytes ({} bytes); "
+                         "falling back to auto-generated catalog"
+                         .format(RIPTOPL_CATALOG_BYTES_MAX, len(disk_data)))
+                else:
+                    self._csv = disk_data
+                    _log("Using disk-resident games.csv from {}".format(disk_csv))
+            except OSError as exc:
+                _log("Error reading disk games.csv: {}, falling back to auto-generation"
+                     .format(exc))
+                signature = None
+        if self._csv is None:
+            self._csv, dropped = self._build_riptopl_csv(exact.values())
+        self._signature = signature
+        return exact, unconventional, dropped, "{} bytes and {} rows".format(
+            RIPTOPL_CATALOG_BYTES_MAX, RIPTOPL_CATALOG_ROWS_MAX)
+
+    def _build_riptopl_csv(self, entries):
+        """(bytes, dropped_count) for a four-field RiptOPL games.csv.
+
+        Every row is checked against the client's own parser rules first, so a
+        refusal names the file here instead of becoming a silently missing row
+        on the console. The client keeps the first row for a STARTUP and drops
+        the rest, so later duplicates are reported and left out. Its row and
+        byte limits fail the whole list when exceeded, so rows past them are
+        dropped and counted.
+        """
+        body = bytearray()
+        dropped = 0
+        rows = 0
+        startups = {}
+        for entry in sorted(entries, key=lambda e: (e.rel_path.lower(), e.rel_path)):
+            problem = riptopl_row_problem(entry.startup, entry.title, entry.rel_path)
+            if problem:
+                _log("  skipped ({}): {}".format(problem, entry.path))
+                continue
+            first = startups.get(entry.startup)
+            if first is not None:
+                _log("  skipped (STARTUP {} is already used by {}; the console keeps "
+                     "only the first row for an id): {}".format(entry.startup, first, entry.rel_path))
+                continue
+            line = (entry.riptopl_csv_line() + "\n").encode("utf-8")
+            if rows >= RIPTOPL_CATALOG_ROWS_MAX or len(body) + len(line) > RIPTOPL_CATALOG_BYTES_MAX:
+                dropped += 1
+                continue
+            startups[entry.startup] = entry.rel_path
+            body += line
+            rows += 1
+        return bytes(body), dropped
+
+    def _report(self, entries, unconventional, dropped, cap="8192 bytes"):
         _log("Indexed {} game(s) from {}".format(len(entries), self.root_dir))
         if unconventional:
             _log("{} file(s) do not follow OPL's SLUS_201.74.Title.iso naming, "
@@ -393,9 +703,9 @@ class GameIndex(object):
             if len(unconventional) > 10:
                 _log("  ... and {} more".format(len(unconventional) - 10))
         if dropped:
-            _log("WARNING: games.csv is capped at {} bytes by the console, so "
+            _log("WARNING: games.csv is capped at {} by the console, so "
                  "{} game(s) were left out. Split the library or shorten "
-                 "filenames.".format(GAMES_CSV_MAX, dropped))
+                 "filenames.".format(cap, dropped))
 
     # -- games.csv --------------------------------------------------------- #
 
@@ -449,6 +759,8 @@ class GameIndex(object):
         Case-insensitive: matches normalized relative path (e.g. 'DVD/Game.iso')
         first, then falls back to bare filename ('Game.iso') if unambiguous.
         """
+        if self.path_aware:
+            return self._lookup_path(name)
         clean = posixpath.normpath(name).lstrip("/").lower()
         with self._lock:
             entry = self._path_entries.get(clean)
@@ -458,6 +770,31 @@ class GameIndex(object):
             if base in self._ambiguous_names:
                 return None
             return self._entries.get(base)
+
+    def _lookup_path(self, name):
+        """Path-aware lookup: <base>/<relative path>, never a bare filename.
+
+        RiptOPL requests its configured base path followed by the catalogue
+        path, and the base is not visible to the server, so leading segments
+        are dropped one at a time until a catalogue path matches. There is no
+        basename fallback: a four-field row's path is authoritative, and
+        guessing from a filename is how a missing image becomes a different
+        disc.
+        """
+        parts = posixpath.normpath(name).lstrip("/").split("/")
+        with self._lock:
+            for start in range(len(parts)):
+                candidate = "/".join(parts[start:])
+                entry = self._exact_paths.get(candidate)
+                if entry is not None:
+                    return entry
+                key = candidate.lower()
+                if key in self._ambiguous_paths:
+                    return None
+                entry = self._path_entries.get(key)
+                if entry is not None:
+                    return entry
+        return None
 
 
 class _RangeError(Exception):
@@ -769,6 +1106,13 @@ def build_parser():
                         help="Interface to bind (blank = all)")
     parser.add_argument("--no-compression", action="store_true",
                         help="Do not decompress CHD/CSO into virtual .iso files")
+    parser.add_argument("--catalog-profile", choices=PROFILES,
+                        default=PROFILE_LEGACY_FLAT,
+                        help="games.csv format: legacy-flat (default, Docmine17 "
+                             "OPL-HTTP) or riptopl-path-aware (RiptOPL only)")
+    parser.add_argument("--recursive", action="store_true",
+                        help="riptopl-path-aware only: also list games up to {} "
+                             "folders deep".format(RECURSIVE_MAX_DEPTH))
     parser.add_argument("--verbose", action="store_true",
                         help="Log every request")
     return parser
@@ -786,7 +1130,14 @@ def main(argv=None):
     if enable_compression and not COMPRESSION_AVAILABLE:
         _log("Compressed-image support unavailable; CHD/CSO will not be served.")
 
-    index = GameIndex(root, enable_compression=enable_compression)
+    if args.recursive and args.catalog_profile != PROFILE_RIPTOPL_PATH_AWARE:
+        _log("--recursive needs --catalog-profile {}: a flat client requests "
+             "bare filenames and cannot launch nested games."
+             .format(PROFILE_RIPTOPL_PATH_AWARE))
+        return 2
+
+    index = GameIndex(root, enable_compression=enable_compression,
+                      profile=args.catalog_profile, recursive=args.recursive)
 
     try:
         server = Ps2HTTPServer((args.bind, args.port), index,
@@ -798,9 +1149,15 @@ def main(argv=None):
 
     _log("HTTP server listening on {}:{}".format(args.bind or "0.0.0.0",
                                                  args.port))
-    _log("In OPL: Network -> Protocol HTTP, Port {}. Set the Port explicitly; "
-         "OPL's game-list and in-game defaults disagree when it is left at 0."
-         .format(args.port))
+    if index.path_aware:
+        _log("Catalogue profile: {} (RiptOPL only; a Docmine17 OPL-HTTP build "
+             "cannot read this games.csv).".format(args.catalog_profile))
+        _log("In RiptOPL: Network -> Protocol HTTP, Port {}, base path / ."
+             .format(args.port))
+    else:
+        _log("In OPL: Network -> Protocol HTTP, Port {}. Set the Port explicitly; "
+             "OPL's game-list and in-game defaults disagree when it is left at 0."
+             .format(args.port))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

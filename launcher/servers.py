@@ -462,10 +462,38 @@ UDPFS = ServerDef(
     _build_argv=_udpfs_argv,
 )
 
+# HTTP games.csv profiles. The flat default is the only one Docmine17's
+# OPL-HTTP understands; the path-aware one is RiptOPL's four-field contract.
+HTTP_CATALOG_PROFILE_CHOICES = (
+    ("Legacy flat (OPL-HTTP)", "legacy-flat"),
+    ("RiptOPL path-aware", "riptopl-path-aware"),
+)
+_HTTP_PROFILE_BY_NAME = {}
+for _label, _value in HTTP_CATALOG_PROFILE_CHOICES:
+    _HTTP_PROFILE_BY_NAME[_label.lower()] = _value
+    _HTTP_PROFILE_BY_NAME[_value] = _value
+
+
+def http_profile_value(raw):
+    """The wire value for a saved profile label/value, or None if unknown."""
+    if raw is None:
+        return None
+    return _HTTP_PROFILE_BY_NAME.get(str(raw).strip().lower())
+
+
 def _http_argv(v):
     if not v.get("root_dir"):
         raise ValueError("HTTP needs a Games folder.")
     args = ["--root-dir", v["root_dir"]]
+    profile = http_profile_value(v.get("catalog_profile"))
+    # The flat default is not passed, so an existing card's command line is
+    # exactly what it was before profiles existed. Nested folders only apply to
+    # the path-aware list (a flat client cannot launch them), so the checkbox
+    # is ignored with the flat list rather than stopping the card from starting.
+    if profile == "riptopl-path-aware":
+        args += ["--catalog-profile", profile]
+        if v.get("recursive"):
+            args += ["--recursive"]
     if v.get("port"):
         args += ["--port", str(v["port"])]
     if v.get("bind"):
@@ -494,8 +522,20 @@ HTTP = ServerDef(
         Field("root_dir", "Games folder", "folder", required=True,
               help="Root folder containing OPL structure (DVD/ and CD/ subfolders with your .iso games)."),
         Field("enable_compression", "Decompress CHD/CSO", "bool", default=True,
-              help="Serve compressed images as virtual .iso files. ZSO is always "
-                   "passed through untouched -- the console decodes that itself."),
+              help="Serve compressed images as virtual .iso files. With the flat "
+                   "list, ZSO is passed through untouched for OPL-HTTP to decode. "
+                   "RiptOPL cannot decode ZSO over HTTP, so the path-aware list "
+                   "decodes it here when lz4 is installed."),
+        Field("catalog_profile", "Game list format", "choice",
+              default="Legacy flat (OPL-HTTP)", choices=HTTP_CATALOG_PROFILE_CHOICES,
+              help="Legacy flat suits Docmine17's OPL-HTTP. RiptOPL path-aware "
+                   "lists each game by its real folder path, so same-named games "
+                   "in different folders both work. Pick the one your loader uses; "
+                   "the other cannot read it."),
+        Field("recursive", "Include nested folders", "bool", default=False,
+              advanced=True,
+              help="RiptOPL path-aware list only (ignored with Legacy flat): also "
+                   "list games up to 4 folders deep. Linked folders are not followed."),
         # Visible, not advanced. OPL's game-list and in-game code use different
         # fallback ports when its Port field is left at 0, so the number here has
         # to be one the user can see and copy across.

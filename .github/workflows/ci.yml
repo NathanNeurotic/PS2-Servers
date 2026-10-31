@@ -99,6 +99,9 @@ jobs:
       - name: Run pinned OPL HTTP client conformance
         run: python conformance/integration/opl_http/run.py
 
+      - name: Run pinned RiptOPL HTTP catalogue conformance
+        run: python conformance/integration/riptopl_http/run.py
+
       - name: Run UDPBD protocol selftest
         run: python udpbd_server/selftest.py
 
