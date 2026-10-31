@@ -75,9 +75,12 @@ class BuildTests(unittest.TestCase):
         self.assertEqual((image["network_protocol"], image["udpfs_access"]), (rp.NET_PROTO_UDPFSBD, 1))
 
     def test_values_that_would_break_the_file_are_refused(self):
-        for share in ("a\nb", "x" * 300):
+        for share in ("a\nb", "x" * 300, "x" * 32, "é" * 16):
             with self.assertRaises(ValueError):
                 rp.build("smbv1", {"share_name": share}, IP)
+        with self.assertRaises(ValueError):
+            rp.build("smbv1", {"username": "u" * 32}, IP)
+        rp.build("smbv1", {"share_name": "x" * 31, "username": "u" * 31}, IP)
 
 
 class RenderTests(unittest.TestCase):

@@ -33,6 +33,7 @@ import os
 import posixpath
 import re
 import socket
+import signal
 import sys
 import threading
 import time
@@ -1012,8 +1013,7 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(total))
             self.send_header("Accept-Ranges", "bytes")
             self.end_headers()
-            if body:
-                self._send_bytes(entry, 0, total)
+            if body and self._send_bytes(entry, 0, total):
                 self._count_read(total)
             return
 
@@ -1027,13 +1027,13 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(length))
         self.send_header("Accept-Ranges", "bytes")
         self.end_headers()
-        if body:
-            self._send_bytes(entry, start, length)
+        if body and self._send_bytes(entry, start, length):
             self._count_read(length)
 
     def _count_read(self, length):
-        # A dropped send sets close_connection; only whole responses count.
-        if self.server.stats is not None and not self.close_connection:
+        # Only whole bodies count. HTTP/1.0 and Connection: close also set
+        # close_connection, so _send_bytes reports completion explicitly.
+        if self.server.stats is not None:
             self._stat("read")
             self._stat("bytes", length)
 
@@ -1043,6 +1043,7 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
         Exactly, because the driver reads a fixed count off the socket and
         ignores our framing headers: a short write leaves it blocking and a
         long one shifts every subsequent response on this keep-alive socket.
+        Returns True once every byte is written, False if the send was dropped.
         """
         handle = self._handle_for(entry)
 
@@ -1067,9 +1068,9 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
                 # which is recoverable; a duplicated range is not.
                 self._stat("errors")
                 self.close_connection = True
-                return
+                return False
             if sent == length:
-                return
+                return True
             # Short but not failed: finish by hand from where it stopped.
             offset += sent
             length -= sent
@@ -1087,6 +1088,7 @@ class Ps2HTTPRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(chunk)
             remaining -= len(chunk)
         self.wfile.flush()
+        return True
 
 
 class Ps2HTTPServer(ThreadingHTTPServer):
@@ -1195,6 +1197,7 @@ def main(argv=None):
         _log("In OPL: Network -> Protocol HTTP, Port {}. Set the Port explicitly; "
              "OPL's game-list and in-game defaults disagree when it is left at 0."
              .format(args.port))
+    _stop_on_sigterm()
     expiry_stop = threading.Event()
     if stats is not None:
         threading.Thread(target=stats.run_expiry, args=(expiry_stop,), daemon=True,
@@ -1209,6 +1212,22 @@ def main(argv=None):
         if stats is not None:
             stats.stop()
     return 0
+
+
+def _stop_on_sigterm():
+    """Let SIGTERM unwind like Ctrl+C, so final session summaries are written.
+
+    The launcher's Stop sends SIGTERM on Linux and macOS. On Windows, Stop
+    ends the process outright and no handler can run.
+    """
+    def _raise(_signum, _frame):
+        raise KeyboardInterrupt()
+
+    if hasattr(signal, "SIGTERM") and threading.current_thread() is threading.main_thread():
+        try:
+            signal.signal(signal.SIGTERM, _raise)
+        except (ValueError, OSError):
+            pass
 
 
 if __name__ == "__main__":

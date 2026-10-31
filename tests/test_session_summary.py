@@ -114,6 +114,15 @@ class HttpWiringTests(unittest.TestCase):
                          (1, 1, 2, 8192, 2))
         self.assertGreaterEqual(fields["connections"], 1)
 
+    def test_connection_close_request_still_counts_its_read(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=5)
+        self.assertEqual(self._get(conn, "/SLUS_201.74.Game.iso",
+                                   {"Range": "bytes=0-4095", "Connection": "close"}), 206)
+        conn.close()
+        self.server.shutdown()
+        fields = ss.parse_line(self.stats.stop()[0])
+        self.assertEqual((fields["read"], fields["bytes"], fields["errors"]), (1, 4096, 0))
+
     def test_off_by_default(self):
         self.assertIsNone(hs.Ps2HTTPServer.__init__.__defaults__[-1])
         self.assertNotIn("--session-summary",

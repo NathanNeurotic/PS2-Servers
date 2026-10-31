@@ -36,6 +36,7 @@ UDPBD_CLIENT_PORT = 0xBDBD
 RIPTOPL_DEFAULT_SMB_PORT = 1111  # src/app/opl.cpp, what an unconfigured install tries
 
 VALUE_MAX = 255  # CONFIG_KEY_VALUE_LEN - 1
+SMB_FIELD_MAX = 31  # gPCShareName / gPCUserName are char[32] (include/opl.h)
 
 
 @dataclass
@@ -79,12 +80,12 @@ def _bind_host(values):
     return "" if host in ("", "0.0.0.0") else host
 
 
-def _check_value(key, value):
+def _check_value(key, value, limit=VALUE_MAX):
     text = str(value)
     if "\r" in text or "\n" in text or "\0" in text:
         raise ValueError("{} cannot contain a line break.".format(key))
-    if len(text.encode("utf-8")) > VALUE_MAX:
-        raise ValueError("{} is longer than RiptOPL's {} bytes.".format(key, VALUE_MAX))
+    if len(text.encode("utf-8")) > limit:
+        raise ValueError("{} is longer than RiptOPL's {} bytes.".format(key, limit))
     return text
 
 
@@ -126,8 +127,9 @@ def _smbv1(values, pc_ip):
     profile = Profile("smbv1", "SMB")
     address = _address(values, pc_ip, profile)
     port = 445 if values.get("take_445") else _port(values, 1025)
-    share = _check_value("Share", (values.get("share_name") or "games").strip() or "games")
-    user = _check_value("User", (values.get("username") or "").strip() or "guest")
+    share = _check_value("Share", (values.get("share_name") or "games").strip() or "games",
+                         SMB_FIELD_MAX)
+    user = _check_value("User", (values.get("username") or "").strip() or "guest", SMB_FIELD_MAX)
     profile.network += [("smb_share_use_nbns", 0), ("smb_ip", address), ("smb_port", port),
                         ("smb_share", share), ("smb_user", user)]
     if values.get("password"):

@@ -49,9 +49,9 @@ class SessionStats:
         """Add count to one counter for this client. Unknown kinds are a bug."""
         if kind not in KINDS:
             raise ValueError(kind)
-        now = self._clock()
         evicted = None
         with self._lock:
+            now = self._clock()  # inside the lock, so last-seen order never runs backwards
             entry = self._clients.get(client)
             if entry is None:
                 if len(self._clients) >= self.max_clients:

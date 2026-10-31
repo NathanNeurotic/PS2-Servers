@@ -87,13 +87,20 @@ def fetch(url, *, cancel=None, opener=None, max_bytes=MAX_BYTES, timeout=TIMEOUT
     opener = opener or _opener()
     cancel = cancel or threading.Event()
     sleep = sleep or cancel.wait
+    deadline = clock() + timeout  # the whole download: both attempts and the wait between
+
+    def remaining():
+        left = deadline - clock()
+        if left <= 0:
+            raise FetchError("Download took longer than {} s: {}".format(timeout, url))
+        return left
+
     for attempt in (1, 2):
         if cancel.is_set():
             raise Cancelled()
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        deadline = clock() + timeout  # the whole attempt, not each socket wait
         try:
-            with opener.open(request, timeout=timeout) as response:
+            with opener.open(request, timeout=remaining()) as response:
                 kind = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
                 if not kind.startswith("image/"):
                     raise FetchError("Not an image ({}): {}".format(kind or "no type", url))
@@ -104,11 +111,11 @@ def fetch(url, *, cancel=None, opener=None, max_bytes=MAX_BYTES, timeout=TIMEOUT
                 while True:
                     if cancel.is_set():
                         raise Cancelled()
-                    if clock() > deadline:
-                        raise FetchError("Download took longer than {} s: {}".format(timeout, url))
+                    remaining()  # each socket wait is already capped by the open timeout
                     read = getattr(response, "read1", None) or response.read
                     chunk = read(65536)
                     if not chunk:
+                        remaining()  # a body that finished late still failed
                         return bytes(body)
                     body += chunk
                     if len(body) > max_bytes:
@@ -118,7 +125,11 @@ def fetch(url, *, cancel=None, opener=None, max_bytes=MAX_BYTES, timeout=TIMEOUT
                 return None
             if exc.code in (429, 500, 502, 503, 504) and attempt == 1:
                 wait = exc.headers.get("Retry-After", "") if exc.headers else ""
-                sleep(min(int(wait), MAX_RETRY_WAIT) if wait.isdigit() else 2)
+                wait = min(int(wait), MAX_RETRY_WAIT) if wait.isdigit() else 2
+                if wait >= remaining():
+                    raise FetchError("HTTP {} from {}; retrying would pass the {} s limit".format(
+                        exc.code, url, timeout)) from None
+                sleep(wait)
                 continue
             raise FetchError("HTTP {} from {}".format(exc.code, url)) from None
         except (urllib.error.URLError, OSError, ValueError) as exc:

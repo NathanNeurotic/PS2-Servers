@@ -183,6 +183,10 @@ SESSION http client=192.168.1.30 seconds=412 connections=3 list=1 open=1 read=51
   dropped connections.
 - HTTP is read-only, so `write` is always 0.
 - These are counts of what the PC served. They do not prove that a game ran.
+- On Linux and macOS, **Stop** in the launcher still prints the final lines.
+  On Windows, **Stop** ends the server process outright, so consoles that
+  have not gone quiet yet get no final line. Stop with Ctrl+C in a terminal
+  to keep them.
 
 The format is shared by every server that adds it (`http_server/session_stats.py`),
 so one parser reads all of them.

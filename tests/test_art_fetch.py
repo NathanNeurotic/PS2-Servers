@@ -109,6 +109,14 @@ class FetchTests(unittest.TestCase):
             art_fetch.fetch("https://x", opener=_Opener(Slow(b"")), timeout=15,
                             clock=lambda: next(ticks))
 
+    def test_retry_wait_counts_against_the_same_deadline(self):
+        ticks = iter([0.0, 0.0, 14.0])
+        waits = []
+        with self.assertRaisesRegex(art_fetch.FetchError, "limit"):
+            art_fetch.fetch("https://x", opener=_Opener(_http_error(503), _Response(FAKE_IMAGE)),
+                            sleep=waits.append, timeout=15, clock=lambda: next(ticks))
+        self.assertEqual(waits, [])
+
     def test_cancel_before_start(self):
         cancel = threading.Event()
         cancel.set()
