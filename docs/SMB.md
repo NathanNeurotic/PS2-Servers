@@ -47,7 +47,7 @@ bug reports. Authentication is not a reason to expose the server to the internet
 
 ## Neutrino SMB
 
-[Neutrino](https://github.com/rickgaiser/neutrino)'s SMB driver
+[Neutrino](https://github.com/ps2max32/neutrino)'s SMB driver
 ([ps2max32/neutrino PR #236](https://github.com/ps2max32/neutrino/pull/236), by
 Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg); merged 2026-10-31; use the latest complete nightly)
 reads games with [usmb2](https://github.com/sahlberg/usmb2). It needs:

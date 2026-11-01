@@ -143,6 +143,8 @@ def generate(work):
         "                exit(72);\n"
         "        }\n",
         "ntlm.c")
+    # The check above calls exit(); newer GCC rejects it without a declaration.
+    ntlm = "#include <stdlib.h>\n" + ntlm
     (work / "ntlm.c").write_text(ntlm, encoding="utf-8", newline="\n")
     for name in USMB2_HASHES:
         if name not in ("usmb2.c", "ntlm.c"):
