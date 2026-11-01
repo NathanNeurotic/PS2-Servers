@@ -65,6 +65,18 @@ class SessionStats:
         if evicted is not None:
             self._emit(self._line(evicted[0], evicted[1], "evicted"))
 
+    def touch(self, client):
+        """Mark a known client as still active without counting anything, so a
+        transfer that outlasts idle_seconds is not summarised mid-way. A client
+        with no entry is left alone. Returns whether one was refreshed."""
+        with self._lock:
+            entry = self._clients.get(client)
+            if entry is None:
+                return False
+            self._clients.move_to_end(client)
+            entry.last = self._clock()
+            return True
+
     def expire(self):
         """Summarise and forget every client idle for idle_seconds. Returns the lines."""
         now = self._clock()

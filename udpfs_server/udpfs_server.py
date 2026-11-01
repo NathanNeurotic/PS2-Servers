@@ -611,6 +611,11 @@ class UdpfsServer:
         if stats is not None:
             stats.record(addr[0], kind, count)
 
+    def _session_touch(self, addr):
+        stats = self.session_stats
+        if stats is not None:
+            stats.touch(addr[0])
+
     def __init__(self, root_dir: Optional[str] = None,
                  block_device: Optional[str] = None,
                  port: int = UDPFS_PORT,
@@ -2687,6 +2692,10 @@ class UdpfsServer:
                         return
                 else:
                     window_retries = 0
+                    # Progress on a slow link: keep the console's session
+                    # summary alive, or a read longer than the idle timeout
+                    # gets summarised before its bytes are counted.
+                    self._session_touch(addr)
                 continue
 
             window_retries = 0

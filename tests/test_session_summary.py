@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -47,6 +48,18 @@ class CounterTests(unittest.TestCase):
                          ("http", "10.0.0.2", 30, 1, 2, 2048, "idle"))
         self.assertEqual(self.stats.expire(), [])
         self.assertEqual(self.stats.active(), 0)
+
+    def test_touch_keeps_an_active_client(self):
+        self.stats.record("10.0.0.2", "read")
+        self.clock.now += 45
+        self.assertTrue(self.stats.touch("10.0.0.2"))
+        self.assertFalse(self.stats.touch("10.0.0.9"))  # never seen: nothing is created
+        self.clock.now += 45
+        self.assertEqual(self.stats.expire(), [])      # 90 s since the read, 45 s since touch
+        self.assertEqual(self.stats.active(), 1)
+        self.clock.now += 61
+        [line] = self.stats.expire()
+        self.assertEqual(ss.parse_line(line)["read"], 1)
 
     def test_clients_are_kept_apart_and_bounded(self):
         self.stats.record("a", "open")
@@ -266,6 +279,46 @@ class UdpfsWiringTests(unittest.TestCase):
                           fields["read"], fields["bytes"], fields["errors"],
                           fields["ended"]),
                          ("127.0.0.1", 1, 2, 2, len(data), 1, "stopped"))
+
+    def test_long_read_keeps_the_summary_active(self):
+        """A read whose transfer outlasts the idle timeout (a slow link acking
+        one window every 30 s) must still produce one line with read=1 and its
+        bytes, not an idle line without the bytes plus a second line without
+        the read."""
+        import udpfs_server as srv
+
+        clock = Clock()
+        peer = ("10.0.0.4", 1)
+        server = srv.UdpfsServer.__new__(srv.UdpfsServer)
+        server.session_stats = ss.SessionStats("udpfs", clock=clock, emit=lambda line: None)
+        server._local = threading.local()      # tx_* fields live on the worker's Session
+        server._local.session = types.SimpleNamespace(tx_seq_nr=0, tx_seq_nr_acked=0, tx_buffer=[])
+        server._optimal_chunk_size = lambda total: 1024
+        server._print_event = lambda *a, **k: None
+
+        def send_packet(addr, payload, fin=False, hdr_size=0):
+            server.tx_seq_nr += 1
+
+        def wait_window(addr):            # the console acks a window after 30 s
+            clock.now += 30
+            server.session_stats.expire()  # the main loop's idle sweep runs meanwhile
+            server.tx_seq_nr_acked = server.tx_seq_nr - 1
+            return False
+
+        server._send_data_packet = send_packet
+        server._wait_for_window_ack = wait_window
+        server._wait_for_final_ack = lambda addr: True
+        # Treat the window as full after every packet so each one waits 30 s.
+        server._in_flight = lambda: srv.SEND_WINDOW if server.tx_seq_nr_acked != server.tx_seq_nr - 1 else 0
+        server.tx_seq_nr_acked = -1
+
+        server._session_record(peer, "read")
+        server._send_read_result(peer, 4096, b"x" * 4096)
+        self.assertGreaterEqual(clock.now, 1000 + 90)  # three waits: well past the 60 s idle limit
+        self.assertEqual(server.session_stats.expire(), [])
+        [line] = server.session_stats.stop()
+        fields = ss.parse_line(line)
+        self.assertEqual((fields["read"], fields["bytes"]), (1, 4096))
 
     def test_unconfirmed_read_does_not_count_bytes(self):
         import udpfs_server as srv
