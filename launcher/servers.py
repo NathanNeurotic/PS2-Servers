@@ -69,6 +69,12 @@ class ServerDef:
     module_dir: Optional[str] = None
     binary_rel: dict = field(default_factory=dict)
     available_os: tuple = ("Windows", "Linux", "Darwin")
+    # True when the server unwinds on the launcher's stop pipe (launcher/
+    # serve.py) and has been checked to wake up for it while idle. Stop then
+    # closes the pipe and waits briefly before ending the process, which on
+    # Windows is the only way its shutdown code (final stats, SESSION lines,
+    # the take-445 restore of Windows file sharing) gets to run.
+    cooperative_stop: bool = False
 
     def build_argv(self, values):
         return self._build_argv(values)
@@ -356,6 +362,7 @@ SMBV1 = ServerDef(
     label="SMBv1 server",
     blurb="Share a games folder over SMB. Works even on Windows 11 where the OS removed SMB1.",
     runtime="python",
+    cooperative_stop=True,
     default_port=1025,
     share_hint="games",
     module_file=_repo("smbv1_server", "smbserver_opl.py"),
@@ -394,6 +401,7 @@ SMBV2 = ServerDef(
     blurb="Share a games folder over SMB2, which modern Windows can browse "
           "without re-enabling SMB1. Needs a username and password.",
     runtime="python",
+    cooperative_stop=True,
     default_port=1445,
     share_hint="games",
     module_file=_repo("smb2_server", "smb2_server.py"),
@@ -409,6 +417,7 @@ SMBV3 = ServerDef(
           "client refuses it and needs SMB2. Neutrino's SMB driver needs this "
           "mode on port 445.",
     runtime="python",
+    cooperative_stop=True,
     default_port=1445,
     share_hint="games",
     module_file=_repo("smb2_server", "smb2_server.py"),
@@ -424,6 +433,7 @@ UDPFS = ServerDef(
     recommendation="Recommended for most setups",
     recommendation_kind="good",
     runtime="python",
+    cooperative_stop=True,
     default_port=0xF5F6,
     port_is_hex=True,
     module_file=_repo("udpfs_server", "ps2servers_core.py"),
@@ -518,6 +528,7 @@ HTTP = ServerDef(
     recommendation="Experimental -- needs hardware validation",
     recommendation_kind="legacy",
     runtime="python",
+    cooperative_stop=True,
     default_port=1100,
     share_hint="games",
     module_file=_repo("http_server", "http_server.py"),
@@ -566,6 +577,7 @@ UDPBD = ServerDef(
     recommendation="Legacy — prefer UDPFS",
     recommendation_kind="legacy",
     runtime="python",
+    cooperative_stop=True,
     default_port=0xBDBD,
     port_is_hex=True,
     module_file=_repo("udpbd_server", "udpbd_server.py"),

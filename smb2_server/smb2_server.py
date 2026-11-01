@@ -177,14 +177,25 @@ class Smb2Server:
         self.sock.listen(backlog)
         return self.sock.getsockname()[1]
 
-    def serve_forever(self):
+    def serve_forever(self, poll_seconds=1.0):
+        # A timeout lets a stop request (Ctrl+C, or the launcher's Stop on
+        # Windows) land in the main thread while nobody connects. Accepted
+        # sockets are still blocking: Python resets them when the default
+        # timeout is None.
+        self.sock.settimeout(poll_seconds)
         while not self._stop.is_set():
             try:
                 client, peer = self.sock.accept()
+            except socket.timeout:
+                # Not `continue` in the handler: see smbserver_opl.py (a
+                # Ctrl+C landing there escapes the caller's try on 3.12).
+                client = None
             except OSError:
                 if self._stop.is_set():
                     return
                 raise
+            if client is None:
+                continue
             t = threading.Thread(target=self._serve_client, args=(client, peer),
                                  daemon=True)
             t.start()

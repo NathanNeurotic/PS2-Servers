@@ -17,6 +17,7 @@ why it replaces the Windows-only prebuilt binary in this repo.
 
 import argparse
 import os
+import select
 import socket
 import struct
 import sys
@@ -39,6 +40,7 @@ CMD_WRITE_DONE = 0x06  # server -> client
 
 SECTOR_SIZE = 512
 RECV_BUFLEN = 2048
+STOP_POLL_SECONDS = 1.0
 # Header (2 bytes) + block_type (4 bytes) = 6 bytes of RDMA overhead.
 RDMA_MAX_PAYLOAD = 1472 - 2 - 4  # 1466
 
@@ -135,6 +137,22 @@ class BlockDevice:
 # --------------------------------------------------------------------------- #
 # Server
 # --------------------------------------------------------------------------- #
+def _ignore_udp_connreset(sock):
+    """Windows: stop reporting ICMP port-unreachable as WSAECONNRESET.
+
+    Without this, one reply sent to a PS2 that has just reset or stopped
+    listening makes the next recvfrom() fail, and the receive loop used to
+    treat any OSError as "socket closed" and shut the whole server down.
+    No-op elsewhere. The same switch udpfs_server.py sets.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        sock.ioctl(0x9800000C, struct.pack("I", 0))  # SIO_UDP_CONNRESET, off
+    except (OSError, AttributeError, ValueError):
+        pass
+
+
 class UdpbdServer:
     def __init__(self, device, bind="", verbose=False):
         self.bd = device
@@ -151,6 +169,7 @@ class UdpbdServer:
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.sock.bind((bind or "0.0.0.0", UDPBD_PORT))
         self._bind_addr = bind or "0.0.0.0"
+        _ignore_udp_connreset(self.sock)
 
     # -- RDMA block sizing ------------------------------------------------- #
     def _set_block_shift(self, shift):
@@ -299,8 +318,23 @@ class UdpbdServer:
         print()
         try:
             while True:
+                # Wake up once a second, so a stop request (Ctrl+C, or the
+                # launcher's Stop on Windows) lands even while no PS2 is
+                # talking to us. The socket itself stays blocking, so replies
+                # are sent exactly as before.
+                try:
+                    readable, _, _ = select.select([self.sock], [], [], STOP_POLL_SECONDS)
+                except (OSError, ValueError):
+                    break  # socket closed -> shut down
+                if not readable:
+                    continue
                 try:
                     datagram, addr = self.sock.recvfrom(RECV_BUFLEN)
+                except ConnectionResetError:
+                    # Windows reports an ICMP port-unreachable from an earlier
+                    # reply (a PS2 that reset or stopped listening) on the next
+                    # recvfrom. UDP has no connection to lose: keep serving.
+                    continue
                 except OSError:
                     break  # socket closed -> shut down
                 if len(datagram) < 2:  # smaller than the header: ignore

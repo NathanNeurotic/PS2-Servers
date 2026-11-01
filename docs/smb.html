@@ -135,7 +135,7 @@ In your loader's <b>Network Settings</b>:
 </div>
 
 <div class="callout warn"><div class="h">Take Port 445 (Admin Option)</div>
-Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (admin)</b> toggle in Desktop attempts to temporarily stop the Windows Server service to free TCP 445. For ordinary PS2 gaming, this is unnecessary: configure your loader with port <b>1445</b> instead.
+Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (admin)</b> toggle in Desktop attempts to temporarily stop the Windows Server service to free TCP 445. <b>Stop</b> starts the service again before the server exits (the launcher waits up to 20 seconds for it); if the server is ended some other way, a reboot brings it back. For ordinary PS2 gaming, this is unnecessary: configure your loader with port <b>1445</b> instead.
 </div>
 
 <h3 id="neutrino-smb">Neutrino SMB</h3>

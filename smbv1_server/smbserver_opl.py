@@ -1512,9 +1512,22 @@ def main(argv=None):
     print(" and allow TCP %d through Windows Firewall (the launcher .bat does this for you)." % bound)
     print("=" * 64)
 
+    # Wake up once a second so a stop request (Ctrl+C, or the launcher's Stop
+    # on Windows) lands even while nobody connects, and the 445 restore below
+    # runs. Accepted sockets are still blocking (Python resets them when the
+    # default timeout is None).
+    lsock.settimeout(1.0)
     try:
         while True:
-            csock, addr = lsock.accept()
+            try:
+                csock, addr = lsock.accept()
+            except socket.timeout:
+                # Not `continue` here: on Python 3.12 a KeyboardInterrupt
+                # delivered on a `continue` inside an except block escapes
+                # the enclosing try, and the 445 restore below never runs.
+                csock = None
+            if csock is None:
+                continue
             csock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             t = threading.Thread(target=serve_conn, args=(server, csock, addr), daemon=True)
             t.start()
