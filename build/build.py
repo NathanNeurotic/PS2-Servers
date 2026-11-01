@@ -113,6 +113,9 @@ INCLUDE_MODULES = [
     "launcher.riptopl_export",
     "launcher.achievement_loader",
     "launcher.discord_presence",
+    # Server sources ship as data and import this at load (HTTP always, the
+    # others with --session-summary); Nuitka cannot see that import.
+    "launcher.session_stats",
     "sqlite3",
     "launcher.raw_storage",
     "launcher.virtual_exfat",
