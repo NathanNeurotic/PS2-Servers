@@ -481,6 +481,14 @@ func (s *Server) sessionRecord(st *session.State, kind string, count int64) {
 	s.summary.Record(st.Peer.IP.String(), kind, count)
 }
 
+// sessionTouch refreshes a console's last-seen time without counting anything.
+func (s *Server) sessionTouch(st *session.State) {
+	if s.summary == nil || st == nil || st.Peer == nil {
+		return
+	}
+	s.summary.Touch(st.Peer.IP.String())
+}
+
 func (s *Server) worker(w *peerWorker) {
 	defer s.wg.Done()
 	for {

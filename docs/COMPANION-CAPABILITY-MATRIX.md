@@ -15,7 +15,7 @@ level yet. **Every row is NOT TESTED on a PS2.**
 
 | Source | Commit | Used for |
 |---|---|---|
-| PS2-Servers `main` | `d862ffa` (#261 merge) | Everything in this file |
+| PS2-Servers `main` | `0b72423` (#270 merge), plus the Edge session-summary branch for the telemetry row | Everything in this file |
 | [RiptOPL](https://github.com/NathanNeurotic/RiptOPL) `rebuild/main` | `4ec6c68` (2026-10-31) | Ember layout (`include/cuesupport.h`, `src/sources/cuesupport.cpp`), PNG/CLUT alpha (`src/gfx/textures.cpp`), network keys (`include/config.h`, `include/opl.h`, `src/app/settingsio.cpp`) |
 | [Open-PS2-Loader](https://github.com/NathanNeurotic/Open-PS2-Loader) | `bfebafdd` | HTTP list parser `src/httpcatalog.c`, compiled by `conformance/integration/riptopl_http/run.py` |
 | [PS2TVCRT / FastLoader](https://github.com/NathanNeurotic/PS2TVCRT) README | `1844bd1` | Feature targets only (its claims are not hardware results) |

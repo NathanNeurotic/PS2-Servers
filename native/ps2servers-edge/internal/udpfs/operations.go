@@ -44,6 +44,9 @@ func (s *Server) handleMessage(st *session.State, p []byte) {
 		s.sessionRecord(st, "write", 1)
 		s.handleWriteRequest(st, p)
 	case protocol.WriteData:
+		// The write itself was counted at WRITE_REQUEST; the data packets that
+		// follow count nothing, but a long write must not read as idle.
+		s.sessionTouch(st)
 		s.handleWriteData(st, p)
 	case protocol.BReadRequest:
 		s.stats.bread.Add(1)

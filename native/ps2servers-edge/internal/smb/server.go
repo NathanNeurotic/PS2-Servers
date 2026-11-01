@@ -562,7 +562,9 @@ func (s *Server) serveConn(nc net.Conn) {
 			if !errors.Is(err, io.EOF) && !isClosed(err) {
 				// A reset is a console switching off, which is normal; a
 				// read that failed any other way is counted.
-				if !errors.Is(err, syscall.ECONNRESET) {
+				// The idle deadline (idleTimeout) is the server giving up on a
+				// silent socket, not a failed read; it is not counted either.
+				if !errors.Is(err, syscall.ECONNRESET) && !errors.Is(err, os.ErrDeadlineExceeded) {
 					c.record("errors", 1)
 				}
 				s.cfg.Log.Debug("SMB read ended", map[string]any{"peer": peer, "error": err.Error()})
