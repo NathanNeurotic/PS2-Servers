@@ -18,12 +18,12 @@ jobs:
           fetch-depth: 0
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: rickgaiser/neutrino
+          repository: ps2max32/neutrino
           ref: 7be8de2798c99af433c91993e021746a54d6800d
           path: .replay/official
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: rickgaiser/neutrino
+          repository: ps2max32/neutrino
           ref: f12b4f51b5112928eb06e29fd91511251c0b29f1
           path: .replay/stable
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
