@@ -443,6 +443,22 @@ class Smb2WiringTests(unittest.TestCase):
                           fields["write"], fields["close"], fields["errors"], fields["ended"]),
                          ("smbv3", "127.0.0.1", 1, 2, 3, 3, 1024, 1, 1, 2, "stopped"))
 
+    def test_uncounted_commands_keep_the_session_alive(self):
+        lines = []
+        server, client, _wire = self._server(lines)
+        clock = Clock()
+        server.session_stats = ss.SessionStats("smbv3", emit=lines.append, clock=clock)
+        server.session_stats.record("127.0.0.1", "connections")
+        clock.now += 50
+        client.echo()                      # counts nothing, but the console is here
+        self.assertEqual(server.session_stats.expire(), [])
+        clock.now += 50                    # 100 s after the connection, 50 s after the echo
+        self.assertEqual(server.session_stats.expire(), [])
+        clock.now += 20                    # now 70 s quiet
+        self.assertEqual(len(server.session_stats.expire()), 1)
+        self.assertEqual(ss.parse_line(lines[0])["ended"], "idle")
+        server.stop()
+
     def test_ntlm_challenge_is_not_an_error(self):
         lines = []
         server, _client, _wire = self._server(lines)

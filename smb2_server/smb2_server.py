@@ -335,6 +335,10 @@ class Smb2Server:
         if (status is not None and status != wire.STATUS_SUCCESS
                 and (hdr.command, status) not in _EXPECTED_STATUSES):
             self._session_record(conn, "errors")
+        elif kind is None and self.session_stats is not None:
+            # ECHO, QUERY_INFO, FLUSH and the like count nothing, but a console
+            # sending only those is not idle, so keep its session alive.
+            self.session_stats.touch(conn.peer[0])
         return status, reply_body, tree_id
 
     def _dispatch(self, conn, hdr, body):
