@@ -148,6 +148,10 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
    STARTED in the follow-up PR: a shared, bounded `SESSION` summary line
    (`http_server/session_stats.py`), opt-in on HTTP. SMBv1, UDPFS and UDPBD and a
    launcher view that reads the lines are still to do.
+   DONE after #267: the launcher's **Stop** is cooperative on every OS
+   (`launcher/process.py` stop pipe, `launcher/serve.py`), so final `SESSION`
+   lines and the take-445 restore run on Windows too. The SMB and UDPBD accept/
+   receive loops now wake once a second for it. `tests/test_cooperative_stop.py`.
 6. Optional P3 VMC/packaging conveniences need a justified, safe disposition;
    do not add an unvetted formatter, automatic card assignments or writable HTTP/
    virtual-exFAT promises. Update all required source/docs/site surfaces, run full

@@ -17,6 +17,7 @@ why it replaces the Windows-only prebuilt binary in this repo.
 
 import argparse
 import os
+import select
 import socket
 import struct
 import sys
@@ -39,6 +40,7 @@ CMD_WRITE_DONE = 0x06  # server -> client
 
 SECTOR_SIZE = 512
 RECV_BUFLEN = 2048
+STOP_POLL_SECONDS = 1.0
 # Header (2 bytes) + block_type (4 bytes) = 6 bytes of RDMA overhead.
 RDMA_MAX_PAYLOAD = 1472 - 2 - 4  # 1466
 
@@ -299,8 +301,23 @@ class UdpbdServer:
         print()
         try:
             while True:
+                # Wake up once a second, so a stop request (Ctrl+C, or the
+                # launcher's Stop on Windows) lands even while no PS2 is
+                # talking to us. The socket itself stays blocking, so replies
+                # are sent exactly as before.
+                try:
+                    readable, _, _ = select.select([self.sock], [], [], STOP_POLL_SECONDS)
+                except (OSError, ValueError):
+                    break  # socket closed -> shut down
+                if not readable:
+                    continue
                 try:
                     datagram, addr = self.sock.recvfrom(RECV_BUFLEN)
+                except ConnectionResetError:
+                    # Windows reports an ICMP port-unreachable from an earlier
+                    # reply (a PS2 that reset or stopped listening) on the next
+                    # recvfrom. UDP has no connection to lose: keep serving.
+                    continue
                 except OSError:
                     break  # socket closed -> shut down
                 if len(datagram) < 2:  # smaller than the header: ignore

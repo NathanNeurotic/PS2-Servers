@@ -177,14 +177,25 @@ class Smb2Server:
         self.sock.listen(backlog)
         return self.sock.getsockname()[1]
 
-    def serve_forever(self):
+    def serve_forever(self, poll_seconds=1.0):
+        # A timeout lets a stop request (Ctrl+C, or the launcher's Stop on
+        # Windows) land in the main thread while nobody connects. Accepted
+        # sockets are still blocking: Python resets them when the default
+        # timeout is None.
+        self.sock.settimeout(poll_seconds)
         while not self._stop.is_set():
             try:
                 client, peer = self.sock.accept()
+            except socket.timeout:
+                # Not `continue` in the handler: see smbserver_opl.py (a
+                # Ctrl+C landing there escapes the caller's try on 3.12).
+                client = None
             except OSError:
                 if self._stop.is_set():
                     return
                 raise
+            if client is None:
+                continue
             t = threading.Thread(target=self._serve_client, args=(client, peer),
                                  daemon=True)
             t.start()
@@ -972,17 +983,30 @@ def take_445():
     status = ps("(Get-Service LanmanServer).Status").stdout.strip()
     browser = ps("(Get-Service Browser -ErrorAction SilentlyContinue).Status"
                  ).stdout.strip()
-    note("[445] stopping LanmanServer (was: %s)..." % (status or "?"))
-    res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction SilentlyContinue")
-    if res.returncode != 0:
-        note("[445] could not stop LanmanServer -- run as Administrator.",
-             res.stderr.strip())
+    restored = []
 
     def restore():
+        # Once only: main's cleanup and the interrupt path below may both
+        # reach it.
+        if restored:
+            return
+        restored.append(True)
         note("[445] restoring LanmanServer...")
         ps("Start-Service LanmanServer -ErrorAction SilentlyContinue")
         if browser == "Running":
             ps("Start-Service Browser -ErrorAction SilentlyContinue")
+
+    note("[445] stopping LanmanServer (was: %s)..." % (status or "?"))
+    try:
+        res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction SilentlyContinue")
+    except BaseException:
+        # Stopped (Stop button, Ctrl+C) while the service was going down: put
+        # it back before leaving, or file sharing stays off until a reboot.
+        restore()
+        raise
+    if res.returncode != 0:
+        note("[445] could not stop LanmanServer -- run as Administrator.",
+             res.stderr.strip())
 
     return restore
 
@@ -1086,40 +1110,41 @@ def main(argv=None):
     except ValueError as e:
         ap.error(str(e))
 
+    # One cleanup owner from take-445 on: a stop request can land during the
+    # bind or the banner, not only in serve_forever(). take_445 restores by
+    # itself if it is interrupted mid-stop.
     restore = None
-    want_port = args.port
-    if args.take_445:
-        want_port = 445
-        restore = take_445()
     try:
-        port = server.listen(args.bind, want_port)
-    except OSError as e:
-        print("ERROR: cannot bind %s:%d -- %s" % (args.bind, want_port, e),
-              file=sys.stderr)
-        hint = bind_hint(want_port, e)
-        if hint:
-            print(hint, file=sys.stderr)
-        if restore is not None:
-            restore()
-        return 1
+        want_port = args.port
+        if args.take_445:
+            want_port = 445
+            restore = take_445()
+        try:
+            port = server.listen(args.bind, want_port)
+        except OSError as e:
+            print("ERROR: cannot bind %s:%d -- %s" % (args.bind, want_port, e),
+                  file=sys.stderr)
+            hint = bind_hint(want_port, e)
+            if hint:
+                print(hint, file=sys.stderr)
+            return 1
 
-    note("SMB%d server on %s:%d" % (args.smb_version, args.bind, port))
-    for name, share in shares.items():
-        note("  share %r -> %s%s" % (name, share.root,
-                                     " (read-only)" if args.read_only else ""))
-    if auth.is_open:
-        note("  NO PASSWORD: anyone who can reach this port can read the share.")
-    else:
-        note("  users: " + ", ".join(sorted(args.user and
-                                            [u.split(":", 1)[0] for u in args.user])))
-    if port != 445:
-        note("  Windows and Neutrino can only connect on port 445; this is %d. "
-             "Map it, or run the SMBv1 mode for OPL." % port)
-    if ceiling < wire.DIALECT_300:
-        note("  SMBv2 mode: Neutrino's SMB driver offers only SMB 3.0 and needs "
-             "the SMBv3 server.")
+        note("SMB%d server on %s:%d" % (args.smb_version, args.bind, port))
+        for name, share in shares.items():
+            note("  share %r -> %s%s" % (name, share.root,
+                                         " (read-only)" if args.read_only else ""))
+        if auth.is_open:
+            note("  NO PASSWORD: anyone who can reach this port can read the share.")
+        else:
+            note("  users: " + ", ".join(sorted(args.user and
+                                                [u.split(":", 1)[0] for u in args.user])))
+        if port != 445:
+            note("  Windows and Neutrino can only connect on port 445; this is %d. "
+                 "Map it, or run the SMBv1 mode for OPL." % port)
+        if ceiling < wire.DIALECT_300:
+            note("  SMBv2 mode: Neutrino's SMB driver offers only SMB 3.0 and needs "
+                 "the SMBv3 server.")
 
-    try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass

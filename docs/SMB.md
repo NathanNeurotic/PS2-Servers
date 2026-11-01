@@ -37,7 +37,11 @@ the separate **Read-only** control determines whether writes are allowed.
 
 Windows Explorer uses TCP 445 rather than a custom SMB port. The optional
 **Take port 445 (admin)** setting temporarily stops Windows File Sharing to
-attempt to free that port; it can still fail if another service holds it. A
+attempt to free that port; it can still fail if another service holds it.
+**Stop** starts Windows File Sharing again before the server exits. The
+launcher waits up to 20 seconds for that; only if the server is ended before it
+finishes (a crash, or Task Manager) does file sharing stay stopped until the next
+reboot. A
 client that supports a custom port can use 1445 without that setup. These modes
 do not enable the Windows SMB1 optional feature.
 

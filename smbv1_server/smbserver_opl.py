@@ -1311,36 +1311,50 @@ def _take_445(bind_addr="0.0.0.0"):
 
     was = status("LanmanServer")
     browser = status("Browser")
-    print("  [445] stopping LanmanServer (was: %s) ..." % (was or "?"))
-    res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction SilentlyContinue")
-    if not wait_stopped("LanmanServer"):
-        # Binding 445 while LanmanServer lives is hopeless, and nothing was
-        # stopped, so there is nothing to restore.
-        print("  [445] could not stop LanmanServer -- run as Administrator."
-              + (" stderr: " + res.stderr.strip() if res.stderr.strip() else ""))
-        return None
+
+    restored = []
 
     def restore():
+        # Once only: the caller's cleanup and the interrupt path below may
+        # both reach it.
+        if restored:
+            return
+        restored.append(True)
         print("  [445] restoring LanmanServer ...")
         ps("Start-Service LanmanServer -ErrorAction SilentlyContinue")
         if browser == "Running":
             ps("Start-Service Browser -ErrorAction SilentlyContinue")
 
-    # Stopping LanmanServer frees 445 only when nothing else keeps the kernel
-    # driver srvnet.sys -- the socket's real owner -- loaded. Docker Desktop's
-    # service depends on it, and on such a machine the port stays bound. We do
-    # not pause other people's software to win the port: name what holds it,
-    # put LanmanServer back, and bail.
-    if not _port_free(bind_addr, 445):
-        deps = ps("(Get-Service srvnet -ErrorAction SilentlyContinue)"
-                  ".DependentServices.Name").stdout.split()
-        pinned = [n for n in deps if status(n) == "Running"]
-        print("  [445] port 445 is still bound by the srvnet driver"
-              + (" -- pinned by %s." % ", ".join(pinned) if pinned else ".")
-              + " Not pausing other software: use --port N (e.g. 1111) instead "
-              + "of --take-445.")
+    print("  [445] stopping LanmanServer (was: %s) ..." % (was or "?"))
+    try:
+        res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction SilentlyContinue")
+        if not wait_stopped("LanmanServer"):
+            # Binding 445 while LanmanServer lives is hopeless, and nothing was
+            # stopped, so there is nothing to restore.
+            print("  [445] could not stop LanmanServer -- run as Administrator."
+                  + (" stderr: " + res.stderr.strip() if res.stderr.strip() else ""))
+            return None
+
+        # Stopping LanmanServer frees 445 only when nothing else keeps the kernel
+        # driver srvnet.sys -- the socket's real owner -- loaded. Docker Desktop's
+        # service depends on it, and on such a machine the port stays bound. We do
+        # not pause other people's software to win the port: name what holds it,
+        # put LanmanServer back, and bail.
+        if not _port_free(bind_addr, 445):
+            deps = ps("(Get-Service srvnet -ErrorAction SilentlyContinue)"
+                      ".DependentServices.Name").stdout.split()
+            pinned = [n for n in deps if status(n) == "Running"]
+            print("  [445] port 445 is still bound by the srvnet driver"
+                  + (" -- pinned by %s." % ", ".join(pinned) if pinned else ".")
+                  + " Not pausing other software: use --port N (e.g. 1111) instead "
+                  + "of --take-445.")
+            restore()
+            return None
+    except BaseException:
+        # Stopped (Stop button, Ctrl+C) while the service was going down: put
+        # it back before leaving, or file sharing stays off until a reboot.
         restore()
-        return None
+        raise
 
     return restore
 
@@ -1450,81 +1464,97 @@ def main(argv=None):
     server = SmbServer(shares, read_only=args.read_only,
                        smb_version=args.smb_version, users=users)
 
+    # One cleanup owner from take-445 on: a stop request can land while the
+    # service is stopping, during the bind retries or the banner, not only in
+    # the accept loop. _take_445 restores by itself if it is interrupted.
     restore = None
-    port = args.port
-    if args.take_445:
-        port = 445
-        restore = _take_445(args.bind)
-        if restore is None:
-            return 2
-    elif port < 1 or port > 65535:
-        print("ERROR: port %d is out of the valid range (1-65535)." % port, file=sys.stderr)
-        return 2
-    elif port < 1033:
-        # Low ports overlap well-known/privileged ports and Windows reserved /
-        # excluded port ranges, which frequently block the bind. (--take-445
-        # deliberately uses 445 and is handled above.)
-        print(" WARNING: port %d is below 1033. Windows can reserve or block low "
-              "ports; if the bind fails or OPL cannot connect, use a higher port "
-              "such as the default 1111." % port)
-
-    # Bind; if the chosen port is taken/reserved, walk forward and report the real one.
-    lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    bound = _bind_listener(lsock, args.bind, port, args.take_445)
-    if bound is None:
-        if args.take_445:
-            print("ERROR: could not bind port 445 -- another process took it in "
-                  "the meantime. Use --port N instead of --take-445.", file=sys.stderr)
-        else:
-            print("ERROR: could not bind a port near %d (try --port N)." % port, file=sys.stderr)
-        if restore:
-            restore()
-        return 2
-    lsock.listen(8)
-
-    ips = _lan_ips()
-    print("=" * 64)
-    print(" PS2 Servers SMBv1 server -- listening on %s:%d" % (args.bind, bound))
-    if users:
-        first = sorted(users)[0]
-        creds = "User: %s   Password: %s" % (
-            first, "(as configured)" if users[first] else "blank")
-    else:
-        creds = "User: guest   Password: blank"
-    print(" In OPL set:  SMB Port: %d   |   %s" % (bound, creds))
-    print("              Share: %s" % "  ".join(sorted(shares)))
-    if len(ips) == 1:
-        print("              PC IP Address: %s" % ips[0])
-    else:
-        print("              PC IP Address: use the one on the SAME network as your PS2")
-        print("              (usually 192.168.x.x -- NOT a VPN/WSL address):")
-        for ip in ips:
-            print("                  %s" % ip)
-    for name in shares:
-        print("              Share: %s   ->   %s%s" % (name, shares[name].root,
-              "   (read-only)" if server.read_only else "   (writable)"))
-    if server.read_only:
-        print(" (read-only -- OPL cannot save per-game settings or VMCs to this share)")
-    else:
-        print(" (writable -- OPL can save settings + VMC-on-SMB here; pass --read-only to lock it)")
-    print(" If OPL says connect failed (error 300): use the LAN IP above (not a VPN/WSL one),")
-    print(" and allow TCP %d through Windows Firewall (the launcher .bat does this for you)." % bound)
-    print("=" * 64)
-
+    lsock = None
     try:
+        port = args.port
+        if args.take_445:
+            port = 445
+            restore = _take_445(args.bind)
+            if restore is None:
+                return 2
+        elif port < 1 or port > 65535:
+            print("ERROR: port %d is out of the valid range (1-65535)." % port, file=sys.stderr)
+            return 2
+        elif port < 1033:
+            # Low ports overlap well-known/privileged ports and Windows reserved /
+            # excluded port ranges, which frequently block the bind. (--take-445
+            # deliberately uses 445 and is handled above.)
+            print(" WARNING: port %d is below 1033. Windows can reserve or block low "
+                  "ports; if the bind fails or OPL cannot connect, use a higher port "
+                  "such as the default 1111." % port)
+
+        # Bind; if the chosen port is taken/reserved, walk forward and report the real one.
+        lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        bound = _bind_listener(lsock, args.bind, port, args.take_445)
+        if bound is None:
+            if args.take_445:
+                print("ERROR: could not bind port 445 -- another process took it in "
+                      "the meantime. Use --port N instead of --take-445.", file=sys.stderr)
+            else:
+                print("ERROR: could not bind a port near %d (try --port N)." % port, file=sys.stderr)
+            return 2
+        lsock.listen(8)
+
+        ips = _lan_ips()
+        print("=" * 64)
+        print(" PS2 Servers SMBv1 server -- listening on %s:%d" % (args.bind, bound))
+        if users:
+            first = sorted(users)[0]
+            creds = "User: %s   Password: %s" % (
+                first, "(as configured)" if users[first] else "blank")
+        else:
+            creds = "User: guest   Password: blank"
+        print(" In OPL set:  SMB Port: %d   |   %s" % (bound, creds))
+        print("              Share: %s" % "  ".join(sorted(shares)))
+        if len(ips) == 1:
+            print("              PC IP Address: %s" % ips[0])
+        else:
+            print("              PC IP Address: use the one on the SAME network as your PS2")
+            print("              (usually 192.168.x.x -- NOT a VPN/WSL address):")
+            for ip in ips:
+                print("                  %s" % ip)
+        for name in shares:
+            print("              Share: %s   ->   %s%s" % (name, shares[name].root,
+                  "   (read-only)" if server.read_only else "   (writable)"))
+        if server.read_only:
+            print(" (read-only -- OPL cannot save per-game settings or VMCs to this share)")
+        else:
+            print(" (writable -- OPL can save settings + VMC-on-SMB here; pass --read-only to lock it)")
+        print(" If OPL says connect failed (error 300): use the LAN IP above (not a VPN/WSL one),")
+        print(" and allow TCP %d through Windows Firewall (the launcher .bat does this for you)." % bound)
+        print("=" * 64)
+
+        # Wake up once a second so a stop request (Ctrl+C, or the launcher's Stop
+        # on Windows) lands even while nobody connects, and the 445 restore below
+        # runs. Accepted sockets are still blocking (Python resets them when the
+        # default timeout is None).
+        lsock.settimeout(1.0)
         while True:
-            csock, addr = lsock.accept()
+            try:
+                csock, addr = lsock.accept()
+            except socket.timeout:
+                # Not `continue` here: on Python 3.12 a KeyboardInterrupt
+                # delivered on a `continue` inside an except block escapes
+                # the enclosing try, and the 445 restore never runs.
+                csock = None
+            if csock is None:
+                continue
             csock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             t = threading.Thread(target=serve_conn, args=(server, csock, addr), daemon=True)
             t.start()
     except KeyboardInterrupt:
         print("\nshutting down ...")
     finally:
-        try:
-            lsock.close()
-        except OSError:
-            pass
+        if lsock is not None:
+            try:
+                lsock.close()
+            except OSError:
+                pass
         if restore:
             restore()
     return 0

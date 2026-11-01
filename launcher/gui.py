@@ -30,7 +30,7 @@ def _direct_link_experimental():
     return platform.system() in ("Linux", "Darwin")
 
 from . import config, directlink, elevate, netinfo, posix_firewall, ra_setup, ra_sounds, servers, status_client, theme, tray, windows_setup
-from .process import ServerProcess
+from .process import STOP_GRACE_SECONDS, ServerProcess
 from .discord_presence import DEFAULT_APPLICATION_ID, DesktopActivity, Presence
 from .ra_session import SessionPoller
 from .release_metadata import DISPLAY_VERSION, version_label
@@ -238,6 +238,21 @@ def tab_text(label):
     -- and keeps them consistent even where StyledNotebook is not in play.
     """
     return "  {}  ".format(label.strip())
+
+
+def _stop_grace_seconds(key, values):
+    """How long Stop waits for a cooperative server before ending it.
+
+    With take-445 the SMB server restarts Windows file sharing (LanmanServer)
+    on its way out, through PowerShell. Ending it part way would leave file
+    sharing stopped until the next reboot, so that case gets longer.
+    """
+    if key.startswith("smb") and values.get("take_445") and platform.system() == "Windows":
+        return TAKE_445_STOP_GRACE_SECONDS
+    return STOP_GRACE_SECONDS
+
+
+TAKE_445_STOP_GRACE_SECONDS = 20.0
 
 
 def _port_number(values):
@@ -2406,7 +2421,10 @@ class LauncherApp:
             self._append_log(
                 key, "[launcher] note: take-445 is set, so the port field ({}) "
                      "is ignored and the server binds 445\n".format(values.get("port")))
-        proc = ServerProcess(key, command, cwd=REPO_ROOT, on_output=self._on_output)
+        proc = ServerProcess(key, command, cwd=REPO_ROOT, on_output=self._on_output,
+                             cooperative_stop=(server.cooperative_stop
+                                               and server.runtime == "python"),
+                             stop_grace=_stop_grace_seconds(key, values))
         try:
             proc.start()
         except OSError as e:
@@ -2746,6 +2764,12 @@ class LauncherApp:
         if confirm and not self.confirm_stop_while_busy([key]):
             return
         if proc.is_running():
+            if proc.cooperative_stop and proc.stop_grace > STOP_GRACE_SECONDS:
+                self._append_log(key, "[launcher] stopping; waiting up to {:g}s for "
+                                      "Windows file sharing to be restored\n".format(
+                                          proc.stop_grace))
+                # Paint the line now: proc.stop() blocks the Tk loop.
+                self.root.update_idletasks()
             proc.stop()
         self.status_poller.clear_target(key)
         self.cards[key]._active_values = None
@@ -2765,6 +2789,13 @@ class LauncherApp:
         The asking belongs at the points where a person actually chose to stop
         something: stop_all_confirmed, stop_server, and _confirm_app_shutdown.
         """
+        # Ask every server first, so they wind down together and the whole
+        # stop costs one grace period rather than one per server.
+        for proc in list(self.procs.values()):
+            try:
+                proc.request_stop()
+            except Exception:
+                pass
         for key in list(self.procs):
             self.stop_server(key, confirm=False)
         self._stop_direct_responder()

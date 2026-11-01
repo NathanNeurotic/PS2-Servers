@@ -69,6 +69,62 @@ def _load_module(path):
     return module
 
 
+STOP_PIPE_ENV = "PS2SERVERS_STOP_PIPE"  # launcher/process.py sets it
+
+
+def _stop_like_ctrl_c(_signum=None, _frame=None):
+    raise KeyboardInterrupt()
+
+
+def install_stop_handlers(environ=None, stdin=None, interrupt=None):
+    """Make the launcher's Stop unwind a server the way Ctrl+C does.
+
+    Every server here already cleans up on KeyboardInterrupt: it closes open
+    sessions, prints its totals and, with --session-summary, its final SESSION
+    lines. Two ways in:
+
+    * SIGTERM (Linux, macOS): the launcher's fallback terminate().
+    * EOF on stdin, when the launcher started us with a stop pipe. This is
+      the only way that works on Windows, where terminate() is
+      TerminateProcess and nothing in the child gets to run.
+
+    Returns the watcher thread, or None when there is no stop pipe.
+    """
+    environ = os.environ if environ is None else environ
+    if threading.current_thread() is threading.main_thread():
+        for name in ("SIGTERM", "SIGBREAK"):
+            sig = getattr(signal, name, None)
+            if sig is None:
+                continue
+            try:
+                signal.signal(sig, _stop_like_ctrl_c)
+            except (ValueError, OSError):
+                pass
+    # Consume the flag so a process this server starts does not inherit it
+    # without the pipe that goes with it.
+    if environ.pop(STOP_PIPE_ENV, None) != "1":
+        return None
+    stream = stdin if stdin is not None else sys.stdin
+    if stream is None:
+        return None
+    if interrupt is None:
+        import _thread
+        interrupt = _thread.interrupt_main
+
+    def watch():
+        source = getattr(stream, "buffer", stream)
+        try:
+            while source.read(4096):
+                pass  # nothing is ever written; only the close matters
+        except (OSError, ValueError):
+            return  # no usable stdin: never stop on our own
+        interrupt()
+
+    watcher = threading.Thread(target=watch, name="ps2servers-stop-pipe", daemon=True)
+    watcher.start()
+    return watcher
+
+
 def run_serve(key, server_args):
     from .servers import REGISTRY
 
@@ -98,6 +154,8 @@ def run_serve(key, server_args):
         raise SystemExit("unknown server: {}".format(key))
     if server.runtime != "python":
         raise SystemExit("{} is a native server; run its binary directly".format(key))
+
+    install_stop_handlers()
 
     if server.module_dir and server.module_dir not in sys.path:
         sys.path.insert(0, server.module_dir)

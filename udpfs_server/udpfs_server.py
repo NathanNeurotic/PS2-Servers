@@ -714,8 +714,11 @@ class UdpfsServer:
         # briefly not reading, or a transient network hiccup. UDP is
         # connectionless, so these resets are spurious; left uncaught they kill the
         # receive loop and drop the transfer mid-load (a "black screen on load" on
-        # Win11). SIO_UDP_CONNRESET tells Windows to stop reporting them. Harmless
-        # / unavailable no-op elsewhere.
+        # Win11). SIO_UDP_CONNRESET would tell Windows to stop reporting them,
+        # but CPython's socket.ioctl() only accepts SIO_RCVALL,
+        # SIO_KEEPALIVE_VALS and SIO_LOOPBACK_FAST_PATH, so this call raises
+        # ValueError and does nothing. What actually keeps the server alive is
+        # the OSError handling around both recvfrom() calls in run().
         if sys.platform == 'win32':
             SIO_UDP_CONNRESET = 0x9800000C
             for _s in (self.sock, self.dsock):

@@ -109,7 +109,7 @@ def generate(work):
     # Port: the client hardcodes 445, which an unprivileged test cannot bind.
     src = splice(src, "        sin.sin_port = htons(445);\n",
                  "        sin.sin_port = htons(usmb2_test_port);\n", "usmb2.c")
-    src = "extern int usmb2_test_port;\n" + src
+    src = "#include <stdio.h>\n#include <stdlib.h>\nextern int usmb2_test_port;\n" + src
     # The PS2 build drops any reply larger than its reassembly buffer.
     src = splice(
         src,
@@ -143,8 +143,10 @@ def generate(work):
         "                exit(72);\n"
         "        }\n",
         "ntlm.c")
-    # The check above calls exit(); newer GCC rejects it without a declaration.
-    ntlm = "#include <stdlib.h>\n" + ntlm
+    # The splice calls printf and exit. GCC 14 and clang 16+ make an implicit
+    # declaration an error even with -w, so declare them rather than rely on
+    # ntlm.c (`--cc clang` reproduces the CI failure with an older GCC).
+    ntlm = "#include <stdio.h>\n#include <stdlib.h>\n" + ntlm
     (work / "ntlm.c").write_text(ntlm, encoding="utf-8", newline="\n")
     for name in USMB2_HASHES:
         if name not in ("usmb2.c", "ntlm.c"):
