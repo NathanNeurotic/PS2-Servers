@@ -10,7 +10,7 @@ Unless otherwise stated, PS2 Servers is licensed under the **Academic Free
 License 3.0 (AFL-3.0)**. See [`LICENSE`](LICENSE).
 
 AFL-3.0 was selected because this repository redistributes upstream UDPFS code
-from [Rick Gaiser](https://github.com/rickgaiser)'s [Neutrino](https://github.com/rickgaiser/neutrino) project, which is licensed under AFL-3.0.
+from [Rick Gaiser](https://github.com/rickgaiser)'s [Neutrino](https://github.com/ps2max32/neutrino) project, which is licensed under AFL-3.0.
 
 ## Original PS2 Servers code
 
@@ -30,10 +30,10 @@ was copied into that implementation.
 
 ### UDPFS server from Neutrino
 
-`udpfs_server/udpfs_server.py` is redistributed from [Rick Gaiser](https://github.com/rickgaiser)'s [Neutrino](https://github.com/rickgaiser/neutrino) host
+`udpfs_server/udpfs_server.py` is redistributed from [Rick Gaiser](https://github.com/rickgaiser)'s [Neutrino](https://github.com/ps2max32/neutrino) host
 tools:
 
-- upstream project: https://github.com/rickgaiser/neutrino
+- upstream project: https://github.com/ps2max32/neutrino
 - upstream file: `pc/udpfs_server.py`
 - upstream license: Academic Free License 3.0
 

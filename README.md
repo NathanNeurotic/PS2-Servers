@@ -477,13 +477,13 @@ PS2 Servers builds on the following projects and contributions:
 
 - **Rick Gaiser — [@rickgaiser](https://github.com/rickgaiser)** — the heart of all
   of this. He designed the **UDPBD** and **UDPFS** network protocols and wrote the
-  original servers, alongside **[Neutrino](https://github.com/rickgaiser/neutrino)**.
+  original servers, alongside **[Neutrino](https://github.com/ps2max32/neutrino)**.
   [`udpfs_server/udpfs_server.py`](udpfs_server/udpfs_server.py) is his UDPFS server
   (from Neutrino's `pc/` host tools), and
   [`udpbd_server/udpbd_server.py`](udpbd_server/udpbd_server.py) is our independent
   Python re‑implementation of his UDPBD v2 protocol. The network game‑loading here
   simply does not exist without his work — thank you.
-- **pcm720 — [@pcm720](https://github.com/pcm720)** — a core [Neutrino](https://github.com/rickgaiser/neutrino) contributor and
+- **pcm720 — [@pcm720](https://github.com/pcm720)** — a core [Neutrino](https://github.com/ps2max32/neutrino) contributor and
   author of **[udpfsd](https://github.com/pcm720/udpfsd)**, a UDPFS server written in
   Go. If you'd rather not run our Python UDPFS server — e.g. on a low‑end device, or
   to sidestep the antivirus heuristics that hit unsigned packaged Python builds —
