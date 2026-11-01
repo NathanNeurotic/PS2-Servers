@@ -1302,6 +1302,12 @@ class LauncherApp:
         scroll.grid(row=0, column=1, sticky="ns", padx=(0, 8), pady=8)
         self.nb.add(self.terminal_tab, text="TERMINAL")
 
+        # SESSION lines (one per console, from servers with Session summary on)
+        # also land in the terminal; this tab shows them as rows.
+        from .session_view import SessionPanel
+        self.session_panel = SessionPanel(self.nb)
+        self.nb.add(self.session_panel, text="SESSIONS")
+
         for server in REGISTRY.values():
             self.logs[server.key] = self.terminal
         self.logs["setup"] = self.terminal
@@ -2819,7 +2825,11 @@ class LauncherApp:
         except queue.Empty:
             pass
         for key, lines in updates.items():  # one widget update per server per tick
-            self._append_log(key, "".join(lines))
+            text = "".join(lines)
+            self._append_log(key, text)
+            panel = getattr(self, "session_panel", None)
+            if panel is not None:
+                panel.feed(key, text)
         if not self._shutting_down:
             self.root.after(150, self._drain_logs)
 

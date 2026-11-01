@@ -148,8 +148,9 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
    STARTED in the follow-up PR: a shared, bounded `SESSION` summary line
    (`launcher/session_stats.py`, moved from `http_server/`), opt-in on HTTP.
    Now also on SMBv1, UDPFS (Desktop/Core), UDPBD and Edge (udpfs/smb/udpbd,
-   `--session-summary`). Still to do: SMBv2/SMBv3, and a launcher view that
-   reads the lines.
+   `--session-summary`), and the launcher's **SESSIONS** tab
+   (`launcher/session_view.py`) shows every line as a row. SMBv2/SMBv3 is in
+   review (#271).
    DONE after #267: the launcher's **Stop** is cooperative on every OS
    (`launcher/process.py` stop pipe, `launcher/serve.py`), so final `SESSION`
    lines and the take-445 restore run on Windows too. The SMB and UDPBD accept/
