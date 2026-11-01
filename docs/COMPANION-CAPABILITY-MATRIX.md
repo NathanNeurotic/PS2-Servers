@@ -60,7 +60,7 @@ descriptors. The cases are:
 | Library root bound to server profiles (opt-in, with preview and rollback) | missing | none | none | none |
 | Guided setup | present | `launcher/setup_guide.py` (read-only text guide) | `test_setup_guide.py` | host-tested |
 | RiptOPL settings export (versioned, read-only) | present | `launcher/riptopl_profile.py`, `launcher/riptopl_export.py`, ABOUT **RiptOPL settings…** | `test_riptopl_profile.py` | host-tested; keys checked against RiptOPL `settingsio.cpp`; SMB2/SMB3 refused |
-| Cross-service session telemetry | partial | Shared `SESSION` line format (`launcher/session_stats.py`), opt-in (`--session-summary`) on HTTP, SMBv1, UDPFS (Desktop/Core) and UDPBD; final lines also on Windows Stop; UDPFS stall report | `test_session_summary.py`, `test_cooperative_stop.py`, `test_udpfs_stall_report.py` | host-tested; not on SMBv2/SMBv3 or Edge, no combined view in the launcher yet |
+| Cross-service session telemetry | partial | Shared `SESSION` line format (`launcher/session_stats.py`), opt-in (`--session-summary`) on HTTP, SMBv1, UDPFS (Desktop/Core) and UDPBD, and on Edge udpfs/smb/udpbd (`internal/sessionstats`); final lines also on Windows Stop; UDPFS stall report | `test_session_summary.py`, `test_cooperative_stop.py`, `test_udpfs_stall_report.py` | host-tested; not on SMBv2/SMBv3, no combined view in the launcher yet |
 | Offline VMC creation | intentionally missing for now | none | none | RiptOPL already creates per-game VMCs; HTTP and virtual exFAT stay read-only |
 
 ## Known limits found by the fixture

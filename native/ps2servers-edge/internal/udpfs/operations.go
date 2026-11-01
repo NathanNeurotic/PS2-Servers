@@ -24,32 +24,41 @@ func (s *Server) handleMessage(st *session.State, p []byte) {
 	// regardless of how a handler exits. WriteData is not counted separately:
 	// a write is one operation however many chunks carry it, which is how the
 	// Desktop server counts it too.
+	// The SESSION summary (sessionRecord) counts the same way; a BREAD/BWRITE
+	// is a read/write of the block device, and DREAD is a folder list.
 	switch protocol.MessageType(p[0]) {
 	case protocol.OpenRequest:
 		s.stats.open.Add(1)
+		s.sessionRecord(st, "open", 1)
 		s.handleOpen(st, p)
 	case protocol.CloseRequest:
 		s.stats.closeOp.Add(1)
+		s.sessionRecord(st, "close", 1)
 		s.handleClose(st, p)
 	case protocol.ReadRequest:
 		s.stats.read.Add(1)
+		s.sessionRecord(st, "read", 1)
 		s.handleRead(st, p)
 	case protocol.WriteRequest:
 		s.stats.write.Add(1)
+		s.sessionRecord(st, "write", 1)
 		s.handleWriteRequest(st, p)
 	case protocol.WriteData:
 		s.handleWriteData(st, p)
 	case protocol.BReadRequest:
 		s.stats.bread.Add(1)
+		s.sessionRecord(st, "read", 1)
 		s.handleBRead(st, p)
 	case protocol.BWriteRequest:
 		s.stats.bwrite.Add(1)
+		s.sessionRecord(st, "write", 1)
 		s.handleBWriteRequest(st, p)
 	case protocol.SeekRequest:
 		s.stats.lseek.Add(1)
 		s.handleSeek(st, p)
 	case protocol.DReadRequest:
 		s.stats.dread.Add(1)
+		s.sessionRecord(st, "list", 1)
 		s.handleDRead(st, p)
 	case protocol.GetStatRequest:
 		s.stats.getstat.Add(1)

@@ -8,11 +8,13 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/filesystem"
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/sessionstats"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/statuslistener"
 )
 
@@ -74,6 +76,10 @@ type Config struct {
 	// legitimately taken, and the failure is logged and ignored rather than
 	// taking SMB down over a diagnostic.
 	StatusPort int
+	// SessionSummary prints one SESSION line per console when it goes quiet
+	// for a minute or the server stops (internal/sessionstats). One counter
+	// update per request; nothing is logged per request.
+	SessionSummary bool
 }
 
 // Server serves SMBv1 to Open-PS2-Loader.
@@ -98,8 +104,9 @@ type Server struct {
 	closeOnce sync.Once
 	closed    chan struct{}
 
-	started time.Time
-	status  *statuslistener.Listener
+	started  time.Time
+	status   *statuslistener.Listener
+	sessions *sessionstats.Stats // nil unless cfg.SessionSummary
 }
 
 // idleTimeout bounds how long a connection may sit without sending anything.
@@ -139,6 +146,9 @@ func New(cfg Config) (*Server, error) {
 		// exactly would make "GAMES" fail where "games" worked, which reads as
 		// a broken server rather than a wrong name.
 		s.shares[strings.ToLower(sh.Name)] = sh
+	}
+	if cfg.SessionSummary {
+		s.sessions = sessionstats.New("smbv1", cfg.Log.Line)
 	}
 	return s, nil
 }
@@ -247,6 +257,9 @@ func itoa(n int) string {
 
 // Serve accepts connections until Close.
 func (s *Server) Serve() error {
+	// Accept blocks, so the idle sweep runs beside it. It ends with closed,
+	// which Close closes before Stop prints the final lines.
+	go s.sessions.RunExpiry(s.closed, 10*time.Second)
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
@@ -332,6 +345,7 @@ func (s *Server) Close() error {
 		_ = s.status.Close()
 	})
 	s.wg.Wait()
+	s.sessions.Stop() // one final SESSION line per console
 	return nil
 }
 
@@ -529,6 +543,7 @@ func (s *Server) serveConn(nc net.Conn) {
 		searches: make(map[uint16]*search),
 	}
 	s.cfg.Log.Info("SMB connect", map[string]any{"peer": peer})
+	c.record("connections", 1)
 	defer func() {
 		c.cleanup()
 		_ = nc.Close()
@@ -545,6 +560,11 @@ func (s *Server) serveConn(nc net.Conn) {
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) && !isClosed(err) {
+				// A reset is a console switching off, which is normal; a
+				// read that failed any other way is counted.
+				if !errors.Is(err, syscall.ECONNRESET) {
+					c.record("errors", 1)
+				}
 				s.cfg.Log.Debug("SMB read ended", map[string]any{"peer": peer, "error": err.Error()})
 			}
 			return
@@ -558,14 +578,76 @@ func (s *Server) serveConn(nc net.Conn) {
 		}
 
 		rep := c.dispatch(r)
+		c.recordReply(r, rep)
 		if rep.silent {
 			continue
 		}
 		if err := c.send(r, rep); err != nil {
+			c.record("errors", 1)
 			s.cfg.Log.Debug("SMB write failed", map[string]any{"peer": peer, "error": err.Error()})
 			return
 		}
+		// Counted after the send succeeded: a reply that never left served
+		// nothing.
+		if r.cmd == ComReadAndX && rep.status == StatusSuccess && rep.params != nil {
+			c.record("bytes", int64(len(rep.data)))
+		}
 	}
+}
+
+// record adds to one SESSION counter for this connection's console, by IP.
+func (c *conn) record(kind string, count int64) {
+	if c.server.sessions == nil {
+		return
+	}
+	host, _, err := net.SplitHostPort(c.net.RemoteAddr().String())
+	if err != nil {
+		host = c.net.RemoteAddr().String()
+	}
+	c.server.sessions.Record(host, kind, count)
+}
+
+// recordReply counts one request for the SESSION summary: what kind it was,
+// and whether it failed. A path the console looked for and did not find is
+// not an error -- OPL probes for optional files (configs, VMCs, art) on every
+// launch -- and FIND_FIRST2/FIND_NEXT2 are folder lists, as on the Desktop
+// server.
+func (c *conn) recordReply(r *req, rep reply) {
+	if c.server.sessions == nil {
+		return
+	}
+	switch r.cmd {
+	case ComOpenAndX, ComNTCreateAndX:
+		c.record("open", 1)
+	case ComReadAndX:
+		c.record("read", 1)
+	case ComWriteAndX:
+		c.record("write", 1)
+	case ComClose:
+		c.record("close", 1)
+	case ComTrans2:
+		if sub := trans2Setup(r); sub == trans2FindFirst2 || sub == trans2FindNext2 {
+			c.record("list", 1)
+		}
+	}
+	if rep.status == StatusSuccess || rep.silent {
+		return
+	}
+	if rep.status == StatusObjectNameNotFound {
+		switch r.cmd {
+		case ComOpenAndX, ComNTCreateAndX, ComCheckDirectory, ComTrans2:
+			return
+		}
+	}
+	c.record("errors", 1)
+}
+
+// trans2Setup is the TRANS2 subcommand, or 0xFFFF when the request has none.
+func trans2Setup(r *req) uint16 {
+	if len(r.params) > 26 && r.params[26] >= 1 && len(r.params) >= 30 {
+		return u16(r.params, 28)
+	}
+	return 0xFFFF
 }
 
 func isClosed(err error) bool {

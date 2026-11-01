@@ -12,6 +12,7 @@ import (
 
 	edgelog "github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/sessionstats"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/statuslistener"
 )
 
@@ -27,6 +28,10 @@ type Config struct {
 	// taken on a box already running that server, so a bind failure is logged
 	// and ignored rather than taking UDPBD down over a diagnostic.
 	StatusPort int
+	// SessionSummary prints one SESSION line per console when it goes quiet
+	// for a minute or the server stops (internal/sessionstats). One counter
+	// update per request; nothing is logged per request.
+	SessionSummary bool
 }
 
 // device is an image file addressed as fixed-size sectors.
@@ -117,8 +122,9 @@ type Server struct {
 	totalRead  int64
 	totalWrite int64
 
-	started time.Time
-	status  *statuslistener.Listener
+	started  time.Time
+	status   *statuslistener.Listener
+	sessions *sessionstats.Stats // nil unless cfg.SessionSummary
 }
 
 func New(cfg Config) (*Server, error) {
@@ -142,7 +148,19 @@ func New(cfg Config) (*Server, error) {
 		dev.close()
 		return nil, fmt.Errorf("image is smaller than one %d-byte sector", SectorSize)
 	}
-	return &Server{cfg: cfg, dev: dev, seen: make(map[string]bool), started: time.Now()}, nil
+	s := &Server{cfg: cfg, dev: dev, seen: make(map[string]bool), started: time.Now()}
+	if cfg.SessionSummary {
+		s.sessions = sessionstats.New("udpbd", cfg.Log.Line)
+	}
+	return s, nil
+}
+
+// record adds to one SESSION counter for the console behind peer, by IP.
+func (s *Server) record(peer *net.UDPAddr, kind string, count int64) {
+	if s.sessions == nil || peer == nil {
+		return
+	}
+	s.sessions.Record(peer.IP.String(), kind, count)
 }
 
 // Listen binds the UDPBD port.
@@ -207,6 +225,7 @@ func (s *Server) statusReply() protocol.StatusReply {
 
 func (s *Server) Close() error {
 	_ = s.status.Close()
+	s.sessions.Stop() // one final SESSION line per console
 	if s.conn != nil {
 		err := s.conn.Close()
 		s.dev.close()
@@ -258,6 +277,8 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 	}()
 	defer close(done)
+	// The receive loop blocks, so the idle sweep runs beside it.
+	go s.sessions.RunExpiry(done, 10*time.Second)
 
 	buf := make([]byte, RecvBufLen)
 	for {
@@ -278,15 +299,20 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 func (s *Server) dispatch(p []byte, peer *net.UDPAddr) {
+	// The SESSION summary counts the same way as the Desktop UDPBD server: an
+	// INFO is the console (re)mounting the disk.
 	switch headerCmd(p) {
 	case CmdInfo:
+		s.record(peer, "connections", 1)
 		s.handleInfo(p, peer)
 	case CmdRead:
 		if len(p) >= 8 {
+			s.record(peer, "read", 1)
 			s.handleRead(p, peer)
 		}
 	case CmdWrite:
 		if len(p) >= 8 {
+			s.record(peer, "write", 1)
 			s.handleWrite(p, peer)
 		}
 	case CmdWriteRDMA:
@@ -343,6 +369,7 @@ func (s *Server) handleRead(p []byte, peer *net.UDPAddr) {
 	// padding for an arbitrary length: a bad or hostile count would otherwise
 	// make the server emit unbounded traffic.
 	if sectorNr < 0 || sectorNr+sectorCount > s.dev.sectorCount() {
+		s.record(peer, "errors", 1)
 		s.cfg.Log.Warn("UDPBD READ out of range", map[string]any{
 			"peer": peer.String(), "sector": sectorNr, "count": sectorCount,
 			"sectors": s.dev.sectorCount()})
@@ -379,6 +406,7 @@ func (s *Server) handleRead(p []byte, peer *net.UDPAddr) {
 		// cursor, so two consoles reading at once cannot pull each other's data.
 		data, err := s.dev.readAtOffset(offsetSector*SectorSize+consumed, size)
 		if err != nil {
+			s.record(peer, "errors", 1)
 			s.cfg.Log.Warn("UDPBD read failed",
 				map[string]any{"peer": peer.String(), "error": err.Error()})
 			return
@@ -388,7 +416,15 @@ func (s *Server) handleRead(p []byte, peer *net.UDPAddr) {
 		packet := packHeader(CmdReadRDMA, cmdid, cmdpkt)
 		packet = append(packet, packBlockType(shift, uint16(blockCount))...)
 		packet = append(packet, data...)
-		s.send(packet, peer)
+		// Bytes are counted per packet sent, so a read that fails part way
+		// counts only what was served. UDPBD has no acknowledgements, so sent
+		// is the most this server can know.
+		if s.send(packet, peer) {
+			s.record(peer, "bytes", int64(len(data)))
+		} else {
+			s.record(peer, "errors", 1)
+			return
+		}
 		cmdpkt = (cmdpkt + 1) & 0xFF
 	}
 }
@@ -400,11 +436,13 @@ func (s *Server) handleWrite(p []byte, peer *net.UDPAddr) {
 		return
 	}
 	if sectorNr < 0 || sectorNr+sectorCount > s.dev.sectorCount() {
+		s.record(peer, "errors", 1)
 		s.cfg.Log.Warn("UDPBD WRITE out of range", map[string]any{
 			"peer": peer.String(), "sector": sectorNr, "count": sectorCount})
 		return
 	}
 	if s.dev.readOnly {
+		s.record(peer, "errors", 1)
 		s.cfg.Log.Warn("UDPBD WRITE on a read-only image, ignoring",
 			map[string]any{"peer": peer.String()})
 	}
@@ -453,6 +491,7 @@ func (s *Server) handleWriteRDMA(p []byte, peer *net.UDPAddr) {
 	}
 
 	if err := s.dev.writeAt(st.offset, p[6:6+size]); err != nil {
+		s.record(peer, "errors", 1)
 		s.cfg.Log.Warn("UDPBD write failed",
 			map[string]any{"peer": peer.String(), "error": err.Error()})
 		s.mu.Lock()
@@ -478,6 +517,7 @@ func (s *Server) handleWriteRDMA(p []byte, peer *net.UDPAddr) {
 		if s.dev.readOnly {
 			result = -1
 		} else if err := s.dev.file.Sync(); err != nil {
+			s.record(peer, "errors", 1)
 			s.cfg.Log.Warn("UDPBD sync failed",
 				map[string]any{"peer": peer.String(), "error": err.Error()})
 			result = -1
@@ -492,11 +532,14 @@ func (s *Server) sendWriteDone(cmdid uint8, result int32, peer *net.UDPAddr) {
 	s.send(reply, peer)
 }
 
-func (s *Server) send(p []byte, peer *net.UDPAddr) {
+// send writes one datagram and reports whether it left the socket.
+func (s *Server) send(p []byte, peer *net.UDPAddr) bool {
 	if _, err := s.conn.WriteToUDP(p, peer); err != nil {
 		s.cfg.Log.Debug("UDPBD send failed",
 			map[string]any{"peer": peer.String(), "error": err.Error()})
+		return false
 	}
+	return true
 }
 
 func le32(v uint32) []byte {

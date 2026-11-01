@@ -54,6 +54,7 @@ FLAG_TO_UCI = {
     "--compression-cache-size": "compression_cache_size",
     "--metrics": "metrics",
     "--metrics-period": "metrics_period",
+    "--session-summary": "session_summary",
     "--log-format": "log_format",
     "--verbose": "verbose",
 }

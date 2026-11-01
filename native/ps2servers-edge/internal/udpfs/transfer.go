@@ -80,10 +80,40 @@ func (s *Server) confirmWindow(st *session.State, target uint16) bool {
 	return false
 }
 
-func (s *Server) sendTransfer(st *session.State, header, data []byte) {
+// sendTransfer sends one reply, header first, and reports whether the console
+// acknowledged all of it. It also feeds the SESSION summary: every reply
+// carries its result in bytes 4..8, so one place sees every error, and the
+// bytes of a READ/BREAD count only once the console confirmed them.
+func (s *Server) sendTransfer(st *session.State, header, data []byte) bool {
+	confirmed := s.sendTransferPackets(st, header, data)
+	if s.summary != nil {
+		reply := header
+		if len(reply) == 0 {
+			reply = data
+		}
+		if len(reply) >= 8 {
+			kind := protocol.MessageType(reply[0])
+			result := int32(binary.LittleEndian.Uint32(reply[4:8]))
+			switch {
+			case result < 0:
+				// A path the console looked for and did not find is not an
+				// error: OPL probes for optional files on every launch.
+				probe := (kind == protocol.OpenReply || kind == protocol.GetStatReply) && result == -int32(syscall.ENOENT)
+				if !probe {
+					s.sessionRecord(st, "errors", 1)
+				}
+			case kind == protocol.ResultReply && result > 0 && confirmed:
+				s.sessionRecord(st, "bytes", int64(result))
+			}
+		}
+	}
+	return confirmed
+}
+
+func (s *Server) sendTransferPackets(st *session.State, header, data []byte) bool {
 	if len(header)%4 != 0 || len(header) > 60 {
 		s.cfg.Log.Error("invalid application response header", map[string]any{"bytes": len(header)})
-		return
+		return false
 	}
 	st.Mu.Lock()
 	st.TxBuffer = nil
@@ -100,7 +130,7 @@ func (s *Server) sendTransfer(st *session.State, header, data []byte) {
 		capacity := protocol.MaxPayload - len(hdrBytes)
 		if capacity < 0 {
 			s.cfg.Log.Error("response header exceeds max payload", map[string]any{"peer": st.Peer, "header_bytes": len(hdrBytes)})
-			return
+			return false
 		}
 		n := len(data)
 		if n > capacity {
@@ -129,12 +159,18 @@ func (s *Server) sendTransfer(st *session.State, header, data []byte) {
 		first = false
 		if len(data) > 0 && windowPackets >= windowSize {
 			if !s.confirmWindow(st, finalSequence) {
-				return
+				return false
+			}
+			// Progress on a slow link: keep the console's summary alive, or
+			// a transfer longer than the idle timeout is summarised before
+			// its bytes are counted.
+			if s.summary != nil && st.Peer != nil {
+				s.summary.Touch(st.Peer.IP.String())
 			}
 			windowPackets = 0
 		}
 	}
-	_ = s.confirmWindow(st, finalSequence)
+	return s.confirmWindow(st, finalSequence)
 }
 
 func (s *Server) sendSimple(st *session.State, payload []byte) { s.sendTransfer(st, nil, payload) }

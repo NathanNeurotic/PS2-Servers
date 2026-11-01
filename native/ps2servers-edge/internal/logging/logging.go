@@ -48,7 +48,28 @@ func (l *Logger) emit(level, message string, fields map[string]any) {
 	}
 	fmt.Fprintln(l.out)
 }
-func (l *Logger) Info(m string, f map[string]any)  { l.emit("info", m, f) }
+func (l *Logger) Info(m string, f map[string]any) { l.emit("info", m, f) }
+
+// Line prints a pre-formatted line as it is in text mode, so a SESSION line
+// reads the same from every PS2 Servers service, and as an info row carrying
+// the fields in JSON mode. Quiet does not suppress it: the operator asked for
+// it with its own flag.
+func (l *Logger) Line(line string, fields map[string]any) {
+	if l.JSON {
+		row := map[string]any{"time": time.Now().UTC().Format(time.RFC3339Nano), "level": "info", "message": "SESSION"}
+		for k, v := range fields {
+			row[k] = v
+		}
+		b, _ := json.Marshal(row)
+		l.mu.Lock()
+		fmt.Fprintln(l.out, string(b))
+		l.mu.Unlock()
+		return
+	}
+	l.mu.Lock()
+	fmt.Fprintln(l.out, line)
+	l.mu.Unlock()
+}
 func (l *Logger) Warn(m string, f map[string]any)  { l.emit("warn", m, f) }
 func (l *Logger) Error(m string, f map[string]any) { l.emit("error", m, f) }
 func (l *Logger) Debug(m string, f map[string]any) {

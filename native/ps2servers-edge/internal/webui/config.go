@@ -25,28 +25,31 @@ type UDPFSConfig struct {
 	CompressionCacheSize int     `json:"compression_cache_size"`
 	Metrics              bool    `json:"metrics"`
 	MetricsPeriod        string  `json:"metrics_period"`
+	SessionSummary       bool    `json:"session_summary"`
 }
 
 type SMBConfig struct {
-	Enabled    bool   `json:"enabled"`
-	Share      string `json:"share"`
-	Bind       string `json:"bind"`
-	Port       int    `json:"port"`
-	ReadOnly   bool   `json:"read_only"`
-	StatusPort int    `json:"status_port"`
-	LogFormat  string `json:"log_format"`
-	Verbose    bool   `json:"verbose"`
+	Enabled        bool   `json:"enabled"`
+	Share          string `json:"share"`
+	Bind           string `json:"bind"`
+	Port           int    `json:"port"`
+	ReadOnly       bool   `json:"read_only"`
+	StatusPort     int    `json:"status_port"`
+	LogFormat      string `json:"log_format"`
+	Verbose        bool   `json:"verbose"`
+	SessionSummary bool   `json:"session_summary"`
 }
 
 type UDPBDConfig struct {
-	Enabled    bool   `json:"enabled"`
-	Image      string `json:"image"`
-	Bind       string `json:"bind"`
-	Port       int    `json:"port"`
-	ReadOnly   bool   `json:"read_only"`
-	StatusPort int    `json:"status_port"`
-	LogFormat  string `json:"log_format"`
-	Verbose    bool   `json:"verbose"`
+	Enabled        bool   `json:"enabled"`
+	Image          string `json:"image"`
+	Bind           string `json:"bind"`
+	Port           int    `json:"port"`
+	ReadOnly       bool   `json:"read_only"`
+	StatusPort     int    `json:"status_port"`
+	LogFormat      string `json:"log_format"`
+	Verbose        bool   `json:"verbose"`
+	SessionSummary bool   `json:"session_summary"`
 }
 
 type WebUIConfig struct {

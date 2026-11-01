@@ -47,6 +47,7 @@ Observability & Web Management:
 
 - `--metrics` — log periodic transfer counters
 - `--metrics-period 1m` — how often, from `1s` to `24h`; parsed (and validated) only when `--metrics` is on
+- `--session-summary` (or `SESSION_SUMMARY=1`) — one `SESSION udpfs client=<ip> ...` line per console when it has been quiet for a minute or the service stops, in the format every PS2 Servers service shares (see [HTTP.md](HTTP.md#session-summary-opt-in)). Also on `smb` (`SESSION smbv1`) and `udpbd` (`SESSION udpbd`). One counter update per request, nothing logged per request; in JSON mode it is an info row with `message` `SESSION` and the counters as fields.
 
 Tooling & automation:
 

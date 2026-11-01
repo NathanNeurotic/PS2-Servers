@@ -80,6 +80,8 @@ func (b *uciBackend) Load() (*EdgeConfig, error) {
 			cfg.UDPFS.LogFormat = val
 		case "ps2servers-edge.main.verbose":
 			cfg.UDPFS.Verbose = val == "1" || val == "true"
+		case "ps2servers-edge.main.session_summary":
+			cfg.UDPFS.SessionSummary = val == "1" || val == "true"
 		case "ps2servers-edge.main.block_device":
 			cfg.UDPFS.BlockDevice = val
 		case "ps2servers-edge.main.sector_size":
@@ -118,6 +120,8 @@ func (b *uciBackend) Load() (*EdgeConfig, error) {
 			cfg.SMB.LogFormat = val
 		case "ps2servers-edge.smb.verbose":
 			cfg.SMB.Verbose = val == "1" || val == "true"
+		case "ps2servers-edge.smb.session_summary":
+			cfg.SMB.SessionSummary = val == "1" || val == "true"
 
 		// UDPBD section
 		case "ps2servers-edge.udpbd.enabled":
@@ -140,6 +144,8 @@ func (b *uciBackend) Load() (*EdgeConfig, error) {
 			cfg.UDPBD.LogFormat = val
 		case "ps2servers-edge.udpbd.verbose":
 			cfg.UDPBD.Verbose = val == "1" || val == "true"
+		case "ps2servers-edge.udpbd.session_summary":
+			cfg.UDPBD.SessionSummary = val == "1" || val == "true"
 
 		// WebUI section
 		case "ps2servers-edge.webui.enabled":
@@ -230,6 +236,7 @@ func (b *uciBackend) Save(cfg *EdgeConfig) error {
 	addCmd("main.compression_cache_size", cfg.UDPFS.CompressionCacheSize)
 	addCmd("main.metrics", cfg.UDPFS.Metrics)
 	addCmd("main.metrics_period", cfg.UDPFS.MetricsPeriod)
+	addCmd("main.session_summary", cfg.UDPFS.SessionSummary)
 
 	// SMB
 	addCmd("smb.enabled", cfg.SMB.Enabled)
@@ -240,6 +247,7 @@ func (b *uciBackend) Save(cfg *EdgeConfig) error {
 	addCmd("smb.status_port", cfg.SMB.StatusPort)
 	addCmd("smb.log_format", cfg.SMB.LogFormat)
 	addCmd("smb.verbose", cfg.SMB.Verbose)
+	addCmd("smb.session_summary", cfg.SMB.SessionSummary)
 
 	// UDPBD
 	addCmd("udpbd.enabled", cfg.UDPBD.Enabled)
@@ -250,6 +258,7 @@ func (b *uciBackend) Save(cfg *EdgeConfig) error {
 	addCmd("udpbd.status_port", cfg.UDPBD.StatusPort)
 	addCmd("udpbd.log_format", cfg.UDPBD.LogFormat)
 	addCmd("udpbd.verbose", cfg.UDPBD.Verbose)
+	addCmd("udpbd.session_summary", cfg.UDPBD.SessionSummary)
 
 	// WebUI
 	addCmd("webui.enabled", cfg.WebUI.Enabled)

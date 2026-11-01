@@ -147,6 +147,8 @@ func main() {
 	compressionCache := fs.Int("compression-cache-size", envInt("COMPRESSION_CACHE_SIZE", 32), "decompressed blocks cached per open image")
 	metrics := fs.Bool("metrics", envBool("METRICS", false), "log periodic transfer statistics")
 	metricsPeriod := fs.String("metrics-period", env("METRICS_PERIOD", "1m"), "how often to log statistics")
+	sessionSummary := fs.Bool("session-summary", envBool("SESSION_SUMMARY", false),
+		"print one SESSION line per console when it goes quiet for a minute or the server stops")
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
 	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
 	quiet := fs.Bool("quiet", false, "suppress informational logs")
@@ -228,7 +230,7 @@ func main() {
 		os.Exit(2)
 	}
 	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
-	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, MetricsPeriod: metricsEvery, BlockDevice: *blockDevice, SectorSize: *sectorSize, NoCompression: *noCompression, CompressionCache: *compressionCache, Log: logger, ServerName: "PS2 Servers Edge"})
+	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, MetricsPeriod: metricsEvery, BlockDevice: *blockDevice, SectorSize: *sectorSize, NoCompression: *noCompression, CompressionCache: *compressionCache, SessionSummary: *sessionSummary, Log: logger, ServerName: "PS2 Servers Edge"})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -293,6 +295,8 @@ func runUDPBD() {
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
 	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
 	quiet := fs.Bool("quiet", false, "suppress informational logs")
+	sessionSummary := fs.Bool("session-summary", envBool("SESSION_SUMMARY", false),
+		"print one SESSION line per console when it goes quiet for a minute or the server stops")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		os.Exit(2)
 	}
@@ -312,7 +316,7 @@ func runUDPBD() {
 	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
 	server, err := udpbd.New(udpbd.Config{
 		Image: *image, Bind: *bind, Port: *port, ReadOnly: *readOnly,
-		StatusPort: *bdStatusPort, Log: logger,
+		StatusPort: *bdStatusPort, SessionSummary: *sessionSummary, Log: logger,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -352,6 +356,8 @@ func runSMB() {
 	logFormat := fs.String("log-format", env("LOG_FORMAT", "text"), "text or json")
 	verbose := fs.Bool("verbose", envBool("VERBOSE", false), "verbose protocol logging")
 	quiet := fs.Bool("quiet", false, "suppress informational logs")
+	sessionSummary := fs.Bool("session-summary", envBool("SESSION_SUMMARY", false),
+		"print one SESSION line per console when it goes quiet for a minute or the server stops")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		os.Exit(2)
 	}
@@ -385,7 +391,7 @@ func runSMB() {
 
 	server, err := smb.New(smb.Config{
 		Shares: parsed, Bind: *bind, Port: *port, ReadOnly: *readOnly,
-		StatusPort: *statusPort, Log: logger,
+		StatusPort: *statusPort, SessionSummary: *sessionSummary, Log: logger,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
