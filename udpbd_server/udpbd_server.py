@@ -21,6 +21,7 @@ import select
 import socket
 import struct
 import sys
+import time
 import stat
 import errno
 import subprocess
@@ -41,6 +42,7 @@ CMD_WRITE_DONE = 0x06  # server -> client
 SECTOR_SIZE = 512
 RECV_BUFLEN = 2048
 STOP_POLL_SECONDS = 1.0
+STATS_EXPIRY_SECONDS = 10.0
 # Header (2 bytes) + block_type (4 bytes) = 6 bytes of RDMA overhead.
 RDMA_MAX_PAYLOAD = 1472 - 2 - 4  # 1466
 
@@ -138,9 +140,12 @@ class BlockDevice:
 # Server
 # --------------------------------------------------------------------------- #
 class UdpbdServer:
-    def __init__(self, device, bind="", verbose=False):
+    def __init__(self, device, bind="", verbose=False, stats=None):
         self.bd = device
         self.verbose = verbose
+        # Optional launcher.session_stats.SessionStats: one counter update per
+        # command, summarised per console (--session-summary).
+        self.stats = stats
         self._total_read = 0
         self._total_write = 0
         self._write_left = 0
@@ -180,9 +185,15 @@ class UdpbdServer:
             shift = 3  # 32-byte blocks
         self._set_block_shift(shift)
 
+    def _record(self, addr, kind, count=1):
+        stats = getattr(self, "stats", None)
+        if stats is not None:
+            stats.record(addr[0], kind, count)
+
     # -- command handlers -------------------------------------------------- #
     def _handle_info(self, addr, datagram):
         _, cmdid, _ = unpack_header(datagram)
+        self._record(addr, "connections")  # the console (re)mounted the disk
         print("UDPBD_CMD_INFO from {}".format(addr[0]))
         self._write_left = 0  # reset any stale in-flight write state on console discovery/reboot
         self._print_stats()
@@ -204,6 +215,8 @@ class UdpbdServer:
         self._set_block_shift_for_sectors(sector_count)
         blocks_left = sector_count * self._blocks_per_sector
         self._total_read += blocks_left * self._block_size
+        self._record(addr, "read")
+        self._record(addr, "bytes", blocks_left * self._block_size)
         if getattr(self.bd, "is_raw", False):
             self.bd.seek(sector_nr, sector_count)
         else:
@@ -226,8 +239,10 @@ class UdpbdServer:
         if self.verbose:
             print("UDPBD_CMD_WRITE(cmdid={}, start={}, count={})".format(
                 cmdid, sector_nr, sector_count))
+        self._record(addr, "write")
         if self.bd.read_only:
             print("Warning: write requested on a read-only image -- ignoring")
+            self._record(addr, "errors")
         self._write_left = 0
         self._write_owner = (addr, cmdid)
         try:
@@ -236,6 +251,7 @@ class UdpbdServer:
             else:
                 self.bd.seek(sector_nr)
         except OSError:
+            self._record(addr, "errors")
             reply = pack_header(CMD_WRITE_DONE, cmdid, (cmdid + 1) & 0xFF)
             self.sock.sendto(reply + struct.pack("<i", -1), addr)
             return
@@ -271,6 +287,7 @@ class UdpbdServer:
             # client it failed, rather than letting the exception kill the server.
             # A failing write is a real operational problem -> always report it.
             print("Write error from {}: {}".format(addr[0], e), file=sys.stderr)
+            self._record(addr, "errors")
             self._write_left = 0
             reply = pack_header(CMD_WRITE_DONE, cmdid, (cmdid + 1) & 0xFF)
             self.sock.sendto(reply + struct.pack("<i", -1), addr)
@@ -299,8 +316,13 @@ class UdpbdServer:
             self._bind_addr, UDPBD_PORT, UDPBD_PORT))
         print("  In OPL: choose UDPBD; no IP or port to enter.")
         print()
+        stats = getattr(self, "stats", None)
+        next_expiry = time.monotonic() + STATS_EXPIRY_SECONDS
         try:
             while True:
+                if stats is not None and time.monotonic() >= next_expiry:
+                    stats.expire()  # consoles quiet for a minute get their line
+                    next_expiry = time.monotonic() + STATS_EXPIRY_SECONDS
                 # Wake up once a second, so a stop request (Ctrl+C, or the
                 # launcher's Stop on Windows) lands even while no PS2 is
                 # talking to us. The socket itself stays blocking, so replies
@@ -343,10 +365,13 @@ class UdpbdServer:
                     # a system / network / disk error is a real problem -> always log
                     print("I/O error handling packet from {}: {}".format(
                         addr[0], e), file=sys.stderr)
+                    self._record(addr, "errors")
         except KeyboardInterrupt:
             print("\nShutting down...")
             self._print_stats()
         finally:
+            if stats is not None:
+                stats.stop()
             self.sock.close()
             self.bd.close()
 
@@ -369,6 +394,9 @@ def main(argv=None):
                         help="interface to bind (default: all interfaces)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="log every read/write command")
+    parser.add_argument("--session-summary", action="store_true",
+                        help="print one SESSION line per console when it goes quiet "
+                             "for a minute or the server stops")
     args = parser.parse_args(argv)
 
     if sum(bool(v) for v in (args.image, args.raw_device, args.virtual_exfat)) != 1:
@@ -410,8 +438,15 @@ def main(argv=None):
                       "or run the Core command with sudo. Do not grant world-write access.")
         return 1
 
+    stats = None
+    if args.session_summary:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if os.path.isdir(os.path.join(root, "launcher")) and root not in sys.path:
+            sys.path.append(root)
+        from launcher.session_stats import SessionStats
+        stats = SessionStats("udpbd")
     try:
-        server = UdpbdServer(device, bind=args.bind, verbose=args.verbose)
+        server = UdpbdServer(device, bind=args.bind, verbose=args.verbose, stats=stats)
     except OSError as e:
         device.close()
         print("Error: cannot bind UDP port 0x{:X}: {}".format(UDPBD_PORT, e))

@@ -601,6 +601,16 @@ def _session_prop(name):
 class UdpfsServer:
     """UDPFS Server over UDPRDMA - unified file and block device server"""
 
+    # Optional launcher.session_stats.SessionStats (--session-summary): one
+    # counter update per request, summarised per console. Separate from
+    # self.stats, the server-wide totals printed at shutdown.
+    session_stats = None
+
+    def _session_record(self, addr, kind, count=1):
+        stats = self.session_stats
+        if stats is not None:
+            stats.record(addr[0], kind, count)
+
     def __init__(self, root_dir: Optional[str] = None,
                  block_device: Optional[str] = None,
                  port: int = UDPFS_PORT,
@@ -884,6 +894,7 @@ class UdpfsServer:
                 sess = Session(self, addr)
                 self.sessions[addr] = sess
                 sess.start()
+                self._session_record(addr, "connections")
             sess.last_activity = time.monotonic()
             return sess
 
@@ -907,6 +918,8 @@ class UdpfsServer:
         if now - self._last_sweep < SESSION_SWEEP_INTERVAL:
             return
         self._last_sweep = now
+        if self.session_stats is not None:
+            self.session_stats.expire()  # consoles quiet for a minute get their line
         with self.sessions_lock:
             idle = [(a, now - s.last_activity) for a, s in self.sessions.items()
                     if now - s.last_activity > self.session_timeout]
@@ -994,6 +1007,8 @@ class UdpfsServer:
         # resources (the block device in _cleanup), avoiding a shutdown race.
         for s in sessions:
             s._thread.join(timeout=2.0)
+        if self.session_stats is not None:
+            self.session_stats.stop()
 
     def run(self):
         """Main server loop"""
@@ -1600,6 +1615,7 @@ class UdpfsServer:
         path = path_bytes.split(b'\x00')[0].decode('utf-8', errors='replace')
 
         self.stats['open'] += 1
+        self._session_record(addr, "list" if is_dir else "open")
 
         resolved = self._resolve_path(path)
         
@@ -1716,6 +1732,7 @@ class UdpfsServer:
         _, _, _, _, handle = struct.unpack('<BBBBi', payload[:8])
 
         self.stats['close'] += 1
+        self._session_record(addr, "close")
 
         if handle == BLOCK_DEVICE_HANDLE:
             # Block device handle cannot be closed
@@ -1740,6 +1757,7 @@ class UdpfsServer:
         _, _, _, _, handle, size = struct.unpack('<BBBBiI', payload[:12])
 
         self.stats['read'] += 1
+        self._session_record(addr, "read")
 
         # Before the handle lookup, and before read(): size is an unbounded
         # uint32 straight off the wire, so 0xFFFFFFFF here is a 4 GiB
@@ -1780,6 +1798,7 @@ class UdpfsServer:
         _, _, _, _, handle, size = struct.unpack('<BBBBiI', payload[:12])
 
         self.stats['write'] += 1
+        self._session_record(addr, "write")
 
         if self.read_only:
             self._print_event(f"[{addr[0]}:{addr[1]}] WRITE -> EACCES (read-only)")
@@ -2159,6 +2178,7 @@ class UdpfsServer:
         sector_nr = sector_nr_lo | (sector_nr_hi << 32)
 
         self.stats['bread'] += 1
+        self._session_record(addr, "read")
 
         fh = self.handles.get(handle)
         if fh is None or fh.is_dir:
@@ -2216,6 +2236,7 @@ class UdpfsServer:
         sector_nr = sector_nr_lo | (sector_nr_hi << 32)
 
         self.stats['bwrite'] += 1
+        self._session_record(addr, "write")
 
         if self.read_only:
             self._print_event(f"[{addr[0]}:{addr[1]}] BWRITE -> EACCES (read-only)")
@@ -2682,6 +2703,10 @@ class UdpfsServer:
     def _send_open_reply(self, addr: Tuple[str, int], handle: int,
                          stat_info: Optional[dict] = None):
         """Send OPEN_REPLY"""
+        # ENOENT is not counted: OPL probes for optional files (configs, VMCs,
+        # art) on every launch, and those misses are normal.
+        if handle < 0 and handle != -errno.ENOENT:
+            self._session_record(addr, "errors")
         if stat_info is None:
             stat_info = {'mode': 0, 'size': 0, 'hisize': 0,
                         'ctime': b'\x00' * 8, 'mtime': b'\x00' * 8}
@@ -2698,11 +2723,17 @@ class UdpfsServer:
 
     def _send_close_reply(self, addr: Tuple[str, int], result: int):
         """Send CLOSE_REPLY"""
+        if result < 0:
+            self._session_record(addr, "errors")
         reply = struct.pack('<BBBBi', MsgType.CLOSE_REPLY, 0, 0, 0, result)
         self._send_data(addr, reply)
 
     def _send_read_result(self, addr: Tuple[str, int], result: int, data: bytes):
         """Send READ response: RESULT_REPLY as app header + optional data"""
+        if result < 0:
+            self._session_record(addr, "errors")
+        elif result:
+            self._session_record(addr, "bytes", result)
         result_reply = struct.pack('<BBBBi', MsgType.RESULT_REPLY, 0, 0, 0, result)
         return self._send_raw_data_with_header(addr, result_reply, data)
 
@@ -2713,6 +2744,8 @@ class UdpfsServer:
 
     def _send_write_done(self, addr: Tuple[str, int], result: int):
         """Send WRITE_DONE"""
+        if result < 0:
+            self._session_record(addr, "errors")
         reply = struct.pack('<BBBBi', MsgType.WRITE_DONE, 0, 0, 0, result)
         self._send_data(addr, reply)
 

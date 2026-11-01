@@ -177,6 +177,7 @@ Keep <b>Protocol mode: Auto</b> selected. Do not check <b>Enforce Modulo mode</b
 <ul>
   <li><b>Idle Timeout:</b> Defaults to <b>3600 seconds (1 hour)</b>. If a console is powered off or paused for longer than this duration, open file descriptors are cleanly closed. Configurable from 60 to 86400 seconds via CLI flag <code>--peer-timeout</code>.</li>
   <li><b>Multiple Consoles:</b> Both Python (Desktop/Core) and Go (Edge) implementations support multiple concurrent PS2 consoles playing different games simultaneously from the same shared folder.</li>
+  <li><b>Session summary (opt-in, Desktop/Core only):</b> tick <b>Session summary</b> in the card's advanced options, or pass <code>--session-summary</code>. One <code>SESSION udpfs ...</code> line is printed per console when it has been quiet for a minute or the server stops: sessions, folder opens (<code>list</code>), file opens, reads and bytes served, writes, closes and errors. A file the console looked for and did not find is not an error (OPL probes for optional files). Nothing is logged per request, and the counts are what the PC served, not proof a game ran. Edge does not print these lines.</li>
 </ul>
 
 </main>

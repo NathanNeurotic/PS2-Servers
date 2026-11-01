@@ -1,9 +1,11 @@
 """Opt-in SESSION summaries: bounded, one line per session, nothing per request."""
 import http.client
 import os
+import struct
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -12,7 +14,7 @@ for _path in (ROOT, os.path.join(ROOT, "http_server"), os.path.join(ROOT, "udpfs
         sys.path.insert(0, _path)
 
 import http_server as hs  # noqa: E402
-import session_stats as ss  # noqa: E402
+from launcher import session_stats as ss  # noqa: E402
 from launcher import servers  # noqa: E402
 
 
@@ -137,6 +139,174 @@ class HttpWiringTests(unittest.TestCase):
                          servers.HTTP.build_argv({"root_dir": "x"}))
         self.assertIn("--session-summary",
                       servers.HTTP.build_argv({"root_dir": "x", "session_summary": True}))
+
+
+class UdpbdWiringTests(unittest.TestCase):
+    """UDPBD counts per console: mounts, reads with bytes, writes and errors."""
+
+    def _server(self, read_only):
+        sys.path.insert(0, os.path.join(ROOT, "udpbd_server"))
+        import udpbd_server as ub
+
+        self.ub = ub
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        image = os.path.join(tmp.name, "disk.img")
+        with open(image, "wb") as f:
+            f.write(b"\0" * (64 * 512))
+        device = ub.BlockDevice(image, read_only=read_only)
+        self.addCleanup(device.close)
+
+        class Sock:
+            def __init__(self):
+                self.sent = []
+
+            def sendto(self, data, addr):
+                self.sent.append((data, addr))
+
+        server = ub.UdpbdServer.__new__(ub.UdpbdServer)
+        server.bd = device
+        server.verbose = False
+        server._total_read = server._total_write = 0
+        server._write_left = 0
+        server._write_owner = None
+        server._block_shift = None
+        server._set_block_shift(5)
+        server.sock = Sock()
+        self.clock, self.lines = Clock(), []
+        server.stats = ss.SessionStats("udpbd", clock=self.clock, emit=self.lines.append)
+        return server
+
+    def test_mount_read_and_write_are_counted_per_console(self):
+        server = self._server(read_only=False)
+        ps2 = ("192.168.0.10", 0xBDBD)
+        other = ("192.168.0.11", 0xBDBD)
+        server._handle_info(ps2, self.ub.pack_header(self.ub.CMD_INFO, 1, 0))
+        read = self.ub.pack_header(self.ub.CMD_READ, 2, 0)
+        read = struct.pack("<HIH", struct.unpack("<H", read)[0], 0, 4)
+        server._handle_read(ps2, read)
+        write = struct.pack("<HIH", struct.unpack("<H", self.ub.pack_header(
+            self.ub.CMD_WRITE, 3, 0))[0], 8, 1)
+        server._handle_write(ps2, write)
+        server._handle_info(other, self.ub.pack_header(self.ub.CMD_INFO, 1, 0))
+        lines = {ss.parse_line(line)["client"]: ss.parse_line(line)
+                 for line in server.stats.stop()}
+        mine = lines["192.168.0.10"]
+        self.assertEqual((mine["service"], mine["connections"], mine["read"], mine["bytes"],
+                          mine["write"], mine["errors"], mine["ended"]),
+                         ("udpbd", 1, 1, 4 * 512, 1, 0, "stopped"))
+        self.assertEqual((lines["192.168.0.11"]["connections"], lines["192.168.0.11"]["read"]),
+                         (1, 0))
+
+    def test_write_to_a_read_only_image_is_an_error(self):
+        server = self._server(read_only=True)
+        write = struct.pack("<HIH", struct.unpack("<H", self.ub.pack_header(
+            self.ub.CMD_WRITE, 3, 0))[0], 0, 1)
+        server._handle_write(("10.0.0.2", 1), write)
+        fields = ss.parse_line(server.stats.stop()[0])
+        self.assertEqual((fields["write"], fields["errors"]), (1, 1))
+
+    def test_off_by_default(self):
+        self.assertNotIn("--session-summary", servers.UDPBD.build_argv({"image_file": "x"}))
+        self.assertIn("--session-summary",
+                      servers.UDPBD.build_argv({"image_file": "x", "session_summary": True}))
+
+
+class UdpfsWiringTests(unittest.TestCase):
+    """A real UDPFS server on loopback, driven by the self-test's client."""
+
+    def test_open_read_and_errors_are_counted_per_console(self):
+        import multiclient_selftest as mc
+        import udpfs_server as srv
+
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        data = mc._make_file(root.name, "GAME.BIN", 3000, seed=7)
+        server = srv.UdpfsServer(root_dir=root.name, port=mc._free_udp_port(),
+                                 bind_ip="127.0.0.1")
+        lines = []
+        server.session_stats = ss.SessionStats("udpfs", emit=lines.append)
+        runner = threading.Thread(target=server.run, daemon=True)
+        runner.start()
+        time.sleep(0.4)
+        client = mc.UdpfsTestClient(("127.0.0.1", server.port))
+        self.addCleanup(client.close)
+        client.discover()
+        handle, _ = client.open("GAME.BIN")
+        self.assertEqual(client.read(handle, len(data)), data)
+        with self.assertRaises(mc.UdpfsError):
+            client.open("MISSING.CFG")      # ENOENT: a normal probe, not an error
+        with self.assertRaises(mc.UdpfsError):
+            client.read(9999, 16)           # EBADF: a real error
+        server._shutdown = True     # stop the receive loop first, as Ctrl+C does
+        runner.join(5)
+        server._shutdown_all_sessions()
+        server._cleanup()
+        server.sock.close()
+        if server.dsock is not server.sock:
+            server.dsock.close()
+        [line] = [l for l in lines if l.startswith("SESSION udpfs")]
+        fields = ss.parse_line(line)
+        self.assertEqual((fields["client"], fields["connections"], fields["open"],
+                          fields["read"], fields["bytes"], fields["errors"],
+                          fields["ended"]),
+                         ("127.0.0.1", 1, 2, 2, len(data), 1, "stopped"))
+
+    def test_off_by_default(self):
+        self.assertNotIn("--session-summary", servers.UDPFS.build_argv({"root_dir": "x"}))
+        self.assertIn("--session-summary",
+                      servers.UDPFS.build_argv({"root_dir": "x", "session_summary": True}))
+
+
+class Smbv1WiringTests(unittest.TestCase):
+    """serve_conn counts SMB1 commands; handlers are stubbed to fix their status."""
+
+    def test_commands_bytes_and_errors_are_counted(self):
+        import socket
+        sys.path.insert(0, os.path.join(ROOT, "smbv1_server"))
+        import smbserver_opl as smb
+
+        def handler(params, data, status):
+            return lambda conn, r: (params, data, status)
+
+        stubs = {
+            smb.SMB_COM_NT_CREATE_ANDX: handler(None, None, smb.STATUS_OBJECT_NAME_NOT_FOUND),
+            smb.SMB_COM_READ_ANDX: handler(b"\0" * 24, b"x" * 100, smb.STATUS_SUCCESS),
+            smb.SMB_COM_CLOSE: handler(None, None, smb.STATUS_ACCESS_DENIED),
+        }
+        saved = {k: smb.HANDLERS[k] for k in stubs}
+        smb.HANDLERS.update(stubs)
+        self.addCleanup(smb.HANDLERS.update, saved)
+
+        server = smb.SmbServer({}, read_only=True)
+        server.session_stats = ss.SessionStats("smbv1", emit=lambda _l: None)
+        ours, theirs = socket.socketpair()
+        self.addCleanup(theirs.close)
+        runner = threading.Thread(target=smb.serve_conn,
+                                  args=(server, ours, ("192.168.0.20", 50000)), daemon=True)
+        runner.start()
+
+        def request(cmd):
+            smb.send_msg(theirs, smb.pack_header(cmd, 0, 1, 1, 1, 1) + smb.build_body(b"", b""))
+            smb.recv_msg(theirs)
+
+        request(smb.SMB_COM_NT_CREATE_ANDX)   # missing optional file: a probe
+        request(smb.SMB_COM_READ_ANDX)        # 100 bytes served
+        request(smb.SMB_COM_CLOSE)            # refused: an error
+        request(0x99)                         # unsupported command: an error
+        theirs.shutdown(socket.SHUT_RDWR)
+        runner.join(5)
+        fields = ss.parse_line(server.session_stats.stop()[0])
+        self.assertEqual((fields["service"], fields["client"], fields["connections"],
+                          fields["open"], fields["read"], fields["bytes"], fields["close"],
+                          fields["errors"]),
+                         ("smbv1", "192.168.0.20", 1, 1, 1, 100, 1, 2))
+
+    def test_off_by_default(self):
+        values = {"games_folder": "x"}
+        self.assertNotIn("--session-summary", servers.SMBV1.build_argv(values))
+        self.assertIn("--session-summary",
+                      servers.SMBV1.build_argv(dict(values, session_summary=True)))
 
 
 if __name__ == "__main__":

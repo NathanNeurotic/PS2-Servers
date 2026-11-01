@@ -544,6 +544,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--peer-timeout", type=_duration_arg("--peer-timeout"),
                         default=_env_duration("PEER_TIMEOUT", SESSION_TIMEOUT))
     parser.add_argument("--metrics", action="store_true", default=_env_bool("METRICS"))
+    parser.add_argument("--session-summary", action="store_true",
+                        default=_env_bool("SESSION_SUMMARY"),
+                        help="print one SESSION line per console when it goes quiet "
+                             "for a minute or the server stops")
     parser.add_argument("--metrics-period", type=_duration_arg("--metrics-period"),
                         default=_env_duration("METRICS_PERIOD", 60.0))
     parser.add_argument("--tx-delay-ms", type=float,
@@ -560,6 +564,16 @@ def build_parser() -> argparse.ArgumentParser:
                              "recently active is dropped (default "
                              f"{DEFAULT_MAX_SESSIONS}; env: MAX_SESSIONS)")
     return parser
+
+
+def _attach_session_stats(server, args):
+    if not args.session_summary:
+        return
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if os.path.isdir(os.path.join(root, "launcher")) and root not in sys.path:
+        sys.path.append(root)
+    from launcher.session_stats import SessionStats
+    server.session_stats = SessionStats("udpfs")
 
 
 def main():
@@ -631,6 +645,7 @@ def main():
             max_transfer_bytes=args.max_transfer_bytes,
             max_sessions=args.max_sessions,
         )
+        _attach_session_stats(server, args)
         server.run()
         return
 
@@ -655,6 +670,7 @@ def main():
         protocol_mode=args.protocol_mode,
         fallback_interval=args.compat_fallback,
     )
+    _attach_session_stats(server, args)
     server.run()
 
 

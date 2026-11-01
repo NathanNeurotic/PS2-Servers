@@ -1,6 +1,7 @@
 """Bounded per-client session counters, summarised once per session.
 
-Opt-in (``--session-summary``). Nothing is logged per request: each event is
+Shared by every server (HTTP, SMBv1, UDPFS, UDPBD), so one parser reads all of
+their lines. Opt-in (``--session-summary``). Nothing is logged per request: each event is
 one counter update under a lock, and a client's totals are printed as one
 ``SESSION`` line when it has been quiet for ``idle_seconds``, when it is pushed
 out by a newer client past ``max_clients``, or when the server stops.

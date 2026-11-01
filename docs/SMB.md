@@ -92,6 +92,19 @@ Use a known-good ISO and verify listing, launching, and saving separately on the
 chosen loader. Host SMB unit tests and Edge/Python wire comparisons run in CI;
 those tests do not establish compatibility with every SMB dialect/client pair.
 
+## Session summary (opt-in, SMBv1)
+
+Tick **Session summary** in the SMBv1 card's advanced options, or pass
+`--session-summary`. The server then prints one `SESSION smbv1 ...` line per
+console when it has been quiet for 60 seconds or the server stops, in the same
+format as HTTP, UDPFS and UDPBD (see [HTTP.md](HTTP.md#session-summary-opt-in)).
+`connections` counts TCP connections, `list` folder searches, `open` file and
+folder opens, `read`/`bytes` reads and the bytes sent for them, `write` writes,
+`close` closes. `errors` counts refused requests and dropped connections; a file
+the console looked for and did not find is not counted, because OPL probes for
+optional files on every launch. Counts are what the PC served, not proof a game
+ran. SMBv2/SMBv3 (the `smb2_server`) do not have this yet.
+
 ## SMBv1 session diagnostics
 
 SMBv1 now prints connection/disconnection events, the first read of each opened
