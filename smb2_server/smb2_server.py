@@ -146,7 +146,31 @@ class Connection:
         self.handles.clear()
 
 
+# SESSION summary counters (--session-summary), one per console. A CREATE is
+# an open whether or not the path exists; a QUERY_DIRECTORY is a folder list.
+_SESSION_KINDS = {
+    wire.CMD_CREATE: "open",
+    wire.CMD_QUERY_DIRECTORY: "list",
+    wire.CMD_READ: "read",
+    wire.CMD_WRITE: "write",
+    wire.CMD_CLOSE: "close",
+}
+# Failure statuses that are part of a normal exchange, not errors: a probe
+# for an optional file, the end of a file or of a listing, and the NTLM
+# challenge round-trip of SESSION_SETUP.
+_EXPECTED_STATUSES = {
+    (wire.CMD_CREATE, wire.STATUS_OBJECT_NAME_NOT_FOUND),
+    (wire.CMD_READ, wire.STATUS_END_OF_FILE),
+    (wire.CMD_QUERY_DIRECTORY, wire.STATUS_NO_MORE_FILES),
+    (wire.CMD_SESSION_SETUP, wire.STATUS_MORE_PROCESSING_REQUIRED),
+}
+
+
 class Smb2Server:
+    # Optional launcher.session_stats.SessionStats (--session-summary): one
+    # counter update per request, summarised per console when it goes quiet.
+    session_stats = None
+
     def __init__(self, shares, authenticator, ceiling=wire.CEILING_SMB2,
                  read_only=False, server_name="PS2SERVERS", domain="WORKGROUP"):
         # Share names are matched without regard to case (share_named), so two
@@ -183,6 +207,7 @@ class Smb2Server:
         # sockets are still blocking: Python resets them when the default
         # timeout is None.
         self.sock.settimeout(poll_seconds)
+        next_expiry = time.monotonic() + 10.0
         while not self._stop.is_set():
             try:
                 client, peer = self.sock.accept()
@@ -194,6 +219,9 @@ class Smb2Server:
                 if self._stop.is_set():
                     return
                 raise
+            if self.session_stats is not None and time.monotonic() >= next_expiry:
+                self.session_stats.expire()  # consoles quiet for a minute get their line
+                next_expiry = time.monotonic() + 10.0
             if client is None:
                 continue
             t = threading.Thread(target=self._serve_client, args=(client, peer),
@@ -213,10 +241,18 @@ class Smb2Server:
                 self.sock.close()
             except OSError:
                 pass
+        if self.session_stats is not None:
+            self.session_stats.stop()  # one final SESSION line per console
+
+    def _session_record(self, conn, kind, count=1):
+        stats = self.session_stats
+        if stats is not None:
+            stats.record(conn.peer[0], kind, count)
 
     def _serve_client(self, sock, peer):
         conn = Connection(self, sock, peer)
         log("connect from", peer)
+        self._session_record(conn, "connections")
         try:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             while not self._stop.is_set():
@@ -229,6 +265,9 @@ class Smb2Server:
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
             log("client", peer, "went away")
         except OSError as e:
+            # A reset or a broken pipe is a console switching off, which is
+            # normal; any other socket error is counted.
+            self._session_record(conn, "errors")
             log("connection error from", peer, e)
         finally:
             conn.close_all()
@@ -281,9 +320,24 @@ class Smb2Server:
                 next_command=next_command) + padded
         if out:
             wire.send_msg(conn.sock, out)
+            # Count served bytes only once the reply left: a send that raised
+            # did not serve anything. A READ reply is a 16-byte body + data.
+            for hdr, status, reply_body, _tree_id in replies:
+                if hdr.command == wire.CMD_READ and status == wire.STATUS_SUCCESS:
+                    self._session_record(conn, "bytes", len(reply_body) - 16)
 
     def _handle(self, conn, hdr, body):
         """(status, body, tree_id). status None means send nothing at all."""
+        kind = _SESSION_KINDS.get(hdr.command)
+        if kind is not None:
+            self._session_record(conn, kind)
+        status, reply_body, tree_id = self._dispatch(conn, hdr, body)
+        if (status is not None and status != wire.STATUS_SUCCESS
+                and (hdr.command, status) not in _EXPECTED_STATUSES):
+            self._session_record(conn, "errors")
+        return status, reply_body, tree_id
+
+    def _dispatch(self, conn, hdr, body):
         handler = _HANDLERS.get(hdr.command)
         if handler is None:
             log("unhandled command", hdr)
@@ -1087,6 +1141,9 @@ def main(argv=None):
     ap.add_argument("--server-name", default="PS2SERVERS")
     ap.add_argument("--domain", default="WORKGROUP")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--session-summary", action="store_true",
+                    help="print one SESSION line per console when it goes quiet "
+                         "for a minute or the server stops")
     args = ap.parse_args(argv)
     VERBOSE = args.verbose
 
@@ -1109,6 +1166,12 @@ def main(argv=None):
                             server_name=args.server_name, domain=args.domain)
     except ValueError as e:
         ap.error(str(e))
+    if args.session_summary:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if os.path.isdir(os.path.join(root, "launcher")) and root not in sys.path:
+            sys.path.append(root)
+        from launcher.session_stats import SessionStats
+        server.session_stats = SessionStats("smbv%d" % args.smb_version)
 
     # One cleanup owner from take-445 on: a stop request can land during the
     # bind or the banner, not only in serve_forever(). take_445 restores by

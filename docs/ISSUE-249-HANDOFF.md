@@ -147,7 +147,7 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
    shutdown/cancel, packaged Windows and Core logs.
    STARTED in the follow-up PR: a shared, bounded `SESSION` summary line
    (`launcher/session_stats.py`, moved from `http_server/`), opt-in on HTTP.
-   Now also on SMBv1, UDPFS (Desktop/Core) and UDPBD. Still to do: SMBv2/SMBv3,
+   Now also on SMBv1, SMBv2/SMBv3, UDPFS (Desktop/Core) and UDPBD. Still to do:
    Edge, and a launcher view that reads the lines.
    DONE after #267: the launcher's **Stop** is cooperative on every OS
    (`launcher/process.py` stop pipe, `launcher/serve.py`), so final `SESSION`
