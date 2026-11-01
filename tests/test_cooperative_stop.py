@@ -33,6 +33,8 @@ from launcher import serve, servers  # noqa: E402
 from launcher.process import STOP_PIPE_ENV, ServerProcess  # noqa: E402
 import smb2_server  # noqa: E402
 import udpbd_server  # noqa: E402
+from unittest import mock  # noqa: E402
+from smbv1_server import smbserver_opl  # noqa: E402
 
 # Python 3.12 + -S style runs (see docs/ISSUE-249-HANDOFF.md) need the same
 # interpreter flags in the child; plain sys.executable is what the launcher uses.
@@ -284,6 +286,98 @@ class UdpbdLoopTests(unittest.TestCase):
         self.addCleanup(setattr, udpbd_server.select, "select", real_select)
         server.run()
         self.assertEqual(len(calls), 2)  # the reset was survived; Ctrl+C ended it
+
+
+class _FakePs:
+    """Stands in for subprocess.run in the take-445 helpers. Records each
+    PowerShell command; raises KeyboardInterrupt on the first one containing
+    `interrupt_on` (a stop request landing while that command runs)."""
+
+    def __init__(self, interrupt_on=None, status="Running"):
+        self.commands = []
+        self.interrupt_on = interrupt_on
+        self.status = status
+
+    def __call__(self, argv, **kwargs):
+        cmd = argv[-1]
+        self.commands.append(cmd)
+        if self.interrupt_on and self.interrupt_on in cmd:
+            self.interrupt_on = None
+            raise KeyboardInterrupt
+        if "Stop-Service" in cmd:
+            self.status = "Stopped"
+        out = self.status if ".Status" in cmd else ""
+        return mock.Mock(returncode=0, stdout=out, stderr="")
+
+    def starts(self):
+        return [c for c in self.commands if c.startswith("Start-Service LanmanServer")]
+
+
+class Take445InterruptTests(unittest.TestCase):
+    """A stop request can land before the accept loop: while LanmanServer is
+    stopping, during the bind retries, or during the banner. Each case must
+    still start Windows file sharing again, exactly once."""
+
+    def test_smbv1_interrupt_while_service_stops_restores(self):
+        fake = _FakePs(interrupt_on="Stop-Service")
+        with mock.patch("subprocess.run", fake):
+            with self.assertRaises(KeyboardInterrupt):
+                smbserver_opl._take_445("127.0.0.1")
+        self.assertEqual(len(fake.starts()), 1)
+
+    def test_smbv1_restore_runs_once(self):
+        fake = _FakePs()
+        with mock.patch("subprocess.run", fake), \
+                mock.patch.object(smbserver_opl, "_port_free", return_value=True):
+            restore = smbserver_opl._take_445("127.0.0.1")
+            restore()
+            restore()
+        self.assertEqual(len(fake.starts()), 1)
+
+    def test_smbv1_interrupt_during_bind_restores(self):
+        restore = mock.Mock()
+        share = tempfile.mkdtemp()
+        with mock.patch.object(smbserver_opl, "_take_445", return_value=restore), \
+                mock.patch.object(smbserver_opl, "_bind_listener",
+                                  side_effect=KeyboardInterrupt):
+            rc = smbserver_opl.main(["--share", "games=" + share, "--take-445"])
+        self.assertEqual(rc, 0)
+        restore.assert_called_once_with()
+
+    def test_smbv1_failed_bind_restores_once(self):
+        restore = mock.Mock()
+        share = tempfile.mkdtemp()
+        with mock.patch.object(smbserver_opl, "_take_445", return_value=restore), \
+                mock.patch.object(smbserver_opl, "_bind_listener", return_value=None):
+            rc = smbserver_opl.main(["--share", "games=" + share, "--take-445"])
+        self.assertEqual(rc, 2)
+        restore.assert_called_once_with()
+
+    def test_smb2_interrupt_while_service_stops_restores(self):
+        fake = _FakePs(interrupt_on="Stop-Service")
+        with mock.patch("subprocess.run", fake):
+            with self.assertRaises(KeyboardInterrupt):
+                smb2_server.take_445()
+        self.assertEqual(len(fake.starts()), 1)
+
+    def test_smb2_interrupt_during_listen_restores(self):
+        restore = mock.Mock()
+        share = tempfile.mkdtemp()
+        with mock.patch.object(smb2_server, "take_445", return_value=restore):
+            with mock.patch.object(smb2_server.Smb2Server, "listen", side_effect=KeyboardInterrupt):
+                rc = smb2_server.main(["--share", "games=" + share, "--open", "--take-445"])
+        self.assertEqual(rc, 0)
+        restore.assert_called_once_with()
+
+    def test_smb2_failed_bind_restores_once(self):
+        restore = mock.Mock()
+        share = tempfile.mkdtemp()
+        with mock.patch.object(smb2_server, "take_445", return_value=restore):
+            with mock.patch.object(smb2_server.Smb2Server, "listen",
+                                   side_effect=OSError(98, "in use")):
+                rc = smb2_server.main(["--share", "games=" + share, "--open", "--take-445"])
+        self.assertEqual(rc, 1)
+        restore.assert_called_once_with()
 
 
 if __name__ == "__main__":
