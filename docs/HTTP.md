@@ -183,6 +183,9 @@ SESSION http client=192.168.1.30 seconds=412 connections=3 list=1 open=1 read=51
   dropped connections.
 - HTTP is read-only, so `write` is always 0.
 - These are counts of what the PC served. They do not prove that a game ran.
+- The launcher's **SESSIONS** tab shows every `SESSION` line from every running
+  server as one row (newest first, 200 kept), so you do not have to find them
+  in the terminal.
 - **Stop** in the launcher prints the final lines on every OS. It asks the
   server to stop the way Ctrl+C does (through a pipe, which also works on
   Windows) and ends the process only if it has not stopped within 3 seconds.
