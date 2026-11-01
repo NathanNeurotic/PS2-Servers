@@ -216,7 +216,6 @@ class UdpbdServer:
         blocks_left = sector_count * self._blocks_per_sector
         self._total_read += blocks_left * self._block_size
         self._record(addr, "read")
-        self._record(addr, "bytes", blocks_left * self._block_size)
         if getattr(self.bd, "is_raw", False):
             self.bd.seek(sector_nr, sector_count)
         else:
@@ -231,6 +230,9 @@ class UdpbdServer:
                       + pack_block_type(self._block_shift, block_count)
                       + data)
             self.sock.sendto(packet, addr)
+            # Counted per packet sent, so a failed seek, read or send (which
+            # the run loop reports as an error) is not counted as served.
+            self._record(addr, "bytes", len(data))
             cmdpkt = (cmdpkt + 1) & 0xFF
 
     def _handle_write(self, addr, datagram):

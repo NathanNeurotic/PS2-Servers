@@ -198,6 +198,21 @@ class UdpbdWiringTests(unittest.TestCase):
         self.assertEqual((lines["192.168.0.11"]["connections"], lines["192.168.0.11"]["read"]),
                          (1, 0))
 
+    def test_failed_send_does_not_count_bytes(self):
+        server = self._server(read_only=False)
+
+        class FailingSock:
+            def sendto(self, data, addr):
+                raise OSError(5, "send failed")
+
+        server.sock = FailingSock()
+        read = struct.pack("<HIH", struct.unpack("<H", self.ub.pack_header(
+            self.ub.CMD_READ, 2, 0))[0], 0, 4)
+        with self.assertRaises(OSError):
+            server._handle_read(("10.0.0.2", 1), read)
+        fields = ss.parse_line(server.stats.stop()[0])
+        self.assertEqual((fields["read"], fields["bytes"]), (1, 0))
+
     def test_write_to_a_read_only_image_is_an_error(self):
         server = self._server(read_only=True)
         write = struct.pack("<HIH", struct.unpack("<H", self.ub.pack_header(
@@ -251,6 +266,20 @@ class UdpfsWiringTests(unittest.TestCase):
                           fields["read"], fields["bytes"], fields["errors"],
                           fields["ended"]),
                          ("127.0.0.1", 1, 2, 2, len(data), 1, "stopped"))
+
+    def test_unconfirmed_read_does_not_count_bytes(self):
+        import udpfs_server as srv
+
+        peer = ("10.0.0.3", 1)
+        for confirmed, expected in ((False, 0), (None, 0), (True, 512)):
+            server = srv.UdpfsServer.__new__(srv.UdpfsServer)
+            server.session_stats = ss.SessionStats("udpfs", emit=lambda line: None)
+            server._send_raw_data_with_header = lambda *a, c=confirmed: c
+            server._session_record(peer, "read")
+            server._send_read_result(peer, 512, b"x" * 512)
+            fields = ss.parse_line(server.session_stats.stop()[0])
+            with self.subTest(confirmed=confirmed):
+                self.assertEqual(fields["bytes"], expected)
 
     def test_off_by_default(self):
         self.assertNotIn("--session-summary", servers.UDPFS.build_argv({"root_dir": "x"}))

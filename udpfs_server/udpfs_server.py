@@ -2732,10 +2732,13 @@ class UdpfsServer:
         """Send READ response: RESULT_REPLY as app header + optional data"""
         if result < 0:
             self._session_record(addr, "errors")
-        elif result:
-            self._session_record(addr, "bytes", result)
         result_reply = struct.pack('<BBBBi', MsgType.RESULT_REPLY, 0, 0, 0, result)
-        return self._send_raw_data_with_header(addr, result_reply, data)
+        confirmed = self._send_raw_data_with_header(addr, result_reply, data)
+        # Count bytes only once the console confirmed the whole transfer: an
+        # aborted or unacknowledged send was not served.
+        if result > 0 and confirmed:
+            self._session_record(addr, "bytes", result)
+        return confirmed
 
     def _send_result_reply(self, addr: Tuple[str, int], result: int):
         """Send RESULT_REPLY"""
