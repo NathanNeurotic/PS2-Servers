@@ -2768,6 +2768,8 @@ class LauncherApp:
                 self._append_log(key, "[launcher] stopping; waiting up to {:g}s for "
                                       "Windows file sharing to be restored\n".format(
                                           proc.stop_grace))
+                # Paint the line now: proc.stop() blocks the Tk loop.
+                self.root.update_idletasks()
             proc.stop()
         self.status_poller.clear_target(key)
         self.cards[key]._active_values = None
