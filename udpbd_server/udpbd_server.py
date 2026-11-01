@@ -137,22 +137,6 @@ class BlockDevice:
 # --------------------------------------------------------------------------- #
 # Server
 # --------------------------------------------------------------------------- #
-def _ignore_udp_connreset(sock):
-    """Windows: stop reporting ICMP port-unreachable as WSAECONNRESET.
-
-    Without this, one reply sent to a PS2 that has just reset or stopped
-    listening makes the next recvfrom() fail, and the receive loop used to
-    treat any OSError as "socket closed" and shut the whole server down.
-    No-op elsewhere. The same switch udpfs_server.py sets.
-    """
-    if sys.platform != "win32":
-        return
-    try:
-        sock.ioctl(0x9800000C, struct.pack("I", 0))  # SIO_UDP_CONNRESET, off
-    except (OSError, AttributeError, ValueError):
-        pass
-
-
 class UdpbdServer:
     def __init__(self, device, bind="", verbose=False):
         self.bd = device
@@ -169,7 +153,6 @@ class UdpbdServer:
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.sock.bind((bind or "0.0.0.0", UDPBD_PORT))
         self._bind_addr = bind or "0.0.0.0"
-        _ignore_udp_connreset(self.sock)
 
     # -- RDMA block sizing ------------------------------------------------- #
     def _set_block_shift(self, shift):
