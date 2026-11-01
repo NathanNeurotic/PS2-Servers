@@ -155,6 +155,9 @@ python ps2servers.py serve udpbd --raw-device '\\.\PhysicalDrive2'</code></pre>
 <details class="deep"><summary>Discovery works, but a game or folder will not open.</summary>
 <p>A <code>UDPBD_CMD_INFO</code> line only establishes a received discovery request. Enable <b>Verbose logging</b> to check whether sector reads arrive, then confirm the selected file's contents match the client's expected block layout. A raw ISO is not automatically a multi-game directory. Also check read permissions, server I/O errors, and client/backend compatibility. Compare the same file through the client mode it was designed for.</p>
 </details>
+<details class="deep"><summary>How much did the console actually read?</summary>
+<p>Tick <b>Session summary</b> in the card's advanced options, or pass <code>--session-summary</code>. One <code>SESSION udpbd ...</code> line is printed per console when it has been quiet for a minute or the server stops: mounts (<code>connections</code>, one per <code>UDPBD_CMD_INFO</code>), reads and the bytes served, writes, and errors (failed writes and writes to a read-only image). Nothing is logged per request. The counts are what the PC served; they do not prove a game ran.</p>
+</details>
 <details class="deep"><summary>The UDPBD server reports "cannot open" or "address already in use".</summary>
 <p><b>Cannot open:</b> verify the selected image actually exists, the server has read access, and it is a regular disk-image file rather than a folder. <b>Address already in use:</b> stop the other UDPBD process on UDP 48573. Start read-only when testing; an unprotected image can be modified by a client.</p>
 </details>

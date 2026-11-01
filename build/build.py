@@ -49,8 +49,6 @@ SUPPORT_FILES = [
     # packaged build imports fine in source mode and fails at runtime, which is
     # exactly the failure tests/test_packaging_data_files.py exists to catch.
     "udpfs_server/router_status.py",
-    # http_server.py does `import session_stats` on load.
-    "http_server/session_stats.py",
     # smb2_server.py imports all four of these at load. _server_entry_points
     # only sees the entry point itself, so a sibling module missing here is a
     # packaged build whose SMBv2/SMBv3 modes die on ImportError at start.
@@ -115,6 +113,9 @@ INCLUDE_MODULES = [
     "launcher.riptopl_export",
     "launcher.achievement_loader",
     "launcher.discord_presence",
+    # Server sources ship as data and import this at load (HTTP always, the
+    # others with --session-summary); Nuitka cannot see that import.
+    "launcher.session_stats",
     "sqlite3",
     "launcher.raw_storage",
     "launcher.virtual_exfat",

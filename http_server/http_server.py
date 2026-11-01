@@ -41,7 +41,10 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
-import session_stats
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if os.path.isdir(os.path.join(_REPO_ROOT, "launcher")) and _REPO_ROOT not in sys.path:
+    sys.path.append(_REPO_ROOT)  # running this file directly from a checkout
+from launcher import session_stats  # noqa: E402  shared by every server
 
 # Compressed-image support is shared with UDPFS rather than reimplemented. The
 # extension table there carries a standing warning against second copies: a

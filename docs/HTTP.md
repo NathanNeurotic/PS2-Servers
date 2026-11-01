@@ -187,8 +187,8 @@ SESSION http client=192.168.1.30 seconds=412 connections=3 list=1 open=1 read=51
   server to stop the way Ctrl+C does (through a pipe, which also works on
   Windows) and ends the process only if it has not stopped within 3 seconds.
 
-The format is shared by every server that adds it (`http_server/session_stats.py`),
-so one parser reads all of them.
+The format is shared with the SMBv1, UDPFS and UDPBD servers
+(`launcher/session_stats.py`), so one parser reads all of them.
 
 ## Direct PS2-to-PC link
 

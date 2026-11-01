@@ -138,5 +138,54 @@ class SiblingImportsAreShippedTests(unittest.TestCase):
                             rel, name, name))
 
 
+
+class LauncherImportsAreCompiledInTests(unittest.TestCase):
+    """Shipped server files are data, so Nuitka never sees what they import.
+
+    A `from launcher import session_stats` in http_server.py imports fine from
+    a checkout and fails in the packaged app unless the module is listed in
+    INCLUDE_MODULES (or imported statically by the launcher itself).
+    """
+
+    @staticmethod
+    def _launcher_modules(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            tree = ast.parse(handle.read(), filename=path)
+        found = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("launcher."):
+                        found.add(alias.name)
+            elif isinstance(node, ast.ImportFrom) and node.level == 1:
+                # `from .x import y` inside launcher/ itself
+                if node.module:
+                    found.add("launcher." + node.module)
+                else:
+                    found.update("launcher." + a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                if node.module == "launcher":
+                    found.update("launcher." + a.name for a in node.names)
+                elif node.module.startswith("launcher."):
+                    found.add(node.module)
+        return found
+
+    def test_launcher_modules_used_by_shipped_servers_are_included(self):
+        included = set(BUILD.INCLUDE_MODULES)
+        # The package __init__ and serve.py are always compiled, so what they
+        # import statically is in the build too.
+        for always in ("launcher/__init__.py", "launcher/serve.py"):
+            included |= self._launcher_modules(os.path.join(ROOT, always))
+        for rel in sorted(BUILD.DATA_FILES):
+            if not rel.endswith(".py") or rel.startswith("launcher/"):
+                continue
+            for module in sorted(self._launcher_modules(os.path.join(ROOT, rel))):
+                with self.subTest(source=rel, imports=module):
+                    self.assertIn(
+                        module, included,
+                        "{} imports {} but build.py does not compile it in; the "
+                        "packaged app fails with ModuleNotFoundError".format(rel, module))
+
+
 if __name__ == "__main__":
     unittest.main()

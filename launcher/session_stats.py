@@ -1,6 +1,7 @@
 """Bounded per-client session counters, summarised once per session.
 
-Opt-in (``--session-summary``). Nothing is logged per request: each event is
+Shared by every server (HTTP, SMBv1, UDPFS, UDPBD), so one parser reads all of
+their lines. Opt-in (``--session-summary``). Nothing is logged per request: each event is
 one counter update under a lock, and a client's totals are printed as one
 ``SESSION`` line when it has been quiet for ``idle_seconds``, when it is pushed
 out by a newer client past ``max_clients``, or when the server stops.
@@ -63,6 +64,18 @@ class SessionStats:
             setattr(entry, kind, getattr(entry, kind) + count)
         if evicted is not None:
             self._emit(self._line(evicted[0], evicted[1], "evicted"))
+
+    def touch(self, client):
+        """Mark a known client as still active without counting anything, so a
+        transfer that outlasts idle_seconds is not summarised mid-way. A client
+        with no entry is left alone. Returns whether one was refreshed."""
+        with self._lock:
+            entry = self._clients.get(client)
+            if entry is None:
+                return False
+            self._clients.move_to_end(client)
+            entry.last = self._clock()
+            return True
 
     def expire(self):
         """Summarise and forget every client idle for idle_seconds. Returns the lines."""

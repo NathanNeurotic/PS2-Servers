@@ -300,6 +300,7 @@ class Conn:
         self.files = {}  # fid -> OpenFile
         self.searches = {}  # sid -> (entries list, cursor)
         self.peer = "unknown"
+        self.peer_ip = "unknown"
         self.started = self.sample_time = time.monotonic()
         self.requests = self.reads = self.writes = self.bytes_read = self.errors = 0
         self.short_reads = self.slow_reads = self.slow_sends = 0
@@ -1103,6 +1104,8 @@ def h_trans2_query_path(conn, r, t_params, t_data):
 
 def h_trans2(conn, r):
     setup, t_params, t_data = _trans2_parse(r)
+    if setup in (TRANS2_FIND_FIRST2, TRANS2_FIND_NEXT2):
+        _session_record(conn, "list")
     if setup == TRANS2_FIND_FIRST2:
         return h_trans2_find_first2(conn, r, t_params, t_data)
     if setup == TRANS2_FIND_NEXT2:
@@ -1174,11 +1177,34 @@ HANDLERS = {
 }
 
 
+# SESSION summary counters (--session-summary) for SMB1 commands. TRANS2 is
+# counted by subcommand in h_trans2: FIND_FIRST2/FIND_NEXT2 are folder lists.
+_SESSION_KINDS = {
+    SMB_COM_OPEN_ANDX: "open",
+    SMB_COM_NT_CREATE_ANDX: "open",
+    SMB_COM_READ_ANDX: "read",
+    SMB_COM_WRITE_ANDX: "write",
+    SMB_COM_CLOSE: "close",
+}
+# A path the console looked for and did not find is not an error: OPL probes
+# for optional files (configs, VMCs, art) on every launch.
+_PROBE_COMMANDS = (SMB_COM_OPEN_ANDX, SMB_COM_NT_CREATE_ANDX, SMB_COM_CHECK_DIRECTORY,
+                   SMB_COM_TRANS2)
+
+
+def _session_record(conn, kind, count=1):
+    stats = getattr(conn.server, "session_stats", None)
+    if stats is not None:
+        stats.record(conn.peer_ip, kind, count)
+
+
 def serve_conn(server, sock, addr):
     conn = Conn(server)
     conn.sock = sock
     conn.peer = f"{addr[0]}:{addr[1]}"
+    conn.peer_ip = addr[0]
     activity(conn.peer, "connected", "read-only" if server.read_only else "writable")
+    _session_record(conn, "connections")
     try:
         while True:
             msg = recv_msg(sock)
@@ -1213,8 +1239,12 @@ def serve_conn(server, sock, addr):
             if r.cmd == SMB_COM_WRITE_ANDX:
                 conn.writes += 1
             handler = HANDLERS.get(r.cmd)
+            kind = _SESSION_KINDS.get(r.cmd)
+            if kind is not None:
+                _session_record(conn, kind)
             if handler is None:
                 conn.errors += 1
+                _session_record(conn, "errors")
                 conn.warning(f"unsupported command=0x{r.cmd:02x}")
                 conn.send(pack_header(r.cmd, STATUS_NOT_IMPLEMENTED, r.tid, r.pid, r.uid, r.mid)
                          + build_body(b"", b""))
@@ -1228,13 +1258,18 @@ def serve_conn(server, sock, addr):
             tid = result[4] if len(result) >= 5 and result[4] is not None else r.tid
             if status != STATUS_SUCCESS or params is None:
                 conn.errors += 1
+                if not (status == STATUS_OBJECT_NAME_NOT_FOUND and r.cmd in _PROBE_COMMANDS):
+                    _session_record(conn, "errors")
                 conn.warning(f"command=0x{r.cmd:02x} status=0x{status:08x} last_read={conn.last_read!r}")
                 conn.send(pack_header(r.cmd, status, r.tid, r.pid, r.uid, r.mid) + build_body(b"", b""))
                 continue
             hdr = pack_header(r.cmd, status, tid, r.pid, uid, r.mid)
             conn.send(hdr + build_body(params, data))
+            if r.cmd == SMB_COM_READ_ANDX and data:
+                _session_record(conn, "bytes", len(data))  # after the send succeeded
     except (ConnectionError, OSError) as e:
         conn.errors += 1
+        _session_record(conn, "errors")
         activity(conn.peer, "connection error", type(e).__name__, str(e),
                  f"last_read={conn.last_read!r}")
     finally:
@@ -1251,6 +1286,8 @@ def serve_conn(server, sock, addr):
 # Server + Windows port-445 (LanmanServer) takeover
 # --------------------------------------------------------------------------------------------
 class SmbServer:
+    session_stats = None  # launcher.session_stats.SessionStats with --session-summary
+
     def __init__(self, shares, read_only, smb_version=1, users=None):
         self.shares = shares
         self.read_only = read_only
@@ -1426,6 +1463,9 @@ def main(argv=None):
                     help="SMB protocol version (1=SMBv1; 2 and 3 are INCOMPLETE "
                          "-- they negotiate and connect but serve no files)")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--session-summary", action="store_true",
+                    help="print one SESSION line per console when it goes quiet "
+                         "for a minute or the server stops")
     args = ap.parse_args(argv)
     VERBOSE = args.verbose
 
@@ -1463,6 +1503,13 @@ def main(argv=None):
 
     server = SmbServer(shares, read_only=args.read_only,
                        smb_version=args.smb_version, users=users)
+    if args.session_summary:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if os.path.isdir(os.path.join(root, "launcher")) and root not in sys.path:
+            sys.path.append(root)
+        from launcher.session_stats import SessionStats
+        server.session_stats = SessionStats("smbv1")
+    stats = getattr(server, "session_stats", None)
 
     # One cleanup owner from take-445 on: a stop request can land while the
     # service is stopping, during the bind retries or the banner, not only in
@@ -1534,7 +1581,11 @@ def main(argv=None):
         # runs. Accepted sockets are still blocking (Python resets them when the
         # default timeout is None).
         lsock.settimeout(1.0)
+        next_expiry = time.monotonic() + 10.0
         while True:
+            if stats is not None and time.monotonic() >= next_expiry:
+                stats.expire()  # consoles quiet for a minute get their line
+                next_expiry = time.monotonic() + 10.0
             try:
                 csock, addr = lsock.accept()
             except socket.timeout:
@@ -1555,6 +1606,8 @@ def main(argv=None):
                 lsock.close()
             except OSError:
                 pass
+        if stats is not None:
+            stats.stop()
         if restore:
             restore()
     return 0

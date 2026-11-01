@@ -146,8 +146,9 @@ passed. Do not weaken that test or claim a new full-suite pass without running i
    host reads do not prove gameplay. Test multiple clients, reconnect, errors,
    shutdown/cancel, packaged Windows and Core logs.
    STARTED in the follow-up PR: a shared, bounded `SESSION` summary line
-   (`http_server/session_stats.py`), opt-in on HTTP. SMBv1, UDPFS and UDPBD and a
-   launcher view that reads the lines are still to do.
+   (`launcher/session_stats.py`, moved from `http_server/`), opt-in on HTTP.
+   Now also on SMBv1, UDPFS (Desktop/Core) and UDPBD. Still to do: SMBv2/SMBv3,
+   Edge, and a launcher view that reads the lines.
    DONE after #267: the launcher's **Stop** is cooperative on every OS
    (`launcher/process.py` stop pipe, `launcher/serve.py`), so final `SESSION`
    lines and the take-445 restore run on Windows too. The SMB and UDPBD accept/

@@ -152,6 +152,8 @@ def _smb_argv(v, smb_version="1"):
         args += ["--user", "{}:{}".format(user, password)]
     if v.get("verbose"):
         args.append("-v")
+    if v.get("session_summary"):
+        args.append("--session-summary")
     return args
 
 
@@ -332,6 +334,8 @@ def _udpfs_argv(v):
         args += ["--protocol-mode", protocol_mode]
     if v.get("verbose"):
         args.append("--verbose")
+    if v.get("session_summary"):
+        args.append("--session-summary")
     return args
 
 
@@ -354,6 +358,8 @@ def _udpbd_argv(v):
         args.append("-r")
     if v.get("verbose"):
         args.append("-v")
+    if v.get("session_summary"):
+        args.append("--session-summary")
     return args
 
 
@@ -391,6 +397,11 @@ SMBV1 = ServerDef(
         Field("bind", "Bind address", "text", default="", advanced=True,
               help="Interface to bind (blank = all)."),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+        Field("session_summary", "Session summary", "bool", default=False, advanced=True,
+              help="Print one SESSION line per console when it goes quiet for a "
+                   "minute or the server stops: connections, folder lists, opens, "
+                   "reads, writes and errors. Nothing is logged per request. Counts "
+                   "are what the PC served, not proof a game ran."),
     ],
     _build_argv=_smbv1_argv,
 )
@@ -470,6 +481,11 @@ UDPFS = ServerDef(
               advanced=True,
               help="Drop an inactive console and close its handles after 60-86400 seconds."),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+        Field("session_summary", "Session summary", "bool", default=False, advanced=True,
+              help="Print one SESSION line per console when it goes quiet for a "
+                   "minute or the server stops: folder lists, opens, reads, writes "
+                   "and errors. Nothing is logged per request. Counts are what the "
+                   "PC served, not proof a game ran."),
     ],
     _build_argv=_udpfs_argv,
 )
@@ -595,6 +611,11 @@ UDPBD = ServerDef(
               help="Requires Exclusive raw access. Gives the PS2 write access to all sectors; use only a dedicated game drive on a trusted LAN. Failed writes may be partial."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
         Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+        Field("session_summary", "Session summary", "bool", default=False, advanced=True,
+              help="Print one SESSION line per console when it goes quiet for a "
+                   "minute or the server stops: mounts, reads, writes and errors. "
+                   "Nothing is logged per request. Counts are what the PC served, "
+                   "not proof a game ran."),
     ],
     _build_argv=_udpbd_argv,
 )
