@@ -172,6 +172,6 @@ class SessionPanel(ttk.Frame):
             self.hint.set(EMPTY_HINT)
         else:
             self.hint.set("{} session{}, newest first. Each row is one console's totals "
-                          "for one visit; errors count replies the console did not "
-                          "expect, not probes for optional files.".format(
-                              count, "" if count == 1 else "s"))
+                          "for one visit. What counts as an error varies by service: "
+                          "HTTP counts every 404, SMB and UDPFS do not count a probe for "
+                          "an optional file.".format(count, "" if count == 1 else "s"))
