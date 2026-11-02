@@ -44,7 +44,17 @@ import (
 // host's part.
 var removeRefusesReadOnly atomic.Bool
 
-func init() { removeRefusesReadOnly.Store(runtime.GOOS == "windows") }
+// removeTriesBoth makes removeEntry delete with os.Remove, as it does on
+// Windows, where that tries DeleteFile and then RemoveDirectory: there only
+// the lstat checks in handleRemove and handleRmdir keep REMOVE from deleting
+// an empty folder and RMDIR from deleting a file. A variable for the same
+// reason as removeRefusesReadOnly.
+var removeTriesBoth atomic.Bool
+
+func init() {
+	removeRefusesReadOnly.Store(runtime.GOOS == "windows")
+	removeTriesBoth.Store(runtime.GOOS == "windows")
+}
 
 func pathOpName(t protocol.MessageType) string {
 	switch t {
@@ -227,11 +237,11 @@ func pathErrno(err error) int32 {
 // removeEntry deletes the entry at path, which lstat found to be a directory
 // (dir) or not. On Unix it is exactly rmdir(2) or unlink(2), so an entry that
 // became the other kind after the lstat is refused rather than removed;
-// os.Remove would try both. Windows uses os.Remove, which handles long paths
-// and deletes a directory symlink or junction with RemoveDirectory -- the
-// link, not what it points at.
+// os.Remove would try both. Windows uses os.Remove (removeTriesBoth), which
+// handles long paths and deletes a directory symlink or junction with
+// RemoveDirectory -- the link, not what it points at.
 func removeEntry(path string, dir bool) error {
-	if runtime.GOOS == "windows" {
+	if removeTriesBoth.Load() {
 		return os.Remove(path)
 	}
 	op, call := "unlink", syscall.Unlink

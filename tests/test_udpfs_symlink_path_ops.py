@@ -230,6 +230,30 @@ class _PathOpsMixin:
                 self.assertTrue(os.path.isdir(empty_root), "RMDIR removed the share root")
                 self.assertEqual(result, -errno.EACCES)
 
+    def test_deletes_answer_from_lstat_where_the_host_answers_otherwise(self):
+        # Linux's unlink() of a folder is EISDIR and its rmdir() of a link is
+        # ENOTDIR by themselves, which would hide a lost lstat() check. macOS
+        # answers the first with EPERM (Windows with EACCES), and Windows'
+        # RemoveDirectory deletes a link to a folder; these stand in for them.
+        real_unlink, real_rmdir = os.unlink, os.rmdir
+
+        def unlink_as_on_macos(path, *args, **kwargs):
+            if os.path.isdir(path) and not os.path.islink(path):
+                raise PermissionError(errno.EPERM, os.strerror(errno.EPERM), path)
+            return real_unlink(path, *args, **kwargs)
+
+        def rmdir_as_on_windows(path, *args, **kwargs):
+            if os.path.islink(path) and os.path.isdir(path):
+                return real_unlink(path)
+            return real_rmdir(path, *args, **kwargs)
+
+        with mock.patch.object(os, "unlink", unlink_as_on_macos), \
+                mock.patch.object(os, "rmdir", rmdir_as_on_windows):
+            self.assertEqual(self.op(REMOVE, "EMPTY"), -errno.EISDIR)
+            self.assertEqual(self.op(RMDIR, "dirlink"), -errno.ENOTDIR)
+        self.assertTrue(os.path.isdir(self.at("EMPTY")))
+        self.assertLink("dirlink")
+
     # -- MKDIR ------------------------------------------------------------------
     def test_mkdir_over_a_dangling_symlink_is_eexist(self):
         result = self.op(MKDIR, "dangling")

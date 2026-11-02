@@ -395,6 +395,44 @@ func TestRemoveOfAReadOnlyFileAnswersAsTheHostDoes(t *testing.T) {
 	}
 }
 
+// On Windows removeEntry is os.Remove, which deletes a file and an empty
+// folder alike, so only the lstat checks keep RMDIR from deleting a file or a
+// link and REMOVE from deleting a folder there. Linux's rmdir and unlink
+// refuse the other kind by themselves, which would hide a lost check;
+// removeTriesBoth stands in for Windows here.
+func TestDeletesRefuseTheOtherKindWhenRemoveTriesBoth(t *testing.T) {
+	defer removeTriesBoth.Store(removeTriesBoth.Load())
+	removeTriesBoth.Store(true)
+	share := newPathOpsShare(t)
+	c := dial(t, startServerAt(t, share.root, false))
+
+	for _, req := range []struct {
+		op   protocol.MessageType
+		path string
+		want int32
+	}{
+		{protocol.RmdirRequest, "GAMES/real.elf", errnoResult(eNOTDIR)},
+		{protocol.RmdirRequest, "dirlink", errnoResult(eNOTDIR)},
+		{protocol.RemoveRequest, "EMPTY", errnoResult(eISDIR)},
+	} {
+		if got := c.pathOp(req.op, req.path); got != req.want {
+			t.Errorf("%s %q returned %d, want %d", pathOpName(req.op), req.path, got, req.want)
+		}
+	}
+	share.assertLink("dirlink")
+	share.assertIntact()
+
+	// Each still goes by its own request.
+	if got := c.pathOp(protocol.RemoveRequest, "GAMES/real.elf"); got != 0 {
+		t.Fatalf("REMOVE of a file returned %d, want 0", got)
+	}
+	if got := c.pathOp(protocol.RmdirRequest, "EMPTY"); got != 0 {
+		t.Fatalf("RMDIR of an empty folder returned %d, want 0", got)
+	}
+	share.assertGone("GAMES/real.elf")
+	share.assertGone("EMPTY")
+}
+
 // Only links are refused on the way; anything else is the operation's to
 // answer, as on the Desktop server.
 func TestAFileUsedAsAFolderIsNotALink(t *testing.T) {
