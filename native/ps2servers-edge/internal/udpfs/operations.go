@@ -296,9 +296,15 @@ func (s *Server) openForWrite(st *session.State, id int32, path string, flags ui
 		mode |= os.O_APPEND
 	}
 	if !s.reserveWriter(real) {
-		s.cfg.Log.Warn("file already open for writing by another peer", map[string]any{"peer": st.Peer, "path": path})
-		s.sendOpen(st, -int32(syscall.EBUSY), 0, 0)
-		return
+		// Held by a handle a replaced loader on this endpoint left open, the
+		// file passes to the new loader: a save it retries after taking over
+		// from that loader would otherwise be refused for the whole session.
+		if !st.TakeOverWriter(real) || !s.reserveWriter(real) {
+			s.cfg.Log.Warn("file already open for writing by another peer", map[string]any{"peer": st.Peer, "path": path})
+			s.sendOpen(st, -int32(syscall.EBUSY), 0, 0)
+			return
+		}
+		s.cfg.Log.Info("write OPEN took the file over from a replaced loader's handle", s.pathLogFields(st, path))
 	}
 	f, err := os.OpenFile(real, mode, 0o644)
 	if err != nil {

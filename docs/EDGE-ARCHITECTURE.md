@@ -56,7 +56,11 @@ and open handles. No global client profile exists.
 Sequence, socket, fallback, and file state cannot leak between sessions.
 Sequence-zero background discovery is answered without resetting a recently
 active transfer. A quiet or nonzero re-handshake replaces the old peer state and
-closes its handles.
+closes its handles. A sequence-zero discovery followed by DATA that starts again
+at 0 or 1 is a new loader taking over the endpoint: the transport is reset but
+the old loader's handles stay open, as Neutrino's FILEID backend needs
+(`session.State.HandOff`). The new loader opening for writing a file one of
+them holds for writing closes that handle and takes over its write reservation.
 
 Strict `standard` and `modulo` modes remain diagnostic policies. They do not
 force a network topology: DATA is still accepted on either local socket.

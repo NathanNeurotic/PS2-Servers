@@ -304,6 +304,7 @@ With writes enabled:
 | Behaviour | Result |
 |---|---|
 | Second peer opens the same file for writing | `EBUSY` — concurrent writers would interleave and corrupt |
+| A loader that took over the console's endpoint opens for writing a file the loader it replaced left open for writing | allowed: the old loader's handle to that file is closed and its reservation passes to the new one. The old loader's other handles stay open for Neutrino's FILEID, and another peer still gets `EBUSY` |
 | Write to a CSO/ZSO/CHD image | `EACCES` — the reader shows a decompressed view, so the offsets do not correspond to the container |
 | Single assembled write over 8 MiB | `EFBIG` — bounds what one peer can make the server buffer |
 | Chunk arrives out of order | `EIO`, whole write abandoned rather than silently misassembled |
@@ -338,7 +339,10 @@ handles. It serves writes, `MKDIR`, `REMOVE` and `RMDIR` unless started with
 inside the root, and a symlink in the last component is the link itself, so
 deleting one never reaches its target.
 Idle sessions are removed, their files are closed, and any write reservation
-they held is released. Normal logs do not print full requested host paths.
+they held is released. A loader that takes over a console's endpoint keeps the
+files the old loader had open, but opening one of them for writing itself
+closes the old loader's handle to it and takes over its reservation. Normal
+logs do not print full requested host paths.
 
 ## Validation status
 
