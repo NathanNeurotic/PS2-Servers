@@ -259,8 +259,16 @@ func itoa(n int) string {
 func (s *Server) Serve() error {
 	// Accept blocks, so the idle sweep runs beside it. It ends with closed,
 	// and it is in wg so Close waits for it before Stop prints the final
-	// lines; an idle line can then never follow them.
+	// lines; an idle line can then never follow them. The Add is taken
+	// under mu and skipped once Close has begun, so it can never race the
+	// Wait in Close (a WaitGroup Add from zero must happen before Wait).
+	s.mu.Lock()
+	if s.stopping {
+		s.mu.Unlock()
+		return nil
+	}
 	s.wg.Add(1)
+	s.mu.Unlock()
 	go func() {
 		defer s.wg.Done()
 		s.sessions.RunExpiry(s.closed, 10*time.Second)
