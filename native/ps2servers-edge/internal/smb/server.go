@@ -258,8 +258,13 @@ func itoa(n int) string {
 // Serve accepts connections until Close.
 func (s *Server) Serve() error {
 	// Accept blocks, so the idle sweep runs beside it. It ends with closed,
-	// which Close closes before Stop prints the final lines.
-	go s.sessions.RunExpiry(s.closed, 10*time.Second)
+	// and it is in wg so Close waits for it before Stop prints the final
+	// lines; an idle line can then never follow them.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.sessions.RunExpiry(s.closed, 10*time.Second)
+	}()
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {

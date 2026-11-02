@@ -276,9 +276,17 @@ func (s *Server) Serve(ctx context.Context) error {
 		case <-done:
 		}
 	}()
-	defer close(done)
-	// The receive loop blocks, so the idle sweep runs beside it.
-	go s.sessions.RunExpiry(done, 10*time.Second)
+	// The receive loop blocks, so the idle sweep runs beside it. Serve waits
+	// for it before returning, so Close's final Stop cannot race an idle line.
+	expiryDone := make(chan struct{})
+	defer func() {
+		close(done)
+		<-expiryDone
+	}()
+	go func() {
+		defer close(expiryDone)
+		s.sessions.RunExpiry(done, 10*time.Second)
+	}()
 
 	buf := make([]byte, RecvBufLen)
 	for {
