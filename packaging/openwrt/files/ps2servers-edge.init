@@ -146,6 +146,10 @@ start_smb() {
         [ "$read_only" -eq 1 ] && procd_append_param command --read-only
         append_bool_flag smb verbose --verbose
         append_bool_flag smb session_summary --session-summary
+        # procd sends SIGKILL 5 s after SIGTERM by default. The smb command
+        # waits up to 10 s for open connections to close (smbShutdownWait in
+        # main.go) before printing its final SESSION lines, so give it 15.
+        procd_set_param term_timeout 15
 
         common_params
         procd_close_instance

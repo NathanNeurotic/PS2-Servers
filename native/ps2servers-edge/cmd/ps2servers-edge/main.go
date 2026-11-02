@@ -440,7 +440,10 @@ func runSMB() {
 	select {
 	case <-closeDone:
 	case <-time.After(smbShutdownWait):
-		logger.Warn("SMB shutdown timed out waiting for connections; exiting",
+		// Best effort and not waited for: if stdout is a full pipe, a
+		// blocked SESSION line holds the logger mutex, and waiting on it
+		// here would undo the bound.
+		go logger.Warn("SMB shutdown timed out waiting for connections; exiting",
 			map[string]any{"waited": smbShutdownWait.String()})
 	}
 }
