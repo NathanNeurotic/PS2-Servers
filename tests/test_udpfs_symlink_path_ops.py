@@ -290,6 +290,22 @@ class _PathOpsMixin:
         self.assertGone("fulllink")
         self.assertEqual(self.read(self.at("FULL", "keep.bin")), b"keep")
 
+    def test_a_dotdot_does_not_get_a_delete_past_the_linked_folder_check(self):
+        # realpath() steps over a folder that does not exist, or a file, when
+        # a '..' follows it, and goes on through the link. The walk stopped at
+        # the first component it could not lstat() and called the path clean,
+        # so these deleted FULL/keep.bin and FULL/SUB through fulllink.
+        for opcode, path in ((REMOVE, "nonexistent/../fulllink/keep.bin"),
+                             (RMDIR, "nonexistent/../fulllink/SUB"),
+                             (REMOVE, "GAMES/real.elf/../../fulllink/keep.bin"),
+                             (RMDIR, "GAMES/real.elf/../../fulllink/SUB")):
+            with self.subTest(opcode=hex(opcode), path=path):
+                self.write(self.at("FULL", "keep.bin"), b"keep")
+                os.makedirs(self.at("FULL", "SUB"), exist_ok=True)
+                self.assertLess(self.op(opcode, path), 0)
+                self.assertTrue(os.path.isfile(self.at("FULL", "keep.bin")))
+                self.assertTrue(os.path.isdir(self.at("FULL", "SUB")))
+
     def test_deletes_do_not_go_through_a_junction(self):
         # lstat() reports a Windows junction as a directory, so DREAD lists
         # one as a folder; only st_reparse_tag gives it away. Junctions exist

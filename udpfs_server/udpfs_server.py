@@ -1255,7 +1255,11 @@ class UdpfsServer:
         any link to a folder as a folder. The link itself, the last
         component, remains the console's to delete.
 
-        A folder that cannot be lstat()ed is left for the operation to report.
+        A folder that cannot be lstat()ed raises the OSError, for the operation
+        to answer with. It must not count as clean: realpath() in
+        _resolve_entry() steps over a folder that does not exist, or a file,
+        when a '..' follows it, so 'missing/../fulllink/keep.bin' reached FULL
+        through the link while this walk stopped at 'missing'.
         """
         parts = [p for p in client_path.replace('\\', '/').split('/')
                  if p not in ('', '.')]
@@ -1263,10 +1267,7 @@ class UdpfsServer:
             # Joined as _resolve_path() joins it, so this walks the path that
             # _resolve_entry() resolved.
             folder = os.path.join(self.root_dir, '/'.join(parts[:depth]))
-            try:
-                st = os.lstat(folder)
-            except OSError:
-                return False
+            st = os.lstat(folder)
             if (stat_mod.S_ISLNK(st.st_mode) or
                     getattr(st, 'st_reparse_tag', 0) == IO_REPARSE_TAG_MOUNT_POINT):
                 return True
@@ -2263,12 +2264,12 @@ class UdpfsServer:
         if resolved is None:
             self._send_result_reply(addr, -errno.EACCES)
             return
-        if self._through_linked_folder(path):
-            self._print_event(f"[{addr[0]}:{addr[1]}] REMOVE '{path}' -> EACCES (through a linked folder)")
-            self._send_result_reply(addr, -errno.EACCES)
-            return
 
         try:
+            if self._through_linked_folder(path):
+                self._print_event(f"[{addr[0]}:{addr[1]}] REMOVE '{path}' -> EACCES (through a linked folder)")
+                self._send_result_reply(addr, -errno.EACCES)
+                return
             # A real directory is refused here, the same answer on every host:
             # unlink() on one is EISDIR on Linux, EPERM on macOS and EACCES on
             # Windows.
@@ -2304,12 +2305,12 @@ class UdpfsServer:
         if resolved is None or resolved == self.root_dir:
             self._send_result_reply(addr, -errno.EACCES)
             return
-        if self._through_linked_folder(path):
-            self._print_event(f"[{addr[0]}:{addr[1]}] RMDIR '{path}' -> EACCES (through a linked folder)")
-            self._send_result_reply(addr, -errno.EACCES)
-            return
 
         try:
+            if self._through_linked_folder(path):
+                self._print_event(f"[{addr[0]}:{addr[1]}] RMDIR '{path}' -> EACCES (through a linked folder)")
+                self._send_result_reply(addr, -errno.EACCES)
+                return
             # A symlink is not a directory, even one that points at a folder.
             # rmdir(2) agrees on POSIX, but Windows' RemoveDirectory accepts a
             # directory symlink, so decide from lstat on every host.
