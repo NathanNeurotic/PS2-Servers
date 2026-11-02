@@ -1884,8 +1884,30 @@ class UdpfsServer:
             self._print_event(f"[{addr[0]}:{addr[1]}] READ error: {e}")
             self._send_read_result(addr, -e.errno, b'')
 
+    def _reset_write(self):
+        """Forget the write being assembled, as Edge's session.ResetWrite does.
+
+        The IOP sends every chunk of a write before it waits for WRITE_DONE, so
+        the rest of a write still arrives after the write was refused at its
+        request. Left armed, the state of the last write took those chunks:
+        chunk 1 of a refused two-chunk write matched the count a finished
+        one-chunk write had left, was added to that write's buffer and written
+        into its file, and a second WRITE_DONE went out. Every WRITE_REQ and
+        BWRITE_REQ therefore starts from here, and so does every write that
+        finishes. write_handle -1 means no write is in progress, and
+        _handle_write_data drops a chunk that arrives then.
+        """
+        self.write_handle = -1
+        self.write_is_block = False
+        self.write_sector_nr = 0
+        self.write_sector_count = 0
+        self.write_data = bytearray()
+        self.write_total_chunks = 0
+        self.write_received_chunks = 0
+
     def _handle_write_req(self, addr: Tuple[str, int], payload: bytes):
         """Handle WRITE_REQ - start of file write operation"""
+        self._reset_write()
         if len(payload) < 12:
             self._send_ack(addr, is_ack=True)
             return
@@ -1926,12 +1948,8 @@ class UdpfsServer:
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] WRITE_REQ handle={handle} size={size}")
 
-        # Initialize write state (file write mode)
+        # Arm the write (file write mode); the rest was reset on entry.
         self.write_handle = handle
-        self.write_is_block = False
-        self.write_data = bytearray()
-        self.write_total_chunks = 0
-        self.write_received_chunks = 0
 
         # Check for inline WRITE_DATA (combined WRITE_REQ + first chunk)
         if len(payload) > 12:
@@ -1951,6 +1969,15 @@ class UdpfsServer:
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] WRITE_DATA chunk={chunk_nr}/{total_chunks} size={chunk_size}")
 
+        if self.write_handle < 0:
+            # No write in progress: the rest of a write refused at its request,
+            # or a chunk with no request in front of it. Dropped, as Edge drops
+            # it, rather than added to whatever write came before.
+            if self.verbose:
+                self._print_event(f"  WRITE_DATA chunk={chunk_nr} with no write in progress, dropped")
+            self._send_ack(addr, is_ack=True)
+            return
+
         if chunk_nr != self.write_received_chunks:
             self._print_event(f"  ERROR: Chunk order error (expected {self.write_received_chunks}, got {chunk_nr})")
             self._send_ack(addr, is_ack=True)
@@ -1965,10 +1992,7 @@ class UdpfsServer:
             self._print_event(
                 f"[{addr[0]}:{addr[1]}] WRITE over {self.max_transfer_bytes} "
                 "bytes -> EINVAL, buffer discarded")
-            self.write_data = bytearray()
-            self.write_handle = -1
-            self.write_received_chunks = 0
-            self.write_total_chunks = 0
+            self._reset_write()
             self._send_write_done(addr, -errno.EINVAL)
             return
 
@@ -1986,18 +2010,20 @@ class UdpfsServer:
 
     def _complete_write(self, addr: Tuple[str, int]):
         """Complete a file write operation"""
-        fh = self.handles.get(self.write_handle)
+        handle, data = self.write_handle, self.write_data
+        self._reset_write()
+        fh = self.handles.get(handle)
         if fh is None or fh.is_dir:
             self._send_write_done(addr, -errno.EBADF)
             return
 
         try:
-            bytes_written = fh.obj.write(self.write_data)
+            bytes_written = fh.obj.write(data)
             fh.obj.flush()
             self.stats['bytes_written'] += bytes_written
 
             if self.verbose:
-                self._print_event(f"[{addr[0]}:{addr[1]}] WRITE handle={self.write_handle} -> {bytes_written} bytes")
+                self._print_event(f"[{addr[0]}:{addr[1]}] WRITE handle={handle} -> {bytes_written} bytes")
             self._update_status()
             self._send_write_done(addr, bytes_written)
         except OSError as e:
@@ -2006,28 +2032,31 @@ class UdpfsServer:
 
     def _complete_bwrite(self, addr: Tuple[str, int]):
         """Complete a block write operation"""
-        fh = self.handles.get(self.write_handle)
+        handle, data = self.write_handle, self.write_data
+        sector_nr, sector_count = self.write_sector_nr, self.write_sector_count
+        self._reset_write()
+        fh = self.handles.get(handle)
         if fh is None or fh.is_dir:
             self._send_write_done(addr, -errno.EBADF)
             return
 
-        sector_size = self.bd_sector_size if self.write_handle == BLOCK_DEVICE_HANDLE else 512
-        expected_size = self.write_sector_count * sector_size
+        sector_size = self.bd_sector_size if handle == BLOCK_DEVICE_HANDLE else 512
+        expected_size = sector_count * sector_size
 
         try:
-            if self.write_handle == BLOCK_DEVICE_HANDLE:
+            if handle == BLOCK_DEVICE_HANDLE:
                 # Shared block device: positional write (no shared file position).
-                self.bd_write(self.write_sector_nr * sector_size,
-                              bytes(self.write_data[:expected_size]))
+                self.bd_write(sector_nr * sector_size,
+                              bytes(data[:expected_size]))
             else:
-                fh.obj.seek(self.write_sector_nr * sector_size)
-                fh.obj.write(self.write_data[:expected_size])
+                fh.obj.seek(sector_nr * sector_size)
+                fh.obj.write(data[:expected_size])
                 fh.obj.flush()
             self.stats['bytes_written'] += expected_size
 
             if self.verbose:
-                self._print_event(f"[{addr[0]}:{addr[1]}] BWRITE handle={self.write_handle} "
-                      f"sector={self.write_sector_nr} count={self.write_sector_count}")
+                self._print_event(f"[{addr[0]}:{addr[1]}] BWRITE handle={handle} "
+                      f"sector={sector_nr} count={sector_count}")
             self._update_status()
             self._send_write_done(addr, 0)
         except OSError as e:
@@ -2357,6 +2386,7 @@ class UdpfsServer:
 
     def _handle_bwrite_req(self, addr: Tuple[str, int], payload: bytes):
         """Handle BWRITE_REQ - start of block write operation"""
+        self._reset_write()
         if len(payload) < 16:
             self._send_ack(addr, is_ack=True)
             return
@@ -2398,14 +2428,11 @@ class UdpfsServer:
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] BWRITE_REQ handle={handle} sector={sector_nr} count={sector_count}")
 
-        # Initialize write state (block write mode)
+        # Arm the write (block write mode); the rest was reset on entry.
         self.write_handle = handle
         self.write_is_block = True
         self.write_sector_nr = sector_nr
         self.write_sector_count = sector_count
-        self.write_data = bytearray()
-        self.write_total_chunks = 0
-        self.write_received_chunks = 0
 
         # Check for inline WRITE_DATA (combined BWRITE_REQ + first chunk)
         if len(payload) > 16:
