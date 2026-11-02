@@ -421,14 +421,21 @@ func runSMB() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	closeDone := make(chan struct{})
 	go func() {
 		<-ctx.Done()
 		_ = server.Close()
+		close(closeDone)
 	}()
 	if err := server.Serve(); err != nil {
 		logger.Error("server stopped", map[string]any{"error": err})
 		os.Exit(1)
 	}
+	// Serve returns as soon as Close shuts the listener, but Close then waits
+	// for live connections and prints the final SESSION lines. Wait for it so
+	// the process does not exit first and lose them.
+	stop()
+	<-closeDone
 }
 
 // shareList collects repeated --share flags.
