@@ -31,10 +31,13 @@ import smb2_srvsvc as srvsvc
 COMPOUND_FID = b"\xff" * 16
 
 
-def _hdr(c, command, flags=0, next_command=0, credits=1):
-    hdr = wire.pack_header(command, 0, c.message_id, tree_id=c.tree_id,
-                           session_id=c.session_id, credits=credits,
-                           next_command=next_command)
+def _hdr(c, command, flags=0, next_command=0, credits=1, inherit=False):
+    # inherit: the all-ones TreeId/SessionId a related request may carry,
+    # meaning "the ones the previous request in this compound used".
+    hdr = wire.pack_header(command, 0, c.message_id,
+                           tree_id=0xFFFFFFFF if inherit else c.tree_id,
+                           session_id=0xFFFFFFFFFFFFFFFF if inherit else c.session_id,
+                           credits=credits, next_command=next_command)
     # A request: no server-to-redir flag, and the caller's own flags.
     hdr = hdr[:16] + struct.pack("<I", flags) + hdr[20:]
     c.message_id += 1
@@ -122,12 +125,20 @@ class LibSmb2Stat(ServerFixture):
 
     def test_a_related_stat_compound_is_answered_in_full(self):
         """CREATE + QUERY_INFO + CLOSE with the all-ones FileId, as libsmb2 sends."""
+        self._related_stat_compound(inherit=False)
+
+    def test_related_requests_inherit_the_tree_and_session(self):
+        """The same compound with all-ones TreeId/SessionId on the related parts."""
+        self._related_stat_compound(inherit=True)
+
+    def _related_stat_compound(self, inherit):
         c = self.connected()
         msg = _chain([
             (_hdr(c, wire.CMD_CREATE, credits=8), _create_body("game.iso")),
-            (_hdr(c, wire.CMD_QUERY_INFO, flags=wire.FLAG_RELATED),
+            (_hdr(c, wire.CMD_QUERY_INFO, flags=wire.FLAG_RELATED, inherit=inherit),
              _query_info_body(COMPOUND_FID, wire.FILE_ALL_INFORMATION)),
-            (_hdr(c, wire.CMD_CLOSE, flags=wire.FLAG_RELATED), _close_body(COMPOUND_FID)),
+            (_hdr(c, wire.CMD_CLOSE, flags=wire.FLAG_RELATED, inherit=inherit),
+             _close_body(COMPOUND_FID)),
         ])
         wire.send_msg(c.sock, msg)
         replies = _split(wire.recv_msg(c.sock))

@@ -92,9 +92,10 @@ def build(src):
     subprocess.run(["cmake", "-S", str(src), "-B", str(out), "-DENABLE_EXAMPLES=ON",
                     "-DENABLE_LIBKRB5=OFF", "-DENABLE_GSSAPI=OFF",
                     "-DCMAKE_BUILD_TYPE=Debug"],
-                   check=True, stdout=subprocess.DEVNULL)
+                   check=True, stdout=subprocess.DEVNULL, timeout=300)
     subprocess.run(["cmake", "--build", str(out), "-j", str(os.cpu_count() or 2),
-                    "--target"] + EXAMPLES, check=True, stdout=subprocess.DEVNULL)
+                    "--target"] + EXAMPLES, check=True, stdout=subprocess.DEVNULL,
+                   timeout=900)
     return out / "examples"
 
 
