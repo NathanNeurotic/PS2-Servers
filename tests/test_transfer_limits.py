@@ -136,6 +136,23 @@ class _Blob:
         self.pos = pos
 
 
+class _WritableBlob(_Blob):
+    """Stands in for a file opened for writing. WRITE and BWRITE refuse a
+    handle that was not, before they take any data."""
+
+    def writable(self):
+        return True
+
+    def write(self, data):
+        end = self.pos + len(data)
+        self.data = self.data[:self.pos] + bytes(data) + self.data[end:]
+        self.pos = end
+        return len(data)
+
+    def flush(self):
+        pass
+
+
 def _handle(blob=None):
     fh = srv.FileHandle(blob or _Blob(), is_dir=False)
     return fh
@@ -228,7 +245,7 @@ class BlockReadIsCapped(unittest.TestCase):
 class WritesAreCapped(unittest.TestCase):
     def setUp(self):
         self.server = _Recorder()
-        self.server.handles[5] = _handle()
+        self.server.handles[5] = _handle(_WritableBlob())
 
     def test_an_oversized_write_is_refused_at_the_request(self):
         self.server._handle_write_req(ADDR, write_req_payload(5, 0xFFFFFFFF))
@@ -249,7 +266,7 @@ class WritesAreCapped(unittest.TestCase):
         one that does not: it counts what actually arrived.
         """
         small = _Recorder(max_transfer_bytes=srv.MIN_MAX_TRANSFER_BYTES)
-        small.handles[5] = _handle()
+        small.handles[5] = _handle(_WritableBlob())
         small._handle_write_req(ADDR, write_req_payload(5, 1024))
 
         chunk = b"A" * 1400

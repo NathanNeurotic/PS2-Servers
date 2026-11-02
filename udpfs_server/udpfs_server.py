@@ -557,6 +557,24 @@ class FileHandle:
         else:
             self.obj.close()
 
+    def writable(self) -> bool:
+        """Whether a WRITE or BWRITE can go through this handle.
+
+        Asked before a write is taken, because the write itself cannot answer
+        for these handles: a file opened 'rb' raises io.UnsupportedOperation,
+        whose errno is None, and a compressed image's reader has no write at
+        all, so the console was sent no WRITE_DONE and waited for one.
+        """
+        if self.is_dir:
+            return False
+        check = getattr(self.obj, 'writable', None)
+        if check is None:
+            return False
+        try:
+            return bool(check())
+        except (OSError, ValueError):  # ValueError: the file is closed
+            return False
+
 
 def console_answers_arp(ip: str) -> Optional[bool]:
     """Whether the console at `ip` still answers ARP; None when the OS cannot tell.
@@ -1897,6 +1915,14 @@ class UdpfsServer:
             self._send_write_done(addr, -errno.EBADF)
             return
 
+        # As Edge answers: a handle opened read-only does not become writable
+        # because the client asks, and a compressed image cannot take bytes at
+        # an offset into its decompressed view.
+        if not fh.writable():
+            self._print_event(f"[{addr[0]}:{addr[1]}] WRITE handle={handle} -> EACCES (not open for writing)")
+            self._send_write_done(addr, -errno.EACCES)
+            return
+
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] WRITE_REQ handle={handle} size={size}")
 
@@ -2351,6 +2377,11 @@ class UdpfsServer:
         fh = self.handles.get(handle)
         if fh is None or fh.is_dir:
             self._send_write_done(addr, -errno.EBADF)
+            return
+
+        if not fh.writable():
+            self._print_event(f"[{addr[0]}:{addr[1]}] BWRITE handle={handle} -> EACCES (not open for writing)")
+            self._send_write_done(addr, -errno.EACCES)
             return
 
         # Refused up front rather than once the chunks have arrived: the client
