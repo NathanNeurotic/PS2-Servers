@@ -290,6 +290,17 @@ class _PathOpsMixin:
         self.assertGone("fulllink")
         self.assertEqual(self.read(self.at("FULL", "keep.bin")), b"keep")
 
+    def test_deletes_do_not_go_through_a_linked_folder_further_down(self):
+        # The walk checks every folder on the way, not only the first.
+        os.makedirs(self.at("FULL", "SUB"))
+        os.makedirs(self.at("DEEP"))
+        self.link(os.path.join("..", "FULL"), os.path.join("DEEP", "link"), is_dir=True)
+        for opcode, path in ((REMOVE, "DEEP/link/keep.bin"), (RMDIR, "DEEP/link/SUB")):
+            with self.subTest(opcode=hex(opcode), path=path):
+                self.assertEqual(self.op(opcode, path), -errno.EACCES)
+        self.assertEqual(self.read(self.at("FULL", "keep.bin")), b"keep")
+        self.assertTrue(os.path.isdir(self.at("FULL", "SUB")))
+
     def test_a_dotdot_does_not_get_a_delete_past_the_linked_folder_check(self):
         # realpath() steps over a folder that does not exist, or a file, when
         # a '..' follows it, and goes on through the link. The walk stopped at

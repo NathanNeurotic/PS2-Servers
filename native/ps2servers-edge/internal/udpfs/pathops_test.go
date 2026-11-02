@@ -267,6 +267,12 @@ func TestMkdirThroughALinkedFolderStaysInsideTheRoot(t *testing.T) {
 func TestDeletesDoNotGoThroughALinkedFolder(t *testing.T) {
 	share := newPathOpsShare(t)
 	share.mkdir("FULL/SUB")
+	// A link further down, under a real folder: every folder on the way is
+	// checked, not only the first.
+	share.mkdir("DEEP")
+	if err := os.Symlink(filepath.Join("..", "FULL"), share.at("DEEP/link")); err != nil {
+		t.Fatal(err)
+	}
 	c := dial(t, startServerAt(t, share.root, false))
 
 	root, err := filesystem.Open(share.root)
@@ -295,6 +301,8 @@ func TestDeletesDoNotGoThroughALinkedFolder(t *testing.T) {
 		{protocol.RmdirRequest, "fulllink/SUB"},
 		{protocol.RemoveRequest, `fulllink\keep.bin`},
 		{protocol.RemoveRequest, "./fulllink/keep.bin"},
+		{protocol.RemoveRequest, "DEEP/link/keep.bin"},
+		{protocol.RmdirRequest, "DEEP/link/SUB"},
 	} {
 		if got := c.pathOp(req.op, req.path); got != errnoResult(eACCES) {
 			t.Errorf("%s %q returned %d, want -EACCES", pathOpName(req.op), req.path, got)
