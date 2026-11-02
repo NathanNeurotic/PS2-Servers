@@ -29,6 +29,7 @@ POSIX only.
 import argparse
 import os
 from pathlib import Path
+import secrets
 import shutil
 import subprocess
 import sys
@@ -53,7 +54,10 @@ from smb2_auth import Authenticator         # noqa: E402
 from smb2_paths import Share                # noqa: E402
 from smb2_server import Smb2Server          # noqa: E402
 
-USER, PASSWORD = "ps2", "secret"
+USER = "ps2"
+# A fresh throwaway password per run, for a loopback server that lives only as
+# long as this script: nothing reusable is written anywhere.
+PASSWORD = secrets.token_hex(16)
 GAME_SIZE = 3 * 1024 * 1024 + 77            # several reads, an odd tail
 
 
@@ -94,19 +98,17 @@ def build(src):
     return out / "examples"
 
 
-class Case:
-    def __init__(self, label):
-        self.label = label
-        self.failed = None
-
-
 def run_checks(name, examples, url_args, ceiling, work):
     share_dir = work / ("share-%s-%d" % (name, ceiling))
     (share_dir / "DVD").mkdir(parents=True)
     game = bytes((i * 7 + 3) & 0xFF for i in range(GAME_SIZE))
     (share_dir / "DVD" / "TEST.iso").write_bytes(game)
+    # libsmb2's examples read the login from NTLM_USER_FILE ("domain:user:pass").
+    # Owner-only, inside the private temporary directory, removed on exit.
     creds = work / "ntlm_user"
-    creds.write_text(":%s:%s\n" % (USER, PASSWORD))
+    fd = os.open(str(creds), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(":%s:%s\n" % (USER, PASSWORD))
 
     server = Smb2Server({"PS2SMB": Share("PS2SMB", str(share_dir))},
                         Authenticator({USER: PASSWORD}), ceiling=ceiling)
