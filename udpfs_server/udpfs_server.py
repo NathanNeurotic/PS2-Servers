@@ -2090,6 +2090,12 @@ class UdpfsServer:
         except OSError as e:
             self._print_event(f"[{addr[0]}:{addr[1]}] LSEEK error: {e}")
             self._send_lseek_reply(addr, -e.errno)
+        except ValueError as e:
+            # seek() takes whence 0, 1 and 2, and 3 and 4 only where the host
+            # has SEEK_DATA and SEEK_HOLE. Any other raised ValueError past the
+            # except above, and the client was sent no answer.
+            self._print_event(f"[{addr[0]}:{addr[1]}] LSEEK error: {e}")
+            self._send_lseek_reply(addr, -errno.EINVAL)
 
     def _handle_dread(self, addr: Tuple[str, int], payload: bytes):
         """Handle DREAD_REQ"""

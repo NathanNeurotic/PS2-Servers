@@ -15,9 +15,10 @@ answered at the request. The console sends every chunk of a write before it
 waits for WRITE_DONE, so the rest of a refused write still arrives, and it must
 be dropped rather than joined to the write before it.
 
-The last class covers a read that went unanswered the same way: a BREAD past
-the largest file offset, where seek() and pread() raise ValueError and
-OverflowError rather than OSError.
+The last two classes cover requests that went unanswered the same way: a BREAD
+past the largest file offset, where seek() and pread() raise ValueError and
+OverflowError rather than OSError, and an LSEEK with a whence seek() does not
+take.
 
 These drive the real AutoUdpfsServer receive loop over loopback.
 
@@ -110,6 +111,12 @@ class _Console(UdpfsTestClient):
         msg = struct.pack("<BBHiII", srv.MsgType.BREAD_REQ, 0, sector_count,
                           handle, sector & 0xFFFFFFFF, sector >> 32)
         return self._answer(msg, srv.MsgType.RESULT_REPLY)
+
+    def lseek_result(self, handle, offset, whence):
+        """An LSEEK's result, or None if the server sent no reply."""
+        msg = struct.pack("<BBHiq", srv.MsgType.LSEEK_REQ, whence, 0, handle,
+                          offset)
+        return self._answer(msg, srv.MsgType.LSEEK_REPLY)
 
     def send_in_chunks(self, request, data, chunk):
         """Send request with data split into chunks, without waiting for an
@@ -440,6 +447,30 @@ class ReadsPythonCannotTakeAreAnsweredTests(_Loopback):
         self.assertEqual(console.bread_result(0, 1 << 54), -errno.EINVAL,
                          f"server events: {self.events}")
         self.assertEqual(console.bread(3, 1), b"D" * SECTOR)
+
+
+class ASeekPythonCannotTakeIsAnsweredTests(_Loopback):
+    """An LSEEK with a whence seek() does not take is answered with EINVAL.
+
+    seek() takes whence 0, 1 and 2, and 3 and 4 only where the host has
+    SEEK_DATA and SEEK_HOLE. For any other it raises ValueError, which the
+    handler's except did not catch, so the client was sent no answer. A
+    console cannot send one: ps2sdk's iomanX_lseek() refuses any whence but
+    the three before the request leaves the IOP.
+    """
+
+    def test_a_whence_seek_does_not_take(self):
+        self._put("game.bin", b"G" * SECTOR)
+        console = self._console()
+        handle = console.open_with("game.bin", O_RDONLY)
+        self.assertGreater(handle, 0)
+        for whence in (5, 255):
+            self.assertEqual(console.lseek_result(handle, 0, whence), -errno.EINVAL,
+                             f"whence {whence}; server events: {self.events}")
+        # The three a console sends still work.
+        self.assertEqual(console.lseek_result(handle, 0, 2), SECTOR)
+        self.assertEqual(console.lseek_result(handle, -1, 1), SECTOR - 1)
+        self.assertEqual(console.lseek_result(handle, 2, 0), 2)
 
 
 if __name__ == "__main__":
