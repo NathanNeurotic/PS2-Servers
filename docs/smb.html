@@ -148,6 +148,16 @@ Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (a
 </ul>
 <p>A CI check builds the pinned usmb2 and merged Neutrino SMB sources on the host and reads a game through them. That is a host check of the protocol, not a test on a PS2.</p>
 
+<h3 id="riptopl-launchstation-smb2">RiptOPL and Launchstation (SMB2)</h3>
+<p><a href="https://github.com/NathanNeurotic/RiptOPL">RiptOPL</a>'s SMB2 mode and <a href="https://github.com/NathanNeurotic/Launchstation">Launchstation</a>'s <code>smb:</code> device browse with <code>smb2man.irx</code>, built on <a href="https://github.com/sahlberg/libsmb2">libsmb2</a> by Ronnie Sahlberg &mdash; <a href="https://github.com/sahlberg">@sahlberg</a>. RiptOPL loads games with its own in-game SMB2 reader.</p>
+<ul>
+  <li><b>Card:</b> SMBv2 or SMBv3. RiptOPL offers SMB 2.0.2 and 2.1 only, so either card negotiates 2.1; Launchstation negotiates 3.0.2 with the SMBv3 card.</li>
+  <li><b>Port:</b> RiptOPL: Network settings, <b>SMB Server</b> section, <b>SMB Version</b> SMB2, <b>Port</b> = the card's port (1445 by default). Launchstation: put the port in the <code>URL</code> of <code>SMB2.CNF</code>, for example <code>smb://192.168.0.10:1445/games</code>; without one it uses 445.</li>
+  <li><b>Share:</b> the card's share (<code>games</code>). In RiptOPL you can leave it blank and pick it from the server's share list.</li>
+  <li><b>Login:</b> the card's username and password. With a <b>No password</b> card any user works (a blank one logs on as <code>Guest</code>). Launchstation keeps <code>USERNAME</code> and <code>PASSWORD</code> to 31 characters.</li>
+</ul>
+<p>A CI check builds the two libsmb2 versions those drivers use and lists, stats, reads, writes, truncates and enumerates shares through both cards; RiptOPL's own host harness checks its in-game reader. Both are host checks of the protocol, not tests on a PS2. The server does not sign: the PS2 clients only sign when a server requires it, but a desktop client that requires signing (Samba's <code>smbclient</code>, Windows 11 24H2 by default) refuses it.</p>
+
 <h2 id="vmc-writes">3. Writes &amp; Virtual Memory Cards (VMC)</h2>
 <p>Both SMBv1 and SMB2/3 in PS2 Servers allow write access by default:</p>
 

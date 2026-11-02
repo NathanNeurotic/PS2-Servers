@@ -108,6 +108,12 @@ jobs:
         # smb2_server on loopback. Host protocol check, not PS2 hardware.
         run: python conformance/integration/neutrino_smb/run.py --require-upstream
 
+      - name: Run pinned libsmb2 clients (RiptOPL and Launchstation smb2man) conformance
+        # Builds the libsmb2 versions both PS2 browse drivers use and lists,
+        # stats, reads, writes and enumerates shares through smb2_server in
+        # SMBv2 and SMBv3 modes. Host protocol check, not PS2 hardware.
+        run: python conformance/integration/libsmb2/run.py --require-upstream
+
       - name: Run UDPBD protocol selftest
         run: python udpbd_server/selftest.py
 
