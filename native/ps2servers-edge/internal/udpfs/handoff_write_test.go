@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
@@ -87,7 +86,7 @@ func TestReplacementLoaderCanRewriteAFileTheOldOneHadOpen(t *testing.T) {
 			}
 			// The old handle went with the takeover, so nothing written
 			// through it late can land on top of the new save.
-			if got := result(c.send(writeReqMsg(old, 4, writeDataMsg(0, 1, []byte("LATE"))))); got != -int32(syscall.EBADF) {
+			if got := result(c.send(writeReqMsg(old, 4, writeDataMsg(0, 1, []byte("LATE"))))); got != -eBADF {
 				t.Fatalf("WRITE on the old loader's handle returned %d, want -EBADF", got)
 			}
 		})
@@ -121,7 +120,7 @@ func TestTakingOverASaveKeepsTheOldLoadersOtherHandles(t *testing.T) {
 
 	replaceLoader(t, c, disc, 0)
 
-	busy := -int32(syscall.EBUSY)
+	busy := -eBUSY
 	if got := result(other.send(openMsg("save.bin", fioRead|fioWrite, false))); got != busy {
 		t.Fatalf("another console's write OPEN of the old loader's save returned %d, want -EBUSY", got)
 	}
@@ -134,7 +133,7 @@ func TestTakingOverASaveKeepsTheOldLoadersOtherHandles(t *testing.T) {
 	if got := result(c.send(openMsg("save.bin", fioRead|fioWrite, false))); got != busy {
 		t.Fatalf("a second write OPEN by the new loader returned %d, want -EBUSY", got)
 	}
-	if got := result(c.send(writeReqMsg(save, 4, writeDataMsg(0, 1, []byte("LATE"))))); got != -int32(syscall.EBADF) {
+	if got := result(c.send(writeReqMsg(save, 4, writeDataMsg(0, 1, []byte("LATE"))))); got != -eBADF {
 		t.Fatalf("WRITE on the taken-over handle returned %d, want -EBADF", got)
 	}
 

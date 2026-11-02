@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"unicode"
 	"unicode/utf8"
 )
@@ -201,24 +200,24 @@ func (s *Server) resolveImagePath(client string) (string, error) {
 }
 func (s *Server) handleOpen(st *session.State, p []byte) {
 	if len(p) < 8 {
-		s.sendOpen(st, -int32(syscall.EINVAL), 0, 0)
+		s.sendOpen(st, -eINVAL, 0, 0)
 		return
 	}
 	isDir := p[1] != 0
 	flags := binary.LittleEndian.Uint16(p[2:4])
 	path, err := cString(p[8:])
 	if err != nil {
-		s.sendOpen(st, -int32(syscall.ENAMETOOLONG), 0, 0)
+		s.sendOpen(st, -eNAMETOOLONG, 0, 0)
 		return
 	}
 	// PS2 FIO access bits: 0x01 read, 0x02 write, 0x03 read+write.
 	wantWrite := flags&0x02 != 0
 	if wantWrite && s.cfg.ReadOnly {
-		s.sendOpen(st, -int32(syscall.EACCES), 0, 0)
+		s.sendOpen(st, -eACCES, 0, 0)
 		return
 	}
 	if len(st.Handles) >= maxHandles {
-		s.sendOpen(st, -int32(syscall.EMFILE), 0, 0)
+		s.sendOpen(st, -eMFILE, 0, 0)
 		return
 	}
 	id := st.NextHandle
@@ -265,7 +264,7 @@ func (s *Server) openForWrite(st *session.State, id int32, path string, flags ui
 
 	if isCompressedName(path) {
 		s.cfg.Log.Warn("refusing write to compressed image", map[string]any{"peer": st.Peer, "path": path})
-		s.sendOpen(st, -int32(syscall.EACCES), 0, 0)
+		s.sendOpen(st, -eACCES, 0, 0)
 		return
 	}
 	real, err := s.root.Resolve(path, create)
@@ -281,7 +280,7 @@ func (s *Server) openForWrite(st *session.State, id int32, path string, flags ui
 			return
 		}
 		if !create {
-			s.sendOpen(st, -int32(syscall.ENOENT), 0, 0)
+			s.sendOpen(st, -eNOENT, 0, 0)
 			return
 		}
 	}
@@ -301,7 +300,7 @@ func (s *Server) openForWrite(st *session.State, id int32, path string, flags ui
 		// from that loader would otherwise be refused for the whole session.
 		if !st.TakeOverWriter(real) || !s.reserveWriter(real) {
 			s.cfg.Log.Warn("file already open for writing by another peer", map[string]any{"peer": st.Peer, "path": path})
-			s.sendOpen(st, -int32(syscall.EBUSY), 0, 0)
+			s.sendOpen(st, -eBUSY, 0, 0)
 			return
 		}
 		s.cfg.Log.Info("write OPEN took the file over from a replaced loader's handle", s.pathLogFields(st, path))
@@ -343,21 +342,21 @@ func (s *Server) sendOpen(st *session.State, result int32, mode uint32, size uin
 }
 func (s *Server) handleClose(st *session.State, p []byte) {
 	if len(p) < 8 {
-		s.sendSimple(st, result8(protocol.CloseReply, -int32(syscall.EINVAL)))
+		s.sendSimple(st, result8(protocol.CloseReply, -eINVAL))
 		return
 	}
 	id := int32(binary.LittleEndian.Uint32(p[4:8]))
 	// CloseHandle also drops any single-writer reservation and discards a
 	// partially assembled write aimed at this handle.
 	if !st.CloseHandle(id) {
-		s.sendSimple(st, result8(protocol.CloseReply, -int32(syscall.EBADF)))
+		s.sendSimple(st, result8(protocol.CloseReply, -eBADF))
 		return
 	}
 	s.sendSimple(st, result8(protocol.CloseReply, 0))
 }
 func (s *Server) handleRead(st *session.State, p []byte) {
 	if len(p) < 12 {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 	id := int32(binary.LittleEndian.Uint32(p[4:8]))
@@ -375,12 +374,12 @@ func (s *Server) handleRead(st *session.State, p []byte) {
 	if int64(size) > s.transferCap {
 		s.cfg.Log.Warn("READ refused, size over cap", map[string]any{
 			"peer": st.Peer, "size": size, "cap": s.transferCap})
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 	h := st.Handles[id]
 	if h == nil || h.Reader == nil {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EBADF)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eBADF), nil)
 		return
 	}
 	buf := make([]byte, size)
@@ -413,14 +412,14 @@ const preferredTransfer = 8 << 20
 // with the first WRITE_DATA chunk appended inline to the same datagram.
 func (s *Server) handleWriteRequest(st *session.State, p []byte) {
 	if len(p) < 12 {
-		s.sendWriteDone(st, -int32(syscall.EINVAL))
+		s.sendWriteDone(st, -eINVAL)
 		return
 	}
 	id := int32(binary.LittleEndian.Uint32(p[4:8]))
 	size := binary.LittleEndian.Uint32(p[8:12])
 	if s.cfg.ReadOnly {
 		s.cfg.Log.Debug("WRITE refused, server is read-only", map[string]any{"peer": st.Peer, "handle": id})
-		s.sendWriteDone(st, -int32(syscall.EACCES))
+		s.sendWriteDone(st, -eACCES)
 		return
 	}
 	// int64(size), not a narrowing of the cap: size is the 32-bit field off the
@@ -428,18 +427,18 @@ func (s *Server) handleWriteRequest(st *session.State, p []byte) {
 	// int would be the one platform where the check could wrap.
 	if int64(size) > s.transferCap {
 		s.cfg.Log.Warn("WRITE refused, size over cap", map[string]any{"peer": st.Peer, "size": size, "cap": s.transferCap})
-		s.sendWriteDone(st, -int32(syscall.EFBIG))
+		s.sendWriteDone(st, -eFBIG)
 		return
 	}
 	h := st.Handles[id]
 	if h == nil || h.Directory != nil {
-		s.sendWriteDone(st, -int32(syscall.EBADF))
+		s.sendWriteDone(st, -eBADF)
 		return
 	}
 	// A handle opened read-only must not become writable just because the
 	// client asked; the access check belongs at OPEN and is enforced again here.
 	if h.Writer == nil {
-		s.sendWriteDone(st, -int32(syscall.EACCES))
+		s.sendWriteDone(st, -eACCES)
 		return
 	}
 	st.WriteActive = true
@@ -481,12 +480,12 @@ func (s *Server) handleWriteData(st *session.State, msg []byte) {
 		s.cfg.Log.Warn("WRITE chunk out of order", map[string]any{
 			"peer": st.Peer, "expected": st.WriteReceivedChunk, "got": chunkNr})
 		st.ResetWrite()
-		s.sendWriteDone(st, -int32(syscall.EIO))
+		s.sendWriteDone(st, -eIO)
 		return
 	}
 	if int64(len(st.WriteBuffer))+int64(chunkSize) > s.transferCap {
 		st.ResetWrite()
-		s.sendWriteDone(st, -int32(syscall.EFBIG))
+		s.sendWriteDone(st, -eFBIG)
 		return
 	}
 	// A BWRITE declared its length up front, so stop the moment the chunks
@@ -498,7 +497,7 @@ func (s *Server) handleWriteData(st *session.State, msg []byte) {
 		s.cfg.Log.Warn("BWRITE overran its declared length", map[string]any{
 			"peer": st.Peer, "declared": st.WriteExpectedLen})
 		st.ResetWrite()
-		s.sendWriteDone(st, -int32(syscall.EINVAL))
+		s.sendWriteDone(st, -eINVAL)
 		return
 	}
 	st.WriteBuffer = append(st.WriteBuffer, body[:chunkSize]...)
@@ -525,7 +524,7 @@ func (s *Server) completeWrite(st *session.State) {
 	}
 	h := st.Handles[id]
 	if h == nil || h.Writer == nil {
-		s.sendWriteDone(st, -int32(syscall.EBADF))
+		s.sendWriteDone(st, -eBADF)
 		return
 	}
 	n, err := h.Writer.Write(buf)
@@ -557,7 +556,7 @@ func (s *Server) sendWriteDone(st *session.State, result int32) {
 
 func (s *Server) handleSeek(st *session.State, p []byte) {
 	if len(p) < 16 {
-		s.sendSeek(st, -int64(syscall.EINVAL))
+		s.sendSeek(st, -int64(eINVAL))
 		return
 	}
 	whence := int(p[1])
@@ -567,7 +566,7 @@ func (s *Server) handleSeek(st *session.State, p []byte) {
 	off := int64(lo | hi<<32)
 	h := st.Handles[id]
 	if h == nil || h.Reader == nil {
-		s.sendSeek(st, -int64(syscall.EBADF))
+		s.sendSeek(st, -int64(eBADF))
 		return
 	}
 	pos, err := h.Reader.Seek(off, whence)
@@ -585,13 +584,13 @@ func (s *Server) sendSeek(st *session.State, pos int64) {
 }
 func (s *Server) handleDRead(st *session.State, p []byte) {
 	if len(p) < 8 {
-		s.sendDRead(st, -int32(syscall.EINVAL), session.DirEntry{})
+		s.sendDRead(st, -eINVAL, session.DirEntry{})
 		return
 	}
 	id := int32(binary.LittleEndian.Uint32(p[4:8]))
 	h := st.Handles[id]
 	if h == nil || h.Directory == nil {
-		s.sendDRead(st, -int32(syscall.EBADF), session.DirEntry{})
+		s.sendDRead(st, -eBADF, session.DirEntry{})
 		return
 	}
 	if h.Index >= len(h.Directory) {
@@ -644,12 +643,12 @@ func (s *Server) sendDRead(st *session.State, result int32, e session.DirEntry) 
 }
 func (s *Server) handleGetStat(st *session.State, p []byte) {
 	if len(p) < 4 {
-		s.sendGetStat(st, -int32(syscall.EINVAL), 0, 0)
+		s.sendGetStat(st, -eINVAL, 0, 0)
 		return
 	}
 	path, err := cString(p[4:])
 	if err != nil {
-		s.sendGetStat(st, -int32(syscall.ENAMETOOLONG), 0, 0)
+		s.sendGetStat(st, -eNAMETOOLONG, 0, 0)
 		return
 	}
 	real, err := s.resolveImagePath(path)

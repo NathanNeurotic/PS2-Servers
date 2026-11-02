@@ -62,16 +62,16 @@ func pathOpName(t protocol.MessageType) string {
 // any other with EACCES, before its path is looked at.
 func (s *Server) pathRequest(st *session.State, p []byte) (mode uint16, path string, ok bool) {
 	if len(p) < 4 {
-		s.sendPathResult(st, -int32(syscall.EINVAL))
+		s.sendPathResult(st, -eINVAL)
 		return 0, "", false
 	}
 	if s.cfg.ReadOnly {
-		s.sendPathResult(st, -int32(syscall.EACCES))
+		s.sendPathResult(st, -eACCES)
 		return 0, "", false
 	}
 	path, err := cString(p[4:])
 	if err != nil {
-		s.sendPathResult(st, -int32(syscall.ENAMETOOLONG))
+		s.sendPathResult(st, -eNAMETOOLONG)
 		return 0, "", false
 	}
 	return binary.LittleEndian.Uint16(p[2:4]), path, true
@@ -122,18 +122,18 @@ func (s *Server) handleRemove(st *session.State, p []byte) {
 	if info.IsDir() {
 		// unlink(2) of a directory is EISDIR on Linux, EPERM on macOS and
 		// EACCES on Windows; answer as the Desktop server does on all of them.
-		s.sendPathResult(st, -int32(syscall.EISDIR))
+		s.sendPathResult(st, -eISDIR)
 		return
 	}
 	if removeRefusesReadOnly.Load() && info.Mode().Perm()&0o200 == 0 {
 		// Go reports the read-only attribute as a mode without write bits.
-		s.sendPathResult(st, -int32(syscall.EACCES))
+		s.sendPathResult(st, -eACCES)
 		return
 	}
 	busy, err := s.removeUnlessWriting(entry)
 	if busy {
 		s.cfg.Log.Warn("REMOVE refused, file is open for writing", s.pathLogFields(st, path))
-		s.sendPathResult(st, -int32(syscall.EBUSY))
+		s.sendPathResult(st, -eBUSY)
 		return
 	}
 	if err != nil {
@@ -159,7 +159,7 @@ func (s *Server) handleRmdir(st *session.State, p []byte) {
 	}
 	if isRoot {
 		// rmdir would succeed on an empty share and delete the served folder.
-		s.sendPathResult(st, -int32(syscall.EACCES))
+		s.sendPathResult(st, -eACCES)
 		return
 	}
 	info, err := os.Lstat(entry)
@@ -169,7 +169,7 @@ func (s *Server) handleRmdir(st *session.State, p []byte) {
 	}
 	if !info.IsDir() {
 		// A symlink is not a directory, even one that points at a folder.
-		s.sendPathResult(st, -int32(syscall.ENOTDIR))
+		s.sendPathResult(st, -eNOTDIR)
 		return
 	}
 	if err := removeEntry(entry, true); err != nil {
@@ -201,20 +201,14 @@ func (s *Server) pathLogFields(st *session.State, path string) map[string]any {
 // pathErrno answers a failed MKDIR, REMOVE or RMDIR with the host's errno, as
 // the Desktop server replies -e.errno, rather than folding everything that is
 // neither missing nor denied into EIO: EEXIST, ENOTEMPTY and ENOTDIR are
-// answers a console file manager acts on. Windows reports its own error codes,
-// not errno values, so there only the portable classes are mapped.
+// answers a console file manager acts on. On Windows that is the number
+// Python gives the Windows error code (hostErrno).
 func pathErrno(err error) int32 {
 	if errors.Is(err, filesystem.ErrEscape) || errors.Is(err, filesystem.ErrThroughLink) {
-		return -int32(syscall.EACCES)
+		return -eACCES
 	}
-	var en syscall.Errno
-	if runtime.GOOS != "windows" && errors.As(err, &en) && en != 0 {
-		return -int32(en)
-	}
-	if errors.Is(err, os.ErrExist) {
-		// Go files Windows' "directory not empty" under ErrExist as well, and
-		// EEXIST is one of the two answers POSIX allows rmdir for it.
-		return -int32(syscall.EEXIST)
+	if n, ok := hostErrno(err); ok {
+		return -n
 	}
 	return errno(err)
 }

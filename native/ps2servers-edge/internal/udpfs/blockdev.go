@@ -132,11 +132,11 @@ func blockRequest(p []byte) (handle int32, sector int64, count int64, ok bool) {
 func (s *Server) handleBRead(st *session.State, p []byte) {
 	handle, sector, count, ok := blockRequest(p)
 	if !ok {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 	if count <= 0 {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 
@@ -149,13 +149,13 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 		if h == nil || h.Reader == nil {
 			s.cfg.Log.Debug("BREAD invalid file handle", map[string]any{
 				"peer": st.Peer, "handle": handle, "sector": sector, "count": count})
-			s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EBADF)), nil)
+			s.sendTransfer(st, result8(protocol.ResultReply, -eBADF), nil)
 			return
 		}
 		const sectorSize int64 = DefaultSectorSize
 		total := count * sectorSize
 		if total > s.transferCap || sector < 0 || sector > math.MaxInt64/sectorSize {
-			s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+			s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 			return
 		}
 		if _, err := h.Reader.Seek(sector*sectorSize, io.SeekStart); err != nil {
@@ -182,12 +182,12 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 
 	dev := s.blockDev
 	if dev == nil {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EBADF)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eBADF), nil)
 		return
 	}
 	total := count * dev.sectorSize
 	if total > s.transferCap {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 	if !dev.inRange(sector, count) {
@@ -195,7 +195,7 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 		// emit an arbitrary amount of zeroes on request.
 		s.cfg.Log.Warn("BREAD out of range", map[string]any{
 			"peer": st.Peer, "sector": sector, "count": count, "sectors": dev.sectorCount()})
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 	data, err := dev.readAt(sector*dev.sectorSize, int(total))
@@ -219,33 +219,33 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
 	handle, sector, count, ok := blockRequest(p)
 	if !ok {
-		s.sendWriteDone(st, -int32(syscall.EINVAL))
+		s.sendWriteDone(st, -eINVAL)
 		return
 	}
 	if s.cfg.ReadOnly {
-		s.sendWriteDone(st, -int32(syscall.EACCES))
+		s.sendWriteDone(st, -eACCES)
 		return
 	}
 	dev := s.blockDev
 	if dev == nil || handle != blockHandle {
-		s.sendWriteDone(st, -int32(syscall.EBADF))
+		s.sendWriteDone(st, -eBADF)
 		return
 	}
 	if dev.readOnly {
 		// Report failure rather than accept and discard, so the console does
 		// not believe a save committed.
-		s.sendWriteDone(st, -int32(syscall.EACCES))
+		s.sendWriteDone(st, -eACCES)
 		return
 	}
 	total := count * dev.sectorSize
 	if count <= 0 || total > s.transferCap {
-		s.sendWriteDone(st, -int32(syscall.EFBIG))
+		s.sendWriteDone(st, -eFBIG)
 		return
 	}
 	if !dev.inRange(sector, count) {
 		s.cfg.Log.Warn("BWRITE out of range", map[string]any{
 			"peer": st.Peer, "sector": sector, "count": count})
-		s.sendWriteDone(st, -int32(syscall.EINVAL))
+		s.sendWriteDone(st, -eINVAL)
 		return
 	}
 	st.WriteActive = true
@@ -280,13 +280,13 @@ func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
 func (s *Server) completeBlockWrite(st *session.State, buf []byte, offset, expected int64) {
 	dev := s.blockDev
 	if dev == nil {
-		s.sendWriteDone(st, -int32(syscall.EBADF))
+		s.sendWriteDone(st, -eBADF)
 		return
 	}
 	if int64(len(buf)) != expected {
 		s.cfg.Log.Warn("BWRITE length mismatch", map[string]any{
 			"peer": st.Peer, "declared": expected, "delivered": len(buf)})
-		s.sendWriteDone(st, -int32(syscall.EINVAL))
+		s.sendWriteDone(st, -eINVAL)
 		return
 	}
 	if err := dev.writeAt(offset, buf); err != nil {

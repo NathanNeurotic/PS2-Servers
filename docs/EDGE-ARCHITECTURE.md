@@ -84,6 +84,13 @@ a link to a folder as a folder, so `REMOVE` and `RMDIR` also refuse a path that
 passes through one (`filesystem.Root.RealFolders`): a console deleting a folder
 recursively would otherwise empty the folder the link points at.
 
+A refused or failed request is answered with a negated errno number, and it is
+the number the Desktop server sends from the same host: the host's own on Linux
+and macOS, and on Windows the C runtime's, which Python derives from the Windows
+error code (`crtErrno` in `internal/udpfs/errno.go` follows CPython's table).
+Replies never use Go's `syscall` constants for this: on Windows most of those
+are values Go invented from 2^29 up rather than errno numbers.
+
 Plain files and ISO images are read directly. CSO uses zlib and ZSO uses a
 bounded raw-LZ4 decoder. Compressed images are exposed with virtual `.iso`
 names and their uncompressed size, and decompressed blocks are cached per open

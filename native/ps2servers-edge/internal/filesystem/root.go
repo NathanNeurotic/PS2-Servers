@@ -171,7 +171,8 @@ func (r *Root) RealFolders(client string) error {
 			// 1.23 and as irregular since.
 			return ErrThroughLink
 		default:
-			// A file used as a folder: the operation answers ENOTDIR.
+			// A file used as a folder: the operation answers as the host
+			// does, ENOTDIR (ENOENT on Windows).
 			return nil
 		}
 	}

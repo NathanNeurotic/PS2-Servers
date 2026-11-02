@@ -168,7 +168,7 @@ func TestWriteRefusedWhenServerIsReadOnly(t *testing.T) {
 	c := dial(t, startServerAt(t, root, true))
 
 	reply := c.send(openMsg("save.bin", fioWrite, false))
-	if got := result(reply); got != -int32(syscall.EACCES) {
+	if got := result(reply); got != -eACCES {
 		t.Fatalf("read-only server allowed write open: got %d, want -EACCES", got)
 	}
 	// The file on disk must be untouched.
@@ -234,7 +234,7 @@ func TestWriteRejectsOutOfOrderChunk(t *testing.T) {
 	// would silently corrupt the file, so the sequence must be abandoned.
 	c.sendNoReply(writeReqMsg(h, 9, writeDataMsg(0, 3, []byte("aaa"))))
 	reply := c.send(writeDataMsg(2, 3, []byte("ccc")))
-	if got := result(reply); got != -int32(syscall.EIO) {
+	if got := result(reply); got != -eIO {
 		t.Fatalf("out-of-order chunk returned %d, want -EIO", got)
 	}
 	c.send(closeMsg(h))
@@ -260,7 +260,7 @@ func TestWriteToCompressedImageIsRefused(t *testing.T) {
 	// at a decompressed offset would land bytes at the wrong place in the
 	// container. Refuse rather than destroy the image.
 	reply := c.send(openMsg("game.cso", fioRead|fioWrite, false))
-	if got := result(reply); got != -int32(syscall.EACCES) {
+	if got := result(reply); got != -eACCES {
 		t.Fatalf("write open on a .cso returned %d, want -EACCES", got)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "game.cso"))
@@ -272,7 +272,7 @@ func TestWriteToCompressedImageIsRefused(t *testing.T) {
 func TestWriteOpenWithoutCreateOnMissingFileIsENOENT(t *testing.T) {
 	c := dial(t, startServerAt(t, t.TempDir(), false))
 	reply := c.send(openMsg("absent.sav", fioRead|fioWrite, false))
-	if got := result(reply); got != -int32(syscall.ENOENT) {
+	if got := result(reply); got != -eNOENT {
 		t.Fatalf("missing file without O_CREAT returned %d, want -ENOENT", got)
 	}
 }
@@ -285,7 +285,7 @@ func TestSecondPeerCannotOpenTheSameFileForWriting(t *testing.T) {
 
 	h := openForWriteOK(t, first, "shared.sav", fioRead|fioWrite|fioCreate)
 	reply := second.send(openMsg("shared.sav", fioRead|fioWrite|fioCreate, false))
-	if got := result(reply); got != -int32(syscall.EBUSY) {
+	if got := result(reply); got != -eBUSY {
 		t.Fatalf("second writer got %d, want -EBUSY", got)
 	}
 	// Reading the same file concurrently stays allowed.
@@ -321,7 +321,7 @@ func TestWriteRequestOverCapIsRefused(t *testing.T) {
 	// the host's RAM and is never larger than preferredTransfer, so one byte
 	// past it is over the limit on every machine this test can run on.
 	reply := c.send(writeReqMsg(h, preferredTransfer+1, nil))
-	if got := result(reply); got != -int32(syscall.EFBIG) {
+	if got := result(reply); got != -eFBIG {
 		t.Fatalf("oversized WRITE_REQ returned %d, want -EFBIG", got)
 	}
 }
@@ -337,7 +337,7 @@ func TestWriteToReadOnlyHandleIsRefused(t *testing.T) {
 	// made at OPEN and must not be bypassable by sending WRITE_REQ anyway.
 	h := openForWriteOK(t, c, "ro.sav", fioRead)
 	reply := c.send(writeReqMsg(h, 4, writeDataMsg(0, 1, []byte("bad!"))))
-	if got := result(reply); got != -int32(syscall.EACCES) {
+	if got := result(reply); got != -eACCES {
 		t.Fatalf("write on a read-only handle returned %d, want -EACCES", got)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "ro.sav"))
@@ -398,7 +398,7 @@ func TestWriteOpenCannotLeaveTheRootThroughASymlink(t *testing.T) {
 		fioRead | fioWrite | fioCreate,
 		fioRead | fioWrite,
 	} {
-		if got := result(c.send(openMsg("outlink", flags, false))); got != -int32(syscall.EACCES) {
+		if got := result(c.send(openMsg("outlink", flags, false))); got != -eACCES {
 			t.Errorf("OPEN outlink flags %#x returned %d, want -EACCES", flags, got)
 		}
 	}

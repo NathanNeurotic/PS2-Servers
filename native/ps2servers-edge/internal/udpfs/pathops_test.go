@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
-	"syscall"
+	"runtime"
 	"testing"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/filesystem"
@@ -34,7 +34,7 @@ func (c *client) pathOp(op protocol.MessageType, path string) int32 {
 	return result(reply)
 }
 
-func errnoResult(e syscall.Errno) int32 { return -int32(e) }
+func errnoResult(e int32) int32 { return -e }
 
 // pathOpsShare builds the share the Desktop server's tests use:
 //
@@ -159,7 +159,7 @@ func TestRemoveRefusesDirectoriesAndReportsMissingFiles(t *testing.T) {
 	c := dial(t, startServerAt(t, share.root, false))
 
 	for _, name := range []string{"FULL", "EMPTY", "", "/"} {
-		if got := c.pathOp(protocol.RemoveRequest, name); got != errnoResult(syscall.EISDIR) {
+		if got := c.pathOp(protocol.RemoveRequest, name); got != errnoResult(eISDIR) {
 			t.Fatalf("REMOVE %q returned %d, want -EISDIR", name, got)
 		}
 	}
@@ -168,7 +168,7 @@ func TestRemoveRefusesDirectoriesAndReportsMissingFiles(t *testing.T) {
 		t.Fatalf("REMOVE of a file returned %d, want 0", got)
 	}
 	share.assertGone("GAMES/real.elf")
-	if got := c.pathOp(protocol.RemoveRequest, "GAMES/real.elf"); got != errnoResult(syscall.ENOENT) {
+	if got := c.pathOp(protocol.RemoveRequest, "GAMES/real.elf"); got != errnoResult(eNOENT) {
 		t.Fatalf("REMOVE of a missing file returned %d, want -ENOENT", got)
 	}
 }
@@ -178,7 +178,7 @@ func TestRmdirRefusesSymlinksAndFiles(t *testing.T) {
 	c := dial(t, startServerAt(t, share.root, false))
 
 	for _, name := range []string{"dirlink", "fulllink", "outdirlink", "link.elf", "dangling", "GAMES/real.elf"} {
-		if got := c.pathOp(protocol.RmdirRequest, name); got != errnoResult(syscall.ENOTDIR) {
+		if got := c.pathOp(protocol.RmdirRequest, name); got != errnoResult(eNOTDIR) {
 			t.Fatalf("RMDIR %s returned %d, want -ENOTDIR", name, got)
 		}
 	}
@@ -192,7 +192,7 @@ func TestRmdirRemovesOnlyEmptyDirectories(t *testing.T) {
 	share := newPathOpsShare(t)
 	c := dial(t, startServerAt(t, share.root, false))
 
-	if got := c.pathOp(protocol.RmdirRequest, "FULL"); got != errnoResult(syscall.ENOTEMPTY) {
+	if got := c.pathOp(protocol.RmdirRequest, "FULL"); got != errnoResult(eNOTEMPTY) {
 		t.Fatalf("RMDIR of a full folder returned %d, want -ENOTEMPTY", got)
 	}
 	share.assertIntact()
@@ -200,7 +200,7 @@ func TestRmdirRemovesOnlyEmptyDirectories(t *testing.T) {
 		t.Fatalf("RMDIR of an empty folder returned %d, want 0", got)
 	}
 	share.assertGone("EMPTY")
-	if got := c.pathOp(protocol.RmdirRequest, "EMPTY"); got != errnoResult(syscall.ENOENT) {
+	if got := c.pathOp(protocol.RmdirRequest, "EMPTY"); got != errnoResult(eNOENT) {
 		t.Fatalf("RMDIR of a missing folder returned %d, want -ENOENT", got)
 	}
 }
@@ -210,7 +210,7 @@ func TestRmdirOfTheShareRootIsRefused(t *testing.T) {
 	root := t.TempDir()
 	c := dial(t, startServerAt(t, root, false))
 	for _, name := range []string{"", "/", ".", "./"} {
-		if got := c.pathOp(protocol.RmdirRequest, name); got != errnoResult(syscall.EACCES) {
+		if got := c.pathOp(protocol.RmdirRequest, name); got != errnoResult(eACCES) {
 			t.Fatalf("RMDIR %q returned %d, want -EACCES", name, got)
 		}
 		if info, err := os.Stat(root); err != nil || !info.IsDir() {
@@ -232,7 +232,7 @@ func TestMkdirCreatesAndReportsWhatExists(t *testing.T) {
 	// dangling and dangling_out: the link itself is the entry, so the folder
 	// is not made wherever it points, inside the root or out of it.
 	for _, name := range []string{"NEW", "GAMES", "dirlink", "link.elf", "dangling", "dangling_out", ""} {
-		if got := c.pathOp(protocol.MkdirRequest, name); got != errnoResult(syscall.EEXIST) {
+		if got := c.pathOp(protocol.MkdirRequest, name); got != errnoResult(eEXIST) {
 			t.Fatalf("MKDIR %q returned %d, want -EEXIST", name, got)
 		}
 	}
@@ -241,7 +241,7 @@ func TestMkdirCreatesAndReportsWhatExists(t *testing.T) {
 	}
 	share.assertLink("dangling")
 	share.assertLink("dangling_out")
-	if got := c.pathOp(protocol.MkdirRequest, "NOPARENT/child"); got != errnoResult(syscall.ENOENT) {
+	if got := c.pathOp(protocol.MkdirRequest, "NOPARENT/child"); got != errnoResult(eNOENT) {
 		t.Fatalf("MKDIR under a missing folder returned %d, want -ENOENT", got)
 	}
 	share.assertIntact()
@@ -296,7 +296,7 @@ func TestDeletesDoNotGoThroughALinkedFolder(t *testing.T) {
 		{protocol.RemoveRequest, `fulllink\keep.bin`},
 		{protocol.RemoveRequest, "./fulllink/keep.bin"},
 	} {
-		if got := c.pathOp(req.op, req.path); got != errnoResult(syscall.EACCES) {
+		if got := c.pathOp(req.op, req.path); got != errnoResult(eACCES) {
 			t.Errorf("%s %q returned %d, want -EACCES", pathOpName(req.op), req.path, got)
 		}
 	}
@@ -331,7 +331,7 @@ func TestRemoveOfAReadOnlyFileAnswersAsTheHostDoes(t *testing.T) {
 	c := dial(t, startServerAt(t, root, false))
 
 	removeRefusesReadOnly.Store(true)
-	if got := c.pathOp(protocol.RemoveRequest, "keep.sav"); got != errnoResult(syscall.EACCES) {
+	if got := c.pathOp(protocol.RemoveRequest, "keep.sav"); got != errnoResult(eACCES) {
 		t.Fatalf("REMOVE of a read-only file as on Windows returned %d, want -EACCES", got)
 	}
 	if data, err := os.ReadFile(save); err != nil || string(data) != "keep" {
@@ -353,14 +353,20 @@ func TestAFileUsedAsAFolderIsNotALink(t *testing.T) {
 	share := newPathOpsShare(t)
 	c := dial(t, startServerAt(t, share.root, false))
 
+	// Windows reports a path through a file as a path that is not there, and
+	// so does the Desktop server's Python there.
+	throughFile := errnoResult(eNOTDIR)
+	if runtime.GOOS == "windows" {
+		throughFile = errnoResult(eNOENT)
+	}
 	for _, req := range []struct {
 		op   protocol.MessageType
 		path string
 		want int32
 	}{
-		{protocol.RemoveRequest, "FULL/keep.bin/x", errnoResult(syscall.ENOTDIR)},
-		{protocol.RmdirRequest, "FULL/keep.bin/x", errnoResult(syscall.ENOTDIR)},
-		{protocol.RemoveRequest, "FULL/NOPE/x", errnoResult(syscall.ENOENT)},
+		{protocol.RemoveRequest, "FULL/keep.bin/x", throughFile},
+		{protocol.RmdirRequest, "FULL/keep.bin/x", throughFile},
+		{protocol.RemoveRequest, "FULL/NOPE/x", errnoResult(eNOENT)},
 	} {
 		if got := c.pathOp(req.op, req.path); got != req.want {
 			t.Errorf("%s %q returned %d, want %d", pathOpName(req.op), req.path, got, req.want)
@@ -379,7 +385,7 @@ func TestPathOpsCannotLeaveTheRoot(t *testing.T) {
 			"/x", `\x`, "C:x", "outdirlink/x",
 		} {
 			// No subtests: the client's helpers fail the test that owns it.
-			if got := c.pathOp(op, path); got != errnoResult(syscall.EACCES) {
+			if got := c.pathOp(op, path); got != errnoResult(eACCES) {
 				t.Errorf("%s %q returned %d, want -EACCES", pathOpName(op), path, got)
 			}
 		}
@@ -389,7 +395,7 @@ func TestPathOpsCannotLeaveTheRoot(t *testing.T) {
 			t.Fatalf("%s outdirlink/sub/x returned %d, want an error", pathOpName(op), got)
 		}
 	}
-	if got := c.pathOp(protocol.RemoveRequest, "outdirlink/../secret.bin"); got != errnoResult(syscall.EACCES) {
+	if got := c.pathOp(protocol.RemoveRequest, "outdirlink/../secret.bin"); got != errnoResult(eACCES) {
 		t.Fatalf("REMOVE through a link out of the root returned %d, want -EACCES", got)
 	}
 	share.assertIntact()
@@ -412,7 +418,7 @@ func TestPathOpsRefusedWhenReadOnly(t *testing.T) {
 		{protocol.RmdirRequest, "dirlink"}, {protocol.RmdirRequest, ""},
 		{protocol.RemoveRequest, "../x"},
 	} {
-		if got := c.pathOp(req.op, req.path); got != errnoResult(syscall.EACCES) {
+		if got := c.pathOp(req.op, req.path); got != errnoResult(eACCES) {
 			t.Fatalf("read-only %s %q returned %d, want -EACCES", pathOpName(req.op), req.path, got)
 		}
 	}
@@ -436,7 +442,7 @@ func TestRemoveOfAFileOpenForWritingIsBusy(t *testing.T) {
 
 	h := openForWriteOK(t, writer, "save.bin", fioRead|fioWrite|fioCreate|fioTrunc)
 	for _, c := range []*client{other, writer} {
-		if got := c.pathOp(protocol.RemoveRequest, "save.bin"); got != errnoResult(syscall.EBUSY) {
+		if got := c.pathOp(protocol.RemoveRequest, "save.bin"); got != errnoResult(eBUSY) {
 			t.Fatalf("REMOVE of a file open for writing returned %d, want -EBUSY", got)
 		}
 	}
@@ -448,9 +454,18 @@ func TestRemoveOfAFileOpenForWritingIsBusy(t *testing.T) {
 		t.Fatalf("save.bin holds %q %v", data, err)
 	}
 
-	// Closed, the file is anyone's to delete; a reader does not hold it.
-	if got := result(other.send(openMsg("save.bin", fioRead, false))); got <= 0 {
-		t.Fatalf("OPEN for read returned %d", got)
+	// Closed, the file is anyone's to delete, and a reader does not hold it --
+	// except on Windows, where a file open at all cannot be deleted: neither
+	// server opens files with FILE_SHARE_DELETE, and both answer EACCES.
+	reader := result(other.send(openMsg("save.bin", fioRead, false)))
+	if reader <= 0 {
+		t.Fatalf("OPEN for read returned %d", reader)
+	}
+	if runtime.GOOS == "windows" {
+		if got := other.pathOp(protocol.RemoveRequest, "save.bin"); got != errnoResult(eACCES) {
+			t.Fatalf("REMOVE of a file open for reading on Windows returned %d, want -EACCES", got)
+		}
+		other.send(closeMsg(reader))
 	}
 	if got := other.pathOp(protocol.RemoveRequest, "save.bin"); got != 0 {
 		t.Fatalf("REMOVE after the writer closed returned %d, want 0", got)
