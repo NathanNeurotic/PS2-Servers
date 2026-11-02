@@ -259,6 +259,46 @@ func TestMkdirThroughALinkedFolderStaysInsideTheRoot(t *testing.T) {
 	}
 }
 
+// The folder gets the console's mode, and 0755 when the console gives none,
+// as from the Desktop server: a mode of 0 passed on would make a folder that
+// nothing but root could list or save into.
+func TestMkdirUsesTheConsolesModeOr0755(t *testing.T) {
+	root := t.TempDir()
+	c := dial(t, startServerAt(t, root, false))
+
+	for _, tc := range []struct {
+		name string
+		mode uint16
+		want os.FileMode
+	}{
+		{"NOMODE", 0, 0o755},
+		{"OWNERONLY", 0o700, 0o700},
+	} {
+		reply := c.send(pathMsg(protocol.MkdirRequest, tc.name, tc.mode))
+		if len(reply) < 8 || protocol.MessageType(reply[0]) != protocol.ResultReply || result(reply) != 0 {
+			t.Fatalf("MKDIR %s with mode %#o: got %x, want a RESULT_REPLY of 0", tc.name, tc.mode, reply)
+		}
+		got, err := os.Stat(filepath.Join(root, tc.name))
+		if err != nil || !got.IsDir() {
+			t.Fatalf("MKDIR %s did not make a folder: %v", tc.name, err)
+		}
+		// The wanted mode through this process's umask, which the server's
+		// mkdir went through as well. Windows ignores both modes.
+		ref := filepath.Join(t.TempDir(), "ref")
+		if err := os.Mkdir(ref, tc.want); err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.Stat(ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Mode().Perm() != want.Mode().Perm() {
+			t.Errorf("MKDIR %s with mode %#o made a folder with %v, want %v",
+				tc.name, tc.mode, got.Mode().Perm(), want.Mode().Perm())
+		}
+	}
+}
+
 // Edge's DREAD lists a link to a folder as a folder, so a console deleting a
 // folder recursively goes into the link like any other subfolder. Deleting
 // through it would empty the folder the link points at, which the console was

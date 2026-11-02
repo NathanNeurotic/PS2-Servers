@@ -254,6 +254,20 @@ class _PathOpsMixin:
         self.assertEqual(self.op(MKDIR, ""), -errno.EEXIST)
         self.assertEqual(self.op(MKDIR, "NOPARENT/child"), -errno.ENOENT)
 
+    def test_mkdir_uses_the_consoles_mode_or_0755(self):
+        # A console that gives no mode gets 0755, as from Edge: a mode of 0
+        # passed on would make a folder that nothing but root could list or
+        # save into. Each is compared with a folder made here through the same
+        # umask; Windows ignores both modes.
+        for name, mode, want in (("NOMODE", 0, 0o755), ("OWNERONLY", 0o700, 0o700)):
+            with self.subTest(mode=oct(mode)):
+                self.server._handle_mkdir(ADDR, _path_request(MKDIR, name, mode))
+                self.assertEqual(self.server.replies[-1], 0)
+                ref = os.path.join(self.outside, "ref_" + name)
+                os.mkdir(ref, want)
+                self.assertEqual(oct(os.stat(self.at(name)).st_mode & 0o777),
+                                 oct(os.stat(ref).st_mode & 0o777))
+
     # -- containment --------------------------------------------------------------
     def test_paths_that_leave_the_root_are_refused(self):
         for opcode in (MKDIR, REMOVE, RMDIR):
