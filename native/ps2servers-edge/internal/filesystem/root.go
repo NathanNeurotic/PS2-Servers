@@ -48,25 +48,74 @@ func hasDotDot(p string) bool {
 	}
 	return false
 }
+
+// Resolve maps a client path to the host path it reaches, which must lie
+// inside the root.
+//
+// allowMissing is for a caller that may create the path: a last component
+// that does not exist yet is joined to its resolved parent. One that does
+// exist is resolved like any other path, so a symlink there is followed and
+// its target must be inside the root too. Opening or creating through a link
+// reaches its target; returning the link unchecked let an O_CREAT open or an
+// SMB create read, truncate and write a file outside the root through a link
+// inside it, and create one through a dangling link.
 func (r *Root) Resolve(client string, allowMissing bool) (string, error) {
 	if client == "" || client == "." || client == "/" || client == "\\" {
 		return r.canonical, nil
 	}
+	candidate, err := r.candidate(client)
+	if err != nil {
+		return "", err
+	}
+	if allowMissing {
+		entry, err := r.entry(candidate)
+		if err != nil {
+			return "", err
+		}
+		if _, err := os.Lstat(entry); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return entry, nil
+			}
+			return "", err
+		}
+		// It exists, if only as a link that may dangle: resolve the whole
+		// path below. A dangling link fails there rather than being created
+		// through.
+		candidate = entry
+	}
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(r.canonical, resolved)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", ErrEscape
+	}
+	return resolved, nil
+}
+
+// candidate refuses any client path that could name a place outside the root
+// -- "..", absolute and drive-qualified paths -- and joins the rest to it.
+func (r *Root) candidate(client string) (string, error) {
 	normalized := strings.ReplaceAll(client, "\\", "/")
 	windowsDrive := len(normalized) >= 2 && ((normalized[0] >= 'A' && normalized[0] <= 'Z') || (normalized[0] >= 'a' && normalized[0] <= 'z')) && normalized[1] == ':'
 	if filepath.IsAbs(client) || strings.HasPrefix(normalized, "/") || windowsDrive || filepath.VolumeName(client) != "" || hasDotDot(client) {
 		return "", ErrEscape
 	}
-	clean := filepath.Clean(filepath.FromSlash(strings.ReplaceAll(client, "\\", "/")))
+	clean := filepath.Clean(filepath.FromSlash(normalized))
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", ErrEscape
 	}
-	candidate := filepath.Join(r.canonical, clean)
-	parent := candidate
-	if allowMissing {
-		parent = filepath.Dir(candidate)
-	}
-	real, err := filepath.EvalSymlinks(parent)
+	return filepath.Join(r.canonical, clean), nil
+}
+
+// entry resolves the parent of candidate, which must exist inside the root,
+// and joins the last component to it unresolved.
+func (r *Root) entry(candidate string) (string, error) {
+	real, err := filepath.EvalSymlinks(filepath.Dir(candidate))
 	if err != nil {
 		return "", err
 	}
@@ -77,21 +126,7 @@ func (r *Root) Resolve(client string, allowMissing bool) (string, error) {
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", ErrEscape
 	}
-	if allowMissing {
-		return filepath.Join(real, filepath.Base(candidate)), nil
-	}
-	resolved, err := filepath.EvalSymlinks(candidate)
-	if err != nil {
-		return "", err
-	}
-	rel, err = filepath.Rel(r.canonical, resolved)
-	if err != nil {
-		return "", err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", ErrEscape
-	}
-	return resolved, nil
+	return filepath.Join(real, filepath.Base(candidate)), nil
 }
 func Mode(info fs.FileInfo) uint32 {
 	if info.IsDir() {

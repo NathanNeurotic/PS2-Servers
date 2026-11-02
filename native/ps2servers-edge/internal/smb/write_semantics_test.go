@@ -121,3 +121,38 @@ func TestReadOnlyRefusesCreates(t *testing.T) {
 		t.Fatalf("read-only server created new.cfg: %v", err)
 	}
 }
+
+// NT_CREATE resolved only the parent of its name, so a symlink in the last
+// component was followed wherever it pointed: a link inside the share to a
+// file outside it opened that file for reading, and OVERWRITE_IF truncated it.
+func TestCreateCannotLeaveTheShareThroughASymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.bin")
+	writeFile(t, secret, []byte("NOT SHAREABLE"))
+	if err := os.Symlink(secret, filepath.Join(root, "outlink")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "ghost"), filepath.Join(root, "dangling_out")); err != nil {
+		t.Fatal(err)
+	}
+
+	cl := dial(t, startServer(t, root, false))
+	cl.handshake("games")
+	for _, disposition := range []uint32{fileOpen, fileOpenIf, fileOverwriteIf, fileSupersede} {
+		p, d := ntCreateParams("outlink", disposition)
+		if h, _, _ := cl.call(ComNTCreateAndX, p, d); h.Status == StatusSuccess {
+			t.Errorf("NT_CREATE disposition %d opened a file outside the share", disposition)
+		}
+	}
+	if got, err := os.ReadFile(secret); err != nil || string(got) != "NOT SHAREABLE" {
+		t.Fatalf("a file outside the share was changed: %q %v", got, err)
+	}
+	p, d := ntCreateParams("dangling_out", fileOpenIf)
+	if h, _, _ := cl.call(ComNTCreateAndX, p, d); h.Status == StatusSuccess {
+		t.Error("NT_CREATE OPEN_IF created through a dangling link")
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "ghost")); !os.IsNotExist(err) {
+		t.Fatalf("a file was created outside the share: %v", err)
+	}
+}

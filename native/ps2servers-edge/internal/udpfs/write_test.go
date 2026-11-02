@@ -367,3 +367,58 @@ func TestAppendModePreservesExistingBytes(t *testing.T) {
 		t.Fatalf("append produced %q, want %q", got, "headtail")
 	}
 }
+
+// An OPEN with O_CREAT resolved only the parent of its path, and the open
+// then followed a symlink in the last component wherever it pointed. A link
+// inside the share to a file outside it let a console truncate and overwrite
+// that file, and a dangling link let it create one outside the root.
+func TestWriteOpenCannotLeaveTheRootThroughASymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.bin")
+	if err := os.WriteFile(secret, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "outlink")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "ghost"), filepath.Join(root, "dangling_out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "real.sav"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real.sav", filepath.Join(root, "link.sav")); err != nil {
+		t.Fatal(err)
+	}
+	c := dial(t, startServerAt(t, root, false))
+
+	for _, flags := range []uint16{
+		fioRead | fioWrite | fioCreate | fioTrunc,
+		fioRead | fioWrite | fioCreate,
+		fioRead | fioWrite,
+	} {
+		if got := result(c.send(openMsg("outlink", flags, false))); got != -int32(syscall.EACCES) {
+			t.Errorf("OPEN outlink flags %#x returned %d, want -EACCES", flags, got)
+		}
+	}
+	if data, err := os.ReadFile(secret); err != nil || string(data) != "secret" {
+		t.Fatalf("a file outside the root was changed through a symlink: %q %v", data, err)
+	}
+	if got := result(c.send(openMsg("dangling_out", fioRead|fioWrite|fioCreate, false))); got >= 0 {
+		t.Errorf("OPEN O_CREAT through a dangling link returned %d, want an error", got)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "ghost")); !os.IsNotExist(err) {
+		t.Fatalf("a file was created outside the root through a dangling link: %v", err)
+	}
+
+	// A link that stays inside the root still works, and writes its target.
+	h := openForWriteOK(t, c, "link.sav", fioRead|fioWrite|fioCreate|fioTrunc)
+	if got := result(c.send(writeReqMsg(h, 3, writeDataMsg(0, 1, []byte("new"))))); got != 3 {
+		t.Fatalf("WRITE through an in-root link returned %d, want 3", got)
+	}
+	c.send(closeMsg(h))
+	if data, err := os.ReadFile(filepath.Join(root, "real.sav")); err != nil || string(data) != "new" {
+		t.Fatalf("in-root link target holds %q %v, want %q", data, err, "new")
+	}
+}
