@@ -3,11 +3,16 @@
 
 _resolve_path() is the single security gate between client-supplied paths and
 the host filesystem: everything the PS2 opens, lists, or stats goes through
-it. This test pins two properties:
+it. MKDIR, REMOVE and RMDIR use _resolve_entry(), which resolves the parent
+the same way and leaves the last component unfollowed. This test pins three
+properties:
 
   * CONTAINMENT -- traversal (../, absolute paths, backslash variants) can
                    never resolve outside the served root; normal relative
                    paths resolve inside it.
+  * ENTRIES     -- a symlink named as the last component is the entry acted
+                   on, never its target, and its parent must still resolve
+                   inside the root.
   * UNC ROOTS   -- a Windows NAS root (\\\\server\\share\\...) works. The guard
                    once ran .replace('\\\\\\\\', '\\\\') on its prefix, which ate the
                    leading double-backslash of UNC roots and made EVERY
@@ -82,6 +87,61 @@ def test_local_containment():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_entry_resolution():
+    """_resolve_entry() is the gate for MKDIR, REMOVE and RMDIR. It realpath()s
+    only the parent, so a symlink in the last component is the entry acted on
+    -- REMOVE of a link once deleted the file it pointed at -- while the parent
+    must still resolve inside the root."""
+    print("[entry] MKDIR/REMOVE/RMDIR entry resolution")
+    root = tempfile.mkdtemp(prefix="udpfs_guard_")
+    outside = tempfile.mkdtemp(prefix="udpfs_guard_out_")
+    server = make_server(root)
+    try:
+        os.makedirs(os.path.join(root, "GAMES"))
+        check(server._resolve_entry("GAMES/x.elf")
+              == os.path.join(server.root_dir, "GAMES", "x.elf"),
+              "plain path names its entry inside root")
+        check(server._resolve_entry("\\GAMES\\x.elf/")
+              == os.path.join(server.root_dir, "GAMES", "x.elf"),
+              "leading, trailing and backslash separators normalize")
+        for root_path in ["", "/", ".", "./"]:
+            check(server._resolve_entry(root_path) == server.root_dir,
+                  "%r is the root itself (callers refuse RMDIR of it)" % root_path)
+        for evil in ["../evil", "..", "GAMES/..", "GAMES/../../evil",
+                     "..\\evil", "GAMES\\..\\..\\evil"]:
+            check(server._resolve_entry(evil) is None,
+                  "entry escape blocked: %r" % evil)
+
+        try:
+            os.symlink(os.path.join("GAMES", "x.elf"), os.path.join(root, "link.elf"))
+            os.symlink(outside, os.path.join(root, "out"), target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            print("  symlink checks skipped: %s" % exc)
+        else:
+            check(server._resolve_entry("link.elf")
+                  == os.path.join(server.root_dir, "link.elf"),
+                  "a symlink as last component is the link, not its target")
+            check(server._resolve_entry("out")
+                  == os.path.join(server.root_dir, "out"),
+                  "a link pointing out of root is still an entry inside it")
+            check(server._resolve_entry("out/x") is None,
+                  "a parent that resolves out of root is refused")
+
+        if os.name == "nt":
+            # Names Windows would reinterpret: a drive other than the root's
+            # makes join() drop the parent, and trailing dots are stripped.
+            drive = os.path.splitdrive(server.root_dir)[0][:1].upper()
+            other = "Q" if drive != "Q" else "R"
+            for name in ["%s:evil" % other, "...", "GAMES/..."]:
+                check(server._resolve_entry(name) is None,
+                      "Windows-reinterpreted name refused: %r" % name)
+    finally:
+        server.sock.close()
+        server.dsock.close()
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(outside, ignore_errors=True)
+
+
 def test_separator_terminated_root():
     """Roots whose realpath already ENDS with a separator -- a bare drive
     root ('C:\\') on Windows, '/' on POSIX. These are the one realpath output
@@ -112,6 +172,10 @@ def test_separator_terminated_root():
               "drive/'/'-root serves top-level file")
         check(server._resolve_path("") == sep_root,
               "the root itself resolves")
+        check(server._resolve_entry("ul.cfg") == os.path.join(sep_root, "ul.cfg"),
+              "drive/'/'-root names a top-level entry")
+        check(server._resolve_entry("") == sep_root,
+              "drive/'/'-root entry of '' is the root itself")
         # '..' cannot ascend above a drive root / filesystem root: it
         # resolves back to the root, which is still inside the share.
         check(server._resolve_path("..") == sep_root,
@@ -166,6 +230,7 @@ def test_unc_root():
 
 def main():
     test_local_containment()
+    test_entry_resolution()
     test_separator_terminated_root()
     test_unc_root()
     print()

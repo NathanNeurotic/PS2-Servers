@@ -36,6 +36,7 @@ import queue
 import re
 import select
 import socket
+import stat as stat_mod
 import struct
 import subprocess
 import sys
@@ -1181,6 +1182,43 @@ class UdpfsServer:
 
         return resolved
 
+    def _resolve_entry(self, client_path: str) -> Optional[str]:
+        """Resolve a client path to the directory entry it names, unfollowed.
+
+        For MKDIR, REMOVE and RMDIR, which act on an entry rather than on what
+        it points at. _resolve_path() realpath()s the whole path, so for a
+        symlink it returns the link's target: REMOVE of 'link.elf' ->
+        'GAMES/real.elf' deleted real.elf, answered 0 and left the link, and
+        RMDIR of a link to an empty folder removed that folder. Here only the
+        parent is realpath()ed and must lie inside the root, exactly as
+        _resolve_path() requires; the last component is joined as given, so the
+        operation meets the link itself, as unlink(2), rmdir(2) and mkdir(2) do.
+
+        '' (and '/', '.') is the root itself, as in _resolve_path(). None for an
+        escape, and for a path ending in '..', which names no entry of its own.
+        """
+        if self.root_dir is None:
+            return None
+        parts = [p for p in client_path.replace('\\', '/').split('/')
+                 if p not in ('', '.')]
+        if not parts:
+            return self.root_dir
+        name = parts[-1]
+        if name == '..':
+            return None
+        parent = self._resolve_path('/'.join(parts[:-1]))
+        if parent is None:
+            return None
+        entry = os.path.join(parent, name)
+        # The OS must address exactly the entry that was checked. On Windows a
+        # name qualified with another drive ('Q:x') makes join() discard the
+        # parent, and trailing dots and spaces are stripped from a final
+        # component ('...' names the parent itself, which for a top-level
+        # request is the share root).
+        if os.path.abspath(entry) != entry:
+            return None
+        return entry
+
     def _transform_compressed_name(self, name: str) -> str:
         """Transform supported compressed extensions to .iso for directory listing."""
         if not self.enable_compression:
@@ -1314,7 +1352,6 @@ class UdpfsServer:
 
     def _stat_to_bytes(self, st) -> dict:
         """Convert os.stat_result to PS2-compatible stat fields"""
-        import stat as stat_mod
         mode = 0
         if stat_mod.S_ISREG(st.st_mode):
             mode = FIO_S_IFREG
@@ -2100,7 +2137,9 @@ class UdpfsServer:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
-        resolved = self._resolve_path(path)
+        # The entry, not a symlink's target: mkdir over a dangling link is
+        # EEXIST, rather than a directory created wherever the link points.
+        resolved = self._resolve_entry(path)
         if resolved is None:
             self._send_result_reply(addr, -errno.EACCES)
             return
@@ -2128,13 +2167,22 @@ class UdpfsServer:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
-        resolved = self._resolve_path(path)
+        # A symlink is removed as itself. DREAD lists the link from lstat, so
+        # the link is what the console chose to delete, not the file behind it.
+        resolved = self._resolve_entry(path)
         if resolved is None:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
         try:
-            os.remove(resolved)
+            # A real directory is refused here, the same answer on every host:
+            # unlink() on one is EISDIR on Linux, EPERM on macOS and EACCES on
+            # Windows.
+            if stat_mod.S_ISDIR(os.lstat(resolved).st_mode):
+                self._print_event(f"[{addr[0]}:{addr[1]}] REMOVE '{path}' -> EISDIR")
+                self._send_result_reply(addr, -errno.EISDIR)
+                return
+            os.unlink(resolved)
             self._print_event(f"[{addr[0]}:{addr[1]}] REMOVE '{path}'")
             self._send_result_reply(addr, 0)
         except OSError as e:
@@ -2156,12 +2204,21 @@ class UdpfsServer:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
-        resolved = self._resolve_path(path)
-        if resolved is None:
+        resolved = self._resolve_entry(path)
+        # The share root is not the console's to remove: rmdir on an empty
+        # served folder would otherwise delete it.
+        if resolved is None or resolved == self.root_dir:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
         try:
+            # A symlink is not a directory, even one that points at a folder.
+            # rmdir(2) agrees on POSIX, but Windows' RemoveDirectory accepts a
+            # directory symlink, so decide from lstat on every host.
+            if not stat_mod.S_ISDIR(os.lstat(resolved).st_mode):
+                self._print_event(f"[{addr[0]}:{addr[1]}] RMDIR '{path}' -> ENOTDIR")
+                self._send_result_reply(addr, -errno.ENOTDIR)
+                return
             os.rmdir(resolved)
             self._print_event(f"[{addr[0]}:{addr[1]}] RMDIR '{path}'")
             self._send_result_reply(addr, 0)
