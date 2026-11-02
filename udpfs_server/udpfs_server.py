@@ -2359,6 +2359,16 @@ class UdpfsServer:
             self._send_read_result(addr, -errno.EINVAL, b'')
             return
 
+        # As for BWRITE: past the largest file offset, 2**63 - 1, seek() and
+        # pread() raise ValueError and OverflowError rather than OSError, so
+        # such a read was never answered. Refused here, as Edge refuses it.
+        if sector_nr * sector_size > (1 << 63) - 1:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] BREAD sector={sector_nr} past the "
+                "largest file offset -> EINVAL")
+            self._send_read_result(addr, -errno.EINVAL, b'')
+            return
+
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] BREAD handle={handle} sector={sector_nr} count={sector_count} ({total_size} bytes)")
 

@@ -15,6 +15,10 @@ answered at the request. The console sends every chunk of a write before it
 waits for WRITE_DONE, so the rest of a refused write still arrives, and it must
 be dropped rather than joined to the write before it.
 
+The last class covers a read that went unanswered the same way: a BREAD past
+the largest file offset, where seek() and pread() raise ValueError and
+OverflowError rather than OSError.
+
 These drive the real AutoUdpfsServer receive loop over loopback.
 
 Run:  python -m unittest tests.test_udpfs_write_needs_writable_handle -v
@@ -99,6 +103,13 @@ class _Console(UdpfsTestClient):
     def bwrite(self, handle, sector, data):
         return self._answer(self._bwrite_req(handle, sector, len(data) // SECTOR)
                             + self._chunk(data), srv.MsgType.WRITE_DONE)
+
+    def bread_result(self, handle, sector, sector_count=1):
+        """A BREAD's result, or None if the server sent no reply. bread(),
+        inherited, is the one that returns the data."""
+        msg = struct.pack("<BBHiII", srv.MsgType.BREAD_REQ, 0, sector_count,
+                          handle, sector & 0xFFFFFFFF, sector >> 32)
+        return self._answer(msg, srv.MsgType.RESULT_REPLY)
 
     def send_in_chunks(self, request, data, chunk):
         """Send request with data split into chunks, without waiting for an
@@ -393,6 +404,42 @@ class ARefusedWriteTakesNoChunksTests(_Loopback):
         self.assertEqual(self._content(self.save),
                          b"AAAA11112222" + b"\0" * (SECTOR - 12) + b"3" * SECTOR
                          + b"44445555")
+
+
+class ReadsPythonCannotTakeAreAnsweredTests(_Loopback):
+    """A read that Python's file calls refuse is answered with EINVAL.
+
+    For a position past the largest file offset, 2**63 - 1, seek() raises
+    ValueError and pread() OverflowError, not OSError. The handler's except
+    did not catch them: the session logged the error and the console was sent
+    no answer, the same as the block writes in the class above.
+    """
+
+    def _game(self, **options):
+        """A console with game.bin, two sectors, open read-only."""
+        self.data = bytes(range(256)) * 4
+        self._put("game.bin", self.data)
+        console = self._console(**options)
+        handle = console.open_with("game.bin", O_RDONLY)
+        self.assertGreater(handle, 0)
+        return console, handle
+
+    def test_a_block_read_past_the_largest_file_offset(self):
+        # Sector 2**54 is byte 2**63, one past the largest offset seek() takes.
+        console, handle = self._game()
+        self.assertEqual(console.bread_result(handle, 1 << 54), -errno.EINVAL,
+                         f"server events: {self.events}")
+        # The session still serves the file.
+        self.assertEqual(console.bread(1, 1, handle=handle), self.data[SECTOR:])
+
+    def test_a_block_read_of_the_image_past_the_largest_file_offset(self):
+        # The same through the shared image, where pread() raised
+        # OverflowError.
+        image = self._put("disk.img", b"D" * (4 * SECTOR))
+        console, _game = self._game(block_device=image)
+        self.assertEqual(console.bread_result(0, 1 << 54), -errno.EINVAL,
+                         f"server events: {self.events}")
+        self.assertEqual(console.bread(3, 1), b"D" * SECTOR)
 
 
 if __name__ == "__main__":
