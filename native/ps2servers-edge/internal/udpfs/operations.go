@@ -66,6 +66,17 @@ func (s *Server) handleMessage(st *session.State, p []byte) {
 	case protocol.GetStatRequest:
 		s.stats.getstat.Add(1)
 		s.handleGetStat(st, p)
+	// The SESSION line has no kind for MKDIR, REMOVE or RMDIR, so like
+	// GETSTAT they are counted only here, as the Desktop server counts them.
+	case protocol.MkdirRequest:
+		s.stats.mkdir.Add(1)
+		s.handleMkdir(st, p)
+	case protocol.RemoveRequest:
+		s.stats.remove.Add(1)
+		s.handleRemove(st, p)
+	case protocol.RmdirRequest:
+		s.stats.rmdir.Add(1)
+		s.handleRmdir(st, p)
 	default:
 		s.cfg.Log.Debug("unknown UDPFS opcode", map[string]any{"peer": st.Peer, "opcode": p[0]})
 	}
@@ -116,6 +127,20 @@ func (s *Server) logRequest(st *session.State, p []byte) {
 		fields["operation"] = "DREAD"
 	case protocol.GetStatRequest:
 		fields["operation"] = "GETSTAT"
+	case protocol.MkdirRequest, protocol.RemoveRequest, protocol.RmdirRequest:
+		fields["operation"] = pathOpName(opcode)
+		if len(p) >= 4 {
+			if opcode == protocol.MkdirRequest {
+				fields["mode"] = binary.LittleEndian.Uint16(p[2:4])
+			}
+			if path, err := cString(p[4:]); err == nil {
+				if safe, ok := safePathForLog(path); ok {
+					fields["path"] = safe
+				} else {
+					fields["path_omitted"] = true
+				}
+			}
+		}
 	default:
 		fields["operation"] = "UNKNOWN"
 	}

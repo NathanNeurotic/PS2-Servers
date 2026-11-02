@@ -51,7 +51,13 @@ const (
 	DReadReply     MessageType = 0x1D
 	GetStatRequest MessageType = 0x1E
 	GetStatReply   MessageType = 0x1F
-	ResultReply    MessageType = 0x26
+	// MKDIR, REMOVE and RMDIR share one request shape: msg_type, a reserved
+	// byte, a 16-bit mode (MKDIR only) and a NUL-terminated path. Each is
+	// answered by a ResultReply carrying 0 or a negative errno.
+	MkdirRequest  MessageType = 0x20
+	RemoveRequest MessageType = 0x22
+	RmdirRequest  MessageType = 0x24
+	ResultReply   MessageType = 0x26
 	// UDPFS carries block-device access as well as files: BREAD answers with a
 	// ResultReply plus raw sector bytes, and BWRITE opens the same WriteData
 	// chunk sequence a file write uses. Handle 0 is reserved for the shared

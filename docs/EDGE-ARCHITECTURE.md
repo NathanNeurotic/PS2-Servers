@@ -73,7 +73,9 @@ queue so a transfer can advance while the request worker is occupied.
 Edge serves writes unless started with `--read-only`. It rejects absolute paths,
 drive-qualified paths, `..`, and symlink escapes before opening files. Directory
 enumeration omits entries that cannot be resolved safely beneath the configured
-root.
+root. `MKDIR`, `REMOVE` and `RMDIR` resolve only the parent of their path
+(`filesystem.Root.Entry`), so like `mkdir(2)`, `unlink(2)` and `rmdir(2)` they
+act on a symlink itself and never on its target.
 
 Plain files and ISO images are read directly. CSO uses zlib and ZSO uses a
 bounded raw-LZ4 decoder. Compressed images are exposed with virtual `.iso`

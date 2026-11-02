@@ -97,6 +97,45 @@ func (r *Root) Resolve(client string, allowMissing bool) (string, error) {
 	return resolved, nil
 }
 
+// Entry resolves client to the directory entry it names, for an operation on
+// the entry itself rather than on what it points at: MKDIR, REMOVE and RMDIR,
+// which like mkdir(2), unlink(2) and rmdir(2) never follow a symlink in the
+// last component. The parent is resolved and must lie inside the root, as in
+// Resolve; the last component is joined unresolved, so a symlink there is
+// the entry acted on even when it points out of the root, and what it points
+// at is never reached.
+//
+// isRoot reports that client names the root itself: "", ".", "/" or "./".
+func (r *Root) Entry(client string) (path string, isRoot bool, err error) {
+	root := true
+	for _, part := range strings.FieldsFunc(client, func(c rune) bool { return c == '/' || c == '\\' }) {
+		if part != "." {
+			root = false
+			break
+		}
+	}
+	if root {
+		return r.canonical, true, nil
+	}
+	candidate, err := r.candidate(client)
+	if err != nil {
+		return "", false, err
+	}
+	entry, err := r.entry(candidate)
+	if err != nil {
+		return "", false, err
+	}
+	// The OS must act on exactly the entry checked here. Windows strips
+	// trailing dots and spaces from a last component, so "..." reaches its
+	// parent -- for a top-level name the root itself, which an RMDIR would
+	// then delete. Abs applies the same rules, so a name it changes is one
+	// the OS would reinterpret.
+	if abs, err := filepath.Abs(entry); err != nil || abs != entry {
+		return "", false, ErrEscape
+	}
+	return entry, entry == r.canonical, nil
+}
+
 // candidate refuses any client path that could name a place outside the root
 // -- "..", absolute and drive-qualified paths -- and joins the rest to it.
 func (r *Root) candidate(client string) (string, error) {

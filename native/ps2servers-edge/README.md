@@ -23,6 +23,8 @@ both can transfer concurrently.
 - delayed Modulo-compatible fallback
 - per-session sequence and response-socket state
 - directory open/read, file open/read/seek/close, getstat
+- MKDIR, REMOVE and RMDIR, acting on the entry named: a symlink is removed
+  as itself and never followed to its target
 - file write: WRITE_REQ / WRITE_DATA / WRITE_DONE, chunk assembly, O_CREAT,
   O_TRUNC and O_APPEND, one writer per file at a time
 - retransmission, NACK handling, send windows, sequence wraparound
@@ -58,6 +60,12 @@ Guarantees:
 - a chunk arriving out of order aborts the whole write with `EIO` rather than
   silently concatenating it into the wrong place
 - completed writes are flushed with `fsync` before `WRITE_DONE` is sent
+- REMOVE of a file a peer holds open for writing gets `EBUSY`; REMOVE of a
+  folder is `EISDIR`, RMDIR of anything but a real, empty folder fails
+  (`ENOTDIR` for a symlink, even one to a folder), and the share root
+  cannot be removed
+- `--read-only` refuses MKDIR, REMOVE and RMDIR with `EACCES`, as it
+  refuses a write
 
 ## Block access over UDPFS
 

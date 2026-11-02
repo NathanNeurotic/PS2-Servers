@@ -127,3 +127,73 @@ func mustSymlink(t *testing.T, target, link string) {
 		t.Fatal(err)
 	}
 }
+
+// Entry is the gate for MKDIR, REMOVE and RMDIR, which act on an entry and not
+// on what it points at: only the parent is resolved, and must stay inside.
+func TestEntryDoesNotFollowTheLastComponent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink permission varies")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "GAMES"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustSymlink(t, filepath.Join("GAMES", "real.sav"), filepath.Join(root, "link.sav"))
+	mustSymlink(t, outside, filepath.Join(root, "out"))
+	r, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for client, want := range map[string]string{
+		"link.sav":      filepath.Join(canonical, "link.sav"),
+		"out":           filepath.Join(canonical, "out"),
+		"GAMES/x.sav/":  filepath.Join(canonical, "GAMES", "x.sav"),
+		`GAMES\x.sav`:   filepath.Join(canonical, "GAMES", "x.sav"),
+		"GAMES/./x.sav": filepath.Join(canonical, "GAMES", "x.sav"),
+	} {
+		if p, isRoot, err := r.Entry(client); err != nil || isRoot || p != want {
+			t.Errorf("Entry(%q) = %q, %v, %v; want %q", client, p, isRoot, err, want)
+		}
+	}
+	for _, client := range []string{"", ".", "/", "./", `\`, "/./"} {
+		if p, isRoot, err := r.Entry(client); err != nil || !isRoot || p != canonical {
+			t.Errorf("Entry(%q) = %q, %v, %v; want the root", client, p, isRoot, err)
+		}
+	}
+	for _, client := range []string{"..", "GAMES/..", "../x", "GAMES/../../x", "/x", `\x`, "C:x", "out/x"} {
+		if p, _, err := r.Entry(client); !errors.Is(err, ErrEscape) {
+			t.Errorf("Entry(%q) = %q, %v; want ErrEscape", client, p, err)
+		}
+	}
+	if _, _, err := r.Entry("NOPARENT/x"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a missing parent gave %v, want ErrNotExist", err)
+	}
+}
+
+// Windows strips trailing dots and spaces from a last component, so the OS
+// would act on a different entry than the one checked: "..." is the parent
+// itself, which for a top-level name is the root.
+func TestEntryRefusesNamesWindowsWouldReinterpret(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path normalisation")
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "GAMES"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, client := range []string{"...", "GAMES/...", "GAMES/x.sav.", "GAMES/x.sav "} {
+		if p, _, err := r.Entry(client); !errors.Is(err, ErrEscape) {
+			t.Errorf("Entry(%q) = %q, %v; want ErrEscape", client, p, err)
+		}
+	}
+}

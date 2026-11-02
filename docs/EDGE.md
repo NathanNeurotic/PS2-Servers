@@ -285,11 +285,13 @@ Options:
 
 ## Writes
 
-Edge implements file writes. They are **on by default** in the bare binary.
-The loader must implement the corresponding save/VMC path; writable serving
-alone does not establish that a game can save over UDPFS.
+Edge implements file writes, folder creation (UDPFS `MKDIR`) and deletion of
+files and folders (`REMOVE`, `RMDIR`). They are **on by default** in the bare
+binary. The loader must implement the corresponding save/VMC path; writable
+serving alone does not establish that a game can save over UDPFS.
 
-Pass `--read-only` (or `RO=1`) to serve read-only instead.
+Pass `--read-only` (or `RO=1`) to serve read-only instead. That refuses every
+write, `MKDIR`, `REMOVE` and `RMDIR` with `EACCES`.
 
 **The OpenWrt package still starts read-only.** It ships `option read_only '1'`
 in `/etc/config/ps2servers-edge`; set it to `'0'` to let a console write. A
@@ -307,6 +309,12 @@ With writes enabled:
 | Chunk arrives out of order | `EIO`, whole write abandoned rather than silently misassembled |
 | Write on a handle opened read-only | `EACCES` — access is decided at OPEN and re-checked |
 | Write completes | `fsync` before `WRITE_DONE`; this does not make interrupted or multi-request saves atomic |
+| `REMOVE` of a file some peer holds open for writing | `EBUSY` — the rest of that save would go into a file no longer in any folder |
+| `REMOVE` of a symlink | the link is deleted; what it points at is never touched |
+| `REMOVE` of a folder | `EISDIR` |
+| `RMDIR` of a file or a symlink, even one to a folder | `ENOTDIR`; `RMDIR` removes only a real, empty folder |
+| `RMDIR` of the share root | `EACCES` |
+| `MKDIR` of a name that exists, a dangling symlink included | `EEXIST`; nothing is created where the link points |
 
 Block-device writes (`BWRITE`) are implemented too, when `--block-device` is
 set. They reuse the same chunk-assembly path as file writes, so the table above
@@ -325,7 +333,10 @@ is silent corruption at a client-chosen offset.
 Edge enforces a configured filesystem root. It rejects `..`, absolute and
 drive-qualified paths, unsafe symbolic links, oversized paths, oversized reads
 and writes, malformed packet lengths, unknown packet types, and excessive open
-handles. It serves writes unless started with `--read-only`.
+handles. It serves writes, `MKDIR`, `REMOVE` and `RMDIR` unless started with
+`--read-only`. Those three act on the entry named: its parent must resolve
+inside the root, and a symlink in the last component is the link itself, so
+deleting one never reaches its target.
 Idle sessions are removed, their files are closed, and any write reservation
 they held is released. Normal logs do not print full requested host paths.
 

@@ -35,7 +35,8 @@ statically linked Go executable and does not require Python or the desktop GUI.
 
 Current Edge scope:
 
-- UDPFS with reads and writes; writable by default, `--read-only` to restrict
+- UDPFS with reads, writes, `MKDIR`, `REMOVE` and `RMDIR`; writable by default,
+  `--read-only` to restrict
 - UDPFS block access (`BREAD`/`BWRITE`) for one disk image via `--block-device`
 - guest SMBv1 as the `smb` subcommand (no SMB2/3)
 - native UDPBD as the `udpbd` subcommand
