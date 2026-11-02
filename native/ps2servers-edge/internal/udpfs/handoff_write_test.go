@@ -93,6 +93,47 @@ func TestReplacementLoaderCanRewriteAFileTheOldOneHadOpen(t *testing.T) {
 	}
 }
 
+// The same for a delete. The old loader's write handle kept its file reserved,
+// so REMOVE of the file it was writing -- the half-copied file of a paste the
+// console was reset in the middle of, say -- was EBUSY until the session timed
+// out, and RMDIR of its folder ENOTEMPTY.
+func TestReplacementLoaderCanDeleteAFileTheOldOneHadOpen(t *testing.T) {
+	for _, first := range []uint16{0, 1} {
+		t.Run(fmt.Sprintf("first DATA %d", first), func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Mkdir(filepath.Join(root, "PASTE"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			disc := startServerAt(t, root, false)
+			c := dial(t, disc)
+			other := dial(t, disc)
+
+			old := openForWriteOK(t, c, "PASTE/game.iso", fioRead|fioWrite|fioCreate|fioTrunc)
+			c.sendAcked(writeReqMsg(old, 8, writeDataMsg(0, 2, []byte("HALF"))))
+
+			replaceLoader(t, c, disc, first)
+
+			// Another console is kept off the file as before.
+			if got := other.pathOp(protocol.RemoveRequest, "PASTE/game.iso"); got != -eBUSY {
+				t.Fatalf("another console's REMOVE of the old loader's file returned %d, want -EBUSY", got)
+			}
+			if got := c.pathOp(protocol.RemoveRequest, "PASTE/game.iso"); got != 0 {
+				t.Fatalf("REMOVE after the handoff returned %d, want 0", got)
+			}
+			if _, err := os.Lstat(filepath.Join(root, "PASTE", "game.iso")); !os.IsNotExist(err) {
+				t.Fatalf("PASTE/game.iso is still there: %v", err)
+			}
+			if got := c.pathOp(protocol.RmdirRequest, "PASTE"); got != 0 {
+				t.Fatalf("RMDIR of its folder returned %d, want 0", got)
+			}
+			// The old handle went with the file.
+			if got := result(c.send(writeReqMsg(old, 4, writeDataMsg(0, 1, []byte("LATE"))))); got != -eBADF {
+				t.Fatalf("WRITE on the old loader's handle returned %d, want -EBADF", got)
+			}
+		})
+	}
+}
+
 // The takeover is narrow. It closes only the old loader's write handle on the
 // file being reopened: what else the old loader had open stays usable by
 // number, as Neutrino's FILEID backend needs, and other consoles are kept off

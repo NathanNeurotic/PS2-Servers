@@ -310,7 +310,7 @@ With writes enabled:
 | Chunk arrives out of order | `EIO`, whole write abandoned rather than silently misassembled |
 | Write on a handle opened read-only | `EACCES` — access is decided at OPEN and re-checked |
 | Write completes | `fsync` before `WRITE_DONE`; this does not make interrupted or multi-request saves atomic |
-| `REMOVE` of a file some peer holds open for writing | `EBUSY` — the rest of that save would go into a file no longer in any folder |
+| `REMOVE` of a file some peer holds open for writing | `EBUSY` — the rest of that save would go into a file no longer in any folder. As for a write open, a handle the loader it replaced on the same endpoint left open is closed instead, and the file is deleted |
 | `REMOVE` of a read-only file | Windows: `EACCES` and the file is kept, as the Desktop server answers there. Elsewhere the file is deleted, by both servers, since `unlink` does not look at a file's own permissions |
 | `REMOVE` of a symlink | the link is deleted; what it points at is never touched |
 | `REMOVE` of a folder | `EISDIR` |
@@ -352,7 +352,8 @@ that passes through a symlinked folder or a junction.
 Idle sessions are removed, their files are closed, and any write reservation
 they held is released. A loader that takes over a console's endpoint keeps the
 files the old loader had open, but opening one of them for writing itself
-closes the old loader's handle to it and takes over its reservation. Normal
+closes the old loader's handle to it and takes over its reservation, and
+deleting one closes that handle too. Normal
 logs do not print full requested host paths.
 
 ## Validation status

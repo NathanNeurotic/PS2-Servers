@@ -53,9 +53,9 @@ Guarantees:
 - a second peer opening the same file for writing gets `EBUSY`, since two
   consoles interleaving into one file would corrupt it
 - a loader that takes over a console's endpoint keeps the old loader's open
-  handles (Neutrino's FILEID), but can still open for writing a file the old
-  loader was writing: that one old handle is closed rather than the open
-  refused with `EBUSY`
+  handles (Neutrino's FILEID), but can still open for writing, or delete, a
+  file the old loader was writing: that one old handle is closed rather than
+  the request refused with `EBUSY`
 - writes to CSO/ZSO/CHD are refused with `EACCES` — those readers present a
   decompressed view, so writing at a decompressed offset would land bytes at
   the wrong place in the container

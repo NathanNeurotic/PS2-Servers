@@ -385,7 +385,7 @@ Only one marker may be applicable to a given reset:
 
 | Marker | Trigger | Meaning |
 |---|---|---|
-| `seq0 discovery resolved to replacement session` | The same PS2 IP:port sends DISCOVERY sequence zero during a live stream, and its next payload-bearing DATA starts again at 0 (Standard) or 1 (Modulo) instead of continuing the old sequence | A new loader took over the endpoint, as Neutrino does from RiptOPL. Edge reset the transport only: the old loader's open handles stay open for Neutrino's FILEID backend, and the new loader may still open for writing a file the old one was writing |
+| `seq0 discovery resolved to replacement session` | The same PS2 IP:port sends DISCOVERY sequence zero during a live stream, and its next payload-bearing DATA starts again at 0 (Standard) or 1 (Modulo) instead of continuing the old sequence | A new loader took over the endpoint, as Neutrino does from RiptOPL. Edge reset the transport only: the old loader's open handles stay open for Neutrino's FILEID backend, and the new loader may still open for writing, or delete, a file the old one was writing |
 | `peer sequence reset (seq 0 received)` | The same PS2 IP:port sends payload-bearing DATA sequence zero when zero is neither the next expected sequence nor its immediately previous sequence | Edge discarded stale stream state and accepted a same-endpoint restart |
 | `replacing stale session for IP` | A packet arrives from the same PS2 IP with a different UDP source port, and the old session has no active write or that write has been quiet for more than one second | Edge removed the old endpoint's worker/session and created one for the new endpoint |
 

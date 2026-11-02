@@ -60,7 +60,8 @@ closes its handles. A sequence-zero discovery followed by DATA that starts again
 at 0 or 1 is a new loader taking over the endpoint: the transport is reset but
 the old loader's handles stay open, as Neutrino's FILEID backend needs
 (`session.State.HandOff`). The new loader opening for writing a file one of
-them holds for writing closes that handle and takes over its write reservation.
+them holds for writing closes that handle and takes over its write reservation;
+deleting such a file closes the handle the same way.
 
 Strict `standard` and `modulo` modes remain diagnostic policies. They do not
 force a network topology: DATA is still accepted on either local socket.

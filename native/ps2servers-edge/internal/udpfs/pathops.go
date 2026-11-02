@@ -33,7 +33,8 @@ import (
 //
 // Edge adds one refusal the Desktop server has no state for: REMOVE of a file
 // that some peer holds open for writing is EBUSY, from the same single-writer
-// reservation that refuses a second writer.
+// reservation that refuses a second writer. As for a write OPEN, a handle that
+// a loader since replaced on the same endpoint left open is closed instead.
 
 // removeRefusesReadOnly makes REMOVE refuse a file whose read-only attribute
 // is set, with EACCES, as Windows' DeleteFile refuses it -- and with it the
@@ -131,6 +132,16 @@ func (s *Server) handleRemove(st *session.State, p []byte) {
 		return
 	}
 	busy, err := s.removeUnlessWriting(entry)
+	if busy && st.TakeOverWriter(entry) {
+		// Held by a handle a replaced loader on this endpoint left open, as
+		// openForWrite finds a file: the new loader deleting the file is not
+		// writing it through that handle, and left open the handle refuses
+		// the delete for as long as the session lasts.
+		busy, err = s.removeUnlessWriting(entry)
+		if !busy {
+			s.cfg.Log.Info("REMOVE took the file over from a replaced loader's handle", s.pathLogFields(st, path))
+		}
+	}
 	if busy {
 		s.cfg.Log.Warn("REMOVE refused, file is open for writing", s.pathLogFields(st, path))
 		s.sendPathResult(st, -eBUSY)
