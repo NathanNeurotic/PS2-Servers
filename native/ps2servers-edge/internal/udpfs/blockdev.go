@@ -217,6 +217,7 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 // the same WriteData flow a file write uses, so only the destination differs --
 // completeWrite routes on st.WriteIsBlock.
 func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
+	st.ResetWrite() // as handleWriteRequest does, so a refused BWRITE's chunks are dropped
 	handle, sector, count, ok := blockRequest(p)
 	if !ok {
 		s.sendWriteDone(st, -eINVAL)

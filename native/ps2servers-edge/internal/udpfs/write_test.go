@@ -346,6 +346,70 @@ func TestWriteToReadOnlyHandleIsRefused(t *testing.T) {
 	}
 }
 
+// A write refused at its request starts nothing, and leaves nothing of an
+// earlier write armed. The console sends every chunk of a write before it waits
+// for WRITE_DONE, so the rest of a refused write still arrives. A write the
+// console had given up on partway was still being assembled, and the refused
+// write's chunk 1 matched its chunk count: it joined that buffer, the buffer
+// was written into the earlier write's file, and a second WRITE_DONE went out
+// for the console to take as the answer to its next request.
+func TestARefusedWriteTakesNoChunksAfterAnUnfinishedOne(t *testing.T) {
+	half := sector('2')[:256]
+	for _, tc := range []struct {
+		name    string
+		request func(readOnly int32) []byte
+		chunk   []byte
+		want    int32
+	}{
+		{"WRITE through a read-only handle", func(ro int32) []byte {
+			return writeReqMsg(ro, 8, writeDataMsg(0, 2, []byte("1111")))
+		}, []byte("2222"), -eACCES},
+		{"WRITE to a handle that is not open", func(int32) []byte {
+			return writeReqMsg(999, 8, writeDataMsg(0, 2, []byte("1111")))
+		}, []byte("2222"), -eBADF},
+		{"WRITE declared over the cap", func(int32) []byte {
+			return writeReqMsg(1, preferredTransfer+1, writeDataMsg(0, 2, []byte("1111")))
+		}, []byte("2222"), -eFBIG},
+		{"BWRITE through a read-only handle", func(ro int32) []byte {
+			return append(blockMsg(protocol.BWriteRequest, ro, 0, 1), writeDataMsg(0, 2, half)...)
+		}, half, -eACCES},
+		{"BWRITE to a handle that is not open", func(int32) []byte {
+			return append(blockMsg(protocol.BWriteRequest, 999, 0, 1), writeDataMsg(0, 2, half)...)
+		}, half, -eBADF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "other.bin"), sector('O'), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			c := dial(t, startServerAt(t, root, false))
+			h := openForWriteOK(t, c, "save.bin", fioRead|fioWrite|fioCreate|fioTrunc)
+			if h != 1 {
+				t.Fatalf("save.bin was opened as handle %d; the over-the-cap case writes to handle 1", h)
+			}
+			ro := result(c.send(openMsg("other.bin", fioRead, false)))
+			if ro <= 0 {
+				t.Fatalf("OPEN other.bin returned %d", ro)
+			}
+			// The console gave up on this write after the first of its three chunks.
+			c.sendAcked(writeReqMsg(h, 12, writeDataMsg(0, 3, []byte("XXXX"))))
+
+			if got := result(c.send(tc.request(ro))); got != tc.want {
+				t.Fatalf("the refused request returned %d, want %d", got, tc.want)
+			}
+			c.sendNoReply(writeDataMsg(1, 2, tc.chunk))
+			reply := c.send(closeMsg(h))
+			if protocol.MessageType(reply[0]) != protocol.CloseReply {
+				t.Fatalf("the next reply was opcode 0x%02x with result %d, not the CLOSE's: "+
+					"the refused write's chunk was taken", reply[0], result(reply))
+			}
+			if data, err := os.ReadFile(filepath.Join(root, "save.bin")); err != nil || len(data) != 0 {
+				t.Fatalf("save.bin holds %q %v, want it empty", data, err)
+			}
+		})
+	}
+}
+
 func TestAppendModePreservesExistingBytes(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "log.sav"), []byte("head"), 0o644); err != nil {

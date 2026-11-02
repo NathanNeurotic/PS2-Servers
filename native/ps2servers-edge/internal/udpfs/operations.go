@@ -411,6 +411,11 @@ const preferredTransfer = 8 << 20
 // handleWriteRequest begins a write: handle plus total byte count, optionally
 // with the first WRITE_DATA chunk appended inline to the same datagram.
 func (s *Server) handleWriteRequest(st *session.State, p []byte) {
+	// Whatever write came before is over, also when this one is refused. The
+	// console sends every chunk before it waits for WRITE_DONE, so the rest of
+	// a refused write still arrives, and a write it gave up on partway would
+	// otherwise still be armed to take them.
+	st.ResetWrite()
 	if len(p) < 12 {
 		s.sendWriteDone(st, -eINVAL)
 		return
