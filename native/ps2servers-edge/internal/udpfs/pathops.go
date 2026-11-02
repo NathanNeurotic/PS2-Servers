@@ -23,6 +23,11 @@ import (
 //     is EEXIST rather than a folder made wherever the link points;
 //   - REMOVE of a real directory is EISDIR and RMDIR of anything else is
 //     ENOTDIR, decided from lstat so every host gives the same answer;
+//   - REMOVE and RMDIR of a path that passes through a symlinked folder or a
+//     junction are EACCES (filesystem.Root.RealFolders). Edge's DREAD lists a
+//     link to a folder as a folder (the Desktop server's lists a junction as
+//     one), so a console deleting a folder recursively would otherwise go
+//     into the link and empty the folder it points at;
 //   - RMDIR of the share root is EACCES, MKDIR of it EEXIST.
 //
 // Edge adds one refusal the Desktop server has no state for: REMOVE of a file
@@ -91,6 +96,9 @@ func (s *Server) handleRemove(st *session.State, p []byte) {
 		return
 	}
 	entry, _, err := s.root.Entry(path)
+	if err == nil {
+		err = s.root.RealFolders(path)
+	}
 	if err != nil {
 		s.sendPathResult(st, pathErrno(err))
 		return
@@ -126,6 +134,9 @@ func (s *Server) handleRmdir(st *session.State, p []byte) {
 		return
 	}
 	entry, isRoot, err := s.root.Entry(path)
+	if err == nil {
+		err = s.root.RealFolders(path)
+	}
 	if err != nil {
 		s.sendPathResult(st, pathErrno(err))
 		return
@@ -177,7 +188,7 @@ func (s *Server) pathLogFields(st *session.State, path string) map[string]any {
 // answers a console file manager acts on. Windows reports its own error codes,
 // not errno values, so there only the portable classes are mapped.
 func pathErrno(err error) int32 {
-	if errors.Is(err, filesystem.ErrEscape) {
+	if errors.Is(err, filesystem.ErrEscape) || errors.Is(err, filesystem.ErrThroughLink) {
 		return -int32(syscall.EACCES)
 	}
 	var en syscall.Errno

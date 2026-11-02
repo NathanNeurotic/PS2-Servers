@@ -316,6 +316,7 @@ With writes enabled:
 | `RMDIR` of a file or a symlink, even one to a folder | `ENOTDIR`; `RMDIR` removes only a real, empty folder |
 | `RMDIR` of the share root | `EACCES` |
 | `MKDIR` of a name that exists, a dangling symlink included | `EEXIST`; nothing is created where the link points |
+| `REMOVE` or `RMDIR` of a path through a symlinked folder or a junction, such as `LINK/save.bin` | `EACCES` — `DREAD` lists a link to a folder as a folder, so a console deleting a folder recursively would otherwise go into the link and empty the folder it points at. Delete by the real path; `REMOVE` of the link itself still deletes the link |
 
 Block-device writes (`BWRITE`) are implemented too, when `--block-device` is
 set. They reuse the same chunk-assembly path as file writes, so the table above
@@ -337,7 +338,8 @@ and writes, malformed packet lengths, unknown packet types, and excessive open
 handles. It serves writes, `MKDIR`, `REMOVE` and `RMDIR` unless started with
 `--read-only`. Those three act on the entry named: its parent must resolve
 inside the root, and a symlink in the last component is the link itself, so
-deleting one never reaches its target.
+deleting one never reaches its target. `REMOVE` and `RMDIR` also refuse a path
+that passes through a symlinked folder or a junction.
 Idle sessions are removed, their files are closed, and any write reservation
 they held is released. A loader that takes over a console's endpoint keeps the
 files the old loader had open, but opening one of them for writing itself

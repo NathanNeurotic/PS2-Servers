@@ -8,6 +8,11 @@ deleting it from the PS2 deleted GAMES/real.elf, answered 0 and left the link.
 RMDIR of a link to an empty folder removed that folder the same way, and MKDIR
 over a dangling link created the directory wherever the link pointed.
 
+REMOVE and RMDIR also went through a linked folder on the way: deleting
+fulllink/keep.bin deleted FULL/keep.bin. A Windows junction is listed by DREAD
+as a folder, so a console deleting a folder recursively would go into one and
+empty the folder it points at; both kinds of link are now refused there.
+
 These drive the real handlers of both server classes -- the standalone
 UdpfsServer and ps2servers_core.AutoUdpfsServer, which the launcher runs -- on
 a real filesystem, and check what is left on disk afterwards.
@@ -24,6 +29,7 @@ import tempfile
 import threading
 import types
 import unittest
+from unittest import mock
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _UDPFS = os.path.join(_ROOT, "udpfs_server")
@@ -37,6 +43,7 @@ ADDR = ("192.168.0.245", 62966)
 
 MKDIR, REMOVE, RMDIR = 0x20, 0x22, 0x24
 O_WRONLY, O_CREAT, O_TRUNC = 0x0002, 0x0200, 0x0400
+IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003  # winnt.h: a junction
 
 ELF_BYTES = b"real elf bytes"
 
@@ -259,13 +266,60 @@ class _PathOpsMixin:
         self.assertEqual(os.listdir(os.path.join(self.outside, "OUTDIR")), [])
         self.assertTrue(os.path.isdir(self.root))
 
-    def test_links_inside_the_parent_still_resolve_inside_the_root(self):
-        # Intermediate components may be links; only the result must stay in.
+    def test_mkdir_through_a_linked_folder_stays_inside_the_root(self):
+        # Creating through a link only has to stay inside the root.
         self.assertEqual(self.op(MKDIR, "fulllink/SUB"), 0)
         self.assertTrue(os.path.isdir(self.at("FULL", "SUB")))
-        self.assertEqual(self.op(RMDIR, "fulllink/SUB"), 0)
-        self.assertEqual(self.op(REMOVE, "fulllink/keep.bin"), 0)
-        self.assertFalse(os.path.exists(self.at("FULL", "keep.bin")))
+
+    # -- deleting through a linked folder -----------------------------------------
+    def test_deletes_do_not_go_through_a_linked_folder(self):
+        # Deleting through fulllink -> FULL deletes what is in FULL, a folder
+        # the console never named. Edge lists any link to a folder as a
+        # folder, and a console deleting a folder recursively goes into it.
+        os.makedirs(self.at("FULL", "SUB"))
+        for opcode, path in ((REMOVE, "fulllink/keep.bin"), (RMDIR, "fulllink/SUB"),
+                             (REMOVE, "fulllink\\keep.bin"), (REMOVE, "./fulllink/keep.bin")):
+            with self.subTest(opcode=hex(opcode), path=path):
+                self.assertEqual(self.op(opcode, path), -errno.EACCES)
+        self.assertEqual(self.read(self.at("FULL", "keep.bin")), b"keep")
+        self.assertTrue(os.path.isdir(self.at("FULL", "SUB")))
+        # By its own path the folder is the console's to delete, and so is
+        # the link itself, which REMOVE deletes without touching FULL.
+        self.assertEqual(self.op(RMDIR, "FULL/SUB"), 0)
+        self.assertEqual(self.op(REMOVE, "fulllink"), 0)
+        self.assertGone("fulllink")
+        self.assertEqual(self.read(self.at("FULL", "keep.bin")), b"keep")
+
+    def test_deletes_do_not_go_through_a_junction(self):
+        # lstat() reports a Windows junction as a directory, so DREAD lists
+        # one as a folder; only st_reparse_tag gives it away. Junctions exist
+        # only on Windows, so a real folder stands in for one here.
+        os.makedirs(self.at("JUNC", "SUB"))
+        self.write(self.at("JUNC", "keep.bin"), b"keep")
+        junction = os.path.join(self.server.root_dir, "JUNC")
+        real_lstat = os.lstat
+
+        def lstat(path, *args, **kwargs):
+            st = real_lstat(path, *args, **kwargs)
+            if os.fspath(path) != junction:
+                return st
+            return types.SimpleNamespace(
+                st_mode=st.st_mode, st_reparse_tag=IO_REPARSE_TAG_MOUNT_POINT)
+
+        with mock.patch.object(srv.os, "lstat", lstat):
+            removed = self.op(REMOVE, "JUNC/keep.bin")
+            rmdir = self.op(RMDIR, "JUNC/SUB")
+        self.assertEqual(removed, -errno.EACCES)
+        self.assertEqual(rmdir, -errno.EACCES)
+        self.assertEqual(self.read(self.at("JUNC", "keep.bin")), b"keep")
+        self.assertTrue(os.path.isdir(self.at("JUNC", "SUB")))
+
+    def test_a_file_used_as_a_folder_is_not_a_link(self):
+        # Only links are refused; anything else is the operation's to answer.
+        self.assertEqual(self.op(REMOVE, "FULL/keep.bin/x"), -errno.ENOTDIR)
+        self.assertEqual(self.op(RMDIR, "FULL/keep.bin/x"), -errno.ENOTDIR)
+        self.assertEqual(self.op(REMOVE, "FULL/NOPE/x"), -errno.ENOENT)
+        self.assertEqual(self.read(self.at("FULL", "keep.bin")), b"keep")
 
     def test_open_for_create_through_a_link_out_of_the_root_stays_refused(self):
         flags = O_WRONLY | O_CREAT | O_TRUNC

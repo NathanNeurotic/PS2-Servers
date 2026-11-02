@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/filesystem"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 )
 
@@ -246,7 +247,7 @@ func TestMkdirCreatesAndReportsWhatExists(t *testing.T) {
 	share.assertIntact()
 }
 
-func TestLinksInsideTheParentStillResolveInsideTheRoot(t *testing.T) {
+func TestMkdirThroughALinkedFolderStaysInsideTheRoot(t *testing.T) {
 	share := newPathOpsShare(t)
 	c := dial(t, startServerAt(t, share.root, false))
 
@@ -256,13 +257,86 @@ func TestLinksInsideTheParentStillResolveInsideTheRoot(t *testing.T) {
 	if info, err := os.Stat(share.at("FULL/SUB")); err != nil || !info.IsDir() {
 		t.Fatalf("FULL/SUB was not created: %v", err)
 	}
-	if got := c.pathOp(protocol.RmdirRequest, "fulllink/SUB"); got != 0 {
-		t.Fatalf("RMDIR through an in-root link returned %d", got)
+}
+
+// Edge's DREAD lists a link to a folder as a folder, so a console deleting a
+// folder recursively goes into the link like any other subfolder. Deleting
+// through it would empty the folder the link points at, which the console was
+// never asked to touch: REMOVE and RMDIR refuse a path through a linked folder,
+// as the Desktop server does.
+func TestDeletesDoNotGoThroughALinkedFolder(t *testing.T) {
+	share := newPathOpsShare(t)
+	share.mkdir("FULL/SUB")
+	c := dial(t, startServerAt(t, share.root, false))
+
+	root, err := filesystem.Open(share.root)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := c.pathOp(protocol.RemoveRequest, "fulllink/keep.bin"); got != 0 {
-		t.Fatalf("REMOVE through an in-root link returned %d", got)
+	listed, err := root.List("")
+	if err != nil {
+		t.Fatal(err)
 	}
-	share.assertGone("FULL/keep.bin")
+	asFolder := false
+	for _, e := range listed {
+		if e.Name == "fulllink" && e.Mode == 0x1000 {
+			asFolder = true
+		}
+	}
+	if !asFolder {
+		t.Fatalf("DREAD no longer lists the link to FULL as a folder: %+v", listed)
+	}
+
+	for _, req := range []struct {
+		op   protocol.MessageType
+		path string
+	}{
+		{protocol.RemoveRequest, "fulllink/keep.bin"},
+		{protocol.RmdirRequest, "fulllink/SUB"},
+		{protocol.RemoveRequest, `fulllink\keep.bin`},
+		{protocol.RemoveRequest, "./fulllink/keep.bin"},
+	} {
+		if got := c.pathOp(req.op, req.path); got != errnoResult(syscall.EACCES) {
+			t.Errorf("%s %q returned %d, want -EACCES", pathOpName(req.op), req.path, got)
+		}
+	}
+	share.assertIntact()
+	if info, err := os.Stat(share.at("FULL/SUB")); err != nil || !info.IsDir() {
+		t.Fatalf("FULL/SUB is gone: %v", err)
+	}
+
+	// By its own path the folder is the console's to delete, and so is the
+	// link itself, which REMOVE deletes without touching FULL.
+	if got := c.pathOp(protocol.RmdirRequest, "FULL/SUB"); got != 0 {
+		t.Fatalf("RMDIR FULL/SUB returned %d, want 0", got)
+	}
+	if got := c.pathOp(protocol.RemoveRequest, "fulllink"); got != 0 {
+		t.Fatalf("REMOVE of the link returned %d, want 0", got)
+	}
+	share.assertGone("fulllink")
+	share.assertIntact()
+}
+
+// Only links are refused on the way; anything else is the operation's to
+// answer, as on the Desktop server.
+func TestAFileUsedAsAFolderIsNotALink(t *testing.T) {
+	share := newPathOpsShare(t)
+	c := dial(t, startServerAt(t, share.root, false))
+
+	for _, req := range []struct {
+		op   protocol.MessageType
+		path string
+		want int32
+	}{
+		{protocol.RemoveRequest, "FULL/keep.bin/x", errnoResult(syscall.ENOTDIR)},
+		{protocol.RmdirRequest, "FULL/keep.bin/x", errnoResult(syscall.ENOTDIR)},
+		{protocol.RemoveRequest, "FULL/NOPE/x", errnoResult(syscall.ENOENT)},
+	} {
+		if got := c.pathOp(req.op, req.path); got != req.want {
+			t.Errorf("%s %q returned %d, want %d", pathOpName(req.op), req.path, got, req.want)
+		}
+	}
+	share.assertIntact()
 }
 
 func TestPathOpsCannotLeaveTheRoot(t *testing.T) {

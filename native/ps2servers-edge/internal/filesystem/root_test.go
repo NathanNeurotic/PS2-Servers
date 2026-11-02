@@ -176,6 +176,41 @@ func TestEntryDoesNotFollowTheLastComponent(t *testing.T) {
 	}
 }
 
+// RealFolders is the second gate for REMOVE and RMDIR: no folder on the way to
+// the last component may be a link, even one that stays inside the root.
+func TestRealFoldersRefusesALinkedFolderOnTheWay(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink permission varies")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "GAMES", "SAVES"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustSymlink(t, "GAMES", filepath.Join(root, "gamelink"))
+	mustSymlink(t, "SAVES", filepath.Join(root, "GAMES", "savelink"))
+	mustWrite(t, filepath.Join(root, "GAMES", "real.sav"), "save")
+	r, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, client := range []string{"gamelink/x.sav", "gamelink/SAVES/x.sav", "GAMES/savelink/x.sav", `gamelink\x.sav`, "./gamelink/x.sav"} {
+		if err := r.RealFolders(client); !errors.Is(err, ErrThroughLink) {
+			t.Errorf("RealFolders(%q) = %v, want ErrThroughLink", client, err)
+		}
+	}
+	// A link as the last component is the entry itself, not a folder passed
+	// through; and real folders, or the root, are what they should be. A
+	// file used as a folder is no link either: the operation says ENOTDIR.
+	for _, client := range []string{"gamelink", "GAMES/savelink", "GAMES/SAVES/x.sav", "GAMES/./x.sav", "x.sav", "", "/", "./", "GAMES/real.sav/x"} {
+		if err := r.RealFolders(client); err != nil {
+			t.Errorf("RealFolders(%q) = %v, want nil", client, err)
+		}
+	}
+	if err := r.RealFolders("NOPE/x.sav"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a missing folder gave %v, want ErrNotExist", err)
+	}
+}
+
 // Windows strips trailing dots and spaces from a last component, so the OS
 // would act on a different entry than the one checked: "..." is the parent
 // itself, which for a top-level name is the root.

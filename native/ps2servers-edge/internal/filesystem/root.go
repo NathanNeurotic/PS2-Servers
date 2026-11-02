@@ -13,6 +13,10 @@ import (
 
 var ErrEscape = errors.New("path escapes configured root")
 
+// ErrThroughLink refuses a deletion whose path passes through a symlinked
+// folder; see Root.RealFolders.
+var ErrThroughLink = errors.New("path passes through a symlinked folder")
+
 type Root struct {
 	path      string
 	canonical string
@@ -107,14 +111,7 @@ func (r *Root) Resolve(client string, allowMissing bool) (string, error) {
 //
 // isRoot reports that client names the root itself: "", ".", "/" or "./".
 func (r *Root) Entry(client string) (path string, isRoot bool, err error) {
-	root := true
-	for _, part := range strings.FieldsFunc(client, func(c rune) bool { return c == '/' || c == '\\' }) {
-		if part != "." {
-			root = false
-			break
-		}
-	}
-	if root {
+	if namesRoot(client) {
 		return r.canonical, true, nil
 	}
 	candidate, err := r.candidate(client)
@@ -134,6 +131,62 @@ func (r *Root) Entry(client string) (path string, isRoot bool, err error) {
 		return "", false, ErrEscape
 	}
 	return entry, entry == r.canonical, nil
+}
+
+// RealFolders reports ErrThroughLink when a folder that client passes through
+// on the way to its last component is a symlink or a Windows junction rather
+// than a real folder. Deleting through one deletes what is in the folder it
+// points at, and List shows a link to a folder as a folder, so a console
+// deleting a folder recursively would go on to empty one it never named.
+// REMOVE and RMDIR call it after Entry has accepted client.
+func (r *Root) RealFolders(client string) error {
+	if namesRoot(client) {
+		return nil
+	}
+	candidate, err := r.candidate(client)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(r.canonical, filepath.Dir(candidate))
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return nil
+	}
+	dir := r.canonical
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		dir = filepath.Join(dir, part)
+		info, err := os.Lstat(dir)
+		if err != nil {
+			return err
+		}
+		switch {
+		case info.IsDir():
+			// A real folder. On Windows Lstat leaves the directory bit off
+			// only for a symlink or a junction, so a reparse-point folder
+			// that is neither, such as a cloud placeholder, passes too.
+		case info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0:
+			// A symlink, or a junction, which Go reports as a symlink before
+			// 1.23 and as irregular since.
+			return ErrThroughLink
+		default:
+			// A file used as a folder: the operation answers ENOTDIR.
+			return nil
+		}
+	}
+	return nil
+}
+
+// namesRoot reports that client names the root itself: nothing but
+// separators and "." components.
+func namesRoot(client string) bool {
+	for _, part := range strings.FieldsFunc(client, func(c rune) bool { return c == '/' || c == '\\' }) {
+		if part != "." {
+			return false
+		}
+	}
+	return true
 }
 
 // candidate refuses any client path that could name a place outside the root

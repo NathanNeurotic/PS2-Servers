@@ -79,7 +79,10 @@ drive-qualified paths, `..`, and symlink escapes before opening files. Directory
 enumeration omits entries that cannot be resolved safely beneath the configured
 root. `MKDIR`, `REMOVE` and `RMDIR` resolve only the parent of their path
 (`filesystem.Root.Entry`), so like `mkdir(2)`, `unlink(2)` and `rmdir(2)` they
-act on a symlink itself and never on its target.
+act on a symlink itself and never on its target. Directory enumeration reports
+a link to a folder as a folder, so `REMOVE` and `RMDIR` also refuse a path that
+passes through one (`filesystem.Root.RealFolders`): a console deleting a folder
+recursively would otherwise empty the folder the link points at.
 
 Plain files and ISO images are read directly. CSO uses zlib and ZSO uses a
 bounded raw-LZ4 decoder. Compressed images are exposed with virtual `.iso`

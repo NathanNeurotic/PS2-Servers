@@ -68,6 +68,10 @@ Guarantees:
   folder is `EISDIR`, RMDIR of anything but a real, empty folder fails
   (`ENOTDIR` for a symlink, even one to a folder), and the share root
   cannot be removed
+- REMOVE and RMDIR refuse with `EACCES` a path that passes through a
+  symlinked folder or a junction: DREAD lists a link to a folder as a
+  folder, so a recursive delete from the console would otherwise empty the
+  folder the link points at
 - `--read-only` refuses MKDIR, REMOVE and RMDIR with `EACCES`, as it
   refuses a write
 

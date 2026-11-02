@@ -216,6 +216,11 @@ class MsgType(IntEnum):
 FIO_S_IFREG = 0x2000
 FIO_S_IFDIR = 0x1000
 
+# The reparse tag of a Windows junction. lstat() reports a junction as a
+# directory, so only os.stat_result.st_reparse_tag tells one apart; the stat
+# module defines this constant on Windows alone.
+IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+
 # Limits
 MAX_DATA_PAYLOAD = 1408  # Maximum UDPRDMA payload
 MAX_HANDLES = 64  # open handles per client (matches udpfsd; was 32 originally)
@@ -1219,6 +1224,36 @@ class UdpfsServer:
             return None
         return entry
 
+    def _through_linked_folder(self, client_path: str) -> bool:
+        """True when a folder the path passes through is a symlink or junction.
+
+        The second gate for REMOVE and RMDIR, after _resolve_entry(), which
+        accepts a link on the way as long as it resolves inside the root.
+        Deleting through one deletes what is in the folder it points at, which
+        the console never named: lstat() reports a Windows junction as a
+        directory, so DREAD lists one as a folder, and a console deleting a
+        folder recursively would go into the junction and empty its target.
+        Symlinks are refused as well, as Edge refuses them -- its DREAD lists
+        any link to a folder as a folder. The link itself, the last
+        component, remains the console's to delete.
+
+        A folder that cannot be lstat()ed is left for the operation to report.
+        """
+        parts = [p for p in client_path.replace('\\', '/').split('/')
+                 if p not in ('', '.')]
+        for depth in range(1, len(parts)):
+            # Joined as _resolve_path() joins it, so this walks the path that
+            # _resolve_entry() resolved.
+            folder = os.path.join(self.root_dir, '/'.join(parts[:depth]))
+            try:
+                st = os.lstat(folder)
+            except OSError:
+                return False
+            if (stat_mod.S_ISLNK(st.st_mode) or
+                    getattr(st, 'st_reparse_tag', 0) == IO_REPARSE_TAG_MOUNT_POINT):
+                return True
+        return False
+
     def _transform_compressed_name(self, name: str) -> str:
         """Transform supported compressed extensions to .iso for directory listing."""
         if not self.enable_compression:
@@ -2173,6 +2208,10 @@ class UdpfsServer:
         if resolved is None:
             self._send_result_reply(addr, -errno.EACCES)
             return
+        if self._through_linked_folder(path):
+            self._print_event(f"[{addr[0]}:{addr[1]}] REMOVE '{path}' -> EACCES (through a linked folder)")
+            self._send_result_reply(addr, -errno.EACCES)
+            return
 
         try:
             # A real directory is refused here, the same answer on every host:
@@ -2208,6 +2247,10 @@ class UdpfsServer:
         # The share root is not the console's to remove: rmdir on an empty
         # served folder would otherwise delete it.
         if resolved is None or resolved == self.root_dir:
+            self._send_result_reply(addr, -errno.EACCES)
+            return
+        if self._through_linked_folder(path):
+            self._print_event(f"[{addr[0]}:{addr[1]}] RMDIR '{path}' -> EACCES (through a linked folder)")
             self._send_result_reply(addr, -errno.EACCES)
             return
 
