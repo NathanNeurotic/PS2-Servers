@@ -8,6 +8,7 @@ import (
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/memory"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/sessionstats"
 	"net"
 	"os"
 	"sync"
@@ -57,9 +58,14 @@ type Config struct {
 	// MetricsPeriod logs a periodic counter snapshot when > 0, matching the
 	// Desktop server's --metrics / --metrics-period.
 	MetricsPeriod time.Duration
-	Log           *edgelog.Logger
-	ServerName    string
-	FallbackDelay time.Duration
+	// SessionSummary prints one SESSION line per console when it goes quiet
+	// for a minute or the server stops, in the format shared with every other
+	// PS2 Servers service (internal/sessionstats). One counter update per
+	// request; nothing is logged per request.
+	SessionSummary bool
+	Log            *edgelog.Logger
+	ServerName     string
+	FallbackDelay  time.Duration
 }
 
 type inbound struct {
@@ -92,6 +98,7 @@ type Server struct {
 	wg         sync.WaitGroup
 
 	stats    metrics
+	summary  *sessionstats.Stats // nil unless cfg.SessionSummary
 	blockDev *blockDevice
 
 	// transferCap bounds one BREAD and one assembled write, resolved once at
@@ -170,6 +177,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	s := &Server{cfg: cfg, root: root, sessions: make(map[string]*peerWorker), incoming: make(chan inbound, 256), closed: make(chan struct{}), transferCap: cfg.MaxTransferBytes}
 	s.stats.started = time.Now()
+	if cfg.SessionSummary {
+		s.summary = sessionstats.New("udpfs", cfg.Log.Line)
+	}
 	if cfg.BlockDevice != "" {
 		// Opened once and shared: every session addresses the same image
 		// through handle 0, using positional I/O so two consoles cannot move
@@ -297,6 +307,7 @@ func (s *Server) Close() error {
 		for _, w := range workers {
 			w.state.Close()
 		}
+		s.summary.Stop() // one final SESSION line per console
 	})
 	s.wg.Wait()
 	return err
@@ -367,6 +378,7 @@ func (s *Server) reaper() {
 				item.w.stop()
 				s.cfg.Log.Info("session expired", map[string]any{"peer": item.key, "idle": item.id.String()})
 			}
+			s.summary.Expire() // consoles quiet for a minute get their SESSION line
 		}
 	}
 }
@@ -446,6 +458,7 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	st.ReleaseWriter = s.releaseWriter
 	w := &peerWorker{state: st, queue: make(chan inbound, 256), done: make(chan struct{})}
 	s.sessions[key] = w
+	s.sessionRecord(st, "connections", 1) // a DISCOVERY that made a session: the console found us
 	s.cfg.Log.Debug("session created", map[string]any{
 		"peer":                key,
 		"ip":                  peerIP,
@@ -457,6 +470,25 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	go s.worker(w)
 	return w
 }
+
+// sessionRecord adds to one SESSION counter for the console behind st. The
+// client is the IP: a console that re-discovers from a new source port is the
+// same console to the person reading the summary.
+func (s *Server) sessionRecord(st *session.State, kind string, count int64) {
+	if s.summary == nil || st == nil || st.Peer == nil {
+		return
+	}
+	s.summary.Record(st.Peer.IP.String(), kind, count)
+}
+
+// sessionTouch refreshes a console's last-seen time without counting anything.
+func (s *Server) sessionTouch(st *session.State) {
+	if s.summary == nil || st == nil || st.Peer == nil {
+		return
+	}
+	s.summary.Touch(st.Peer.IP.String())
+}
+
 func (s *Server) worker(w *peerWorker) {
 	defer s.wg.Done()
 	for {

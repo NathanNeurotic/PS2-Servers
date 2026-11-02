@@ -33,6 +33,7 @@ both can transfer concurrently.
 - ISO, CSO/CISO, ZSO/ZISO, with a `--compression-cache-size` block cache
 - `--no-compression` to serve containers as raw bytes (a diagnostic)
 - `--metrics` periodic transfer counters
+- `--session-summary` one `SESSION` line per console (udpfs, smb and udpbd)
 - text and JSON logs
 - graceful SIGINT/SIGTERM shutdown
 

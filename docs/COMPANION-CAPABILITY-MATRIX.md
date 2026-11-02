@@ -15,7 +15,7 @@ level yet. **Every row is NOT TESTED on a PS2.**
 
 | Source | Commit | Used for |
 |---|---|---|
-| PS2-Servers `main` | `d862ffa` (#261 merge) | Everything in this file |
+| PS2-Servers `main` | `0b72423` (#270 merge), plus the Edge session-summary branch for the telemetry row | Everything in this file |
 | [RiptOPL](https://github.com/NathanNeurotic/RiptOPL) `rebuild/main` | `4ec6c68` (2026-10-31) | Ember layout (`include/cuesupport.h`, `src/sources/cuesupport.cpp`), PNG/CLUT alpha (`src/gfx/textures.cpp`), network keys (`include/config.h`, `include/opl.h`, `src/app/settingsio.cpp`) |
 | [Open-PS2-Loader](https://github.com/NathanNeurotic/Open-PS2-Loader) | `bfebafdd` | HTTP list parser `src/httpcatalog.c`, compiled by `conformance/integration/riptopl_http/run.py` |
 | [PS2TVCRT / FastLoader](https://github.com/NathanNeurotic/PS2TVCRT) README | `1844bd1` | Feature targets only (its claims are not hardware results) |
@@ -60,7 +60,7 @@ descriptors. The cases are:
 | Library root bound to server profiles (opt-in, with preview and rollback) | missing | none | none | none |
 | Guided setup | present | `launcher/setup_guide.py` (read-only text guide) | `test_setup_guide.py` | host-tested |
 | RiptOPL settings export (versioned, read-only) | present | `launcher/riptopl_profile.py`, `launcher/riptopl_export.py`, ABOUT **RiptOPL settings…** | `test_riptopl_profile.py` | host-tested; keys checked against RiptOPL `settingsio.cpp`; SMB2/SMB3 refused |
-| Cross-service session telemetry | partial | Shared `SESSION` line format (`launcher/session_stats.py`), opt-in (`--session-summary`) on HTTP, SMBv1, SMBv2/SMBv3, UDPFS (Desktop/Core) and UDPBD; final lines also on Windows Stop; UDPFS stall report | `test_session_summary.py`, `test_session_view.py`, `test_cooperative_stop.py`, `test_udpfs_stall_report.py` | host-tested; the launcher's SESSIONS tab shows the lines from every service; Edge in review (#272) |
+| Cross-service session telemetry | present | Shared `SESSION` line format (`launcher/session_stats.py`), opt-in (`--session-summary`) on HTTP, SMBv1, SMBv2/SMBv3, UDPFS (Desktop/Core) and UDPBD, and on Edge udpfs/smb/udpbd (`internal/sessionstats`); final lines also on Windows Stop; UDPFS stall report | `test_session_summary.py`, `test_session_view.py`, `test_cooperative_stop.py`, `test_udpfs_stall_report.py` | host-tested; the launcher's SESSIONS tab shows the lines from every service |
 | Offline VMC creation | intentionally missing for now | none | none | RiptOPL already creates per-game VMCs; HTTP and virtual exFAT stay read-only |
 
 ## Known limits found by the fixture

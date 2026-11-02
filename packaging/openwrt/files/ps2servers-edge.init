@@ -79,6 +79,7 @@ start_udpfs() {
         [ "$read_only" -eq 1 ] && procd_append_param command --read-only
         append_bool_flag main single_port --single-port
         append_bool_flag main verbose --verbose
+        append_bool_flag main session_summary --session-summary
 
         # Block access (BREAD/BWRITE) is served by the same UDPFS instance as the
         # file share, so it belongs here rather than in a second service. Leaving
@@ -144,6 +145,11 @@ start_smb() {
         config_get_bool read_only smb read_only 1
         [ "$read_only" -eq 1 ] && procd_append_param command --read-only
         append_bool_flag smb verbose --verbose
+        append_bool_flag smb session_summary --session-summary
+        # procd sends SIGKILL 5 s after SIGTERM by default. The smb command
+        # waits up to 10 s for open connections to close (smbShutdownWait in
+        # main.go) before printing its final SESSION lines, so give it 15.
+        procd_set_param term_timeout 15
 
         common_params
         procd_close_instance
@@ -177,6 +183,7 @@ start_udpbd() {
         config_get_bool read_only udpbd read_only 1
         [ "$read_only" -eq 1 ] && procd_append_param command --read-only
         append_bool_flag udpbd verbose --verbose
+        append_bool_flag udpbd session_summary --session-summary
 
         common_params
         procd_close_instance

@@ -120,6 +120,7 @@ func schema(version string) *Schema {
 					{Name: "compression_cache_size", Type: TypeInt, Default: 32, Min: fnum(0), Max: fnum(4096), EnforcedBy: EnforcedByServer, Doc: "decompressed blocks cached per open image; 0 disables"},
 					{Name: "metrics", Type: TypeBool, Default: false, Doc: "log periodic transfer counters to syslog"},
 					{Name: "metrics_period", Type: TypeDuration, Default: "1m", MinValue: "1s", MaxValue: "24h", EnforcedBy: EnforcedByServer, AppliesWhen: "metrics", Doc: "how often metrics are logged; only used when metrics is 1"},
+					{Name: "session_summary", Type: TypeBool, Default: false, Doc: "one SESSION line per console when it goes quiet for a minute or the service stops: connections, list, open, read, bytes, write, close, errors. Nothing per request"},
 				},
 			},
 			{
@@ -136,6 +137,7 @@ func schema(version string) *Schema {
 					{Name: "status_port", Type: TypeInt, Default: 0, Min: fnum(-1), Max: fnum(65535), EnforcedBy: EnforcedByAPI, Doc: "router status query port: 0 is off, -1 is the standard discovery port (which udpfs already owns -- set -1 only when smb is the only service)"},
 					{Name: "log_format", Type: TypeEnum, Default: "text", Values: []string{"text", "json"}, EnforcedBy: EnforcedByAPI},
 					{Name: "verbose", Type: TypeBool, Default: false, Doc: "verbose protocol logging"},
+					{Name: "session_summary", Type: TypeBool, Default: false, Doc: "one SESSION line per console when it goes quiet for a minute or the service stops: connections, list, open, read, bytes, write, close, errors. Nothing per request"},
 				},
 			},
 			{
@@ -152,6 +154,7 @@ func schema(version string) *Schema {
 					{Name: "status_port", Type: TypeInt, Default: 0, Min: fnum(-1), Max: fnum(65535), EnforcedBy: EnforcedByAPI, Doc: "router status query port: 0 is off, -1 is the standard discovery port (set -1 only when udpbd is the only service)"},
 					{Name: "log_format", Type: TypeEnum, Default: "text", Values: []string{"text", "json"}, EnforcedBy: EnforcedByAPI},
 					{Name: "verbose", Type: TypeBool, Default: false, Doc: "verbose protocol logging"},
+					{Name: "session_summary", Type: TypeBool, Default: false, Doc: "one SESSION line per console when it goes quiet for a minute or the service stops: connections, list, open, read, bytes, write, close, errors. Nothing per request"},
 				},
 			},
 			{

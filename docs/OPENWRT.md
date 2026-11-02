@@ -31,6 +31,7 @@ config udpfs 'main'
     option compression_cache_size '32'
     option metrics '0'
     option metrics_period '1m'
+    option session_summary '0'
 
 config webui 'webui'
     option enabled '0'
@@ -64,6 +65,7 @@ The UDPFS options map to Edge flags as follows:
 | `compression_cache_size` | `--compression-cache-size` | decompressed blocks kept per image, `0`–`4096` |
 | `metrics` | `--metrics` | log periodic transfer counters |
 | `metrics_period` | `--metrics-period` | how often, `1s`–`24h`; only applied with `metrics` |
+| `session_summary` | `--session-summary` | one `SESSION` line per console when it goes quiet for a minute, is pushed out past 64 tracked consoles, or the service stops; also in the `smb` and `udpbd` sections |
 
 The `procd` service runs as the dedicated `ps2edge` user, restarts on failure,
 and passes the UCI values to the first-party Edge CLI. If the game mount is not
