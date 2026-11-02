@@ -189,6 +189,8 @@ def _smb2_argv(v, smb_version):
         args += ["--user", "{}:{}".format(user, password)]
     if v.get("verbose"):
         args.append("-v")
+    if v.get("session_summary"):
+        args.append("--session-summary")
     return args
 
 
@@ -226,6 +228,11 @@ _SMB2_FIELDS = [
     Field("bind", "Bind address", "text", default="", advanced=True,
           help="Interface to bind (blank = all)."),
     Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+    Field("session_summary", "Session summary", "bool", default=False, advanced=True,
+          help="Print one SESSION line per console when it goes quiet for a "
+               "minute or the server stops: connections, folder lists, opens, "
+               "reads, writes and errors. Nothing is logged per request. Counts "
+               "are what the PC served, not proof a game ran."),
 ]
 
 

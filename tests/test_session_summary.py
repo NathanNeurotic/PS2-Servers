@@ -391,5 +391,87 @@ class Smbv1WiringTests(unittest.TestCase):
                       servers.SMBV1.build_argv(dict(values, session_summary=True)))
 
 
+class Smb2WiringTests(unittest.TestCase):
+    """A real SMB2 server on loopback, driven by the test suite's client."""
+
+    def _server(self, lines):
+        import shutil
+        from tests import test_smb2_server as t2
+
+        share_dir = tempfile.mkdtemp(prefix="ps2smb2-session-")
+        self.addCleanup(shutil.rmtree, share_dir, True)
+        with open(os.path.join(share_dir, "game.iso"), "wb") as f:
+            f.write(b"\x5a" * 4096)
+        os.mkdir(os.path.join(share_dir, "APPS"))
+        server = t2.Smb2Server({"games": t2.Share("games", share_dir)},
+                               t2.Authenticator({t2.USER: t2.PASSWORD}),
+                               ceiling=t2.wire.CEILING_SMB3)
+        server.session_stats = ss.SessionStats("smbv3", emit=lines.append)
+        port = server.listen("127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        client = t2.Client(port)
+        self.addCleanup(client.close)
+        client.negotiate()
+        self.assertEqual(client.session_setup(t2.USER, t2.PASSWORD), 0)
+        self.assertEqual(client.tree_connect("games"), 0)
+        return server, client, t2.wire
+
+    def test_commands_bytes_and_errors_are_counted(self):
+        lines = []
+        server, client, wire = self._server(lines)
+
+        status, fid = client.create("game.iso")
+        self.assertEqual(status, 0)
+        self.assertEqual(client.read(fid, 0, 1024)[1], b"\x5a" * 1024)
+        self.assertEqual(client.read(fid, 1 << 20, 512)[0], wire.STATUS_END_OF_FILE)  # normal
+        self.assertEqual(client.close_handle(fid), 0)
+        status, _ = client.create("MISSING.CFG")                       # a probe, not an error
+        self.assertEqual(status, wire.STATUS_OBJECT_NAME_NOT_FOUND)
+        status, root = client.create("", directory=True)
+        self.assertEqual(status, 0)
+        # One listing is two QUERY_DIRECTORY requests: the page, then the
+        # NO_MORE_FILES that ends it. Both count, as FIND_NEXT2 does on SMBv1.
+        self.assertIn("game.iso", client.query_directory(root, "*"))
+        self.assertNotEqual(client.read(b"\xff" * 16, 0, 16)[0], 0)   # bogus handle: an error
+        self.assertNotEqual(client.write(root, 0, b"x")[0], 0)         # write to a folder: an error
+
+        server.stop()                                                   # prints the final line
+        self.assertEqual(len(lines), 1)
+        fields = ss.parse_line(lines[0])
+        self.assertEqual((fields["service"], fields["client"], fields["connections"],
+                          fields["list"], fields["open"], fields["read"], fields["bytes"],
+                          fields["write"], fields["close"], fields["errors"], fields["ended"]),
+                         ("smbv3", "127.0.0.1", 1, 2, 3, 3, 1024, 1, 1, 2, "stopped"))
+
+    def test_uncounted_commands_keep_the_session_alive(self):
+        lines = []
+        server, client, _wire = self._server(lines)
+        clock = Clock()
+        server.session_stats = ss.SessionStats("smbv3", emit=lines.append, clock=clock)
+        server.session_stats.record("127.0.0.1", "connections")
+        clock.now += 50
+        client.echo()                      # counts nothing, but the console is here
+        self.assertEqual(server.session_stats.expire(), [])
+        clock.now += 50                    # 100 s after the connection, 50 s after the echo
+        self.assertEqual(server.session_stats.expire(), [])
+        clock.now += 20                    # now 70 s quiet
+        self.assertEqual(len(server.session_stats.expire()), 1)
+        self.assertEqual(ss.parse_line(lines[0])["ended"], "idle")
+        server.stop()
+
+    def test_ntlm_challenge_is_not_an_error(self):
+        lines = []
+        server, _client, _wire = self._server(lines)
+        server.stop()
+        self.assertEqual(ss.parse_line(lines[0])["errors"], 0)
+
+    def test_off_by_default(self):
+        values = {"games_folder": "x", "open_share": True}
+        for definition in (servers.SMBV2, servers.SMBV3):
+            self.assertNotIn("--session-summary", definition.build_argv(values))
+            self.assertIn("--session-summary",
+                          definition.build_argv(dict(values, session_summary=True)))
+
+
 if __name__ == "__main__":
     unittest.main()
