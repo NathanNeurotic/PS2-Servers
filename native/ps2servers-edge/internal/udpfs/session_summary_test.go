@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -119,10 +118,10 @@ func TestSessionSummaryCountsAConsole(t *testing.T) {
 	if payload = exchange(readReq(handle, 16)); string(payload[8:24]) != "0123456789abcdef" {
 		t.Fatalf("read %q", payload[8:])
 	}
-	if payload = exchange(openReq("missing.cfg")); int32(binary.LittleEndian.Uint32(payload[4:8])) != -int32(syscall.ENOENT) {
+	if payload = exchange(openReq("missing.cfg")); int32(binary.LittleEndian.Uint32(payload[4:8])) != -eNOENT {
 		t.Fatalf("probe result %d", int32(binary.LittleEndian.Uint32(payload[4:8])))
 	}
-	if payload = exchange(readReq(999, 16)); int32(binary.LittleEndian.Uint32(payload[4:8])) != -int32(syscall.EBADF) {
+	if payload = exchange(readReq(999, 16)); int32(binary.LittleEndian.Uint32(payload[4:8])) != -eBADF {
 		t.Fatalf("bad handle result %d", int32(binary.LittleEndian.Uint32(payload[4:8])))
 	}
 	// One more round trip so the previous ACK has certainly been consumed

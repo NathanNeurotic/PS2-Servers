@@ -56,7 +56,12 @@ and open handles. No global client profile exists.
 Sequence, socket, fallback, and file state cannot leak between sessions.
 Sequence-zero background discovery is answered without resetting a recently
 active transfer. A quiet or nonzero re-handshake replaces the old peer state and
-closes its handles.
+closes its handles. A sequence-zero discovery followed by DATA that starts again
+at 0 or 1 is a new loader taking over the endpoint: the transport is reset but
+the old loader's handles stay open, as Neutrino's FILEID backend needs
+(`session.State.HandOff`). The new loader opening for writing a file one of
+them holds for writing closes that handle and takes over its write reservation;
+deleting such a file closes the handle the same way.
 
 Strict `standard` and `modulo` modes remain diagnostic policies. They do not
 force a network topology: DATA is still accepted on either local socket.
@@ -73,7 +78,19 @@ queue so a transfer can advance while the request worker is occupied.
 Edge serves writes unless started with `--read-only`. It rejects absolute paths,
 drive-qualified paths, `..`, and symlink escapes before opening files. Directory
 enumeration omits entries that cannot be resolved safely beneath the configured
-root.
+root. `MKDIR`, `REMOVE` and `RMDIR` resolve only the parent of their path
+(`filesystem.Root.Entry`), so like `mkdir(2)`, `unlink(2)` and `rmdir(2)` they
+act on a symlink itself and never on its target. Directory enumeration reports
+a link to a folder as a folder, so `REMOVE` and `RMDIR` also refuse a path that
+passes through one (`filesystem.Root.RealFolders`): a console deleting a folder
+recursively would otherwise empty the folder the link points at.
+
+A refused or failed request is answered with a negated errno number, and it is
+the number the Desktop server sends from the same host: the host's own on Linux
+and macOS, and on Windows the C runtime's, which Python derives from the Windows
+error code (`crtErrno` in `internal/udpfs/errno.go` follows CPython's table).
+Replies never use Go's `syscall` constants for this: on Windows most of those
+are values Go invented from 2^29 up rather than errno numbers.
 
 Plain files and ISO images are read directly. CSO uses zlib and ZSO uses a
 bounded raw-LZ4 decoder. Compressed images are exposed with virtual `.iso`
@@ -86,7 +103,10 @@ CGO-free implementation; see [Edge configuration](EDGE.md).
 `--block-device` additionally serves one image through the UDPFS `BREAD`/
 `BWRITE` opcodes on handle 0, which `OPEN` never returns. Access is positional
 because one image is shared by every session; a seek cursor would let two
-consoles move each other's read position.
+consoles move each other's read position. On any other handle the same opcodes
+address the file that handle opened, in 512-byte sectors: Neutrino's FILEID
+backend reads a game and writes a VMC that way, through handles its loader
+opened and the stage running the game inherits.
 
 ## UDPBD boundary
 

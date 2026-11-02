@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
@@ -112,7 +111,7 @@ func TestBlockReadPastTheEndIsRefused(t *testing.T) {
 	// Answering this by padding with zeroes would let a bad count pull an
 	// arbitrary amount of traffic out of the server.
 	reply := c.send(blockMsg(protocol.BReadRequest, 0, sectors-1, 8))
-	if got := result(reply); got != -int32(syscall.EINVAL) {
+	if got := result(reply); got != -eINVAL {
 		t.Fatalf("out-of-range BREAD returned %d, want -EINVAL", got)
 	}
 }
@@ -165,7 +164,7 @@ func TestBlockWriteRefusedOnAReadOnlyServer(t *testing.T) {
 
 	req := append(blockMsg(protocol.BWriteRequest, 0, 3, 1), writeDataMsg(0, 1, make([]byte, 512))...)
 	reply := c.send(req)
-	if got := result(reply); got != -int32(syscall.EACCES) {
+	if got := result(reply); got != -eACCES {
 		t.Fatalf("BWRITE on a read-only server returned %d, want -EACCES", got)
 	}
 	onDisk, err := os.ReadFile(imgPath)

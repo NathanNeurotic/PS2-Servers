@@ -280,7 +280,9 @@ func (s *Server) handleData(st *session.State, in inbound) {
 			// Hot same-endpoint loader replacement: reset transport only.
 			// Neutrino's UDPFS FILEID backend carries the already-open game
 			// handle across this transition and will BREAD it after negotiation.
-			st.ResetTransport(profile)
+			// The kept handles are marked inherited, so the new loader can
+			// reopen for writing a file the old one was writing (openForWrite).
+			st.HandOff(profile)
 			st.DiscoverySequence = 0
 			st.FallbackGeneration++
 			st.ResponseSocket = in.socket

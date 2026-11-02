@@ -35,8 +35,10 @@ statically linked Go executable and does not require Python or the desktop GUI.
 
 Current Edge scope:
 
-- UDPFS with reads and writes; writable by default, `--read-only` to restrict
-- UDPFS block access (`BREAD`/`BWRITE`) for one disk image via `--block-device`
+- UDPFS with reads, writes, `MKDIR`, `REMOVE` and `RMDIR`; writable by default,
+  `--read-only` to restrict
+- UDPFS block access (`BREAD`/`BWRITE`) for one disk image via `--block-device`,
+  and for files a console opened, as Neutrino's FILEID backend uses it
 - guest SMBv1 as the `smb` subcommand (no SMB2/3)
 - native UDPBD as the `udpbd` subcommand
 - embedded responsive Web GUI management dashboard (`ps2servers-edge webui`)

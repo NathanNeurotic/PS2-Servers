@@ -129,6 +129,20 @@ func (s *Server) reserveWriter(realPath string) bool {
 	return true
 }
 
+// removeUnlessWriting deletes the file or symlink at realPath unless some peer
+// holds it open for writing, which it reports as busy. The check and the
+// unlink happen under writersMu: otherwise another peer's OPEN for write could
+// reserve the file between them and go on writing a save into a file that is
+// no longer in any folder, lost when it is closed.
+func (s *Server) removeUnlessWriting(realPath string) (busy bool, err error) {
+	s.writersMu.Lock()
+	defer s.writersMu.Unlock()
+	if s.writers[realPath] > 0 {
+		return true, nil
+	}
+	return false, removeEntry(realPath, false)
+}
+
 // releaseWriter drops a reservation taken by reserveWriter.
 func (s *Server) releaseWriter(realPath string) {
 	s.writersMu.Lock()

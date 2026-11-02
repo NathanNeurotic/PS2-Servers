@@ -285,11 +285,13 @@ Options:
 
 ## Writes
 
-Edge implements file writes. They are **on by default** in the bare binary.
-The loader must implement the corresponding save/VMC path; writable serving
-alone does not establish that a game can save over UDPFS.
+Edge implements file writes, folder creation (UDPFS `MKDIR`) and deletion of
+files and folders (`REMOVE`, `RMDIR`). They are **on by default** in the bare
+binary. The loader must implement the corresponding save/VMC path; writable
+serving alone does not establish that a game can save over UDPFS.
 
-Pass `--read-only` (or `RO=1`) to serve read-only instead.
+Pass `--read-only` (or `RO=1`) to serve read-only instead. That refuses every
+write, `MKDIR`, `REMOVE` and `RMDIR` with `EACCES`.
 
 **The OpenWrt package still starts read-only.** It ships `option read_only '1'`
 in `/etc/config/ps2servers-edge`; set it to `'0'` to let a console write. A
@@ -302,11 +304,20 @@ With writes enabled:
 | Behaviour | Result |
 |---|---|
 | Second peer opens the same file for writing | `EBUSY` — concurrent writers would interleave and corrupt |
+| A loader that took over the console's endpoint opens for writing a file the loader it replaced left open for writing | allowed: the old loader's handle to that file is closed and its reservation passes to the new one. The old loader's other handles stay open for Neutrino's FILEID, and another peer still gets `EBUSY` |
 | Write to a CSO/ZSO/CHD image | `EACCES` — the reader shows a decompressed view, so the offsets do not correspond to the container |
 | Single assembled write over 8 MiB | `EFBIG` — bounds what one peer can make the server buffer |
 | Chunk arrives out of order | `EIO`, whole write abandoned rather than silently misassembled |
 | Write on a handle opened read-only | `EACCES` — access is decided at OPEN and re-checked |
 | Write completes | `fsync` before `WRITE_DONE`; this does not make interrupted or multi-request saves atomic |
+| `REMOVE` of a file some peer holds open for writing | `EBUSY` — the rest of that save would go into a file no longer in any folder. As for a write open, a handle the loader it replaced on the same endpoint left open is closed instead, and the file is deleted |
+| `REMOVE` of a read-only file | Windows: `EACCES` and the file is kept, as the Desktop server answers there. Elsewhere the file is deleted, by both servers, since `unlink` does not look at a file's own permissions |
+| `REMOVE` of a symlink | the link is deleted; what it points at is never touched |
+| `REMOVE` of a folder | `EISDIR` |
+| `RMDIR` of a file or a symlink, even one to a folder | `ENOTDIR`; `RMDIR` removes only a real, empty folder |
+| `RMDIR` of the share root | `EACCES` |
+| `MKDIR` of a name that exists, a dangling symlink included | `EEXIST`; nothing is created where the link points |
+| `REMOVE` or `RMDIR` of a path through a symlinked folder or a junction, such as `LINK/save.bin` | `EACCES` — `DREAD` lists a link to a folder as a folder, so a console deleting a folder recursively would otherwise go into the link and empty the folder it points at. Delete by the real path; `REMOVE` of the link itself still deletes the link |
 
 Block-device writes (`BWRITE`) are implemented too, when `--block-device` is
 set. They reuse the same chunk-assembly path as file writes, so the table above
@@ -320,14 +331,30 @@ Go wraps silently on signed overflow, so the addition form accepts a sector near
 bound — and the resulting offset can land inside the real file. On a write that
 is silent corruption at a client-chosen offset.
 
+`BREAD` and `BWRITE` on any handle other than 0 address the file that handle
+opened, in 512-byte sectors, with or without `--block-device`. Neutrino's UDPFS
+FILEID backend works this way: its loader opens the game and any VMC or HDD
+image, and the stage that runs the game reads and saves through those handles.
+Such a `BWRITE` needs a handle opened for writing (`EACCES` otherwise), is held
+to the length it declares, may extend the file as a write after `LSEEK` can, and
+is `fsync`ed before `WRITE_DONE`. The Desktop server takes these writes too.
+
 ## Security model
 
 Edge enforces a configured filesystem root. It rejects `..`, absolute and
 drive-qualified paths, unsafe symbolic links, oversized paths, oversized reads
 and writes, malformed packet lengths, unknown packet types, and excessive open
-handles. It serves writes unless started with `--read-only`.
+handles. It serves writes, `MKDIR`, `REMOVE` and `RMDIR` unless started with
+`--read-only`. Those three act on the entry named: its parent must resolve
+inside the root, and a symlink in the last component is the link itself, so
+deleting one never reaches its target. `REMOVE` and `RMDIR` also refuse a path
+that passes through a symlinked folder or a junction.
 Idle sessions are removed, their files are closed, and any write reservation
-they held is released. Normal logs do not print full requested host paths.
+they held is released. A loader that takes over a console's endpoint keeps the
+files the old loader had open, but opening one of them for writing itself
+closes the old loader's handle to it and takes over its reservation, and
+deleting one closes that handle too. Normal
+logs do not print full requested host paths.
 
 ## Validation status
 

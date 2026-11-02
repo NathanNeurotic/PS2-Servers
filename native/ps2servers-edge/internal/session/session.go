@@ -34,6 +34,10 @@ type Handle struct {
 	// RealPath is the resolved on-disk path, retained so closing the handle
 	// can release this file's single-writer reservation.
 	RealPath string
+	// Inherited marks a handle that a loader since replaced on the same
+	// endpoint opened. HandOff keeps such handles for the new loader, which
+	// may use them by number (FILEID), but it did not open them itself.
+	Inherited bool
 }
 
 type DirEntry struct {
@@ -78,9 +82,11 @@ type State struct {
 	WriteBuffer        []byte
 	WriteTotalChunks   uint16
 	WriteReceivedChunk uint16
-	// WriteIsBlock routes the assembled buffer to the shared block device at
-	// WriteOffset instead of to a file handle. BWRITE and a file write share
-	// the same WriteData chunk sequence, so only the destination differs.
+	// WriteIsBlock marks a BWRITE: the assembled buffer goes to WriteOffset
+	// of the shared block device, or of the file WriteHandle names when that
+	// is not the device's handle 0, rather than to a file handle's position.
+	// BWRITE and a file write share the same WriteData chunk sequence, so
+	// only the destination differs.
 	WriteIsBlock bool
 	WriteOffset  int64
 	// WriteExpectedLen is how many bytes a BWRITE said it would deliver, or 0
@@ -158,6 +164,35 @@ func (s *State) ResetTransport(profile Profile) {
 			return
 		}
 	}
+}
+
+// HandOff resets the transport for a loader that took over this peer's
+// endpoint while the old loader's stream was live. The old loader's handles
+// stay open, as ResetTransport leaves them, and are marked Inherited so that
+// TakeOverWriter can tell them from the new loader's own. The caller must
+// hold Mu.
+func (s *State) HandOff(profile Profile) {
+	s.ResetTransport(profile)
+	for _, h := range s.Handles {
+		h.Inherited = true
+	}
+}
+
+// TakeOverWriter closes the inherited handles holding realPath open for
+// writing, releasing their single-writer reservation, and reports whether
+// there were any. It is for the new loader opening that file for writing
+// itself, which it would not do while using the old loader's handle. Left
+// open, that handle keeps the file reserved for as long as the session
+// lasts, so every write OPEN of it, a retried save included, is EBUSY.
+func (s *State) TakeOverWriter(realPath string) bool {
+	taken := false
+	for id, h := range s.Handles {
+		if h.Inherited && h.Writer != nil && h.RealPath == realPath {
+			s.CloseHandle(id)
+			taken = true
+		}
+	}
+	return taken
 }
 
 // Reset closes per-peer resources and returns protocol counters to a clean

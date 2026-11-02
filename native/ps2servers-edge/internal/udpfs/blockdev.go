@@ -132,11 +132,11 @@ func blockRequest(p []byte) (handle int32, sector int64, count int64, ok bool) {
 func (s *Server) handleBRead(st *session.State, p []byte) {
 	handle, sector, count, ok := blockRequest(p)
 	if !ok {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 	if count <= 0 {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 
@@ -149,13 +149,13 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 		if h == nil || h.Reader == nil {
 			s.cfg.Log.Debug("BREAD invalid file handle", map[string]any{
 				"peer": st.Peer, "handle": handle, "sector": sector, "count": count})
-			s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EBADF)), nil)
+			s.sendTransfer(st, result8(protocol.ResultReply, -eBADF), nil)
 			return
 		}
 		const sectorSize int64 = DefaultSectorSize
 		total := count * sectorSize
 		if total > s.transferCap || sector < 0 || sector > math.MaxInt64/sectorSize {
-			s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+			s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 			return
 		}
 		if _, err := h.Reader.Seek(sector*sectorSize, io.SeekStart); err != nil {
@@ -182,12 +182,12 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 
 	dev := s.blockDev
 	if dev == nil {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EBADF)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eBADF), nil)
 		return
 	}
 	total := count * dev.sectorSize
 	if total > s.transferCap {
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 	if !dev.inRange(sector, count) {
@@ -195,7 +195,7 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 		// emit an arbitrary amount of zeroes on request.
 		s.cfg.Log.Warn("BREAD out of range", map[string]any{
 			"peer": st.Peer, "sector": sector, "count": count, "sectors": dev.sectorCount()})
-		s.sendTransfer(st, result8(protocol.ResultReply, -int32(syscall.EINVAL)), nil)
+		s.sendTransfer(st, result8(protocol.ResultReply, -eINVAL), nil)
 		return
 	}
 	data, err := dev.readAt(sector*dev.sectorSize, int(total))
@@ -217,47 +217,91 @@ func (s *Server) handleBRead(st *session.State, p []byte) {
 // the same WriteData flow a file write uses, so only the destination differs --
 // completeWrite routes on st.WriteIsBlock.
 func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
+	st.ResetWrite() // as handleWriteRequest does, so a refused BWRITE's chunks are dropped
 	handle, sector, count, ok := blockRequest(p)
 	if !ok {
-		s.sendWriteDone(st, -int32(syscall.EINVAL))
+		s.sendWriteDone(st, -eINVAL)
 		return
 	}
 	if s.cfg.ReadOnly {
-		s.sendWriteDone(st, -int32(syscall.EACCES))
+		s.sendWriteDone(st, -eACCES)
+		return
+	}
+	if handle != blockHandle {
+		s.handleFileBWriteRequest(st, handle, sector, count, p)
 		return
 	}
 	dev := s.blockDev
-	if dev == nil || handle != blockHandle {
-		s.sendWriteDone(st, -int32(syscall.EBADF))
+	if dev == nil {
+		s.sendWriteDone(st, -eBADF)
 		return
 	}
 	if dev.readOnly {
 		// Report failure rather than accept and discard, so the console does
 		// not believe a save committed.
-		s.sendWriteDone(st, -int32(syscall.EACCES))
+		s.sendWriteDone(st, -eACCES)
 		return
 	}
 	total := count * dev.sectorSize
 	if count <= 0 || total > s.transferCap {
-		s.sendWriteDone(st, -int32(syscall.EFBIG))
+		s.sendWriteDone(st, -eFBIG)
 		return
 	}
 	if !dev.inRange(sector, count) {
 		s.cfg.Log.Warn("BWRITE out of range", map[string]any{
 			"peer": st.Peer, "sector": sector, "count": count})
-		s.sendWriteDone(st, -int32(syscall.EINVAL))
+		s.sendWriteDone(st, -eINVAL)
 		return
 	}
+	s.cfg.Log.Debug("BWRITE", map[string]any{
+		"peer": st.Peer, "sector": sector, "count": count})
+	s.startBlockWrite(st, blockHandle, sector*dev.sectorSize, total, p)
+}
+
+// handleFileBWriteRequest opens a block write into a file the peer opened for
+// writing. Neutrino's UDPFS FILEID backend saves this way: its loader opens a
+// VMC or HDD image read-write, hands the server's handle number to the stage
+// that boots the game, and that stage writes 512-byte sectors with BWRITE, as
+// it reads them with BREAD. The Desktop server takes these writes.
+func (s *Server) handleFileBWriteRequest(st *session.State, handle int32, sector, count int64, p []byte) {
+	h := st.Handles[handle]
+	if h == nil || h.Directory != nil {
+		s.cfg.Log.Debug("BWRITE invalid file handle", map[string]any{
+			"peer": st.Peer, "handle": handle, "sector": sector, "count": count})
+		s.sendWriteDone(st, -eBADF)
+		return
+	}
+	// As for WRITE, access was decided at OPEN.
+	if _, ok := h.Writer.(io.WriterAt); !ok {
+		s.sendWriteDone(st, -eACCES)
+		return
+	}
+	const sectorSize int64 = DefaultSectorSize
+	total := count * sectorSize
+	if count <= 0 || total > s.transferCap {
+		s.sendWriteDone(st, -eFBIG)
+		return
+	}
+	if sector < 0 || sector > (math.MaxInt64-total)/sectorSize {
+		s.sendWriteDone(st, -eINVAL)
+		return
+	}
+	s.cfg.Log.Debug("BWRITE file handle", map[string]any{
+		"peer": st.Peer, "handle": handle, "sector": sector, "count": count})
+	s.startBlockWrite(st, handle, sector*sectorSize, total, p)
+}
+
+// startBlockWrite readies the chunk sequence of a BWRITE of total bytes at
+// offset of the image (blockHandle) or of the file handle names.
+func (s *Server) startBlockWrite(st *session.State, handle int32, offset, total int64, p []byte) {
 	st.WriteActive = true
 	st.WriteIsBlock = true
-	st.WriteHandle = blockHandle
-	st.WriteOffset = sector * dev.sectorSize
+	st.WriteHandle = handle
+	st.WriteOffset = offset
 	st.WriteExpectedLen = total
 	st.WriteBuffer = make([]byte, 0, total)
 	st.WriteTotalChunks = 0
 	st.WriteReceivedChunk = 0
-	s.cfg.Log.Debug("BWRITE", map[string]any{
-		"peer": st.Peer, "sector": sector, "count": count})
 	if len(p) > 16 {
 		s.handleWriteData(st, p[16:])
 		return
@@ -265,7 +309,8 @@ func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
 	s.sendACK(st, true)
 }
 
-// completeBlockWrite flushes an assembled block write to the image.
+// completeBlockWrite flushes an assembled block write to the image, or to the
+// file handle names when that is not blockHandle.
 //
 // expected is the byte count the BWRITE header declared, and the buffer must
 // match it exactly. inRange validated the DECLARED sector range, but nothing on
@@ -277,16 +322,24 @@ func (s *Server) handleBWriteRequest(st *session.State, p []byte) {
 // contents. Checking a length and then writing a different one is the same
 // defect as the overflow bug in inRange: the quantity validated was not the
 // quantity used.
-func (s *Server) completeBlockWrite(st *session.State, buf []byte, offset, expected int64) {
-	dev := s.blockDev
-	if dev == nil {
-		s.sendWriteDone(st, -int32(syscall.EBADF))
-		return
-	}
+//
+// A file handle's BWRITE is held to its declared length too. Its sectors are
+// not held to the file's size: like a WRITE after LSEEK, and like the Desktop
+// server's BWRITE, it may write past the end and extend the file.
+func (s *Server) completeBlockWrite(st *session.State, handle int32, buf []byte, offset, expected int64) {
 	if int64(len(buf)) != expected {
 		s.cfg.Log.Warn("BWRITE length mismatch", map[string]any{
-			"peer": st.Peer, "declared": expected, "delivered": len(buf)})
-		s.sendWriteDone(st, -int32(syscall.EINVAL))
+			"peer": st.Peer, "handle": handle, "declared": expected, "delivered": len(buf)})
+		s.sendWriteDone(st, -eINVAL)
+		return
+	}
+	if handle != blockHandle {
+		s.completeFileBlockWrite(st, handle, buf, offset)
+		return
+	}
+	dev := s.blockDev
+	if dev == nil {
+		s.sendWriteDone(st, -eBADF)
 		return
 	}
 	if err := dev.writeAt(offset, buf); err != nil {
@@ -301,6 +354,38 @@ func (s *Server) completeBlockWrite(st *session.State, buf []byte, offset, expec
 	}
 	s.stats.bytesWritten.Add(int64(len(buf)))
 	s.cfg.Log.Debug("BWRITE ok", map[string]any{"peer": st.Peer, "bytes": len(buf)})
+	s.sendWriteDone(st, int32(len(buf)))
+}
+
+// completeFileBlockWrite writes an assembled BWRITE into a peer's file handle
+// at the sectors it named, then syncs it as a WRITE does. The write is
+// positional: it does not move the handle's position for READ and WRITE.
+func (s *Server) completeFileBlockWrite(st *session.State, handle int32, buf []byte, offset int64) {
+	var w io.WriterAt
+	if h := st.Handles[handle]; h != nil {
+		w, _ = h.Writer.(io.WriterAt)
+	}
+	if w == nil {
+		s.sendWriteDone(st, -eBADF)
+		return
+	}
+	if _, err := w.WriteAt(buf, offset); err != nil {
+		s.cfg.Log.Warn("BWRITE file write failed", map[string]any{
+			"peer": st.Peer, "handle": handle, "error": err.Error()})
+		s.sendWriteDone(st, errno(err))
+		return
+	}
+	if f, ok := w.(*os.File); ok {
+		if err := f.Sync(); err != nil {
+			s.cfg.Log.Warn("BWRITE file sync failed", map[string]any{
+				"peer": st.Peer, "handle": handle, "error": err.Error()})
+			s.sendWriteDone(st, errno(err))
+			return
+		}
+	}
+	s.stats.bytesWritten.Add(int64(len(buf)))
+	s.cfg.Log.Debug("BWRITE file handle ok", map[string]any{
+		"peer": st.Peer, "handle": handle, "bytes": len(buf)})
 	s.sendWriteDone(st, int32(len(buf)))
 }
 

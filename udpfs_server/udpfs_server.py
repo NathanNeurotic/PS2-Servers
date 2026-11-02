@@ -36,6 +36,7 @@ import queue
 import re
 import select
 import socket
+import stat as stat_mod
 import struct
 import subprocess
 import sys
@@ -214,6 +215,11 @@ class MsgType(IntEnum):
 # PS2 file mode flags
 FIO_S_IFREG = 0x2000
 FIO_S_IFDIR = 0x1000
+
+# The reparse tag of a Windows junction. lstat() reports a junction as a
+# directory, so only os.stat_result.st_reparse_tag tells one apart; the stat
+# module defines this constant on Windows alone.
+IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
 
 # Limits
 MAX_DATA_PAYLOAD = 1408  # Maximum UDPRDMA payload
@@ -550,6 +556,24 @@ class FileHandle:
             pass  # Directory entries are a list, nothing to close
         else:
             self.obj.close()
+
+    def writable(self) -> bool:
+        """Whether a WRITE or BWRITE can go through this handle.
+
+        Asked before a write is taken, because the write itself cannot answer
+        for these handles: a file opened 'rb' raises io.UnsupportedOperation,
+        whose errno is None, and a compressed image's reader has no write at
+        all, so the console was sent no WRITE_DONE and waited for one.
+        """
+        if self.is_dir:
+            return False
+        check = getattr(self.obj, 'writable', None)
+        if check is None:
+            return False
+        try:
+            return bool(check())
+        except (OSError, ValueError):  # ValueError: the file is closed
+            return False
 
 
 def console_answers_arp(ip: str) -> Optional[bool]:
@@ -1181,6 +1205,74 @@ class UdpfsServer:
 
         return resolved
 
+    def _resolve_entry(self, client_path: str) -> Optional[str]:
+        """Resolve a client path to the directory entry it names, unfollowed.
+
+        For MKDIR, REMOVE and RMDIR, which act on an entry rather than on what
+        it points at. _resolve_path() realpath()s the whole path, so for a
+        symlink it returns the link's target: REMOVE of 'link.elf' ->
+        'GAMES/real.elf' deleted real.elf, answered 0 and left the link, and
+        RMDIR of a link to an empty folder removed that folder. Here only the
+        parent is realpath()ed and must lie inside the root, exactly as
+        _resolve_path() requires; the last component is joined as given, so the
+        operation meets the link itself, as unlink(2), rmdir(2) and mkdir(2) do.
+
+        '' (and '/', '.') is the root itself, as in _resolve_path(). None for an
+        escape, and for a path ending in '..', which names no entry of its own.
+        """
+        if self.root_dir is None:
+            return None
+        parts = [p for p in client_path.replace('\\', '/').split('/')
+                 if p not in ('', '.')]
+        if not parts:
+            return self.root_dir
+        name = parts[-1]
+        if name == '..':
+            return None
+        parent = self._resolve_path('/'.join(parts[:-1]))
+        if parent is None:
+            return None
+        entry = os.path.join(parent, name)
+        # The OS must address exactly the entry that was checked. On Windows a
+        # name qualified with another drive ('Q:x') makes join() discard the
+        # parent, and trailing dots and spaces are stripped from a final
+        # component ('...' names the parent itself, which for a top-level
+        # request is the share root).
+        if os.path.abspath(entry) != entry:
+            return None
+        return entry
+
+    def _through_linked_folder(self, client_path: str) -> bool:
+        """True when a folder the path passes through is a symlink or junction.
+
+        The second gate for REMOVE and RMDIR, after _resolve_entry(), which
+        accepts a link on the way as long as it resolves inside the root.
+        Deleting through one deletes what is in the folder it points at, which
+        the console never named: lstat() reports a Windows junction as a
+        directory, so DREAD lists one as a folder, and a console deleting a
+        folder recursively would go into the junction and empty its target.
+        Symlinks are refused as well, as Edge refuses them -- its DREAD lists
+        any link to a folder as a folder. The link itself, the last
+        component, remains the console's to delete.
+
+        A folder that cannot be lstat()ed raises the OSError, for the operation
+        to answer with. It must not count as clean: realpath() in
+        _resolve_entry() steps over a folder that does not exist, or a file,
+        when a '..' follows it, so 'missing/../fulllink/keep.bin' reached FULL
+        through the link while this walk stopped at 'missing'.
+        """
+        parts = [p for p in client_path.replace('\\', '/').split('/')
+                 if p not in ('', '.')]
+        for depth in range(1, len(parts)):
+            # Joined as _resolve_path() joins it, so this walks the path that
+            # _resolve_entry() resolved.
+            folder = os.path.join(self.root_dir, '/'.join(parts[:depth]))
+            st = os.lstat(folder)
+            if (stat_mod.S_ISLNK(st.st_mode) or
+                    getattr(st, 'st_reparse_tag', 0) == IO_REPARSE_TAG_MOUNT_POINT):
+                return True
+        return False
+
     def _transform_compressed_name(self, name: str) -> str:
         """Transform supported compressed extensions to .iso for directory listing."""
         if not self.enable_compression:
@@ -1314,7 +1406,6 @@ class UdpfsServer:
 
     def _stat_to_bytes(self, st) -> dict:
         """Convert os.stat_result to PS2-compatible stat fields"""
-        import stat as stat_mod
         mode = 0
         if stat_mod.S_ISREG(st.st_mode):
             mode = FIO_S_IFREG
@@ -1794,8 +1885,30 @@ class UdpfsServer:
             self._print_event(f"[{addr[0]}:{addr[1]}] READ error: {e}")
             self._send_read_result(addr, -e.errno, b'')
 
+    def _reset_write(self):
+        """Forget the write being assembled, as Edge's session.ResetWrite does.
+
+        The IOP sends every chunk of a write before it waits for WRITE_DONE, so
+        the rest of a write still arrives after the write was refused at its
+        request. Left armed, the state of the last write took those chunks:
+        chunk 1 of a refused two-chunk write matched the count a finished
+        one-chunk write had left, was added to that write's buffer and written
+        into its file, and a second WRITE_DONE went out. Every WRITE_REQ and
+        BWRITE_REQ therefore starts from here, and so does every write that
+        finishes. write_handle -1 means no write is in progress, and
+        _handle_write_data drops a chunk that arrives then.
+        """
+        self.write_handle = -1
+        self.write_is_block = False
+        self.write_sector_nr = 0
+        self.write_sector_count = 0
+        self.write_data = bytearray()
+        self.write_total_chunks = 0
+        self.write_received_chunks = 0
+
     def _handle_write_req(self, addr: Tuple[str, int], payload: bytes):
         """Handle WRITE_REQ - start of file write operation"""
+        self._reset_write()
         if len(payload) < 12:
             self._send_ack(addr, is_ack=True)
             return
@@ -1825,15 +1938,19 @@ class UdpfsServer:
             self._send_write_done(addr, -errno.EBADF)
             return
 
+        # As Edge answers: a handle opened read-only does not become writable
+        # because the client asks, and a compressed image cannot take bytes at
+        # an offset into its decompressed view.
+        if not fh.writable():
+            self._print_event(f"[{addr[0]}:{addr[1]}] WRITE handle={handle} -> EACCES (not open for writing)")
+            self._send_write_done(addr, -errno.EACCES)
+            return
+
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] WRITE_REQ handle={handle} size={size}")
 
-        # Initialize write state (file write mode)
+        # Arm the write (file write mode); the rest was reset on entry.
         self.write_handle = handle
-        self.write_is_block = False
-        self.write_data = bytearray()
-        self.write_total_chunks = 0
-        self.write_received_chunks = 0
 
         # Check for inline WRITE_DATA (combined WRITE_REQ + first chunk)
         if len(payload) > 12:
@@ -1853,6 +1970,15 @@ class UdpfsServer:
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] WRITE_DATA chunk={chunk_nr}/{total_chunks} size={chunk_size}")
 
+        if self.write_handle < 0:
+            # No write in progress: the rest of a write refused at its request,
+            # or a chunk with no request in front of it. Dropped, as Edge drops
+            # it, rather than added to whatever write came before.
+            if self.verbose:
+                self._print_event(f"  WRITE_DATA chunk={chunk_nr} with no write in progress, dropped")
+            self._send_ack(addr, is_ack=True)
+            return
+
         if chunk_nr != self.write_received_chunks:
             self._print_event(f"  ERROR: Chunk order error (expected {self.write_received_chunks}, got {chunk_nr})")
             self._send_ack(addr, is_ack=True)
@@ -1867,10 +1993,7 @@ class UdpfsServer:
             self._print_event(
                 f"[{addr[0]}:{addr[1]}] WRITE over {self.max_transfer_bytes} "
                 "bytes -> EINVAL, buffer discarded")
-            self.write_data = bytearray()
-            self.write_handle = -1
-            self.write_received_chunks = 0
-            self.write_total_chunks = 0
+            self._reset_write()
             self._send_write_done(addr, -errno.EINVAL)
             return
 
@@ -1888,18 +2011,20 @@ class UdpfsServer:
 
     def _complete_write(self, addr: Tuple[str, int]):
         """Complete a file write operation"""
-        fh = self.handles.get(self.write_handle)
+        handle, data = self.write_handle, self.write_data
+        self._reset_write()
+        fh = self.handles.get(handle)
         if fh is None or fh.is_dir:
             self._send_write_done(addr, -errno.EBADF)
             return
 
         try:
-            bytes_written = fh.obj.write(self.write_data)
+            bytes_written = fh.obj.write(data)
             fh.obj.flush()
             self.stats['bytes_written'] += bytes_written
 
             if self.verbose:
-                self._print_event(f"[{addr[0]}:{addr[1]}] WRITE handle={self.write_handle} -> {bytes_written} bytes")
+                self._print_event(f"[{addr[0]}:{addr[1]}] WRITE handle={handle} -> {bytes_written} bytes")
             self._update_status()
             self._send_write_done(addr, bytes_written)
         except OSError as e:
@@ -1908,28 +2033,31 @@ class UdpfsServer:
 
     def _complete_bwrite(self, addr: Tuple[str, int]):
         """Complete a block write operation"""
-        fh = self.handles.get(self.write_handle)
+        handle, data = self.write_handle, self.write_data
+        sector_nr, sector_count = self.write_sector_nr, self.write_sector_count
+        self._reset_write()
+        fh = self.handles.get(handle)
         if fh is None or fh.is_dir:
             self._send_write_done(addr, -errno.EBADF)
             return
 
-        sector_size = self.bd_sector_size if self.write_handle == BLOCK_DEVICE_HANDLE else 512
-        expected_size = self.write_sector_count * sector_size
+        sector_size = self.bd_sector_size if handle == BLOCK_DEVICE_HANDLE else 512
+        expected_size = sector_count * sector_size
 
         try:
-            if self.write_handle == BLOCK_DEVICE_HANDLE:
+            if handle == BLOCK_DEVICE_HANDLE:
                 # Shared block device: positional write (no shared file position).
-                self.bd_write(self.write_sector_nr * sector_size,
-                              bytes(self.write_data[:expected_size]))
+                self.bd_write(sector_nr * sector_size,
+                              bytes(data[:expected_size]))
             else:
-                fh.obj.seek(self.write_sector_nr * sector_size)
-                fh.obj.write(self.write_data[:expected_size])
+                fh.obj.seek(sector_nr * sector_size)
+                fh.obj.write(data[:expected_size])
                 fh.obj.flush()
             self.stats['bytes_written'] += expected_size
 
             if self.verbose:
-                self._print_event(f"[{addr[0]}:{addr[1]}] BWRITE handle={self.write_handle} "
-                      f"sector={self.write_sector_nr} count={self.write_sector_count}")
+                self._print_event(f"[{addr[0]}:{addr[1]}] BWRITE handle={handle} "
+                      f"sector={sector_nr} count={sector_count}")
             self._update_status()
             self._send_write_done(addr, 0)
         except OSError as e:
@@ -1962,6 +2090,12 @@ class UdpfsServer:
         except OSError as e:
             self._print_event(f"[{addr[0]}:{addr[1]}] LSEEK error: {e}")
             self._send_lseek_reply(addr, -e.errno)
+        except ValueError as e:
+            # seek() takes whence 0, 1 and 2, and 3 and 4 only where the host
+            # has SEEK_DATA and SEEK_HOLE. Any other raised ValueError past the
+            # except above, and the client was sent no answer.
+            self._print_event(f"[{addr[0]}:{addr[1]}] LSEEK error: {e}")
+            self._send_lseek_reply(addr, -errno.EINVAL)
 
     def _handle_dread(self, addr: Tuple[str, int], payload: bytes):
         """Handle DREAD_REQ"""
@@ -2100,7 +2234,9 @@ class UdpfsServer:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
-        resolved = self._resolve_path(path)
+        # The entry, not a symlink's target: mkdir over a dangling link is
+        # EEXIST, rather than a directory created wherever the link points.
+        resolved = self._resolve_entry(path)
         if resolved is None:
             self._send_result_reply(addr, -errno.EACCES)
             return
@@ -2128,13 +2264,26 @@ class UdpfsServer:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
-        resolved = self._resolve_path(path)
+        # A symlink is removed as itself. DREAD lists the link from lstat, so
+        # the link is what the console chose to delete, not the file behind it.
+        resolved = self._resolve_entry(path)
         if resolved is None:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
         try:
-            os.remove(resolved)
+            if self._through_linked_folder(path):
+                self._print_event(f"[{addr[0]}:{addr[1]}] REMOVE '{path}' -> EACCES (through a linked folder)")
+                self._send_result_reply(addr, -errno.EACCES)
+                return
+            # A real directory is refused here, the same answer on every host:
+            # unlink() on one is EISDIR on Linux, EPERM on macOS and EACCES on
+            # Windows.
+            if stat_mod.S_ISDIR(os.lstat(resolved).st_mode):
+                self._print_event(f"[{addr[0]}:{addr[1]}] REMOVE '{path}' -> EISDIR")
+                self._send_result_reply(addr, -errno.EISDIR)
+                return
+            os.unlink(resolved)
             self._print_event(f"[{addr[0]}:{addr[1]}] REMOVE '{path}'")
             self._send_result_reply(addr, 0)
         except OSError as e:
@@ -2156,12 +2305,25 @@ class UdpfsServer:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
-        resolved = self._resolve_path(path)
-        if resolved is None:
+        resolved = self._resolve_entry(path)
+        # The share root is not the console's to remove: rmdir on an empty
+        # served folder would otherwise delete it.
+        if resolved is None or resolved == self.root_dir:
             self._send_result_reply(addr, -errno.EACCES)
             return
 
         try:
+            if self._through_linked_folder(path):
+                self._print_event(f"[{addr[0]}:{addr[1]}] RMDIR '{path}' -> EACCES (through a linked folder)")
+                self._send_result_reply(addr, -errno.EACCES)
+                return
+            # A symlink is not a directory, even one that points at a folder.
+            # rmdir(2) agrees on POSIX, but Windows' RemoveDirectory accepts a
+            # directory symlink, so decide from lstat on every host.
+            if not stat_mod.S_ISDIR(os.lstat(resolved).st_mode):
+                self._print_event(f"[{addr[0]}:{addr[1]}] RMDIR '{path}' -> ENOTDIR")
+                self._send_result_reply(addr, -errno.ENOTDIR)
+                return
             os.rmdir(resolved)
             self._print_event(f"[{addr[0]}:{addr[1]}] RMDIR '{path}'")
             self._send_result_reply(addr, 0)
@@ -2203,6 +2365,16 @@ class UdpfsServer:
             self._send_read_result(addr, -errno.EINVAL, b'')
             return
 
+        # As for BWRITE: past the largest file offset, 2**63 - 1, seek() and
+        # pread() raise ValueError and OverflowError rather than OSError, so
+        # such a read was never answered. Refused here, as Edge refuses it.
+        if sector_nr * sector_size > (1 << 63) - 1:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] BREAD sector={sector_nr} past the "
+                "largest file offset -> EINVAL")
+            self._send_read_result(addr, -errno.EINVAL, b'')
+            return
+
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] BREAD handle={handle} sector={sector_nr} count={sector_count} ({total_size} bytes)")
 
@@ -2231,6 +2403,7 @@ class UdpfsServer:
 
     def _handle_bwrite_req(self, addr: Tuple[str, int], payload: bytes):
         """Handle BWRITE_REQ - start of block write operation"""
+        self._reset_write()
         if len(payload) < 16:
             self._send_ack(addr, is_ack=True)
             return
@@ -2253,10 +2426,15 @@ class UdpfsServer:
             self._send_write_done(addr, -errno.EBADF)
             return
 
+        if not fh.writable():
+            self._print_event(f"[{addr[0]}:{addr[1]}] BWRITE handle={handle} -> EACCES (not open for writing)")
+            self._send_write_done(addr, -errno.EACCES)
+            return
+
         # Refused up front rather than once the chunks have arrived: the client
         # declares the size here, so this is the earliest point it is known.
-        declared = sector_count * (self.bd_sector_size
-                                   if handle == BLOCK_DEVICE_HANDLE else 512)
+        sector_size = self.bd_sector_size if handle == BLOCK_DEVICE_HANDLE else 512
+        declared = sector_count * sector_size
         if declared > self.max_transfer_bytes:
             self._print_event(
                 f"[{addr[0]}:{addr[1]}] BWRITE {declared} bytes over "
@@ -2264,17 +2442,25 @@ class UdpfsServer:
             self._send_write_done(addr, -errno.EINVAL)
             return
 
+        # The sector is lo | hi << 32, the console's to choose. Past the
+        # largest file offset, 2**63 - 1, seek() and pwrite() raise ValueError
+        # and OverflowError rather than OSError, so such a write was never
+        # answered. Refused here, as Edge refuses it.
+        if sector_nr * sector_size + declared > (1 << 63) - 1:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] BWRITE sector={sector_nr} past the "
+                "largest file offset -> EINVAL")
+            self._send_write_done(addr, -errno.EINVAL)
+            return
+
         if self.verbose:
             self._print_event(f"[{addr[0]}:{addr[1]}] BWRITE_REQ handle={handle} sector={sector_nr} count={sector_count}")
 
-        # Initialize write state (block write mode)
+        # Arm the write (block write mode); the rest was reset on entry.
         self.write_handle = handle
         self.write_is_block = True
         self.write_sector_nr = sector_nr
         self.write_sector_count = sector_count
-        self.write_data = bytearray()
-        self.write_total_chunks = 0
-        self.write_received_chunks = 0
 
         # Check for inline WRITE_DATA (combined BWRITE_REQ + first chunk)
         if len(payload) > 16:

@@ -168,7 +168,7 @@ func TestWriteRefusedWhenServerIsReadOnly(t *testing.T) {
 	c := dial(t, startServerAt(t, root, true))
 
 	reply := c.send(openMsg("save.bin", fioWrite, false))
-	if got := result(reply); got != -int32(syscall.EACCES) {
+	if got := result(reply); got != -eACCES {
 		t.Fatalf("read-only server allowed write open: got %d, want -EACCES", got)
 	}
 	// The file on disk must be untouched.
@@ -234,7 +234,7 @@ func TestWriteRejectsOutOfOrderChunk(t *testing.T) {
 	// would silently corrupt the file, so the sequence must be abandoned.
 	c.sendNoReply(writeReqMsg(h, 9, writeDataMsg(0, 3, []byte("aaa"))))
 	reply := c.send(writeDataMsg(2, 3, []byte("ccc")))
-	if got := result(reply); got != -int32(syscall.EIO) {
+	if got := result(reply); got != -eIO {
 		t.Fatalf("out-of-order chunk returned %d, want -EIO", got)
 	}
 	c.send(closeMsg(h))
@@ -260,7 +260,7 @@ func TestWriteToCompressedImageIsRefused(t *testing.T) {
 	// at a decompressed offset would land bytes at the wrong place in the
 	// container. Refuse rather than destroy the image.
 	reply := c.send(openMsg("game.cso", fioRead|fioWrite, false))
-	if got := result(reply); got != -int32(syscall.EACCES) {
+	if got := result(reply); got != -eACCES {
 		t.Fatalf("write open on a .cso returned %d, want -EACCES", got)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "game.cso"))
@@ -272,7 +272,7 @@ func TestWriteToCompressedImageIsRefused(t *testing.T) {
 func TestWriteOpenWithoutCreateOnMissingFileIsENOENT(t *testing.T) {
 	c := dial(t, startServerAt(t, t.TempDir(), false))
 	reply := c.send(openMsg("absent.sav", fioRead|fioWrite, false))
-	if got := result(reply); got != -int32(syscall.ENOENT) {
+	if got := result(reply); got != -eNOENT {
 		t.Fatalf("missing file without O_CREAT returned %d, want -ENOENT", got)
 	}
 }
@@ -285,7 +285,7 @@ func TestSecondPeerCannotOpenTheSameFileForWriting(t *testing.T) {
 
 	h := openForWriteOK(t, first, "shared.sav", fioRead|fioWrite|fioCreate)
 	reply := second.send(openMsg("shared.sav", fioRead|fioWrite|fioCreate, false))
-	if got := result(reply); got != -int32(syscall.EBUSY) {
+	if got := result(reply); got != -eBUSY {
 		t.Fatalf("second writer got %d, want -EBUSY", got)
 	}
 	// Reading the same file concurrently stays allowed.
@@ -321,7 +321,7 @@ func TestWriteRequestOverCapIsRefused(t *testing.T) {
 	// the host's RAM and is never larger than preferredTransfer, so one byte
 	// past it is over the limit on every machine this test can run on.
 	reply := c.send(writeReqMsg(h, preferredTransfer+1, nil))
-	if got := result(reply); got != -int32(syscall.EFBIG) {
+	if got := result(reply); got != -eFBIG {
 		t.Fatalf("oversized WRITE_REQ returned %d, want -EFBIG", got)
 	}
 }
@@ -337,12 +337,76 @@ func TestWriteToReadOnlyHandleIsRefused(t *testing.T) {
 	// made at OPEN and must not be bypassable by sending WRITE_REQ anyway.
 	h := openForWriteOK(t, c, "ro.sav", fioRead)
 	reply := c.send(writeReqMsg(h, 4, writeDataMsg(0, 1, []byte("bad!"))))
-	if got := result(reply); got != -int32(syscall.EACCES) {
+	if got := result(reply); got != -eACCES {
 		t.Fatalf("write on a read-only handle returned %d, want -EACCES", got)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "ro.sav"))
 	if err != nil || string(data) != "keep" {
 		t.Fatalf("read-only handle allowed a write: %q %v", data, err)
+	}
+}
+
+// A write refused at its request starts nothing, and leaves nothing of an
+// earlier write armed. The console sends every chunk of a write before it waits
+// for WRITE_DONE, so the rest of a refused write still arrives. A write the
+// console had given up on partway was still being assembled, and the refused
+// write's chunk 1 matched its chunk count: it joined that buffer, the buffer
+// was written into the earlier write's file, and a second WRITE_DONE went out
+// for the console to take as the answer to its next request.
+func TestARefusedWriteTakesNoChunksAfterAnUnfinishedOne(t *testing.T) {
+	half := sector('2')[:256]
+	for _, tc := range []struct {
+		name    string
+		request func(readOnly int32) []byte
+		chunk   []byte
+		want    int32
+	}{
+		{"WRITE through a read-only handle", func(ro int32) []byte {
+			return writeReqMsg(ro, 8, writeDataMsg(0, 2, []byte("1111")))
+		}, []byte("2222"), -eACCES},
+		{"WRITE to a handle that is not open", func(int32) []byte {
+			return writeReqMsg(999, 8, writeDataMsg(0, 2, []byte("1111")))
+		}, []byte("2222"), -eBADF},
+		{"WRITE declared over the cap", func(int32) []byte {
+			return writeReqMsg(1, preferredTransfer+1, writeDataMsg(0, 2, []byte("1111")))
+		}, []byte("2222"), -eFBIG},
+		{"BWRITE through a read-only handle", func(ro int32) []byte {
+			return append(blockMsg(protocol.BWriteRequest, ro, 0, 1), writeDataMsg(0, 2, half)...)
+		}, half, -eACCES},
+		{"BWRITE to a handle that is not open", func(int32) []byte {
+			return append(blockMsg(protocol.BWriteRequest, 999, 0, 1), writeDataMsg(0, 2, half)...)
+		}, half, -eBADF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "other.bin"), sector('O'), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			c := dial(t, startServerAt(t, root, false))
+			h := openForWriteOK(t, c, "save.bin", fioRead|fioWrite|fioCreate|fioTrunc)
+			if h != 1 {
+				t.Fatalf("save.bin was opened as handle %d; the over-the-cap case writes to handle 1", h)
+			}
+			ro := result(c.send(openMsg("other.bin", fioRead, false)))
+			if ro <= 0 {
+				t.Fatalf("OPEN other.bin returned %d", ro)
+			}
+			// The console gave up on this write after the first of its three chunks.
+			c.sendAcked(writeReqMsg(h, 12, writeDataMsg(0, 3, []byte("XXXX"))))
+
+			if got := result(c.send(tc.request(ro))); got != tc.want {
+				t.Fatalf("the refused request returned %d, want %d", got, tc.want)
+			}
+			c.sendNoReply(writeDataMsg(1, 2, tc.chunk))
+			reply := c.send(closeMsg(h))
+			if protocol.MessageType(reply[0]) != protocol.CloseReply {
+				t.Fatalf("the next reply was opcode 0x%02x with result %d, not the CLOSE's: "+
+					"the refused write's chunk was taken", reply[0], result(reply))
+			}
+			if data, err := os.ReadFile(filepath.Join(root, "save.bin")); err != nil || len(data) != 0 {
+				t.Fatalf("save.bin holds %q %v, want it empty", data, err)
+			}
+		})
 	}
 }
 
@@ -365,5 +429,60 @@ func TestAppendModePreservesExistingBytes(t *testing.T) {
 	}
 	if string(got) != "headtail" {
 		t.Fatalf("append produced %q, want %q", got, "headtail")
+	}
+}
+
+// An OPEN with O_CREAT resolved only the parent of its path, and the open
+// then followed a symlink in the last component wherever it pointed. A link
+// inside the share to a file outside it let a console truncate and overwrite
+// that file, and a dangling link let it create one outside the root.
+func TestWriteOpenCannotLeaveTheRootThroughASymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.bin")
+	if err := os.WriteFile(secret, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "outlink")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "ghost"), filepath.Join(root, "dangling_out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "real.sav"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real.sav", filepath.Join(root, "link.sav")); err != nil {
+		t.Fatal(err)
+	}
+	c := dial(t, startServerAt(t, root, false))
+
+	for _, flags := range []uint16{
+		fioRead | fioWrite | fioCreate | fioTrunc,
+		fioRead | fioWrite | fioCreate,
+		fioRead | fioWrite,
+	} {
+		if got := result(c.send(openMsg("outlink", flags, false))); got != -eACCES {
+			t.Errorf("OPEN outlink flags %#x returned %d, want -EACCES", flags, got)
+		}
+	}
+	if data, err := os.ReadFile(secret); err != nil || string(data) != "secret" {
+		t.Fatalf("a file outside the root was changed through a symlink: %q %v", data, err)
+	}
+	if got := result(c.send(openMsg("dangling_out", fioRead|fioWrite|fioCreate, false))); got >= 0 {
+		t.Errorf("OPEN O_CREAT through a dangling link returned %d, want an error", got)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "ghost")); !os.IsNotExist(err) {
+		t.Fatalf("a file was created outside the root through a dangling link: %v", err)
+	}
+
+	// A link that stays inside the root still works, and writes its target.
+	h := openForWriteOK(t, c, "link.sav", fioRead|fioWrite|fioCreate|fioTrunc)
+	if got := result(c.send(writeReqMsg(h, 3, writeDataMsg(0, 1, []byte("new"))))); got != 3 {
+		t.Fatalf("WRITE through an in-root link returned %d, want 3", got)
+	}
+	c.send(closeMsg(h))
+	if data, err := os.ReadFile(filepath.Join(root, "real.sav")); err != nil || string(data) != "new" {
+		t.Fatalf("in-root link target holds %q %v, want %q", data, err, "new")
 	}
 }

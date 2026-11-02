@@ -379,12 +379,13 @@ resumed UDPFS.
 The initial NHDDL discovery and negotiation are pre-handoff evidence. They do
 not count as post-reset Neutrino traffic.
 
-### The two handoff markers
+### The three handoff markers
 
 Only one marker may be applicable to a given reset:
 
 | Marker | Trigger | Meaning |
 |---|---|---|
+| `seq0 discovery resolved to replacement session` | The same PS2 IP:port sends DISCOVERY sequence zero during a live stream, and its next payload-bearing DATA starts again at 0 (Standard) or 1 (Modulo) instead of continuing the old sequence | A new loader took over the endpoint, as Neutrino does from RiptOPL. Edge reset the transport only: the old loader's open handles stay open for Neutrino's FILEID backend, and the new loader may still open for writing, or delete, a file the old one was writing |
 | `peer sequence reset (seq 0 received)` | The same PS2 IP:port sends payload-bearing DATA sequence zero when zero is neither the next expected sequence nor its immediately previous sequence | Edge discarded stale stream state and accepted a same-endpoint restart |
 | `replacing stale session for IP` | A packet arrives from the same PS2 IP with a different UDP source port, and the old session has no active write or that write has been quiet for more than one second | Edge removed the old endpoint's worker/session and created one for the new endpoint |
 
@@ -392,7 +393,7 @@ Seeing a marker proves a datagram matching that restart/replacement condition
 reached the corresponding Edge branch. Attribute it to Neutrino after the
 reset only when its timestamp follows the captured launch and link-down
 events. The marker does not, by itself, prove the following file open or game
-boot succeeded. Absence of both markers is not a failed handoff implementation
+boot succeeded. Absence of all three markers is not a failed handoff implementation
 when no post-reset datagram was received.
 
 A payload-free control packet does not enter the reset branch. Sequence zero
@@ -401,8 +402,9 @@ a duplicate/re-ACK when the next expected sequence is one. In those cases raw
 RX and the verbose sequence fields, rather than the reset marker, are the
 decisive packet evidence.
 
-The sequence-reset line includes `expected`, `received`, `profile`, `socket`,
-and `outcome`. The same-IP replacement line includes `old_peer`, `new_peer`,
+The loader-replacement line includes `old_expected`, `first_data_sequence`,
+`profile` and `socket`. The sequence-reset line includes `expected`,
+`received`, `profile`, `socket`, and `outcome`. The same-IP replacement line includes `old_peer`, `new_peer`,
 both source ports, quiet time, active-write state, eligibility, and `reason`.
 With verbose logging, `same-IP session replacement candidate` also records a
 candidate that was deliberately retained to protect a recent active write.

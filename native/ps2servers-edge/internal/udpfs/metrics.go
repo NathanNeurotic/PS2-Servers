@@ -31,6 +31,9 @@ type metrics struct {
 	lseek     atomic.Int64
 	bread     atomic.Int64
 	bwrite    atomic.Int64
+	mkdir     atomic.Int64
+	remove    atomic.Int64
+	rmdir     atomic.Int64
 
 	bytesRead    atomic.Int64
 	bytesWritten atomic.Int64
@@ -141,6 +144,9 @@ func (m *metrics) snapshot() map[string]any {
 		"lseek":                  m.lseek.Load(),
 		"bread":                  m.bread.Load(),
 		"bwrite":                 m.bwrite.Load(),
+		"mkdir":                  m.mkdir.Load(),
+		"remove":                 m.remove.Load(),
+		"rmdir":                  m.rmdir.Load(),
 		"bytes_read":             readBytes,
 		"bytes_written":          m.bytesWritten.Load(),
 		"rx_discovery_datagrams": m.rxDiscoveryDatagrams.Load(),

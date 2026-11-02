@@ -7,7 +7,6 @@ import (
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"os"
-	"syscall"
 	"time"
 )
 
@@ -98,7 +97,7 @@ func (s *Server) sendTransfer(st *session.State, header, data []byte) bool {
 			case result < 0:
 				// A path the console looked for and did not find is not an
 				// error: OPL probes for optional files on every launch.
-				probe := (kind == protocol.OpenReply || kind == protocol.GetStatReply) && result == -int32(syscall.ENOENT)
+				probe := (kind == protocol.OpenReply || kind == protocol.GetStatReply) && result == -eNOENT
 				if !probe {
 					s.sessionRecord(st, "errors", 1)
 				}
@@ -179,12 +178,12 @@ func errno(err error) int32 {
 		return 0
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		return -int32(syscall.ENOENT)
+		return -eNOENT
 	}
 	if errors.Is(err, os.ErrPermission) || errors.Is(err, filesystem.ErrEscape) {
-		return -int32(syscall.EACCES)
+		return -eACCES
 	}
-	return -int32(syscall.EIO)
+	return -eIO
 }
 
 func result8(t protocol.MessageType, result int32) []byte {

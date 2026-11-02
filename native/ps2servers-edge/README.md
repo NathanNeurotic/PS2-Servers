@@ -23,6 +23,8 @@ both can transfer concurrently.
 - delayed Modulo-compatible fallback
 - per-session sequence and response-socket state
 - directory open/read, file open/read/seek/close, getstat
+- MKDIR, REMOVE and RMDIR, acting on the entry named: a symlink is removed
+  as itself and never followed to its target
 - file write: WRITE_REQ / WRITE_DATA / WRITE_DONE, chunk assembly, O_CREAT,
   O_TRUNC and O_APPEND, one writer per file at a time
 - retransmission, NACK handling, send windows, sequence wraparound
@@ -50,6 +52,10 @@ Guarantees:
 
 - a second peer opening the same file for writing gets `EBUSY`, since two
   consoles interleaving into one file would corrupt it
+- a loader that takes over a console's endpoint keeps the old loader's open
+  handles (Neutrino's FILEID), but can still open for writing, or delete, a
+  file the old loader was writing: that one old handle is closed rather than
+  the request refused with `EBUSY`
 - writes to CSO/ZSO/CHD are refused with `EACCES` — those readers present a
   decompressed view, so writing at a decompressed offset would land bytes at
   the wrong place in the container
@@ -58,6 +64,19 @@ Guarantees:
 - a chunk arriving out of order aborts the whole write with `EIO` rather than
   silently concatenating it into the wrong place
 - completed writes are flushed with `fsync` before `WRITE_DONE` is sent
+- REMOVE of a file a peer holds open for writing gets `EBUSY`; REMOVE of a
+  folder is `EISDIR`, RMDIR of anything but a real, empty folder fails
+  (`ENOTDIR` for a symlink, even one to a folder), and the share root
+  cannot be removed
+- on Windows, REMOVE of a read-only file gets `EACCES` and the file is
+  kept, as the Desktop server answers there; elsewhere `unlink` does not
+  look at a file's own permissions, and both servers delete it
+- REMOVE and RMDIR refuse with `EACCES` a path that passes through a
+  symlinked folder or a junction: DREAD lists a link to a folder as a
+  folder, so a recursive delete from the console would otherwise empty the
+  folder the link points at
+- `--read-only` refuses MKDIR, REMOVE and RMDIR with `EACCES`, as it
+  refuses a write
 
 ## Block access over UDPFS
 
@@ -83,6 +102,12 @@ arrives as `lo | hi<<32` and is fully client-controlled, and Go wraps silently
 on signed overflow, so the addition form accepts values near `MaxInt64`: the
 wrapped sum is negative and passes both bounds. On `BWRITE` that would be silent
 corruption of the image at an offset the client picks.
+
+On any other handle, `BREAD` and `BWRITE` address the file that handle opened,
+in 512-byte sectors, with or without `--block-device`. That is how Neutrino's
+UDPFS FILEID backend reads a game and saves to a VMC through handles its loader
+opened. `BWRITE` there needs a handle opened for writing and is held to the
+length it declares.
 
 ## UDPBD
 

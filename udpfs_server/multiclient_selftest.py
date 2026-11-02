@@ -449,12 +449,22 @@ def test_peer_timeout_reap(root, files):
                 print("  SETUP FAIL: no open file handle to observe")
                 return False
 
+            # The client's last packet, its ACK of the OPEN reply, is routed on
+            # the server's own thread and can land anywhere from here on.
+            # Routed after the reap below, it starts a new session for addr, so
+            # each check asks whether sess, this session, is the one serving
+            # addr, not whether any is. Routed between the aging and the reap
+            # sweep, it makes sess active again, so sess is aged and swept a
+            # second time if it survived the first. It is one packet and can
+            # do that once: a sweep that never reaps still fails. Checking the
+            # address made REAP fail now and then on a sweep that had worked.
+
             # A peer inside its window must survive an otherwise-identical sweep.
             # Without this, a reap test passes even if the sweep reaps everything.
             server._last_sweep -= srv.SESSION_SWEEP_INTERVAL
             server._sweep_idle_sessions()
             with server.sessions_lock:
-                kept = addr in server.sessions
+                kept = server.sessions.get(addr) is sess
             if kept:
                 print("  KEEP  ok: a peer inside its window survives a sweep")
             else:
@@ -462,12 +472,15 @@ def test_peer_timeout_reap(root, files):
                 ok = False
 
             # Age it past the timeout: the same sweep must now drop it.
-            with server.sessions_lock:
-                sess.last_activity -= (server.session_timeout + 1.0)
-            server._last_sweep -= srv.SESSION_SWEEP_INTERVAL
-            server._sweep_idle_sessions()
-            with server.sessions_lock:
-                reaped = addr not in server.sessions
+            for _attempt in range(2):
+                with server.sessions_lock:
+                    sess.last_activity -= (server.session_timeout + 1.0)
+                server._last_sweep -= srv.SESSION_SWEEP_INTERVAL
+                server._sweep_idle_sessions()
+                with server.sessions_lock:
+                    reaped = server.sessions.get(addr) is not sess
+                if reaped:
+                    break
             sess._thread.join(timeout=2.0)
             if reaped and not sess._thread.is_alive():
                 print(f"  REAP  ok: peer idle > {server.session_timeout:g}s dropped,"
