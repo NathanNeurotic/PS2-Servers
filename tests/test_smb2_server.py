@@ -37,6 +37,10 @@ from smb2_server import Smb2Server      # noqa: E402
 
 USER, PASSWORD = "ripto", "correct horse battery"
 
+# CREATE DesiredAccess: what a client opening to read sends, and read+write.
+READ_ONLY = 0x00120089
+READ_WRITE = 0x0012019F
+
 
 class Client:
     """The smallest SMB2 client that can exercise the server."""
@@ -155,12 +159,13 @@ class Client:
             self.tree_id = head.tree_id
         return head.status
 
-    def create(self, name, disposition=wire.FILE_OPEN, options=0, directory=False):
+    def create(self, name, disposition=wire.FILE_OPEN, options=0, directory=False,
+               access=READ_WRITE):
         raw = name.encode("utf-16-le")
         if directory:
             options |= wire.FILE_DIRECTORY_FILE
         body = struct.pack("<HBBIQQIIIIIHHII", 57, 0, 0, 2, 0, 0,
-                           0x00120089, 0, 7, disposition, options,
+                           access, 0, 7, disposition, options,
                            wire.HEADER_SIZE + 56, len(raw), 0, 0) + raw
         head, reply = self.call(wire.CMD_CREATE, body)
         if head.status != 0:

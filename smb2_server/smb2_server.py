@@ -28,6 +28,8 @@ once in this project and cost a release's worth of trust:
     without them makes Windows drop the connection. 3.0.2 is negotiated instead,
     which every SMB3 client speaks.
   * No oplocks, leases, or change notification. A client polls instead.
+  * IPC$ carries one pipe, srvsvc, and answers one call on it, NetrShareEnum,
+    so a client can list the shares (smb2_srvsvc.py). No other pipe exists.
 
 Run it directly:
 
@@ -48,6 +50,7 @@ import time
 from smb2_auth import AuthError, Authenticator, server_challenge
 from smb2_paths import PathError, Share
 import smb2_spnego as spnego
+import smb2_srvsvc as srvsvc
 import smb2_wire as wire
 
 VERBOSE = False
@@ -66,7 +69,7 @@ class Handle:
     """One open file or directory, and everything the client can ask about it."""
 
     __slots__ = ("file_id", "share", "path", "rel", "is_dir", "fh",
-                 "delete_on_close", "listing", "cursor")
+                 "delete_on_close", "listing", "cursor", "can_write", "pipe")
 
     def __init__(self, file_id, share, path, rel, is_dir):
         self.file_id = file_id
@@ -76,6 +79,12 @@ class Handle:
         self.is_dir = is_dir
         self.fh = None
         self.delete_on_close = False
+        # Whether the CREATE asked for write access. A handle opened to read
+        # must not change the file: a client that writes through one by mistake
+        # would otherwise overwrite a game image it only meant to read.
+        self.can_write = True
+        # A named pipe on IPC$ (srvsvc) instead of a file; path is None then.
+        self.pipe = None
         # Enumeration state. A directory listing is snapshotted at the first
         # QUERY_DIRECTORY and walked across calls: re-reading the directory on
         # every call would skip or repeat entries whenever anything changed
@@ -101,6 +110,19 @@ class Smb2Error(Exception):
         self.detail = detail
 
 
+class _IpcTree:
+    """The IPC$ tree: pipes only, never a path."""
+    name = "IPC$"
+    read_only = True
+    root = None
+
+    def __repr__(self):
+        return "IPC$"
+
+
+IPC_TREE = _IpcTree()
+
+
 class Connection:
     """Per-TCP state. One client, one dialect, one session, many handles."""
 
@@ -117,6 +139,12 @@ class Connection:
         self.handles = {}        # volatile id -> Handle
         self._next_tree = 1
         self._next_handle = 1
+        # Credits this client still holds. Every request spends at least one
+        # and every reply grants more; see Server._grant_credits.
+        self.credits = 0
+        # The FileId a related compound's later requests mean when they send
+        # the all-ones placeholder: the one the compound's CREATE opened.
+        self.compound_file_id = None
 
     # -- handle plumbing --------------------------------------------------- #
     def add_handle(self, share, path, rel, is_dir):
@@ -134,6 +162,11 @@ class Connection:
         serving it whatever the volatile half points at would hand it the
         contents of a different file under the name it thinks it asked for.
         """
+        if raw_file_id == wire.COMPOUND_FILE_ID and self.compound_file_id is not None:
+            # MS-SMB2 3.3.5.2.7.2: inside a related compound the all-ones FileId
+            # stands for the file the CREATE before it opened. libsmb2 sends
+            # every stat, unlink, rename and truncate this way.
+            raw_file_id = self.compound_file_id
         persistent, volatile = struct.unpack("<QQ", raw_file_id)
         h = self.handles.get(volatile)
         if h is None or persistent != volatile:
@@ -288,23 +321,45 @@ class Smb2Server:
         """
         replies = []
         offset = 0
+        conn.compound_file_id = None
+        prev = None                     # (header, status) of the request before
         while offset < len(msg):
             hdr = wire.parse_header(msg[offset:])
             if hdr is None:
                 return
             end = offset + hdr.next_command if hdr.next_command else len(msg)
             body = msg[offset + wire.HEADER_SIZE:end]
-            status, reply_body, tree_id = self._handle(conn, hdr, body)
+            related = bool(hdr.flags & wire.FLAG_RELATED) and prev is not None
+            if related:
+                # A related request inherits the session and tree of the one
+                # before it, and fails with that one's status if it failed:
+                # the file it would act on was never opened.
+                if hdr.session_id == 0xFFFFFFFFFFFFFFFF:
+                    hdr.session_id = prev[0].session_id
+                if hdr.tree_id == 0xFFFFFFFF:
+                    hdr.tree_id = prev[0].tree_id
+            if related and prev[1] not in (None, wire.STATUS_SUCCESS):
+                status, reply_body, tree_id = prev[1], wire.error_body(), None
+            else:
+                status, reply_body, tree_id = self._handle(conn, hdr, body)
+            if (hdr.command == wire.CMD_CREATE and status == wire.STATUS_SUCCESS
+                    and len(reply_body) >= 80):
+                conn.compound_file_id = bytes(reply_body[64:80])
+            if tree_id is not None:
+                hdr.tree_id = tree_id
+            prev = (hdr, status)
+            grant = self._grant_credits(conn, hdr)
             # A CANCEL is answered with silence. Replying to one is itself a
             # protocol error, so "no reply" has to be representable.
             if status is not None:
-                replies.append((hdr, status, reply_body, tree_id))
+                replies.append((hdr, status, reply_body, tree_id, grant))
             if not hdr.next_command:
                 break
             offset = end
+        conn.compound_file_id = None
 
         out = b""
-        for i, (hdr, status, reply_body, tree_id) in enumerate(replies):
+        for i, (hdr, status, reply_body, tree_id, grant) in enumerate(replies):
             last = i == len(replies) - 1
             padded = reply_body
             next_command = 0
@@ -317,14 +372,36 @@ class Smb2Server:
                 hdr.command, status, hdr.message_id,
                 tree_id=hdr.tree_id if tree_id is None else tree_id,
                 session_id=conn.session_id or hdr.session_id,
+                credits=grant,
+                flags=wire.FLAG_RELATED if (i and hdr.flags & wire.FLAG_RELATED) else 0,
                 next_command=next_command) + padded
         if out:
             wire.send_msg(conn.sock, out)
             # Count served bytes only once the reply left: a send that raised
             # did not serve anything. A READ reply is a 16-byte body + data.
-            for hdr, status, reply_body, _tree_id in replies:
+            for hdr, status, reply_body, _tree_id, _grant in replies:
                 if hdr.command == wire.CMD_READ and status == wire.STATUS_SUCCESS:
                     self._session_record(conn, "bytes", len(reply_body) - 16)
+
+    # The most credits one client may hold at once. Enough for libsmb2 to keep
+    # a compound and a few large reads in flight; a client asks for what it
+    # wants and is never handed more than this in total.
+    CREDIT_LIMIT = 512
+
+    def _grant_credits(self, conn, hdr):
+        """Credits for this request's reply (MS-SMB2 3.3.1.2).
+
+        Always granting one kept a client at a balance of one forever. libsmb2
+        will not send a request it lacks the credits for, so its three-part
+        CREATE/QUERY_INFO/CLOSE compound -- every stat -- sat in its queue and
+        the PS2 browse driver hung there.
+        """
+        if hdr.command != wire.CMD_NEGOTIATE:
+            conn.credits = max(0, conn.credits - max(1, hdr.credit_charge))
+        want = max(1, hdr.credits)
+        grant = max(1, min(want, self.CREDIT_LIMIT - conn.credits))
+        conn.credits += grant
+        return grant
 
     def _handle(self, conn, hdr, body):
         """(status, body, tree_id). status None means send nothing at all."""
@@ -396,12 +473,25 @@ class Smb2Server:
         if not conn.authenticated:
             raise Smb2Error(wire.STATUS_USER_SESSION_DELETED, "no session")
 
-    def _tree(self, conn, hdr):
+    def _tree(self, conn, hdr, ipc_ok=False):
         self._require_session(conn)
         share = conn.trees.get(hdr.tree_id)
         if share is None:
             raise Smb2Error(wire.STATUS_NETWORK_NAME_DELETED, "no such tree")
+        if share is IPC_TREE and not ipc_ok:
+            # IPC$ holds pipes, not files: nothing that walks a directory or
+            # resolves a path may be handed it.
+            raise Smb2Error(wire.STATUS_INVALID_DEVICE_REQUEST, "not served on IPC$")
         return share
+
+    def share_list(self):
+        """(name, type, remark, path) for every share, IPC$ last, for srvsvc."""
+        rows = [(name, srvsvc.STYPE_DISKTREE,
+                 "read-only" if (self.read_only or share.read_only) else "",
+                 "")              # level 2 path: the host's folders are not advertised
+                for name, share in sorted(self.shares.items())]
+        rows.append(("IPC$", srvsvc.STYPE_IPC | srvsvc.STYPE_SPECIAL, "Remote IPC", ""))
+        return rows
 
     def _writable(self, share):
         if self.read_only or share.read_only:
@@ -608,10 +698,17 @@ def h_tree_connect(srv, conn, hdr, body):
     # \\server\share -- only the last component names anything here.
     name = path.rstrip("\\").rsplit("\\", 1)[-1]
     if name.upper() == "IPC$":
-        # Explorer asks for IPC$ before anything else. Refusing it politely is
-        # correct for a server with no named pipes; refusing it with the wrong
-        # status makes the client abandon the whole connection.
-        raise Smb2Error(wire.STATUS_BAD_NETWORK_NAME, "no IPC$ on this server")
+        # IPC$ carries one pipe, srvsvc, so a client with no share name can ask
+        # which shares there are (RiptOPL's share picker, Explorer's \\server
+        # view, smbclient -L). See smb2_srvsvc.py.
+        tree_id = conn._next_tree
+        conn._next_tree += 1
+        conn.trees[tree_id] = IPC_TREE
+        log("tree connect IPC$ as tid", tree_id)
+        body_out = struct.pack("<HBBIII", 16, wire.SHARE_TYPE_PIPE, 0,
+                               0x00000030,      # SMB2_SHAREFLAG_NO_CACHING
+                               0, 0x001F01FF)
+        return wire.STATUS_SUCCESS, body_out, tree_id
     share = srv.share_named(name)
     if share is None:
         raise Smb2Error(wire.STATUS_BAD_NETWORK_NAME, "no share named %r" % name)
@@ -632,12 +729,34 @@ def h_tree_disconnect(srv, conn, hdr, body):
     return wire.STATUS_SUCCESS, struct.pack("<HH", 4, 0)
 
 
+def _create_pipe(srv, conn, body):
+    """CREATE on IPC$: the srvsvc pipe, or not found."""
+    name_off, name_len = struct.unpack_from("<HH", body, 44)
+    name = wire.from_utf16(request_buffer(body, name_off, name_len, "CREATE name",
+                                          least=wire.HEADER_SIZE + 56))
+    if name.strip("\\").lower() not in srvsvc.PIPE_NAMES:
+        raise Smb2Error(wire.STATUS_OBJECT_NAME_NOT_FOUND, "no pipe %r" % name)
+    h = conn.add_handle(IPC_TREE, None, name, False)
+    h.pipe = srvsvc.SrvsvcPipe(srv.share_list, srv.server_name)
+    log("create pipe", name, "-> id", h.file_id)
+    body_out = struct.pack(
+        "<HBBIQQQQqqII16sII",
+        89, 0, 0, wire.FILE_OPENED,
+        0, 0, 0, 0, 4096, 0,
+        0x00000080, 0,                       # FILE_ATTRIBUTE_NORMAL
+        struct.pack("<QQ", h.file_id, h.file_id),
+        0, 0)
+    return wire.STATUS_SUCCESS, body_out
+
+
 def h_create(srv, conn, hdr, body):
-    share = srv._tree(conn, hdr)
+    share = srv._tree(conn, hdr, ipc_ok=True)
     if len(body) < 56:
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short CREATE")
+    if share is IPC_TREE:
+        return _create_pipe(srv, conn, body)
     (_size, _sec_flags, _oplock, _impersonation, _flags1, _flags2,
-     _access, _attrs, _share_access, disposition, options,
+     access, _attrs, _share_access, disposition, options,
      name_off, name_len, _cc_off, _cc_len) = struct.unpack_from(
         "<HBBIQQIIIIIHHII", body, 0)
     rel = wire.from_utf16(request_buffer(body, name_off, name_len, "CREATE name",
@@ -681,6 +800,7 @@ def h_create(srv, conn, hdr, body):
         raise Smb2Error(wire.STATUS_NOT_A_DIRECTORY, rel)
 
     h = conn.add_handle(share, path, rel, is_dir)
+    h.can_write = bool(access & wire.ACCESS_WRITE_ANY)
     if options & wire.FILE_DELETE_ON_CLOSE:
         srv._writable(share)
         h.delete_on_close = True
@@ -700,14 +820,14 @@ def h_create(srv, conn, hdr, body):
 
 
 def h_close(srv, conn, hdr, body):
-    srv._tree(conn, hdr)
+    srv._tree(conn, hdr, ipc_ok=True)
     if len(body) < 24:
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short CLOSE")
     _size, flags, _res = struct.unpack_from("<HHI", body, 0)
     h = conn.handle_from(body[8:24])
 
     try:
-        st = os.stat(h.path)
+        st = os.stat(h.path) if h.pipe is None else None
     except OSError:
         st = None
     h.close()
@@ -761,11 +881,18 @@ def _open_file(h, writable):
 
 
 def h_read(srv, conn, hdr, body):
-    srv._tree(conn, hdr)
+    srv._tree(conn, hdr, ipc_ok=True)
     if len(body) < 48:
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short READ")
     _size, _pad, _flags, length, offset = struct.unpack_from("<HBBIQ", body, 0)
     h = conn.handle_from(body[16:32])
+    if h.pipe is not None:
+        data, more = h.pipe.read(min(length, wire.MAX_READ))
+        if not data:
+            raise Smb2Error(wire.STATUS_PIPE_EMPTY, "nothing written to the pipe yet")
+        body_out = struct.pack("<HBBIII", 17, wire.HEADER_SIZE + 16, 0, len(data), 0, 0)
+        # BUFFER_OVERFLOW is a warning with data: the client reads the rest.
+        return (wire.STATUS_BUFFER_OVERFLOW if more else wire.STATUS_SUCCESS), body_out + data
     if h.is_dir:
         raise Smb2Error(wire.STATUS_INVALID_DEVICE_REQUEST, "read on a directory")
 
@@ -784,14 +911,24 @@ def h_read(srv, conn, hdr, body):
 
 
 def h_write(srv, conn, hdr, body):
-    share = srv._tree(conn, hdr)
-    srv._writable(share)
+    share = srv._tree(conn, hdr, ipc_ok=True)
     if len(body) < 48:
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short WRITE")
     _size, data_off, length, offset = struct.unpack_from("<HHIQ", body, 0)
     h = conn.handle_from(body[16:32])
+    if h.pipe is not None:
+        data = request_buffer(body, data_off, length, "WRITE data",
+                              least=wire.HEADER_SIZE + 48)
+        try:
+            written = h.pipe.write(data)
+        except srvsvc.RpcError as e:
+            raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "srvsvc: %s" % e)
+        return wire.STATUS_SUCCESS, struct.pack("<HHIIHH", 17, 0, written, 0, 0, 0)
+    srv._writable(share)
     if h.is_dir:
         raise Smb2Error(wire.STATUS_INVALID_DEVICE_REQUEST, "write to a directory")
+    if not h.can_write:
+        raise Smb2Error(wire.STATUS_ACCESS_DENIED, "write through a read-only handle")
 
     if length > wire.MAX_WRITE:
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER,
@@ -941,6 +1078,8 @@ def h_set_info(srv, conn, hdr, body):
 
     if info_class == wire.FILE_END_OF_FILE_INFORMATION and len(payload) >= 8:
         size = struct.unpack_from("<q", payload, 0)[0]
+        if not h.can_write:
+            raise Smb2Error(wire.STATUS_ACCESS_DENIED, "resize through a read-only handle")
         fh = _open_file(h, writable=True)
         fh.truncate(size)
         return wire.STATUS_SUCCESS, struct.pack("<H", 2)
@@ -985,7 +1124,33 @@ def h_cancel(srv, conn, hdr, body):
 
 
 def h_ioctl(srv, conn, hdr, body):
-    raise Smb2Error(wire.STATUS_NOT_SUPPORTED, "no ioctls are served")
+    srv._tree(conn, hdr, ipc_ok=True)
+    if len(body) < 56:
+        raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short IOCTL")
+    ctl_code = struct.unpack_from("<I", body, 4)[0]
+    if ctl_code != wire.FSCTL_PIPE_TRANSCEIVE:
+        raise Smb2Error(wire.STATUS_NOT_SUPPORTED, "ioctl 0x%08x is not served" % ctl_code)
+    h = conn.handle_from(body[8:24])
+    if h.pipe is None:
+        raise Smb2Error(wire.STATUS_INVALID_DEVICE_REQUEST, "transceive on a file")
+    in_off, in_len, _max_in, _out_off, _out_len, max_out, flags = struct.unpack_from(
+        "<IIIIIII", body, 24)
+    data = request_buffer(body, in_off, in_len, "IOCTL input",
+                          least=wire.HEADER_SIZE + 56)
+    try:
+        out = h.pipe.transact(data)
+    except srvsvc.RpcError as e:
+        raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "srvsvc: %s" % e)
+    status = wire.STATUS_SUCCESS
+    if max_out and len(out) > max_out:
+        # The rest waits in the pipe for READs, as on Windows.
+        h.pipe.outbox = out[max_out:] + h.pipe.outbox
+        out = out[:max_out]
+        status = wire.STATUS_BUFFER_OVERFLOW
+    off = wire.HEADER_SIZE + 48
+    body_out = struct.pack("<HHI16sIIIIII", 49, 0, ctl_code, bytes(body[8:24]),
+                           off, 0, off, len(out), 0, 0)
+    return status, body_out + out
 
 
 _HANDLERS = {

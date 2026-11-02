@@ -107,6 +107,13 @@ COMMAND_NAMES = {
 FLAG_SERVER_TO_REDIR = 0x00000001
 FLAG_ASYNC = 0x00000002
 FLAG_RELATED = 0x00000004
+# The FileId a related compound request sends to mean "the file the CREATE
+# before me opened".
+COMPOUND_FILE_ID = b"\xff" * 16
+
+# CREATE DesiredAccess bits that allow changing a file's data: FILE_WRITE_DATA,
+# FILE_APPEND_DATA, MAXIMUM_ALLOWED, GENERIC_ALL and GENERIC_WRITE.
+ACCESS_WRITE_ANY = 0x00000002 | 0x00000004 | 0x02000000 | 0x10000000 | 0x40000000
 FLAG_SIGNED = 0x00000008
 
 STATUS_SUCCESS = 0x00000000
@@ -137,6 +144,8 @@ STATUS_MEDIA_WRITE_PROTECTED = 0xC00000A2
 STATUS_DISK_FULL = 0xC000007F
 STATUS_CANNOT_DELETE = 0xC0000121
 STATUS_DIRECTORY_NOT_EMPTY = 0xC0000101
+STATUS_BUFFER_OVERFLOW = 0x80000005
+STATUS_PIPE_EMPTY = 0xC00000D9
 
 # Names for the statuses smb2_paths raises, so a path decision made in one place
 # arrives on the wire as the status it chose rather than a generic denial.
@@ -180,6 +189,9 @@ FILE_NON_DIRECTORY_FILE = 0x00000040
 FILE_DELETE_ON_CLOSE = 0x00001000
 
 SHARE_TYPE_DISK = 0x01
+SHARE_TYPE_PIPE = 0x02
+
+FSCTL_PIPE_TRANSCEIVE = 0x0011C017
 
 SECURITY_MODE_SIGNING_ENABLED = 0x0001
 SECURITY_MODE_SIGNING_REQUIRED = 0x0002
@@ -359,6 +371,15 @@ def directory_entry(name, st, info_class, read_only=False):
         return struct.pack("<IIQQQQqqIII", 0, 0, ctime, atime, mtime, chtime,
                            st.st_size, allocation_of(st), attrs,
                            len(name_utf16), 0) + name_utf16
+    if info_class == FILE_ID_FULL_DIRECTORY_INFORMATION:
+        # FileFullDirectoryInformation plus 4 reserved bytes and an 8-byte
+        # FileId. libsmb2's smb2_opendir asks for this class and no other, so
+        # without it RiptOPL's and Launchstation's SMB2 browse drivers list
+        # nothing at all.
+        return struct.pack("<IIQQQQqqIIIIQ", 0, 0, ctime, atime, mtime, chtime,
+                           st.st_size, allocation_of(st), attrs,
+                           len(name_utf16), 0, 0,
+                           st.st_ino & 0xFFFFFFFFFFFFFFFF) + name_utf16
     if info_class == FILE_NAMES_INFORMATION:
         return struct.pack("<III", 0, 0, len(name_utf16)) + name_utf16
     return None
@@ -382,7 +403,9 @@ FILE_ALIGNMENT_INFORMATION = 0x11
 FILE_ALL_INFORMATION = 0x12
 FILE_END_OF_FILE_INFORMATION = 0x14
 FILE_NETWORK_OPEN_INFORMATION = 0x22
+FILE_ATTRIBUTE_TAG_INFORMATION = 0x23
 FILE_ID_BOTH_DIRECTORY_INFORMATION = 0x25
+FILE_ID_FULL_DIRECTORY_INFORMATION = 0x26
 
 FS_VOLUME_INFORMATION = 0x01
 FS_SIZE_INFORMATION = 0x03
@@ -422,6 +445,12 @@ def file_info(info_class, st, name="", read_only=False):
     if info_class == FILE_NAME_INFORMATION:
         raw = utf16(name)
         return struct.pack("<I", len(raw)) + raw
+    if info_class == FILE_ATTRIBUTE_TAG_INFORMATION:
+        # FileAttributes + ReparseTag (none: nothing served here is a reparse
+        # point). libsmb2 sends this beside FileAllInformation on every stat
+        # and fstat and keeps the first failure, so refusing it made every
+        # stat from a PS2 SMB2 browse driver fail.
+        return struct.pack("<II", attrs, 0)
     if info_class == FILE_NETWORK_OPEN_INFORMATION:
         return struct.pack("<QQQQqqII", ctime, atime, mtime, chtime,
                            allocation_of(st), st.st_size, attrs, 0)

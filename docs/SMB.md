@@ -81,6 +81,40 @@ builds the pinned usmb2 and merged Neutrino SMB sources on the host and reads a
 game through them; it runs in CI. That is a host check of the protocol, not a
 test on a PS2.
 
+## RiptOPL and Launchstation (SMB2)
+
+[RiptOPL](https://github.com/NathanNeurotic/RiptOPL)'s SMB2 mode and
+[Launchstation](https://github.com/NathanNeurotic/Launchstation)'s `smb:` device
+browse with `smb2man.irx`, which is built on
+[libsmb2](https://github.com/sahlberg/libsmb2) by Ronnie Sahlberg
+([@sahlberg](https://github.com/sahlberg)). RiptOPL loads games with its own
+in-game SMB2 reader.
+
+| Setting | RiptOPL | Launchstation |
+|---|---|---|
+| Card | **SMBv2** or **SMBv3**. RiptOPL offers SMB 2.0.2 and 2.1 only, so either card negotiates 2.1. | **SMBv2** or **SMBv3** (it negotiates 3.0.2 with the SMBv3 card). |
+| Port | Network settings, **SMB Server** section, with **SMB Version** set to SMB2: **Port** = the card's port (1445 by default). | In the `URL`: `smb://<PC address>:1445/games`. Without a port it uses 445. |
+| Share | The card's share (`games`), or leave it blank to pick from the server's share list. | The share in the `URL`. |
+| Login | The card's username and password. With a **No password** card, any user (a blank one logs on as `Guest`). | `USERNAME` and `PASSWORD` in `SMB2.CNF` (31 characters at most). |
+
+The server gives libsmb2 what it asks for: FileIdFullDirectoryInformation
+listings, the attribute-tag query sent with every stat, related
+CREATE + QUERY_INFO + CLOSE compounds (with enough credits for libsmb2 to send
+them), and the share list over `IPC$` (`\PIPE\srvsvc`, NetrShareEnum levels 0-2).
+Before these were added, listing, stat, truncate and the share picker all failed.
+
+`conformance/integration/libsmb2/run.py` builds the two libsmb2 versions those
+drivers use (RiptOPL's vendored c6e4997 and Launchstation's d61b781) on the host
+and lists, stats, reads byte for byte, writes, truncates and enumerates shares
+against both cards; it runs in CI. RiptOPL's in-game reader is checked by
+RiptOPL's own `tests/smb2-live` harness, which passes against both cards. Both
+are host checks of the protocol, not tests on a PS2.
+
+Known limit: the server does not sign. The PS2 clients above sign only when the
+server requires it, so they are unaffected, but a desktop client whose policy
+requires signing (Samba's `smbclient`, Windows 11 24H2 by default) refuses the
+tree connect.
+
 ## Writes and testing
 
 Writable is the default for the bare servers. The OS account running the server
