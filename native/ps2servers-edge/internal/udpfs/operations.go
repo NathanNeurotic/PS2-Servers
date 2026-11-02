@@ -519,7 +519,7 @@ func (s *Server) completeWrite(st *session.State) {
 	expected := st.WriteExpectedLen
 	st.ResetWrite()
 	if isBlock {
-		s.completeBlockWrite(st, buf, offset, expected)
+		s.completeBlockWrite(st, id, buf, offset, expected)
 		return
 	}
 	h := st.Handles[id]

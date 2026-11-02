@@ -103,6 +103,12 @@ on signed overflow, so the addition form accepts values near `MaxInt64`: the
 wrapped sum is negative and passes both bounds. On `BWRITE` that would be silent
 corruption of the image at an offset the client picks.
 
+On any other handle, `BREAD` and `BWRITE` address the file that handle opened,
+in 512-byte sectors, with or without `--block-device`. That is how Neutrino's
+UDPFS FILEID backend reads a game and saves to a VMC through handles its loader
+opened. `BWRITE` there needs a handle opened for writing and is held to the
+length it declares.
+
 ## UDPBD
 
 Edge also serves a single disk image as a network block device, so choosing

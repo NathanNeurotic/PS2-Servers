@@ -331,6 +331,14 @@ Go wraps silently on signed overflow, so the addition form accepts a sector near
 bound — and the resulting offset can land inside the real file. On a write that
 is silent corruption at a client-chosen offset.
 
+`BREAD` and `BWRITE` on any handle other than 0 address the file that handle
+opened, in 512-byte sectors, with or without `--block-device`. Neutrino's UDPFS
+FILEID backend works this way: its loader opens the game and any VMC or HDD
+image, and the stage that runs the game reads and saves through those handles.
+Such a `BWRITE` needs a handle opened for writing (`EACCES` otherwise), is held
+to the length it declares, may extend the file as a write after `LSEEK` can, and
+is `fsync`ed before `WRITE_DONE`. The Desktop server takes these writes too.
+
 ## Security model
 
 Edge enforces a configured filesystem root. It rejects `..`, absolute and

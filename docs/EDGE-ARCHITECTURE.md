@@ -102,7 +102,10 @@ CGO-free implementation; see [Edge configuration](EDGE.md).
 `--block-device` additionally serves one image through the UDPFS `BREAD`/
 `BWRITE` opcodes on handle 0, which `OPEN` never returns. Access is positional
 because one image is shared by every session; a seek cursor would let two
-consoles move each other's read position.
+consoles move each other's read position. On any other handle the same opcodes
+address the file that handle opened, in 512-byte sectors: Neutrino's FILEID
+backend reads a game and writes a VMC that way, through handles its loader
+opened and the stage running the game inherits.
 
 ## UDPBD boundary
 

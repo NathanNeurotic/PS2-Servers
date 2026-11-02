@@ -82,9 +82,11 @@ type State struct {
 	WriteBuffer        []byte
 	WriteTotalChunks   uint16
 	WriteReceivedChunk uint16
-	// WriteIsBlock routes the assembled buffer to the shared block device at
-	// WriteOffset instead of to a file handle. BWRITE and a file write share
-	// the same WriteData chunk sequence, so only the destination differs.
+	// WriteIsBlock marks a BWRITE: the assembled buffer goes to WriteOffset
+	// of the shared block device, or of the file WriteHandle names when that
+	// is not the device's handle 0, rather than to a file handle's position.
+	// BWRITE and a file write share the same WriteData chunk sequence, so
+	// only the destination differs.
 	WriteIsBlock bool
 	WriteOffset  int64
 	// WriteExpectedLen is how many bytes a BWRITE said it would deliver, or 0
