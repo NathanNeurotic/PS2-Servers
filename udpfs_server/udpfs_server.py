@@ -2417,12 +2417,23 @@ class UdpfsServer:
 
         # Refused up front rather than once the chunks have arrived: the client
         # declares the size here, so this is the earliest point it is known.
-        declared = sector_count * (self.bd_sector_size
-                                   if handle == BLOCK_DEVICE_HANDLE else 512)
+        sector_size = self.bd_sector_size if handle == BLOCK_DEVICE_HANDLE else 512
+        declared = sector_count * sector_size
         if declared > self.max_transfer_bytes:
             self._print_event(
                 f"[{addr[0]}:{addr[1]}] BWRITE {declared} bytes over "
                 f"{self.max_transfer_bytes} -> EINVAL")
+            self._send_write_done(addr, -errno.EINVAL)
+            return
+
+        # The sector is lo | hi << 32, the console's to choose. Past the
+        # largest file offset, 2**63 - 1, seek() and pwrite() raise ValueError
+        # and OverflowError rather than OSError, so such a write was never
+        # answered. Refused here, as Edge refuses it.
+        if sector_nr * sector_size + declared > (1 << 63) - 1:
+            self._print_event(
+                f"[{addr[0]}:{addr[1]}] BWRITE sector={sector_nr} past the "
+                "largest file offset -> EINVAL")
             self._send_write_done(addr, -errno.EINVAL)
             return
 

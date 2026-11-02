@@ -314,6 +314,26 @@ class ARefusedWriteTakesNoChunksTests(_Loopback):
         self._assert_only_the_refusal(console, handle, -errno.EINVAL,
                                       "BWRITE declared over the cap")
 
+    def test_a_block_write_past_the_largest_file_offset(self):
+        # Sector 2**54 is byte 2**63, one past the largest offset seek() takes:
+        # it raised ValueError, not OSError, and the write went unanswered.
+        console, handle = self._after_a_finished_write()
+        console.send_in_chunks(console._bwrite_req(handle, 1 << 54, 1),
+                               b"2" * SECTOR, SECTOR // 2)
+        self._assert_only_the_refusal(console, handle, -errno.EINVAL,
+                                      "BWRITE past the largest file offset")
+
+    def test_a_block_write_to_the_image_past_the_largest_file_offset(self):
+        # The same through the shared image, where pwrite() raised
+        # OverflowError.
+        image = self._put("disk.img", b"D" * (4 * SECTOR))
+        console, handle = self._after_a_finished_write(block_device=image)
+        console.send_in_chunks(console._bwrite_req(0, 1 << 54, 1),
+                               b"2" * SECTOR, SECTOR // 2)
+        self._assert_only_the_refusal(console, handle, -errno.EINVAL,
+                                      "BWRITE to the image past the largest file offset")
+        self.assertEqual(self._content(image), b"D" * (4 * SECTOR))
+
     def _give_up_on_a_write(self, console, handle):
         # The console stops sending a write's chunks when a send fails, and
         # its next request finds that write still being assembled here.
