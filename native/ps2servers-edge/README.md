@@ -68,6 +68,9 @@ Guarantees:
   folder is `EISDIR`, RMDIR of anything but a real, empty folder fails
   (`ENOTDIR` for a symlink, even one to a folder), and the share root
   cannot be removed
+- on Windows, REMOVE of a read-only file gets `EACCES` and the file is
+  kept, as the Desktop server answers there; elsewhere `unlink` does not
+  look at a file's own permissions, and both servers delete it
 - REMOVE and RMDIR refuse with `EACCES` a path that passes through a
   symlinked folder or a junction: DREAD lists a link to a folder as a
   folder, so a recursive delete from the console would otherwise empty the

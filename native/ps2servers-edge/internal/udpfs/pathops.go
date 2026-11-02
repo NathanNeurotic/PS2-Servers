@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/filesystem"
@@ -33,6 +34,16 @@ import (
 // Edge adds one refusal the Desktop server has no state for: REMOVE of a file
 // that some peer holds open for writing is EBUSY, from the same single-writer
 // reservation that refuses a second writer.
+
+// removeRefusesReadOnly makes REMOVE refuse a file whose read-only attribute
+// is set, with EACCES, as Windows' DeleteFile refuses it -- and with it the
+// Desktop server, whose os.unlink is DeleteFile there. os.Remove would clear
+// the attribute and delete the file. POSIX unlink ignores a file's own mode,
+// so elsewhere both servers delete it. A variable so tests can take either
+// host's part.
+var removeRefusesReadOnly atomic.Bool
+
+func init() { removeRefusesReadOnly.Store(runtime.GOOS == "windows") }
 
 func pathOpName(t protocol.MessageType) string {
 	switch t {
@@ -112,6 +123,11 @@ func (s *Server) handleRemove(st *session.State, p []byte) {
 		// unlink(2) of a directory is EISDIR on Linux, EPERM on macOS and
 		// EACCES on Windows; answer as the Desktop server does on all of them.
 		s.sendPathResult(st, -int32(syscall.EISDIR))
+		return
+	}
+	if removeRefusesReadOnly.Load() && info.Mode().Perm()&0o200 == 0 {
+		// Go reports the read-only attribute as a mode without write bits.
+		s.sendPathResult(st, -int32(syscall.EACCES))
 		return
 	}
 	busy, err := s.removeUnlessWriting(entry)

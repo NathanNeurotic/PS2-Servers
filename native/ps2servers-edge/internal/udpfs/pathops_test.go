@@ -317,6 +317,36 @@ func TestDeletesDoNotGoThroughALinkedFolder(t *testing.T) {
 	share.assertIntact()
 }
 
+// On Windows the Desktop server's os.unlink is DeleteFile, which refuses a
+// file whose read-only attribute is set; os.Remove clears the attribute and
+// deletes it anyway. POSIX unlink ignores a file's own mode, so elsewhere both
+// servers delete it. removeRefusesReadOnly stands in for the host here.
+func TestRemoveOfAReadOnlyFileAnswersAsTheHostDoes(t *testing.T) {
+	defer removeRefusesReadOnly.Store(removeRefusesReadOnly.Load())
+	root := t.TempDir()
+	save := filepath.Join(root, "keep.sav")
+	if err := os.WriteFile(save, []byte("keep"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	c := dial(t, startServerAt(t, root, false))
+
+	removeRefusesReadOnly.Store(true)
+	if got := c.pathOp(protocol.RemoveRequest, "keep.sav"); got != errnoResult(syscall.EACCES) {
+		t.Fatalf("REMOVE of a read-only file as on Windows returned %d, want -EACCES", got)
+	}
+	if data, err := os.ReadFile(save); err != nil || string(data) != "keep" {
+		t.Fatalf("the read-only file was deleted or changed: %q %v", data, err)
+	}
+
+	removeRefusesReadOnly.Store(false)
+	if got := c.pathOp(protocol.RemoveRequest, "keep.sav"); got != 0 {
+		t.Fatalf("REMOVE of a read-only file as on POSIX returned %d, want 0", got)
+	}
+	if _, err := os.Lstat(save); !os.IsNotExist(err) {
+		t.Fatalf("keep.sav still exists: %v", err)
+	}
+}
+
 // Only links are refused on the way; anything else is the operation's to
 // answer, as on the Desktop server.
 func TestAFileUsedAsAFolderIsNotALink(t *testing.T) {

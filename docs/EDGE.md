@@ -311,6 +311,7 @@ With writes enabled:
 | Write on a handle opened read-only | `EACCES` — access is decided at OPEN and re-checked |
 | Write completes | `fsync` before `WRITE_DONE`; this does not make interrupted or multi-request saves atomic |
 | `REMOVE` of a file some peer holds open for writing | `EBUSY` — the rest of that save would go into a file no longer in any folder |
+| `REMOVE` of a read-only file | Windows: `EACCES` and the file is kept, as the Desktop server answers there. Elsewhere the file is deleted, by both servers, since `unlink` does not look at a file's own permissions |
 | `REMOVE` of a symlink | the link is deleted; what it points at is never touched |
 | `REMOVE` of a folder | `EISDIR` |
 | `RMDIR` of a file or a symlink, even one to a folder | `ENOTDIR`; `RMDIR` removes only a real, empty folder |
