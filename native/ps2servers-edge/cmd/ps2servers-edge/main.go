@@ -433,10 +433,20 @@ func runSMB() {
 	}
 	// Serve returns as soon as Close shuts the listener, but Close then waits
 	// for live connections and prints the final SESSION lines. Wait for it so
-	// the process does not exit first and lose them.
+	// the process does not exit first and lose them -- but not forever: a read
+	// stuck on a dead disk is not cancelled by closing its socket, and Stop
+	// must still stop.
 	stop()
-	<-closeDone
+	select {
+	case <-closeDone:
+	case <-time.After(smbShutdownWait):
+		logger.Warn("SMB shutdown timed out waiting for connections; exiting",
+			map[string]any{"waited": smbShutdownWait.String()})
+	}
 }
+
+// smbShutdownWait bounds how long the smb command waits for Close after Stop.
+const smbShutdownWait = 10 * time.Second
 
 // shareList collects repeated --share flags.
 type shareList []string
