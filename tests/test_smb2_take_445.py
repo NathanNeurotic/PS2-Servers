@@ -50,6 +50,7 @@ class FakeServices:
             if self.stop_issued and self.delayed_polls:
                 return subprocess.CompletedProcess(
                     args, 1, "", "Cannot start while StopPending")
+            self.stop_issued = False  # The stop transition is over.
             self.state = "Running"
             return subprocess.CompletedProcess(args, 0, "", "")
         return subprocess.CompletedProcess(args, 0, "", "")
