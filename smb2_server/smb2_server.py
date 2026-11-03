@@ -1182,7 +1182,7 @@ _HANDLERS = {
 # CLI
 # --------------------------------------------------------------------------- #
 
-def take_445(stop_timeout=10.0, poll_interval=0.25):
+def take_445(stop_timeout=10.0, poll_interval=0.25, restore_timeout=10.0):
     """Temporarily stop Windows file sharing before taking port 445.
 
     The service can report that Stop-Service returned while it is still
@@ -1214,17 +1214,39 @@ def take_445(stop_timeout=10.0, poll_interval=0.25):
     restored = []
 
     def restore():
+        """Restore a previously running service only after its stop finishes.
+
+        A timed-out Stop-Service can leave Windows in StopPending. Start-Service
+        cannot reliably run in that state, so wait for Stopped before starting.
+        Only mark success when the service actually reaches Running; on timeout,
+        log the recovery command and leave the callback retryable.
+        """
         if restored:
             return
-        restored.append(True)
-        # Respect a machine where Windows file sharing was already stopped.
         if not originally_running:
+            restored.append(True)
             return
         note("[445] restoring LanmanServer...")
-        res = ps("Start-Service LanmanServer -ErrorAction Stop")
-        if res.returncode:
-            note("[445] WARNING: could not restore LanmanServer:",
-                 res.stderr.strip())
+        deadline = time.monotonic() + restore_timeout
+        while True:
+            state = status("LanmanServer")
+            if state == "Running":
+                restored.append(True)
+                break
+            if state == "Stopped":
+                res = ps("Start-Service LanmanServer -ErrorAction Stop")
+                if res.returncode:
+                    note("[445] WARNING: Start-Service failed:", res.stderr.strip())
+            elif state not in ("StopPending", "StartPending"):
+                note("[445] WARNING: cannot verify LanmanServer state:",
+                     state or "unknown")
+                return
+            if time.monotonic() >= deadline:
+                note("[445] WARNING: LanmanServer was not restored; run "
+                     "'Start-Service LanmanServer' in elevated PowerShell "
+                     "after its pending transition completes.")
+                return
+            time.sleep(poll_interval)
         if browser == "Running":
             ps("Start-Service Browser -ErrorAction SilentlyContinue")
 
@@ -1242,6 +1264,7 @@ def take_445(stop_timeout=10.0, poll_interval=0.25):
         if res.returncode:
             note("[445] could not stop LanmanServer; administrator rights or "
                  "a dependent service may prevent takeover.", res.stderr.strip())
+            restore()  # Even a failed stop request may have changed its state.
             return None
         deadline = time.monotonic() + stop_timeout
         while status("LanmanServer") != "Stopped":
