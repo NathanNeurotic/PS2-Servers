@@ -228,11 +228,16 @@ class Smb2Server:
 
     # -- lifecycle --------------------------------------------------------- #
     def listen(self, bind, port, backlog=8):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind((bind, port))
-        self.sock.listen(backlog)
-        return self.sock.getsockname()[1]
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind((bind, port))
+            sock.listen(backlog)
+        except BaseException:
+            sock.close()  # A failed 445 attempt must not leak a socket on retry.
+            raise
+        self.sock = sock
+        return sock.getsockname()[1]
 
     def serve_forever(self, poll_seconds=1.0):
         # A timeout lets a stop request (Ctrl+C, or the launcher's Stop on
@@ -1177,18 +1182,14 @@ _HANDLERS = {
 # CLI
 # --------------------------------------------------------------------------- #
 
-def take_445():
-    """Stop Windows' LanmanServer so this server can bind 445. Returns restore().
+def take_445(stop_timeout=10.0, poll_interval=0.25):
+    """Temporarily stop Windows file sharing before taking port 445.
 
-    Windows' own SMB client cannot be pointed at a non-445 port, so for Explorer
-    to reach this share at all, something has to give up 445. This is the same
-    approach as smbv1_server/smbserver_opl.py's _take_445, deliberately kept
-    identical in the two properties that matter:
-
-      * Stop, never Disable. A hard kill that never runs restore() leaves the
-        service stopped until the next boot, not disabled forever.
-      * PowerShell resolved by absolute path, so a stray powershell.exe on PATH
-        or in the working directory cannot be run in its place.
+    The service can report that Stop-Service returned while it is still
+    stopping. Verify its state before binding; the separate listener retry
+    handles srvnet.sys holding the port briefly after the service stops.
+    Never enable SMB1 or change the service's startup configuration.
+    Returns a restore callback, or None if stopping failed.
     """
     import subprocess
 
@@ -1203,38 +1204,80 @@ def take_445():
         return subprocess.run([powershell, "-NoProfile", "-Command", cmd],
                               capture_output=True, text=True)
 
-    status = ps("(Get-Service LanmanServer).Status").stdout.strip()
-    browser = ps("(Get-Service Browser -ErrorAction SilentlyContinue).Status"
-                 ).stdout.strip()
+    def status(name):
+        return ps("(Get-Service %s -ErrorAction SilentlyContinue).Status" %
+                  name).stdout.strip()
+
+    initial = status("LanmanServer")
+    browser = status("Browser")
+    originally_running = initial == "Running"
     restored = []
 
     def restore():
-        # Once only: main's cleanup and the interrupt path below may both
-        # reach it.
         if restored:
             return
         restored.append(True)
+        # Respect a machine where Windows file sharing was already stopped.
+        if not originally_running:
+            return
         note("[445] restoring LanmanServer...")
-        ps("Start-Service LanmanServer -ErrorAction SilentlyContinue")
+        res = ps("Start-Service LanmanServer -ErrorAction Stop")
+        if res.returncode:
+            note("[445] WARNING: could not restore LanmanServer:",
+                 res.stderr.strip())
         if browser == "Running":
             ps("Start-Service Browser -ErrorAction SilentlyContinue")
 
-    note("[445] stopping LanmanServer (was: %s)..." % (status or "?"))
+    if initial == "Stopped":
+        note("[445] LanmanServer was already stopped; leaving it unchanged.")
+        return restore
+    if not originally_running:
+        note("[445] cannot verify LanmanServer is running or stopped (state: %s)." %
+             (initial or "unknown"))
+        return None
+
+    note("[445] stopping LanmanServer (was: %s)..." % initial)
     try:
-        res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction SilentlyContinue")
+        res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction Stop")
+        if res.returncode:
+            note("[445] could not stop LanmanServer; administrator rights or "
+                 "a dependent service may prevent takeover.", res.stderr.strip())
+            return None
+        deadline = time.monotonic() + stop_timeout
+        while status("LanmanServer") != "Stopped":
+            if time.monotonic() >= deadline:
+                note("[445] LanmanServer did not reach Stopped within %.1fs." %
+                     stop_timeout)
+                restore()
+                return None
+            time.sleep(poll_interval)
     except BaseException:
-        # Stopped (Stop button, Ctrl+C) while the service was going down: put
-        # it back before leaving, or file sharing stays off until a reboot.
+        # Preserve the previous Windows file-sharing state if startup is
+        # interrupted after the stop request.
         restore()
         raise
-    if res.returncode != 0:
-        note("[445] could not stop LanmanServer -- run as Administrator.",
-             res.stderr.strip())
-
     return restore
 
 
-def bind_hint(port, err):
+def listen_after_take_445(server, bind, port, timeout=10.0, interval=0.25):
+    """Retry only the expected Windows 445-release errors, on exactly 445.
+
+    A successful Stop-Service is not proof that srvnet.sys has released its
+    listener. No fallback port is safe: clients expecting 445 would miss it.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return server.listen(bind, port)
+        except OSError as exc:
+            retryable = (exc.errno in (errno.EADDRINUSE, errno.EACCES)
+                         or getattr(exc, "winerror", None) in (10013, 10048))
+            if not retryable or time.monotonic() >= deadline:
+                raise
+            time.sleep(interval)
+
+
+def bind_hint(port, err, take_445=False):
     """What to do about a failed bind, or "" when there is nothing specific.
 
     Port 445 is the case worth explaining. Neutrino's SMB driver and Windows'
@@ -1243,6 +1286,12 @@ def bind_hint(port, err):
     """
     if port != 445:
         return ""
+    if take_445 and os.name == "nt":
+        return ("TCP 445 remained unavailable after Windows file sharing was "
+                "stopped and the bind was retried. Another service, srvnet.sys, "
+                "or a Windows port reservation may still block it. Check "
+                "Get-NetTCPConnection -LocalPort 445 and running dependents "
+                "of Get-Service srvnet. Do not disable Windows services.")
     if err.errno in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", -1)):
         if os.name == "nt":
             return ("Port 445 belongs to Windows file sharing. Tick 'Take port "
@@ -1351,12 +1400,17 @@ def main(argv=None):
         if args.take_445:
             want_port = 445
             restore = take_445()
+            if restore is None:
+                return 1
         try:
-            port = server.listen(args.bind, want_port)
+            if args.take_445:
+                port = listen_after_take_445(server, args.bind, want_port)
+            else:
+                port = server.listen(args.bind, want_port)
         except OSError as e:
             print("ERROR: cannot bind %s:%d -- %s" % (args.bind, want_port, e),
                   file=sys.stderr)
-            hint = bind_hint(want_port, e)
+            hint = bind_hint(want_port, e, take_445=args.take_445)
             if hint:
                 print(hint, file=sys.stderr)
             return 1
@@ -1381,12 +1435,12 @@ def main(argv=None):
     except KeyboardInterrupt:
         pass
     finally:
-        server.stop()
-        # Always, including on an exception: leaving Windows file sharing
-        # stopped because this server crashed is a far worse outcome than
-        # whatever went wrong here.
-        if restore is not None:
-            restore()
+        try:
+            server.stop()
+        finally:
+            # Always restore, even if server.stop() itself raises.
+            if restore is not None:
+                restore()
     return 0
 
 
