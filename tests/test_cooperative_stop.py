@@ -353,12 +353,14 @@ class Take445InterruptTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         restore.assert_called_once_with()
 
-    def test_smb2_interrupt_while_service_stops_restores(self):
+    def test_smb2_interrupt_before_service_stop_keeps_it_running(self):
+        """If interruption happens before Stop-Service changes state, don't restart."""
         fake = _FakePs(interrupt_on="Stop-Service")
         with mock.patch("subprocess.run", fake):
             with self.assertRaises(KeyboardInterrupt):
                 smb2_server.take_445()
-        self.assertEqual(len(fake.starts()), 1)
+        self.assertEqual(fake.status, "Running")
+        self.assertEqual(len(fake.starts()), 0)
 
     def test_smb2_interrupt_during_listen_restores(self):
         restore = mock.Mock()
