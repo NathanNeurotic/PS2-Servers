@@ -273,6 +273,13 @@ def _needs_admin(key, values, setup_needed):
     return setup_needed or take_445 or 0 < _port_number(values) < 1025
 
 
+def _status_port(key, values):
+    """Report the port the launched server actually listens on."""
+    if key in ("smbv1", "smbv2", "smbv3") and values.get("take_445"):
+        return 445
+    return values.get("port") or 0
+
+
 def opl_hint(key, ip, values):
     if key == "retroachievements":
         mode = values.get("mode") or "xerabora"
@@ -2445,7 +2452,7 @@ class LauncherApp:
         # it from the child process being alive. Loopback, because the launcher
         # is asking about a server it started itself.
         try:
-            self.status_poller.set_target(key, "127.0.0.1", values.get("port") or 0)
+            self.status_poller.set_target(key, "127.0.0.1", _status_port(key, values))
         except Exception as e:
             self._append_log(key, "[launcher] status poller target setup warning: {}\n".format(e))
         card.refresh_status(True)
