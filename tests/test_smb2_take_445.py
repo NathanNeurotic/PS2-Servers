@@ -23,14 +23,14 @@ from launcher import gui
 
 class FakeServices:
     def __init__(self, initial="Running", delayed_polls=0, stop_failed=False):
-        self.state = initial
+        """Initialize a synthetic Windows service and its stop behavior."""\n        self.state = initial
         self.delayed_polls = delayed_polls
         self.stop_failed = stop_failed
         self.commands = []
         self.stop_issued = False
 
     def run(self, args, **_kwargs):
-        cmd = args[-1]
+        """Simulate PowerShell Get-Service, Stop-Service, and Start-Service."""\n        cmd = args[-1]
         self.commands.append(cmd)
         if cmd.startswith("(Get-Service LanmanServer"):
             if self.stop_issued and self.state != "Stopped":
@@ -47,20 +47,23 @@ class FakeServices:
             self.stop_issued = True
             return subprocess.CompletedProcess(args, 0, "", "")
         if cmd.startswith("Start-Service LanmanServer"):
+            if self.stop_issued and self.delayed_polls:
+                return subprocess.CompletedProcess(
+                    args, 1, "", "Cannot start while StopPending")
             self.state = "Running"
             return subprocess.CompletedProcess(args, 0, "", "")
         return subprocess.CompletedProcess(args, 0, "", "")
 
     def starts(self):
-        return [c for c in self.commands if c.startswith("Start-Service LanmanServer")]
+        """Return attempted service restart commands."""\n        return [c for c in self.commands if c.startswith("Start-Service LanmanServer")]
 
     def stops(self):
-        return [c for c in self.commands if c.startswith("Stop-Service")]
+        """Return attempted service stop commands."""\n        return [c for c in self.commands if c.startswith("Stop-Service")]
 
 
 class WindowsTake445Tests(unittest.TestCase):
     def test_waits_for_stopped_service_and_restores_only_once(self):
-        fake = FakeServices(delayed_polls=2)
+        """Only restore a service after its stop completes, and restore once."""\n        fake = FakeServices(delayed_polls=2)
         with mock.patch("subprocess.run", side_effect=fake.run), \
                 mock.patch.object(smb2.time, "sleep") as sleep:
             restore = smb2.take_445()
@@ -74,7 +77,7 @@ class WindowsTake445Tests(unittest.TestCase):
         self.assertEqual(len(fake.starts()), 1)
 
     def test_does_not_restart_file_sharing_if_initially_stopped(self):
-        fake = FakeServices(initial="Stopped")
+        """Preserve a user's previously stopped Windows File Sharing."""\n        fake = FakeServices(initial="Stopped")
         with mock.patch("subprocess.run", side_effect=fake.run):
             restore = smb2.take_445()
             self.assertTrue(callable(restore))
@@ -84,20 +87,30 @@ class WindowsTake445Tests(unittest.TestCase):
         self.assertEqual(fake.state, "Stopped")
 
     def test_refuses_to_bind_if_service_stop_is_denied(self):
-        fake = FakeServices(stop_failed=True)
+        """Do not bind 445 when Windows rejects the stop request."""\n        fake = FakeServices(stop_failed=True)
         with mock.patch("subprocess.run", side_effect=fake.run):
             self.assertIsNone(smb2.take_445())
         self.assertEqual(len(fake.stops()), 1)
         self.assertEqual(fake.starts(), [])
 
-    def test_stop_timeout_attempts_to_restore_service(self):
+    def test_stop_timeout_waits_for_pending_transition_before_restore(self):
+        """A stop timeout must not start LanmanServer in StopPending."""
+        fake = FakeServices(delayed_polls=2)
+        with mock.patch("subprocess.run", side_effect=fake.run), \
+                mock.patch.object(smb2.time, "sleep"):
+            self.assertIsNone(smb2.take_445(stop_timeout=0, restore_timeout=1))
+        self.assertEqual(len(fake.starts()), 1)
+        self.assertEqual(fake.state, "Running")
+
+    def test_persistent_stop_pending_is_not_started(self):
+        """Refuse unsafe recovery if Windows never completes the pending stop."""
         fake = FakeServices(delayed_polls=100)
         with mock.patch("subprocess.run", side_effect=fake.run):
-            self.assertIsNone(smb2.take_445(stop_timeout=0))
-        self.assertEqual(len(fake.starts()), 1)
+            self.assertIsNone(smb2.take_445(stop_timeout=0, restore_timeout=0))
+        self.assertEqual(fake.starts(), [])
 
     def test_stop_interrupt_restores_original_service(self):
-        fake = FakeServices()
+        """Attempt service restoration after interrupted stop calls."""\n        fake = FakeServices()
 
         def interrupt_after_stop(args, **kwargs):
             if args[-1].startswith("Stop-Service"):
@@ -113,7 +126,7 @@ class WindowsTake445Tests(unittest.TestCase):
 
 class Port445RetryTests(unittest.TestCase):
     def test_retry_recovers_from_windows_access_denied_and_address_in_use(self):
-        server = mock.Mock()
+        """Retry temporary access-denied and address-in-use on port 445."""\n        server = mock.Mock()
         server.listen.side_effect = [
             OSError(errno.EACCES, "port still held"),
             OSError(errno.EADDRINUSE, "port still held"),
@@ -128,7 +141,7 @@ class Port445RetryTests(unittest.TestCase):
             self.assertEqual(call.args, ("0.0.0.0", 445))
 
     def test_permanent_conflict_fails_after_timeout_without_using_other_port(self):
-        server = mock.Mock()
+        """Do not silently bind a different port when 445 remains busy."""\n        server = mock.Mock()
         server.listen.side_effect = OSError(errno.EACCES, "reserved")
         with mock.patch.object(smb2.time, "sleep") as sleep:
             with self.assertRaises(OSError):
@@ -137,7 +150,7 @@ class Port445RetryTests(unittest.TestCase):
         sleep.assert_not_called()
 
     def test_unexpected_bind_error_is_not_retried(self):
-        server = mock.Mock()
+        """Unexpected bind failures should surface without repeated attempts."""\n        server = mock.Mock()
         server.listen.side_effect = OSError(errno.EINVAL, "invalid bind")
         with mock.patch.object(smb2.time, "sleep") as sleep:
             with self.assertRaises(OSError):
@@ -146,7 +159,7 @@ class Port445RetryTests(unittest.TestCase):
         sleep.assert_not_called()
 
     def test_failed_socket_is_closed_before_a_retry(self):
-        server = smb2.Smb2Server({}, None)
+        """Close each unsuccessful socket before retrying port 445."""\n        server = smb2.Smb2Server({}, None)
         sock = mock.Mock()
         sock.bind.side_effect = OSError(errno.EACCES, "denied")
         with mock.patch.object(smb2.socket, "socket", return_value=sock):
@@ -156,7 +169,7 @@ class Port445RetryTests(unittest.TestCase):
         self.assertIsNone(server.sock)
 
     def test_take_445_error_hint_does_not_assume_missing_elevation(self):
-        with mock.patch.object(smb2.os, "name", "nt"):
+        """A persistent 445 conflict does not always mean missing admin rights."""\n        with mock.patch.object(smb2.os, "name", "nt"):
             hint = smb2.bind_hint(445, OSError(errno.EACCES, "denied"),
                                   take_445=True)
         self.assertIn("srvnet.sys", hint)
@@ -165,7 +178,7 @@ class Port445RetryTests(unittest.TestCase):
 
 class GuiEffectivePortTests(unittest.TestCase):
     def test_take_445_overrides_saved_port_in_all_smb_modes(self):
-        for key in ("smbv1", "smbv2", "smbv3"):
+        """Use effective TCP 445 for SMB status, leaving HTTP unchanged."""\n        for key in ("smbv1", "smbv2", "smbv3"):
             with self.subTest(key=key):
                 self.assertEqual(gui._status_port(
                     key, {"take_445": True, "port": "1025"}), 445)
