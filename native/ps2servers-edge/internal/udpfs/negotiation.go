@@ -100,6 +100,15 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 	// let the next payload-bearing DATA packet resolve it.
 	if st.Streaming && h.Sequence == 0 {
 		st.PendingZeroDiscovery = time.Now()
+		// A console that keeps broadcasting discovery mid-reply is alive: both
+		// client families poll discovery for the life of a transfer, and the
+		// reference server resets its retransmit budget on any inbound peer
+		// packet. Surface the validated discovery as liveness so confirmWindow's
+		// quiet budget resets; the stream itself still resolves on the next DATA.
+		select {
+		case st.AckEvents <- session.AckEvent{ACK: false, Sequence: h.Sequence}:
+		default:
+		}
 		s.sendStandardInform(st)
 		return
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/logging"
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 )
 
@@ -99,8 +100,12 @@ func TestConfirmWindowProgressResetsQuietBudget(t *testing.T) {
 	done := make(chan bool, 1)
 	go func() { done <- s.confirmWindow(st, target) }()
 
-	// Repeatedly prune the head without ever covering the target: the head
-	// moves, so each wait must reset the quiet counter.
+	// Repeatedly move the buffer head without ever covering the target: the
+	// head moves, so each wait must reset the quiet counter. No AckEvents are
+	// injected here -- channel activity resets the quiet run on its own, which
+	// would mask a broken progress check and let this test pass with its named
+	// behavior removed.
+	next := uint16(4)
 	prune := time.NewTicker(7 * time.Millisecond)
 	defer prune.Stop()
 	live := time.NewTimer(200 * time.Millisecond)
@@ -109,14 +114,9 @@ func TestConfirmWindowProgressResetsQuietBudget(t *testing.T) {
 		select {
 		case <-prune.C:
 			st.Mu.Lock()
-			if len(st.TxBuffer) > 1 {
-				st.TxBuffer = st.TxBuffer[1:]
-			}
+			st.TxBuffer = append(st.TxBuffer[1:], session.BufferedPacket{Sequence: next})
+			next++
 			st.Mu.Unlock()
-			select {
-			case st.AckEvents <- session.AckEvent{ACK: true, Sequence: 0}:
-			default:
-			}
 		case <-live.C:
 			st.Mu.Lock()
 			st.TransmitAcked = target
@@ -131,5 +131,52 @@ func TestConfirmWindowProgressResetsQuietBudget(t *testing.T) {
 			}
 			return
 		}
+	}
+}
+
+// A console that keeps broadcasting sequence-zero discovery mid-reply is
+// still alive: both client families poll discovery for the life of a
+// transfer, and the reference server resets its retransmit budget on any
+// inbound peer packet. The preserved-stream path in handleDiscovery must
+// surface that validated packet as ACK-channel activity, or confirmWindow
+// can exhaust its quiet budget and abort the reply of a console that never
+// stopped talking -- the loop reported in #240.
+func TestStreamingDiscoverySignalsPeerActivity(t *testing.T) {
+	s := newTestServer(t)
+	peer := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9699}
+
+	pkt := discoveryPacket(0)
+	h, err := protocol.ParseHeader(pkt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.handleDiscovery(inbound{packet: pkt, peer: peer, socket: session.DiscoverySocket}, h)
+	w := s.getWorker(peer)
+	if w == nil {
+		t.Fatal("discovery did not create a session")
+	}
+	st := w.state
+	st.Mu.Lock()
+	st.Streaming = true
+	st.Mu.Unlock()
+
+	// Drain any event the establishing discovery queued, then confirm a
+	// preserved-stream discovery registers liveness.
+	for {
+		select {
+		case <-st.AckEvents:
+		default:
+			goto drained
+		}
+	}
+drained:
+	s.handleDiscovery(inbound{packet: pkt, peer: peer, socket: session.DiscoverySocket}, h)
+	select {
+	case ev := <-st.AckEvents:
+		if ev.ACK {
+			t.Fatal("discovery must not pose as an ACK covering progress")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("streaming discovery did not signal peer activity")
 	}
 }
