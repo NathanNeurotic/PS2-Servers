@@ -19,8 +19,8 @@ const (
 	defaultFallback     = 250 * time.Millisecond
 	sessionReplaceQuiet = 1 * time.Second
 	windowSize          = 8
-	ackTimeout          = 120 * time.Millisecond
-	maxWindowRetries    = 4
+	windowAckTimeout    = 100 * time.Millisecond
+	maxWindowRetries    = 200
 	maxDatagram         = 64 * 1024
 	maxPathBytes        = 1024
 	maxHandles          = 64
@@ -36,6 +36,14 @@ type Config struct {
 	PeerTimeout  time.Duration
 	TxDelay      time.Duration
 	ReadOnly     bool
+	// WindowAckTimeout is the quiet wait on a reply window before its packets
+	// are retransmitted. MaxWindowRetries bounds consecutive quiet waits before
+	// a transfer is aborted; either peer activity or forward progress resets
+	// the run (the reference server and the Python Core behave this way, and
+	// the total quiet budget matches the console's ~20 s tolerance). Both
+	// default when zero and are set explicitly only by tests.
+	WindowAckTimeout time.Duration
+	MaxWindowRetries int
 	// BlockDevice serves one disk image over UDPFS BREAD/BWRITE alongside the
 	// file share, as the Desktop server's --block-device and udpfsd's -bdpath
 	// do. Empty disables it.
@@ -175,6 +183,12 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.FallbackDelay <= 0 {
 		cfg.FallbackDelay = defaultFallback
+	}
+	if cfg.WindowAckTimeout <= 0 {
+		cfg.WindowAckTimeout = windowAckTimeout
+	}
+	if cfg.MaxWindowRetries <= 0 {
+		cfg.MaxWindowRetries = maxWindowRetries
 	}
 	if cfg.Log == nil {
 		cfg.Log = edgelog.New(os.Stdout, "text", false, false)
