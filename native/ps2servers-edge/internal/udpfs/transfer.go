@@ -36,35 +36,48 @@ func ackCovers(ack, target uint16) bool {
 	return ((ack - target) & protocol.SequenceMask) < 2048
 }
 
-func (s *Server) waitForAck(st *session.State, target uint16) bool {
-	timer := time.NewTimer(ackTimeout)
+// waitForAck blocks until the console's cumulative ACK covers target, the
+// quiet timeout elapses, or the server closes. It also reports whether any
+// ACK-channel traffic arrived at all: the reference server treats any peer
+// packet as liveness and resets its retransmit budget, so a console that
+// keeps polling cannot be abandoned mid-reply.
+func (s *Server) waitForAck(st *session.State, target uint16) (covered, activity bool) {
+	timer := time.NewTimer(s.cfg.WindowAckTimeout)
 	defer timer.Stop()
 	for {
 		st.Mu.Lock()
 		covered := ackCovers(st.TransmitAcked, target)
 		st.Mu.Unlock()
 		if covered {
-			return true
+			return true, activity
 		}
 		select {
 		case <-st.AckEvents:
+			activity = true
 			continue
 		case <-timer.C:
-			return false
+			return false, activity
 		case <-s.closed:
-			return false
+			return false, activity
 		}
 	}
 }
 
 func (s *Server) confirmWindow(st *session.State, target uint16) bool {
-	for attempt := 0; attempt <= maxWindowRetries; attempt++ {
-		if s.waitForAck(st, target) {
+	quiet := 0
+	for {
+		st.Mu.Lock()
+		acked, head := st.TransmitAcked, uint16(0)
+		if len(st.TxBuffer) > 0 {
+			head = st.TxBuffer[0].Sequence
+		}
+		st.Mu.Unlock()
+
+		covered, activity := s.waitForAck(st, target)
+		if covered {
 			return true
 		}
-		if attempt == maxWindowRetries {
-			break
-		}
+
 		st.Mu.Lock()
 		if len(st.TxBuffer) == 0 {
 			st.Mu.Unlock()
@@ -72,8 +85,18 @@ func (s *Server) confirmWindow(st *session.State, target uint16) bool {
 		}
 		from := st.TxBuffer[0].Sequence
 		s.retransmit(st, from)
+		alive := activity || st.TransmitAcked != acked || st.TxBuffer[0].Sequence != head
 		st.Mu.Unlock()
-		s.cfg.Log.Debug("ACK timeout; retransmitting window", map[string]any{"peer": st.Peer, "from_sequence": from, "attempt": attempt + 1})
+
+		if alive {
+			quiet = 0
+		} else {
+			quiet++
+		}
+		if quiet >= s.cfg.MaxWindowRetries {
+			break
+		}
+		s.cfg.Log.Debug("ACK timeout; retransmitting window", map[string]any{"peer": st.Peer, "from_sequence": from, "quiet_attempts": quiet})
 	}
 	s.cfg.Log.Warn("transfer aborted after ACK retries", map[string]any{"peer": st.Peer, "target_sequence": target})
 	return false
