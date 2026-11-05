@@ -11,7 +11,6 @@ import (
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -172,31 +171,46 @@ func cString(b []byte) (string, error) {
 	}
 	return string(b), nil
 }
-func (s *Server) resolveImagePath(client string) (string, error) {
-	p, err := s.root.Resolve(client, false)
-	if err == nil {
-		return p, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	// With --no-compression a missing .iso must stay missing: answering with a
-	// CSO/ZSO container under an .iso name would hand the console bytes it
-	// cannot read.
-	if !s.compressedSiblingsEnabled() {
-		return "", err
-	}
-	if !strings.HasSuffix(strings.ToLower(client), ".iso") {
-		return "", err
-	}
-	base := client[:len(client)-4]
-	for _, ext := range []string{".cso", ".ciso", ".zso", ".ziso"} {
-		candidate, er := s.root.Resolve(base+ext, false)
-		if er == nil {
-			return candidate, nil
+func compressedImageExtensions() []string {
+	return []string{".cso", ".ciso", ".zso", ".ziso"}
+}
+
+func hasCompressedImageExtension(name string) bool {
+	lower := strings.ToLower(name)
+	for _, ext := range compressedImageExtensions() {
+		if strings.HasSuffix(lower, ext) {
+			return true
 		}
 	}
-	return "", err
+	return false
+}
+
+func (s *Server) resolveImagePath(client string) (string, bool, error) {
+	p, err := s.root.Resolve(client, false)
+	if err == nil {
+		return p, false, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", false, err
+	}
+	if !s.compressedSiblingsEnabled() || !strings.HasSuffix(strings.ToLower(client), ".iso") {
+		return "", false, err
+	}
+	base := client[:len(client)-4]
+	if hasCompressedImageExtension(base) {
+		candidate, er := s.root.Resolve(base, false)
+		if er != nil {
+			return "", false, er
+		}
+		return candidate, true, nil
+	}
+	for _, ext := range compressedImageExtensions() {
+		candidate, er := s.root.Resolve(base+ext, false)
+		if er == nil {
+			return candidate, true, nil
+		}
+	}
+	return "", false, err
 }
 func (s *Server) handleOpen(st *session.State, p []byte) {
 	if len(p) < 8 {
@@ -236,12 +250,12 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 		s.openForWrite(st, id, path, flags)
 		return
 	}
-	real, err := s.resolveImagePath(path)
+	real, decompress, err := s.resolveImagePath(path)
 	if err != nil {
 		s.sendOpen(st, errno(err), 0, 0)
 		return
 	}
-	img, err := s.openImage(real)
+	img, err := s.openImage(real, decompress)
 	if err != nil {
 		s.sendOpen(st, errno(err), 0, 0)
 		return
@@ -604,25 +618,15 @@ func (s *Server) handleDRead(st *session.State, p []byte) {
 	}
 	entry := h.Directory[h.Index]
 	h.Index++
-	// Compressed containers are listed under an .iso name with their
-	// decompressed size, so the console sees what it will actually receive.
-	// --no-compression turns that off: the entry keeps its real name and size.
-	if s.compressedSiblingsEnabled() {
-		lower := strings.ToLower(entry.Name)
-		for _, ext := range []string{".cso", ".ciso", ".zso", ".ziso"} {
-			if strings.HasSuffix(lower, ext) {
-				entry.Name = entry.Name[:len(entry.Name)-len(ext)] + ".iso"
-				// SizeOf, not openImage: this needs one number out of the
-				// 24-byte header, and opening the image to get it built the
-				// whole block index -- megabytes per entry, discarded
-				// immediately, once for every compressed game in the folder.
-				// Reachable by a console simply listing a directory, which is
-				// what made it the likeliest way to exhaust a small router.
-				if size, err := compression.SizeOf(entry.SourcePath); err == nil {
-					entry.Size = uint64(size)
-				}
-				break
-			}
+	// Append .iso to the complete container name so same-stem plain and
+	// compressed images keep distinct advertised names. The alias reports the
+	// decompressed size; the direct container path remains raw.
+	if s.compressedSiblingsEnabled() && hasCompressedImageExtension(entry.Name) {
+		entry.Name += ".iso"
+		// SizeOf, not openImage: this needs one number out of the header,
+		// without building and discarding the whole block index per entry.
+		if size, err := compression.SizeOf(entry.SourcePath); err == nil {
+			entry.Size = uint64(size)
 		}
 	}
 	s.sendDRead(st, 1, entry)
@@ -656,7 +660,7 @@ func (s *Server) handleGetStat(st *session.State, p []byte) {
 		s.sendGetStat(st, -eNAMETOOLONG, 0, 0)
 		return
 	}
-	real, err := s.resolveImagePath(path)
+	real, decompress, err := s.resolveImagePath(path)
 	if err != nil {
 		s.sendGetStat(st, errno(err), 0, 0)
 		return
@@ -667,9 +671,7 @@ func (s *Server) handleGetStat(st *session.State, p []byte) {
 		return
 	}
 	size := uint64(info.Size())
-	if ext := strings.ToLower(filepath.Ext(real)); s.compressedSiblingsEnabled() &&
-		(ext == ".cso" || ext == ".ciso" || ext == ".zso" || ext == ".ziso") {
-		// Header only, for the same reason as the DREAD path above.
+	if decompress && s.compressedSiblingsEnabled() {
 		if n, e := compression.SizeOf(real); e == nil {
 			size = uint64(n)
 		}

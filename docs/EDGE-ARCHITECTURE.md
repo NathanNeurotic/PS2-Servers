@@ -92,13 +92,16 @@ error code (`crtErrno` in `internal/udpfs/errno.go` follows CPython's table).
 Replies never use Go's `syscall` constants for this: on Windows most of those
 are values Go invented from 2^29 up rather than errno numbers.
 
-Plain files and ISO images are read directly. CSO uses zlib and ZSO uses a
-bounded raw-LZ4 decoder. Compressed images are exposed with virtual `.iso`
-names and their uncompressed size, and decompressed blocks are cached per open
-image up to `--compression-cache-size`. `--no-compression` turns both the
-decoding and the `.iso` substitution off, so a container is served as the raw
-bytes on disk under its real name. CHD is deliberately not in the default
-CGO-free implementation; see [Edge configuration](EDGE.md).
+Plain files, ISO images, and directly named compressed containers are read as
+raw bytes with their on-disk size. CSO uses zlib and ZSO uses a bounded raw-LZ4
+decoder. A compressed container is advertised by appending `.iso` to its full
+name (`game.cso` becomes `game.cso.iso`) and reporting its uncompressed size, so
+a same-stem plain ISO cannot collide with it. That canonical alias decodes its
+exact source; legacy `game.iso` aliases still resolve same-stem containers when
+no plain ISO exists. Decompressed blocks are cached per open image up to
+`--compression-cache-size`. `--no-compression` disables aliases and decoding, so
+a container is served as raw bytes under its real name. CHD is deliberately not
+in the default CGO-free implementation; see [Edge configuration](EDGE.md).
 
 `--block-device` additionally serves one image through the UDPFS `BREAD`/
 `BWRITE` opcodes on handle 0, which `OPEN` never returns. Access is positional

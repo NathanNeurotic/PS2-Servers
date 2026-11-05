@@ -244,12 +244,12 @@ func TestNoCompressionStopsAdvertisingContainersAsIso(t *testing.T) {
 	defer server.Close()
 
 	// A request for the virtual .iso must not resolve to the container.
-	if _, err := server.resolveImagePath("game.iso"); err == nil {
+	if _, _, err := server.resolveImagePath("game.iso"); err == nil {
 		t.Fatal("--no-compression still substituted a .cso for a missing .iso")
 	}
-	// The real name still resolves.
-	if _, err := server.resolveImagePath("game.cso"); err != nil {
-		t.Fatalf("the container itself should still be reachable: %v", err)
+	// The real name still resolves without a decompression request.
+	if _, decompress, err := server.resolveImagePath("game.cso"); err != nil || decompress {
+		t.Fatalf("the container itself should resolve raw: decompress=%t, err=%v", decompress, err)
 	}
 }
 
