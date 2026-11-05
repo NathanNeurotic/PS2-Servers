@@ -73,6 +73,13 @@ jobs:
           python udpfs_server/multiclient_selftest.py
           python udpfs_server/pathguard_selftest.py
           python udpfs_server/compression_selftest.py
+      - name: Install libchdr for optional Edge CHD tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libchdr-dev
+      - name: Test optional CHD build
+        working-directory: native/ps2servers-edge
+        run: CGO_ENABLED=1 go test -tags chd ./internal/compression ./internal/udpfs -count=1
 
       # Drives the shared conformance probe against a real Edge process over
       # real UDP sockets: standards client plus three Modulo-shaped ones,

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/compression"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 )
 
@@ -124,7 +125,11 @@ func TestCompressedAliasesAndRawContainerSemantics(t *testing.T) {
 	}
 	c := dial(t, startServerAt(t, root, false))
 	entries := listUDPFSImages(t, c)
-	for _, name := range []string{"game.iso", "game.cso.iso", "legacy.cso.iso", "MIXED.CSO.iso", "other.zso.iso", "other.chd", "corrupt.cso.iso"} {
+	chdName := "other.chd"
+	if compression.CHDAvailable {
+		chdName += ".iso"
+	}
+	for _, name := range []string{"game.iso", "game.cso.iso", "legacy.cso.iso", "MIXED.CSO.iso", "other.zso.iso", chdName, "corrupt.cso.iso"} {
 		if _, ok := entries[name]; !ok {
 			t.Errorf("directory does not advertise %q: %+v", name, entries)
 		}

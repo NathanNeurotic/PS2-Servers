@@ -33,6 +33,7 @@ both can transfer concurrently.
 - block access over UDPFS: `BREAD` / `BWRITE` against one `--block-device`
   image on handle 0, positional, bounds-checked against integer overflow
 - ISO, CSO/CISO, ZSO/ZISO, with a `--compression-cache-size` block cache
+- optional CHD with a `-tags chd` CGO build and libchdr
 - `--no-compression` to serve containers as raw bytes (a diagnostic)
 - `--metrics` periodic transfer counters
 - `--session-summary` one `SESSION` line per console (udpfs, smb and udpbd)
@@ -133,6 +134,14 @@ Implemented: INFO, READ with RDMA streaming and the upstream block-size
 optimizer, and WRITE with the RDMA handshake. Out-of-range, truncated and
 unsolicited RDMA packets are refused rather than written. A read-only image
 reports failure rather than faking a successful save.
+
+## Optional CHD builds
+
+Generic static downloads omit CHD. To enable it from source, install libchdr and
+build with `CGO_ENABLED=1 go build -tags chd ./cmd/ps2servers-edge`. That build
+advertises `game.chd.iso` and decodes virtual aliases through the same bounded
+cache as CSO/ZSO; direct `.chd` paths remain raw. Default builds list real CHD
+files raw and do not advertise virtual CHD aliases.
 
 ## Not claimed
 

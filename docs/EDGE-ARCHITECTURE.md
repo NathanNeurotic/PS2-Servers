@@ -103,7 +103,10 @@ exact source; legacy `game.iso` aliases still resolve same-stem containers when
 no plain ISO exists. Decompressed blocks are cached per open image up to
 `--compression-cache-size`. `--no-compression` disables aliases and decoding, so
 a container is served as raw bytes under its real name. CHD is deliberately not
-in the default CGO-free implementation; see [Edge configuration](EDGE.md).
+in the default CGO-free implementation. An explicit `-tags chd` CGO build adds a
+bounded libchdr backend with the same Image read/seek/cache path and enables
+`.chd.iso` aliases only when that backend is present; see
+[Edge configuration](EDGE.md).
 
 `--block-device` additionally serves one image through the UDPFS `BREAD`/
 `BWRITE` opcodes on handle 0, which `OPEN` never returns. Access is positional

@@ -172,7 +172,11 @@ func cString(b []byte) (string, error) {
 	return string(b), nil
 }
 func compressedImageExtensions() []string {
-	return []string{".cso", ".ciso", ".zso", ".ziso"}
+	extensions := []string{".cso", ".ciso", ".zso", ".ziso"}
+	if compression.CHDAvailable {
+		extensions = append(extensions, ".chd")
+	}
+	return extensions
 }
 
 func hasCompressedImageExtension(name string) bool {

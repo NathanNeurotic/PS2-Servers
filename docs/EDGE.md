@@ -171,15 +171,19 @@ the service starts.
 
 ## Compression matrix
 
-| Format | Desktop/Core | Edge generic static builds |
-|---|---:|---:|
-| ISO | Yes | Yes |
-| CSO/CISO | Yes | Yes, pure Go zlib |
-| ZSO/ZISO | Yes when LZ4 is available | Yes, bounded pure-Go LZ4 block decoder |
-| CHD | Yes when `libchdr` is available | No |
+| Format | Desktop/Core | Edge generic static builds | Edge source build with `-tags chd` |
+|---|---:|---:|---:|
+| ISO | Yes | Yes | Yes |
+| CSO/CISO | Yes | Yes, pure Go zlib | Yes |
+| ZSO/ZISO | Yes when LZ4 is available | Yes, bounded pure-Go LZ4 block decoder | Yes |
+| CHD | Yes when `libchdr` is available | No | Yes, with CGO and libchdr |
 
-CHD is not implemented in the generic CGO-free Edge binaries. Use Desktop/Core
-with `libchdr` for CHD; no separate Edge CHD download is currently provided.
+Generic CGO-free Edge downloads remain CHD-free. To build optional CHD support
+from source, install libchdr and compile with
+`CGO_ENABLED=1 go build -tags chd ./cmd/ps2servers-edge`. Only that build
+advertises `.chd.iso` aliases; default builds list real CHD files raw and never
+substitute decoded data for them. Use Desktop/Core if you cannot provide CGO and
+libchdr on the target.
 
 ## UDPBD
 

@@ -210,6 +210,7 @@ Each archive also carries `README.md`, `EDGE.md`, this guide, a
 `BUILD-METADATA.txt` recording the exact toolchain, and a `.sha256` file
 alongside the download for verification.
 
-**CHD note:** Edge supports **CSO and ZSO** but **not CHD** — CHD needs a native
-library that would break static linking. If your games are CHD files, use the
+**CHD note:** Generic static Edge builds support **CSO and ZSO** but not CHD.
+Source builds can opt into CHD with `-tags chd`, CGO, and libchdr; that native
+library is intentionally excluded from these portable downloads. If your games are CHD files, use the
 Desktop server, or convert them.

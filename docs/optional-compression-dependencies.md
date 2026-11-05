@@ -8,8 +8,9 @@ container's real name returns its raw bytes and size, while a virtual alias
 returns decoded bytes and size.
 
 HTTP uses the same CHD/CSO readers but passes ZSO through to the console without
-needing PC-side LZ4. Edge has a separate built-in CSO/ZSO decoder and no CHD
-support. See [the editions](EDITIONS.md).
+needing PC-side LZ4. Edge has a separate built-in CSO/ZSO decoder; optional CHD
+support requires an explicit `-tags chd` CGO build with libchdr. Generic static
+Edge builds do not include CHD. See [the editions](EDITIONS.md).
 
 ## GUI behavior
 

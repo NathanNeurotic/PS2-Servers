@@ -3,8 +3,11 @@
 ## pcm720/udpfsd
 
 Technical reference reviewed for UDPFS behavior, deployment targets, and the
-optional CHD/CGO build boundary. No source file is copied into the current PS2
-Servers Edge implementation. Notice is retained proactively for provenance.
+optional CHD/CGO build boundary. The Edge CHD backend in
+`native/ps2servers-edge/internal/compression/chd_enabled.go` and its minimal C
+header are adapted from this project. The CD/DVD CHD and reference ISO files in
+`internal/compression/testdata` are test fixtures from the same revision.
+Preserve this notice with those files and any binary distributions containing them.
 
 Copyright 2026 Ivan V ([pcm720](https://github.com/pcm720))
 

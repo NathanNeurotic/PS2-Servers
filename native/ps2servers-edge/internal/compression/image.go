@@ -24,6 +24,7 @@ type Image struct {
 	align     uint8
 	index     []uint32
 	pos       int64
+	chd       *chdState
 
 	// Decompressed-block cache. Without one, every read re-inflates its block
 	// straight off disk, and a console reading sequentially touches the same
@@ -176,6 +177,10 @@ func openImage(path string) (*Image, error) {
 	}
 	rawFileSize := st.Size()
 	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".chd" {
+		_ = f.Close()
+		return openCHD(path)
+	}
 	if ext != ".cso" && ext != ".ciso" && ext != ".zso" && ext != ".ziso" {
 		return &Image{f: f, format: "plain", size: rawFileSize, fileSize: rawFileSize}, nil
 	}
@@ -304,6 +309,9 @@ func SizeOf(path string) (int64, error) {
 	// A file that is not a container is its own size, matching Open's
 	// treatment of anything without a recognised extension.
 	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".chd" {
+		return sizeOfCHD(path)
+	}
 	if ext != ".cso" && ext != ".ciso" && ext != ".zso" && ext != ".ziso" {
 		return st.Size(), nil
 	}
@@ -326,8 +334,16 @@ func SizeOf(path string) (int64, error) {
 	return h.size, nil
 }
 
-func (i *Image) Close() error { return i.f.Close() }
-func (i *Image) Size() int64  { return i.size }
+func (i *Image) Close() error {
+	if i.chd != nil {
+		return i.chd.close()
+	}
+	if i.f == nil {
+		return nil
+	}
+	return i.f.Close()
+}
+func (i *Image) Size() int64 { return i.size }
 func (i *Image) Seek(off int64, whence int) (int64, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -400,6 +416,9 @@ func (i *Image) readBlock(n int64) ([]byte, error) {
 }
 
 func (i *Image) decodeBlock(n int64) ([]byte, error) {
+	if i.chd != nil {
+		return i.chd.readBlock(n)
+	}
 	if n < 0 || n >= int64(len(i.index)-1) {
 		return nil, io.EOF
 	}
