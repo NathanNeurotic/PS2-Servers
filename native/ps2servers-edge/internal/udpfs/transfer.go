@@ -147,7 +147,10 @@ func (s *Server) sendTransferPackets(st *session.State, header, data []byte) boo
 	var pending [][]byte
 	flush := func() {
 		if len(pending) > 0 {
-			s.sendPackets(s.responseSocket(st), pending, st.Peer)
+			st.Mu.Lock()
+			which, peer := s.responseSocket(st), st.Peer
+			st.Mu.Unlock()
+			s.sendPackets(which, pending, peer)
 			st.Mu.Lock()
 			marked := 0
 			for i := range st.TxBuffer {

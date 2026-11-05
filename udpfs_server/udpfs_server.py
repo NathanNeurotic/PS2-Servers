@@ -1301,13 +1301,14 @@ class UdpfsServer:
                 return resolved
             if resolved and resolved != self.root_dir:
                 dirname, stem = os.path.split(resolved)
+                requested_stem = os.path.splitext(stem)[0]
                 try:
                     listing = os.listdir(dirname)
                 except OSError:
                     listing = []
                 for entry in listing:
                     entry_stem, entry_ext = os.path.splitext(entry)
-                    if entry_stem != stem or entry_ext.lower() != canonical_ext:
+                    if entry_stem != requested_stem or entry_ext.lower() != canonical_ext:
                         continue
                     candidate = os.path.join(dirname, entry)
                     if self._resolve_path(os.path.relpath(candidate, self.root_dir)):

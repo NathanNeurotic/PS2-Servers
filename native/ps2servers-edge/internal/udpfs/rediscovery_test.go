@@ -143,6 +143,75 @@ func TestBackgroundDiscoveryPreservesActiveStream(t *testing.T) {
 	}
 }
 
+func TestNonzeroDiscoveryHandoffPreservesFileID(t *testing.T) {
+	server, disc, _ := startTestServer(t, session.Pending)
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	dataAddr := prepareHotStandardSession(t, server, client, disc, 2213)
+	gameData := bytes.Repeat([]byte{0x5a}, 1024)
+	w := server.getWorker(client.LocalAddr().(*net.UDPAddr))
+	w.state.Mu.Lock()
+	w.state.Handles[81] = &session.Handle{Reader: bytes.NewReader(gameData)}
+	w.state.NextHandle = 82
+	w.state.Mu.Unlock()
+	if _, err := client.WriteToUDP(discoveryPacket(7), disc); err != nil {
+		t.Fatal(err)
+	}
+	if packet, _ := recvPacket(t, client); len(packet) < 6 {
+		t.Fatal("short discovery reply")
+	}
+	if _, err := client.WriteToUDP(dataPacket(8, blockMsg(protocol.BReadRequest, 81, 0, 1)), dataAddr); err != nil {
+		t.Fatal(err)
+	}
+	_, payload, _ := recvDataPayload(t, client)
+	if len(payload) < 8+512 || result(payload) != 512 || !bytes.Equal(payload[8:8+512], gameData[:512]) {
+		t.Fatalf("nonzero-discovery replacement did not preserve FILEID data: %x", payload)
+	}
+	w.state.Mu.Lock()
+	defer w.state.Mu.Unlock()
+	if w.state.Handles[81] == nil || !w.state.Handles[81].Inherited {
+		t.Fatal("replacement closed or failed to inherit FILEID")
+	}
+	if w.state.Profile != session.Modulo || w.state.ExpectedReceive != 9 {
+		t.Fatalf("replacement left profile %v and expected sequence %d", w.state.Profile, w.state.ExpectedReceive)
+	}
+}
+
+func TestStreamingDiscoveryRefreshesLiveness(t *testing.T) {
+	server, disc, _ := startTestServer(t, session.Standard)
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	prepareHotStandardSession(t, server, client, disc, 2213)
+	w := server.getWorker(client.LocalAddr().(*net.UDPAddr))
+	w.state.Mu.Lock()
+	w.state.LastActivity = time.Now().Add(-2 * time.Minute)
+	w.state.Mu.Unlock()
+
+	before := time.Now()
+	if _, err := client.WriteToUDP(discoveryPacket(7), disc); err != nil {
+		t.Fatal(err)
+	}
+	if packet, _ := recvPacket(t, client); len(packet) < 6 {
+		t.Fatal("short discovery reply")
+	}
+	w.state.Mu.Lock()
+	lastActivity := w.state.LastActivity
+	w.state.Mu.Unlock()
+	if lastActivity.Before(before) {
+		t.Fatalf("streaming discovery left stale activity %v, want at least %v", lastActivity, before)
+	}
+	server.expireSessions(time.Now())
+	if server.getWorker(client.LocalAddr().(*net.UDPAddr)) != w {
+		t.Fatal("streaming peer expired after a validated discovery")
+	}
+}
+
 func fmtSequence(sequence uint16) string {
 	if sequence == 0 {
 		return "zero"

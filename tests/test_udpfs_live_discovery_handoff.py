@@ -540,6 +540,36 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         self.assertEqual(replies[0][1], 512)
         self.assertEqual(replies[0][2], game_data[:512])
 
+    def test_nonzero_discovery_data_selects_continuation_or_handoff(self):
+        cases = (
+            ("continuation", 7, 2213, CORE.PROFILE_STANDARD, 2214),
+            ("replacement", 7, 8, CORE.PROFILE_MODULO, 9),
+            ("wrapped replacement", 4095, 0, CORE.PROFILE_MODULO, 1),
+        )
+        for name, discovery, first_data, profile, next_sequence in cases:
+            with self.subTest(name=name):
+                addr = ("192.0.2.10", 5009)
+                server = _make_server(protocol_mode="auto")
+                sess = _make_active_session(addr, handle_id=81)
+                sess.handles[81] = _FakeHandle(b"game" * 256)
+                sess._handle_ref = sess.handles[81]
+                sess.next_handle = 82
+                sess.rx_seq_nr_expected = 2213
+                server.sessions[addr] = sess
+                server._get_or_create_session = lambda a: sess
+                server._handle_discovery(_pack_discovery(discovery), addr)
+                self.assertEqual(sess.rx_seq_nr_expected, 2213)
+                consumed, acknowledgements = _exercise_payload_data(
+                    server, sess, addr, first_data)
+                self.assertEqual(len(consumed), 1,
+                                 "valid post-discovery DATA was rejected")
+                self.assertEqual(acknowledgements[0]["flags"] & 0x1, 0x1)
+                self.assertEqual(sess.protocol_profile, profile)
+                self.assertEqual(sess.rx_seq_nr_expected, next_sequence)
+                self.assertFalse(sess._handle_ref.closed)
+                self.assertIs(sess.handles[81], sess._handle_ref)
+                self.assertEqual(sess.next_handle, 82)
+
     def test_standard_mode_preserves_too(self):
         """Preservation must be profile-agnostic (standard mode)."""
         addr = ("192.0.2.10", 5005)

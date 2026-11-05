@@ -269,6 +269,39 @@ func TestBatchedMultiWindowRead(t *testing.T) {
 	}
 }
 
+func TestBatchFlushSynchronizesPeerSnapshot(t *testing.T) {
+	server, _, peer, _ := newUDPWriteTestServer(t, true)
+	server.batchWriteConn = server.data
+	server.batchWrite = func(addr *net.UDPAddr, packets [][]byte) (int, error) {
+		return len(packets), nil
+	}
+	st := session.New(peer, session.Standard)
+	stop := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				st.Mu.Lock()
+				st.ResponseSocket = session.DiscoverySocket
+				st.Mu.Unlock()
+			}
+		}
+	}()
+	defer func() { close(stop); <-finished }()
+	for i := 0; i < 100; i++ {
+		st.Mu.Lock()
+		st.TransmitAcked = protocol.Previous(st.TransmitSequence + 2)
+		st.Mu.Unlock()
+		if !server.sendTransferPackets(st, nil, make([]byte, 2048)) {
+			t.Fatal("transfer was not confirmed")
+		}
+	}
+}
+
 func BenchmarkUDPBatch(b *testing.B) {
 	for _, enabled := range []bool{false, true} {
 		b.Run(map[bool]string{false: "legacy", true: "batch"}[enabled], func(b *testing.B) {

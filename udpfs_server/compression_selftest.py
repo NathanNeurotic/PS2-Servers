@@ -337,6 +337,33 @@ def test_compression_disabled(root):
         d.close()
 
 
+def test_canonical_alias_folds_only_extension_case(root):
+    """A missing extension-case alias selects its exact stem, not a decoy."""
+    make_cso(os.path.join(root, 'Fold.cso'), bytes(range(256)) * 20)
+    make_cso(os.path.join(root, 'Fold.CSO.cso'), b'wrong' * 1000)
+    d = Driver(root)
+    original_exists = srv.os.path.exists
+    original_resolve = d.server._resolve_path
+    def preserve_requested_case(path):
+        if path.replace('\\', '/').lstrip('/') == 'Fold.CSO':
+            return os.path.join(root, 'Fold.CSO')
+        return original_resolve(path)
+    def missing_requested_case(path):
+        if os.fspath(path).replace('\\', '/').endswith('/Fold.CSO'):
+            return False
+        return original_exists(path)
+    d.server._resolve_path = preserve_requested_case
+    srv.os.path.exists = missing_requested_case
+    try:
+        resolved = d.server._resolve_compressed_sibling('/Fold.CSO.iso')
+    finally:
+        d.server._resolve_path = original_resolve
+        srv.os.path.exists = original_exists
+        d.close()
+    check(resolved == os.path.join(root, 'Fold.cso'),
+          f"canonical extension-case fallback selected {resolved!r}")
+
+
 def test_prefers_parseable_sibling(root):
     """Legacy aliases skip a corrupt sibling; canonical aliases stay exact."""
     print("[prefer-parseable] corrupt earlier sibling doesn't hide a valid one")
@@ -501,6 +528,7 @@ def main():
         test_duplicate_stem_names(root, cso_data)
         test_legacy_aliases(root, cso_data)
         test_compression_disabled(root)
+        test_canonical_alias_folds_only_extension_case(root)
         test_prefers_parseable_sibling(root)
         test_exact_stem_no_case_collision(root)
         test_listing_namespace(cso_data)

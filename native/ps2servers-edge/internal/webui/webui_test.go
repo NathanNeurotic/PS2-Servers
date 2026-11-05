@@ -703,3 +703,16 @@ func TestUDPBatchConfigDefaultsOffAndAppearsInSchema(t *testing.T) {
 	}
 	t.Fatal("udp_batch is missing from the schema")
 }
+
+func TestUCIBoolMatchesOpenWrtTrueValues(t *testing.T) {
+	for _, value := range []string{"1", "true", "on", "yes", "enabled"} {
+		if !uciBool(value) {
+			t.Errorf("uciBool(%q) = false, want true", value)
+		}
+	}
+	for _, value := range []string{"0", "false", "off", "no", "disabled", ""} {
+		if uciBool(value) {
+			t.Errorf("uciBool(%q) = true, want false", value)
+		}
+	}
+}

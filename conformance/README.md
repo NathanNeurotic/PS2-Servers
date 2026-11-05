@@ -51,7 +51,9 @@ Core/Edge's longer tolerance. Corrupt virtual GETSTAT returns `EIO` on Edge and
 `ENOENT` on Core, with liveness checked after the failure. DREAD, decoded bytes,
 raw-container semantics, and shared success paths are still checked exactly. CHD
 decoding is covered by the separate capability-tagged Edge suite because this
-reference build is CGO-free.
+reference build is CGO-free. In Auto mode, Core and Edge additionally preserve
+inherited FILEIDs when a confirmed nonzero-discovery replacement starts at the
+following sequence; the reference does not implement that deferred handoff.
 
 Multi-hour lifecycle, physical Raspberry Pi/OpenWrt runs, and physical PS2
 listing/Neutrino launch/restart/relaunch/VMC scenarios remain separate acceptance

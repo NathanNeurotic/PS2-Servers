@@ -128,11 +128,10 @@ class AutoUdpfsServer(UdpfsServer):
             sess.handshake_generation = 0
             sess.fallback_sent = False
             sess.first_data_seen = False
-            # A sequence-zero discovery during an active stream is ambiguous:
-            # it can be a background rediscovery from the current client or a
-            # new loader taking over the same UDP endpoint. Defer the decision
-            # until the next payload-bearing DATA packet tells us which.
+            # Defer any loader-handoff decision until payload DATA identifies
+            # the old stream or the replacement's negotiated sequence.
             sess.pending_zero_discovery_at = 0.0
+            sess.pending_discovery_sequence = None
             sess.compat_lock = threading.RLock()
         return sess
 
@@ -164,6 +163,7 @@ class AutoUdpfsServer(UdpfsServer):
         sess.fallback_sent = False
         sess.first_data_seen = False
         sess.pending_zero_discovery_at = 0.0
+        sess.pending_discovery_sequence = None
 
     def _reset_session_state(self, sess, profile):
         """Close peer-owned handles and fully reset a stale/replaced session.
@@ -325,11 +325,14 @@ class AutoUdpfsServer(UdpfsServer):
         quiet = now - getattr(sess, "last_activity", 0.0)
         with sess.compat_lock:
             if sess.rx_streaming:
-                # Discovery alone never ends an active stream. Sequence zero is
-                # ambiguous about a loader handoff and is resolved by DATA; every
-                # sequence leaves handles and transport intact meanwhile.
+                # Discovery alone never ends an active stream. Remember a
+                # possible replacement sequence until payload DATA resolves it.
                 if hdr.seq_nr == 0:
                     sess.pending_zero_discovery_at = now
+                    sess.pending_discovery_sequence = None
+                else:
+                    sess.pending_discovery_sequence = hdr.seq_nr
+                    sess.pending_zero_discovery_at = 0.0
                 self._canonical_inform(addr)
                 if self.verbose:
                     self._print_event(
@@ -391,6 +394,24 @@ class AutoUdpfsServer(UdpfsServer):
 
         with sess.compat_lock:
             ingress = sess.ingress or SOCKET_DATA
+
+            # Resolve a nonzero discovery only when payload DATA confirms the
+            # replacement's next sequence. Old-sequence DATA keeps the stream.
+            pending_discovery = getattr(sess, "pending_discovery_sequence", None)
+            if pending_discovery is not None and payload_size > 0:
+                if hdr.seq_nr == sess.rx_seq_nr_expected:
+                    sess.pending_discovery_sequence = None
+                elif hdr.seq_nr == (pending_discovery + 1) & 0xFFF:
+                    old_expected = sess.rx_seq_nr_expected
+                    initial_profile = (
+                        self.protocol_mode if self.protocol_mode != "auto"
+                        else PROFILE_PENDING)
+                    self._reset_transport_state(sess, initial_profile)
+                    sess.discovery_sequence = pending_discovery
+                    sess.handshake_generation += 1
+                    self._print_event(
+                        f"[{addr[0]}:{addr[1]}] nonzero discovery resolved to replacement "
+                        f"session: old_expected={old_expected} first_data={hdr.seq_nr}")
 
             # Commit the deferred seq0-discovery decision only when real DATA
             # arrives. If it continues at the old expected sequence, the

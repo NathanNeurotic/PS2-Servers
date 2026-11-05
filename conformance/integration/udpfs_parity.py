@@ -304,7 +304,7 @@ def bindable_host():
 
 def free_port():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", 0))
+    sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
     sock.close()
     return port
@@ -358,10 +358,11 @@ def make_fixtures(root):
 
 
 class Server:
-    def __init__(self, name, binary, root, host, block_only=False):
+    def __init__(self, name, binary, root, host, block_only=False, protocol="standard"):
         self.name = name
         self.root = root
         self.host = host
+        self.protocol = protocol
         self.port = free_port()
         self.log = root / f"{name}-{block_only}.log"
         args = self.command(binary, block_only)
@@ -383,13 +384,13 @@ class Server:
         if kind == "core":
             args = [sys.executable, "ps2servers.py", "serve", "udpfs",
                     "--bind", self.host, "--port", str(self.port),
-                    "--protocol-mode", "standard", "--block-device", block]
+                    "--protocol-mode", self.protocol, "--block-device", block]
             if not block_only:
                 args += ["--root-dir", str(self.root)]
             return args
         if kind == "edge":
             args = [binary, "udpfs", "--bind", self.host, "--port", str(self.port),
-                    "--protocol-mode", "standard", "--block-device", block]
+                    "--protocol-mode", self.protocol, "--block-device", block]
             if not block_only:
                 args += ["--root", str(self.root)]
             return args
@@ -567,6 +568,33 @@ def case_block_and_restart(server):
         c.close()
 
 
+def case_nonzero_replacement(server, binary):
+    root = Path(tempfile.mkdtemp(prefix=f"udpfs-{server.name}-auto-", dir=server.root.parent))
+    make_fixtures(root)
+    auto = Server(server.name + "-auto", binary, root, server.host, protocol="auto")
+    client = None
+    succeeded = False
+    try:
+        client = connected_client(auto)
+        handle, _, _ = client.open("/DVD/Example.iso")
+        expected = client.bread(1, handle=handle)
+        client.discover(7)
+        client.reset_transport()
+        client.tx_seq = 8
+        client.rx_expected = 1
+        actual = client.bread(2, handle=handle)
+        expect(actual == expected, "Auto nonzero-discovery replacement inherited FILEID")
+        succeeded = True
+    finally:
+        if client is not None:
+            client.close()
+        auto.stop()
+        if succeeded:
+            shutil.rmtree(root, ignore_errors=True)
+        else:
+            print(f"logs retained: {root}")
+
+
 def case_faults(server):
     for fault in ("nack", "duplicate", "fin", "reorder"):
         c = connected_client(server)
@@ -642,6 +670,8 @@ def run_server(name, binary, work, host, cases):
                 case_namespace(server)
             elif case == "restart":
                 case_block_and_restart(server)
+                if name != "reference":
+                    case_nonzero_replacement(server, binary)
             elif case == "wrap":
                 case_wrap(server)
             elif case == "faults":

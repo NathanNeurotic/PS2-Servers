@@ -13,9 +13,9 @@ import (
 
 func writeCHDTestHeader(t *testing.T, path string, version, hunk, unit uint32, logical uint64, codec uint32) {
 	t.Helper()
-	hdr := make([]byte, 64)
+	hdr := make([]byte, 124)
 	copy(hdr[:8], "MComprHD")
-	binary.BigEndian.PutUint32(hdr[8:12], 64)
+	binary.BigEndian.PutUint32(hdr[8:12], 124)
 	binary.BigEndian.PutUint32(hdr[12:16], version)
 	binary.BigEndian.PutUint32(hdr[16:20], codec)
 	binary.BigEndian.PutUint64(hdr[32:40], logical)
@@ -23,6 +23,24 @@ func writeCHDTestHeader(t *testing.T, path string, version, hunk, unit uint32, l
 	binary.BigEndian.PutUint32(hdr[60:64], unit)
 	if err := os.WriteFile(path, hdr, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestParseCHDHeaderRejectsTruncatedV5(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "truncated.chd")
+	writeCHDTestHeader(t, path, 5, 4096, 2048, 4096, 0)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 124 {
+		t.Fatalf("fixture has %d bytes, want a full CHDv5 header", len(data))
+	}
+	if err := os.WriteFile(path, data[:64], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseCHDHeader(path); err == nil {
+		t.Fatal("64-byte CHDv5 prefix was accepted as a complete header")
 	}
 }
 

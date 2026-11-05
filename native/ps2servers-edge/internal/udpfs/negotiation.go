@@ -96,13 +96,17 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 		"peer": in.peer.String(), "socket": in.socket, "sequence": h.Sequence,
 		"profile": st.Profile, "streaming": st.Streaming, "quiet": quiet.String(), "known": known,
 	})
-	// Discovery never proves that an established stream ended. Only a
-	// sequence-zero discovery is ambiguous about a loader handoff; resolve that
-	// marker on subsequent payload DATA. Every other discovery sequence is just
-	// background traffic and must not reset transport or close handles.
+	// Discovery never proves that an established stream ended. Record a
+	// possible replacement sequence and resolve it on subsequent payload DATA.
 	if st.Streaming {
+		st.Touch()
 		if h.Sequence == 0 {
 			st.PendingZeroDiscovery = time.Now()
+			st.PendingDiscoverySequence = nil
+		} else {
+			sequence := h.Sequence
+			st.PendingDiscoverySequence = &sequence
+			st.PendingZeroDiscovery = time.Time{}
 		}
 		// A console that keeps broadcasting discovery mid-reply is alive. Surface
 		// the validated packet as liveness without acknowledging TX progress.
@@ -356,6 +360,31 @@ func (s *Server) handleData(st *session.State, in inbound) {
 			st.Touch()
 			s.stats.sequenceResets.Add(1)
 			s.cfg.Log.Info("seq0 discovery resolved to replacement session", map[string]any{
+				"peer": inboundPeerString(in.peer), "socket": in.socket,
+				"old_expected": expected, "first_data_sequence": h.Sequence,
+				"profile": profile,
+			})
+		}
+	}
+
+	if len(payload) > 0 && st.PendingDiscoverySequence != nil {
+		discovery := *st.PendingDiscoverySequence
+		switch {
+		case h.Sequence == st.ExpectedReceive:
+			st.PendingDiscoverySequence = nil
+		case h.Sequence == protocol.Next(discovery):
+			expected := st.ExpectedReceive
+			profile := session.Pending
+			if s.cfg.ProtocolMode == session.Standard || s.cfg.ProtocolMode == session.Modulo {
+				profile = s.cfg.ProtocolMode
+			}
+			st.HandOff(profile)
+			st.DiscoverySequence = discovery
+			st.FallbackGeneration++
+			st.ResponseSocket = in.socket
+			st.Touch()
+			s.stats.sequenceResets.Add(1)
+			s.cfg.Log.Info("nonzero discovery resolved to replacement session", map[string]any{
 				"peer": inboundPeerString(in.peer), "socket": in.socket,
 				"old_expected": expected, "first_data_sequence": h.Sequence,
 				"profile": profile,

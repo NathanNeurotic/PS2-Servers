@@ -12,6 +12,7 @@ import (
 var ErrCHDUnavailable = errors.New("CHD support requires CGO and libchdr (build with -tags chd)")
 
 const maxCHDHunkBytes = 16 << 20
+const chdV5HeaderBytes = 124
 
 type chdHeader struct {
 	isCD          bool
@@ -34,7 +35,7 @@ func parseCHDHeader(path string) (chdHeader, error) {
 		return h, err
 	}
 	defer f.Close()
-	raw := make([]byte, 64)
+	raw := make([]byte, chdV5HeaderBytes)
 	if _, err := io.ReadFull(f, raw); err != nil {
 		return h, err
 	}
@@ -43,6 +44,9 @@ func parseCHDHeader(path string) (chdHeader, error) {
 	}
 	if version := binary.BigEndian.Uint32(raw[12:16]); version != 5 {
 		return h, fmt.Errorf("unsupported CHD version %d", version)
+	}
+	if size := binary.BigEndian.Uint32(raw[8:12]); size != chdV5HeaderBytes {
+		return h, fmt.Errorf("invalid CHDv5 header size %d", size)
 	}
 	logical := binary.BigEndian.Uint64(raw[32:40])
 	hunk := binary.BigEndian.Uint32(raw[56:60])
