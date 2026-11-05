@@ -73,6 +73,33 @@ def note(*a):
     print("[smb2]", *a, file=sys.stderr, flush=True)
 
 
+def _local_ipv4_addresses():
+    """IPv4 addresses this host answers on, for the open-share warning."""
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None,
+                                       socket.AF_INET, socket.SOCK_DGRAM):
+            ip = info[4][0]
+            if ip and not ip.startswith("127."):
+                ips.add(ip)
+    except OSError:
+        pass
+    if not ips:
+        # The hostname lookup can miss interfaces; asking the stack for the
+        # source address of a would-be outbound route finds the primary one.
+        # TEST-NET-1 is unroutable, so no traffic is actually sent.
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(("192.0.2.1", 80))
+                ips.add(s.getsockname()[0])
+            finally:
+                s.close()
+        except OSError:
+            pass
+    return sorted(ips)
+
+
 class Handle:
     """One open file or directory, and everything the client can ask about it."""
 
@@ -1741,6 +1768,12 @@ def main(argv=None):
                                          " (read-only)" if args.read_only else ""))
         if auth.is_open:
             note("  NO PASSWORD: anyone who can reach this port can read the share.")
+            if args.bind in ("", "0.0.0.0", "::"):
+                ips = _local_ipv4_addresses()
+                if ips:
+                    note("  Reachable on: " + ", ".join(ips))
+                note("  Bound to every interface; use --bind <address> to serve "
+                     "only one network, such as the LAN the console is on.")
         else:
             note("  users: " + ", ".join(sorted(args.user and
                                                 [u.split(":", 1)[0] for u in args.user])))

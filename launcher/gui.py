@@ -310,6 +310,10 @@ def opl_hint(key, ip, values):
             hint += ("\nLaunchstation / wLaunchELF → SMB shares (SMB2.CNF) block"
                      " (use Copy console config for the paste-ready text):"
                      "\n" + block)
+        if values.get("open_share") and not (values.get("bind") or "").strip():
+            hint += ("\nNo password, bound to every interface: this share is "
+                     "reachable on every network this PC joins. Set Bind address "
+                     "(Advanced) to restrict it to the LAN the console is on.")
         return hint
     if key == "udpfs":        # OPL never asks UDPFS for a server IP: the console broadcasts DISCOVERY
         # and the server answers. Naming the LAN IP as a "server IP" sent users
