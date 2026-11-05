@@ -1703,6 +1703,29 @@ class UdpfsServer:
             self._print_event(f"[{addr[0]}:{addr[1]}] Unknown message type: 0x{msg_type:02x}")
             self._send_ack(addr, is_ack=True)
 
+    def _prepare_directory_entries(self, entries):
+        """Build one advertised namespace, retaining real names over aliases."""
+        real_names = {entry.name for entry in entries}
+        prepared = []
+        for entry in entries:
+            display_name = self._transform_compressed_name(entry.name)
+            if display_name == entry.name:
+                prepared.append({'name': display_name, 'source': entry,
+                                 'stat_info': None})
+                continue
+            if display_name in real_names or len(display_name.encode('utf-8')) > 255:
+                continue
+            try:
+                st = entry.stat(follow_symlinks=False)
+                compressed_stat = self._get_compressed_stat(entry.path, st)
+            except OSError:
+                continue
+            if compressed_stat is None:
+                continue
+            prepared.append({'name': display_name, 'source': entry,
+                             'stat_info': compressed_stat})
+        return prepared
+
     # --- File operation handlers ---
 
     def _handle_open(self, addr: Tuple[str, int], payload: bytes):
@@ -1733,7 +1756,7 @@ class UdpfsServer:
         if is_dir:
             # Directory open
             try:
-                entries = list(os.scandir(resolved))
+                entries = self._prepare_directory_entries(list(os.scandir(resolved)))
                 handle = self._alloc_handle({'entries': entries, 'index': 0}, is_dir=True)
                 if handle < 0:
                     self._send_open_reply(addr, handle)
@@ -2120,8 +2143,10 @@ class UdpfsServer:
         # console cannot tell that from a complete one: OPL took every later cover
         # in ART/ to be missing, and later games never appeared in the list.
         while dir_data['index'] < len(dir_data['entries']):
-            entry = dir_data['entries'][dir_data['index']]
+            advertised = dir_data['entries'][dir_data['index']]
             dir_data['index'] += 1
+            entry = advertised['source']
+            display_name = advertised['name']
 
             try:
                 st = entry.stat(follow_symlinks=False)
@@ -2129,18 +2154,7 @@ class UdpfsServer:
                 self._print_event(f"[{addr[0]}:{addr[1]}] DREAD stat error, skipping '{entry.name}': {e}")
                 continue
 
-            # Check if this is a compressed file and transform display
-            display_name = entry.name
-            stat_info = self._stat_to_bytes(st)
-
-            if self.enable_compression:
-                # Present supported compressed files as .iso with their
-                # uncompressed size (the transform is a no-op for other names)
-                display_name = self._transform_compressed_name(entry.name)
-                if display_name != entry.name:
-                    compressed_stat = self._get_compressed_stat(entry.path, st)
-                    if compressed_stat:
-                        stat_info = compressed_stat
+            stat_info = advertised['stat_info'] or self._stat_to_bytes(st)
 
             if self.verbose:
                 if display_name != entry.name:

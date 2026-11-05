@@ -124,6 +124,7 @@ func (s *State) ResetWrite() {
 type BufferedPacket struct {
 	Sequence uint16
 	Bytes    []byte
+	Sent     bool
 }
 
 func New(peer *net.UDPAddr, forced Profile) *State {

@@ -341,8 +341,8 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         self.assertEqual(ack_packets[0]["ack_sequence"], 1)
         self.assertEqual(ack_packets[0]["flags"] & 0x1, 0x1)
 
-    def test_active_stream_nonzero_still_preserved_without_inform(self):
-        """Existing nonzero guard must remain: active + seq!=0 + quiet<2s -> no reset, no inform."""
+    def test_active_stream_nonzero_preserved_with_canonical_inform(self):
+        """Nonzero discovery preserves the stream and receives canonical INFORM."""
         addr = ("192.0.2.10", 5002)
         server = _make_server(protocol_mode="auto")
         sess = _make_active_session(addr, quiet_seconds=0.5)
@@ -364,11 +364,11 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         finally:
             time.monotonic = real_mono
 
-        self.assertEqual(len(canonical_calls), 0)
+        self.assertEqual(len(canonical_calls), 1)
         self.assertEqual(len(reset_calls), 0)
         self.assertIn(1, sess.handles)
         self.assertTrue(sess.rx_streaming)
-        self.assertEqual(len(server._sent), 0)
+        self.assertEqual(len(server._sent), 1)
 
     def test_modulo_mode_unchanged(self):
         """Modulo mode must not be affected by new seq0 guard (early modulo branch)."""
@@ -420,7 +420,7 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         finally:
             time.monotonic = real_mono
         self.assertTrue(any("DISCOVERY seq=0 during active stream" in m for m in logs))
-        self.assertTrue(any("defer replacement decision" in m for m in logs))
+        self.assertTrue(any("preserve existing session" in m for m in logs))
 
     def test_recent_seq0_then_old_expected_data_preserves_session(self):
         """Background seq0 discovery followed by the old stream stays live."""

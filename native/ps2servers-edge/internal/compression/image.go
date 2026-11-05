@@ -335,6 +335,8 @@ func SizeOf(path string) (int64, error) {
 }
 
 func (i *Image) Close() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	if i.chd != nil {
 		return i.chd.close()
 	}

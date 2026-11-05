@@ -317,3 +317,48 @@ func TestSendPacketsCachesBatchWriter(t *testing.T) {
 		t.Fatal("batch writer is not cached for the data socket")
 	}
 }
+
+func TestBatchedTransferDoesNotPublishQueuedPacketsBeforeFlush(t *testing.T) {
+	for _, control := range []string{"nack", "ack"} {
+		t.Run(control, func(t *testing.T) {
+			server, _, peer, receiver := newUDPWriteTestServer(t, true)
+			st := session.New(peer, session.Standard)
+			st.TransmitSequence = 4090
+			st.TransmitAcked = 3
+			first := true
+			server.batchWrite = func(addr *net.UDPAddr, batch [][]byte) (int, error) {
+				if first {
+					first = false
+					if control == "nack" {
+						server.retransmit(st, 4090)
+					} else {
+						server.pruneAcked(st, 4097)
+					}
+				}
+				for _, packet := range batch {
+					if _, err := server.data.WriteToUDP(packet, addr); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return len(batch), nil
+			}
+			if !server.sendTransferPackets(st, nil, make([]byte, protocol.MaxPayload*10)) {
+				t.Fatal("transfer was not confirmed")
+			}
+			received := receiveDatagrams(t, receiver, 10)
+			for i, packet := range received {
+				h, err := protocol.ParseHeader(packet)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := uint16(4090+i) & protocol.SequenceMask
+				if h.Sequence != want {
+					t.Errorf("packet %d sequence = %d, want %d", i, h.Sequence, want)
+				}
+			}
+			if len(st.TxBuffer) != 10 {
+				t.Fatalf("control pruned or lost retransmission entries: %d", len(st.TxBuffer))
+			}
+		})
+	}
+}

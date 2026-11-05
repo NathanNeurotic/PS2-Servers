@@ -141,6 +141,18 @@ class Driver:
         self.server._handle_getstat(self.addr, b'\x00' * 4 + path.encode() + b'\x00')
         return self.replies.pop()
 
+    def listnames(self, path='/'):
+        handle, _ = self.open(path, is_dir=True)
+        assert handle >= 0, "DOPEN %r failed: %d" % (path, handle)
+        entries = []
+        while True:
+            self.server._handle_dread(self.addr, struct.pack('<BBBBi', 0, 0, 0, 0, handle))
+            result, name, stat_info = self.replies.pop()
+            if result <= 0:
+                break
+            entries.append(name)
+        return entries
+
     def listdir(self, path='/'):
         handle, _ = self.open(path, is_dir=True)
         assert handle >= 0, "DOPEN %r failed: %d" % (path, handle)
@@ -185,6 +197,8 @@ def test_listing_and_getstat(root):
               "uppercase-extension CHD keeps its name and appends .iso")
         check('GameA.cso' not in entries and 'GameB.chd' not in entries,
               "raw compressed names not listed")
+        check('Corrupt.cso.iso' not in entries,
+              "undecodable virtual alias is omitted while valid entries remain")
 
         print("[getstat]")
         result, stat_info = d.getstat('/GameB.chd.iso')
@@ -379,6 +393,33 @@ def test_exact_stem_no_case_collision(root):
         d.close()
 
 
+def test_listing_namespace(cso_data):
+    """Real names win collisions and virtual aliases fit the wire name limit."""
+    print("[namespace] real-name collisions and encoded limits")
+    root = tempfile.mkdtemp(prefix='udpfs_namespace_')
+    d = Driver(root)
+    try:
+        make_cso(os.path.join(root, 'game.cso'), cso_data)
+        with open(os.path.join(root, 'game.cso.iso'), 'wb') as f:
+            f.write(b'REAL')
+        for name in ('a' * 247 + '.cso', 'b' * 248 + '.cso',
+                     'é' * 123 + '.cso', 'é' * 124 + '.cso'):
+            make_cso(os.path.join(root, name), cso_data)
+        names = d.listnames()
+        check(names.count('game.cso.iso') == 1,
+              "real ISO and compressed alias share one advertised name")
+        for name in ('a' * 247 + '.cso.iso', 'é' * 123 + '.cso.iso'):
+            check(names.count(name) == 1, f"boundary alias {name!r} is advertised once")
+        for name in ('b' * 248 + '.cso.iso', 'é' * 124 + '.cso.iso'):
+            check(name not in names, f"overlength alias {name!r} is suppressed")
+        handle, stat_info = d.open('/game.cso.iso')
+        check(handle >= 0 and d.handle_obj(handle).read(4) == b'REAL',
+              "real ISO wins the colliding virtual alias")
+    finally:
+        d.close()
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_extension_gating_builder():
     """Pin the COMPRESSED_EXTENSIONS builder directly: monkeypatching the tuple
     in other tests would hide a regression in the library-availability gating
@@ -462,6 +503,7 @@ def main():
         test_compression_disabled(root)
         test_prefers_parseable_sibling(root)
         test_exact_stem_no_case_collision(root)
+        test_listing_namespace(cso_data)
         test_extension_gating_builder()
         test_extension_alias_mapping()
     finally:

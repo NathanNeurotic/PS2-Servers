@@ -2,10 +2,13 @@ package compression
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func writeCHDTestHeader(t *testing.T, path string, version, hunk, unit uint32, logical uint64, codec uint32) {
@@ -109,5 +112,51 @@ func TestCHDUserDataExtraction(t *testing.T) {
 	}
 	if got := chdExtractUserData([]byte{1, 2, 3}); len(got) != 2048 || got[0] != 1 || got[2] != 3 || got[3] != 0 {
 		t.Fatalf("short-sector extraction returned %x", got[:4])
+	}
+}
+
+func TestCHDCloseWaitsForRead(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	closed := make(chan struct{})
+	state := &chdState{}
+	state.readBlock = func(block int64) ([]byte, error) {
+		close(started)
+		<-release
+		select {
+		case <-closed:
+			return nil, errors.New("read after close")
+		default:
+			return []byte{1, 2, 3, 4}, nil
+		}
+	}
+	var closeOnce sync.Once
+	state.close = func() error {
+		closeOnce.Do(func() { close(closed) })
+		return nil
+	}
+	img := &Image{format: "chd", size: 4, blockSize: 4, chd: state}
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := img.Read(make([]byte, 4))
+		readDone <- err
+	}()
+	<-started
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- img.Close() }()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close completed during an active read: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	if err := <-readDone; err != nil {
+		t.Fatalf("active read failed: %v", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if err := img.Close(); err != nil {
+		t.Fatalf("second Close failed: %v", err)
 	}
 }

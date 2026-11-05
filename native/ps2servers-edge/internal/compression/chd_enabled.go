@@ -39,6 +39,9 @@ func openCHD(path string) (*Image, error) {
 	hunkBuffer := make([]byte, int(h.hunkSize))
 	img := &Image{format: "chd", size: h.size, fileSize: info.Size(), blockSize: h.blockSize, chd: &chdState{}}
 	img.chd.readBlock = func(block int64) ([]byte, error) {
+		if handle == nil {
+			return nil, os.ErrClosed
+		}
 		if block < 0 || block >= h.blocks {
 			return nil, io.EOF
 		}

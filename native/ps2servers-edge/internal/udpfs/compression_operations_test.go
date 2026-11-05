@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/compression"
@@ -125,14 +126,20 @@ func TestCompressedAliasesAndRawContainerSemantics(t *testing.T) {
 	}
 	c := dial(t, startServerAt(t, root, false))
 	entries := listUDPFSImages(t, c)
-	chdName := "other.chd"
-	if compression.CHDAvailable {
-		chdName += ".iso"
-	}
-	for _, name := range []string{"game.iso", "game.cso.iso", "legacy.cso.iso", "MIXED.CSO.iso", "other.zso.iso", chdName, "corrupt.cso.iso"} {
+	for _, name := range []string{"game.iso", "game.cso.iso", "legacy.cso.iso", "MIXED.CSO.iso", "other.zso.iso"} {
 		if _, ok := entries[name]; !ok {
 			t.Errorf("directory does not advertise %q: %+v", name, entries)
 		}
+	}
+	if compression.CHDAvailable {
+		if _, ok := entries["other.chd.iso"]; ok {
+			t.Error("undecodable CHD was advertised as a virtual ISO")
+		}
+	} else if _, ok := entries["other.chd"]; !ok {
+		t.Error("raw CHD is missing from the default build's listing")
+	}
+	if _, ok := entries["corrupt.cso.iso"]; ok {
+		t.Error("corrupt CSO was advertised as a virtual ISO")
 	}
 
 	if _, size, data := readUDPFSImage(t, c, "game.iso"); size != uint64(len(plain)) || !bytes.Equal(data, plain) {
@@ -182,5 +189,104 @@ func TestCompressedAliasesKeepCaseOnlyNamesDistinct(t *testing.T) {
 		if _, size, data := readUDPFSImage(t, c, name); size != uint64(len(source)) || !bytes.Equal(data, source) {
 			t.Errorf("%s returned size %d, data %x", name, size, data)
 		}
+	}
+}
+
+func listUDPFSImageNames(t *testing.T, c *client) []string {
+	t.Helper()
+	directory := result(c.send(openMsg("", fioRead, true)))
+	if directory <= 0 {
+		t.Fatalf("DOPEN returned %d", directory)
+	}
+	var names []string
+	for {
+		request := make([]byte, 8)
+		request[0] = byte(protocol.DReadRequest)
+		binary.LittleEndian.PutUint32(request[4:8], uint32(directory))
+		reply := c.send(request)
+		if got := result(reply); got == 0 {
+			break
+		} else if got < 0 {
+			t.Fatalf("DREAD returned %d", got)
+		}
+		nameLen := int(binary.LittleEndian.Uint16(reply[2:4]))
+		names = append(names, string(reply[48:48+nameLen]))
+	}
+	if got := result(c.send(closeMsg(directory))); got != 0 {
+		t.Fatalf("directory CLOSE returned %d", got)
+	}
+	return names
+}
+
+func TestCompressedListingNamespaceReservesRealNamesAndLimitsAliases(t *testing.T) {
+	root := t.TempDir()
+	source := []byte("0123456789abcdef")
+	writeUDPFSCSO(t, filepath.Join(root, "game.cso"), source)
+	if err := os.WriteFile(filepath.Join(root, "game.cso.iso"), []byte("REAL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		strings.Repeat("a", 247) + ".cso",
+		strings.Repeat("b", 248) + ".cso",
+		strings.Repeat("é", 123) + ".cso",
+		strings.Repeat("é", 124) + ".cso",
+	} {
+		writeUDPFSCSO(t, filepath.Join(root, name), source)
+	}
+	c := dial(t, startServerAt(t, root, false))
+	counts := map[string]int{}
+	for _, name := range listUDPFSImageNames(t, c) {
+		counts[name]++
+	}
+	if got := counts["game.cso.iso"]; got != 1 {
+		t.Errorf("real ISO and virtual alias produced %d duplicate names, want 1", got)
+	}
+	for _, name := range []string{strings.Repeat("a", 247) + ".cso.iso", strings.Repeat("é", 123) + ".cso.iso"} {
+		if counts[name] != 1 {
+			t.Errorf("boundary alias %q missing: %+v", name, counts)
+		}
+	}
+	for _, name := range []string{strings.Repeat("b", 248) + ".cso.iso", strings.Repeat("é", 124) + ".cso.iso"} {
+		if counts[name] != 0 {
+			t.Errorf("overlength alias %q was advertised: %+v", name, counts)
+		}
+	}
+}
+
+func TestLegacyAliasPrefersParseableSiblingAndCorruptAliasesAreHidden(t *testing.T) {
+	root := t.TempDir()
+	source := []byte("0123456789abcdef")
+	if err := os.WriteFile(filepath.Join(root, "PrefG.cso"), []byte("not a CSO"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	encoded := append([]byte{0xf0, 1}, source...)
+	writeUDPFSContainer(t, filepath.Join(root, "PrefG.zso"), "ZISO", source, encoded)
+	c := dial(t, startServerAt(t, root, false))
+	names := listUDPFSImageNames(t, c)
+	for _, name := range names {
+		if name == "PrefG.cso.iso" {
+			t.Fatal("corrupt virtual alias was advertised")
+		}
+	}
+	found := false
+	for _, name := range names {
+		if name == "PrefG.zso.iso" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("valid later sibling was hidden")
+	}
+	if _, size, data := readUDPFSImage(t, c, "PrefG.iso"); size != uint64(len(source)) || !bytes.Equal(data, source) {
+		t.Fatalf("legacy alias did not select valid later sibling: size=%d data=%x", size, data)
+	}
+	if result, size := statUDPFSImage(t, c, "PrefG.iso"); result != 0 || size != uint64(len(source)) {
+		t.Fatalf("legacy GETSTAT = %d, %d; want valid decoded size", result, size)
+	}
+	if result, _, _ := readUDPFSImage(t, c, "PrefG.cso.iso"); result != -eIO {
+		t.Fatalf("corrupt canonical alias returned %d, want -EIO", result)
+	}
+	if result, size := statUDPFSImage(t, c, "PrefG.cso.iso"); result != -eIO || size != 0 {
+		t.Fatalf("corrupt canonical GETSTAT = %d, %d; want -EIO, 0", result, size)
 	}
 }

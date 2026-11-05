@@ -47,6 +47,7 @@ FLAG_TO_UCI = {
     "--single-port": "single_port",
     "--peer-timeout": "peer_timeout",
     "--tx-delay-ms": "tx_delay_ms",
+    "--udp-batch": "udp_batch",
     "--read-only": "read_only",
     "--block-device": "block_device",
     "--sector-size": "sector_size",

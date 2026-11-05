@@ -13,7 +13,7 @@ import (
 func (s *Server) pruneAcked(st *session.State, ack uint16) {
 	kept := st.TxBuffer[:0]
 	for _, p := range st.TxBuffer {
-		if ((p.Sequence - ack - 1) & protocol.SequenceMask) < 2048 {
+		if !p.Sent || ((p.Sequence-ack-1)&protocol.SequenceMask) < 2048 {
 			kept = append(kept, p)
 		}
 	}
@@ -22,7 +22,7 @@ func (s *Server) pruneAcked(st *session.State, ack uint16) {
 func (s *Server) retransmit(st *session.State, from uint16) {
 	var packets [][]byte
 	for _, p := range st.TxBuffer {
-		if ((p.Sequence - from) & protocol.SequenceMask) < 2048 {
+		if p.Sent && ((p.Sequence-from)&protocol.SequenceMask) < 2048 {
 			packets = append(packets, p.Bytes)
 		}
 	}
@@ -148,6 +148,18 @@ func (s *Server) sendTransferPackets(st *session.State, header, data []byte) boo
 	flush := func() {
 		if len(pending) > 0 {
 			s.sendPackets(s.responseSocket(st), pending, st.Peer)
+			st.Mu.Lock()
+			marked := 0
+			for i := range st.TxBuffer {
+				if !st.TxBuffer[i].Sent {
+					st.TxBuffer[i].Sent = true
+					marked++
+					if marked == len(pending) {
+						break
+					}
+				}
+			}
+			st.Mu.Unlock()
 			pending = nil
 		}
 	}
@@ -187,6 +199,7 @@ func (s *Server) sendTransferPackets(st *session.State, header, data []byte) boo
 			pending = append(pending, packet)
 		} else {
 			s.sendOn(s.responseSocket(st), packet, st.Peer)
+			st.TxBuffer[len(st.TxBuffer)-1].Sent = true
 		}
 		st.TransmitSequence = protocol.Next(st.TransmitSequence)
 		st.Mu.Unlock()

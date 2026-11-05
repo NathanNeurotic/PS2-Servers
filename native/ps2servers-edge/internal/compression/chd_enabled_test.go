@@ -42,6 +42,9 @@ func TestCHDReadSeekEOFAndSize(t *testing.T) {
 			if err != nil || len(got) != wantSize || !bytes.Equal(got[:len(want)], want) {
 				t.Fatalf("full decode differs: len=%d, err=%v", len(got), err)
 			}
+			if name == "test_cd.chd" && !bytes.Equal(got[len(want):], make([]byte, wantSize-len(want))) {
+				t.Fatal("CD hunk-padding sectors are not the expected zero bytes")
+			}
 			if _, err := img.Seek(0, io.SeekEnd); err != nil {
 				t.Fatal(err)
 			}

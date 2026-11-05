@@ -211,14 +211,51 @@ func (s *Server) resolveImagePath(client string) (string, bool, error) {
 		}
 		return candidate, true, nil
 	}
+	first := ""
 	for _, ext := range compressedImageExtensions() {
 		candidate, er := s.root.Resolve(base+ext, false)
-		if er == nil {
+		if er != nil {
+			continue
+		}
+		if first == "" {
+			first = candidate
+		}
+		if _, err := compression.SizeOf(candidate); err == nil {
 			return candidate, true, nil
 		}
 	}
+	if first != "" {
+		return first, true, nil
+	}
 	return "", false, err
 }
+
+func (s *Server) prepareDirectory(entries []session.DirEntry) []session.DirEntry {
+	realNames := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		realNames[entry.Name] = struct{}{}
+	}
+	out := make([]session.DirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !s.compressedSiblingsEnabled() || !hasCompressedImageExtension(entry.Name) {
+			out = append(out, entry)
+			continue
+		}
+		alias := entry.Name + ".iso"
+		if _, exists := realNames[alias]; exists || len(alias) > 255 {
+			continue
+		}
+		size, err := compression.SizeOf(entry.SourcePath)
+		if err != nil {
+			continue
+		}
+		entry.Name = alias
+		entry.Size = uint64(size)
+		out = append(out, entry)
+	}
+	return out
+}
+
 func (s *Server) handleOpen(st *session.State, p []byte) {
 	if len(p) < 8 {
 		s.sendOpen(st, -eINVAL, 0, 0)
@@ -253,7 +290,7 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 			s.sendOpen(st, errno(err), 0, 0)
 			return
 		}
-		st.Handles[id] = &session.Handle{Directory: entries}
+		st.Handles[id] = &session.Handle{Directory: s.prepareDirectory(entries)}
 		s.sendOpen(st, id, 0x1000, 0)
 		return
 	}
@@ -637,17 +674,6 @@ func (s *Server) handleDRead(st *session.State, p []byte) {
 	}
 	entry := h.Directory[h.Index]
 	h.Index++
-	// Append .iso to the complete container name so same-stem plain and
-	// compressed images keep distinct advertised names. The alias reports the
-	// decompressed size; the direct container path remains raw.
-	if s.compressedSiblingsEnabled() && hasCompressedImageExtension(entry.Name) {
-		entry.Name += ".iso"
-		// SizeOf, not openImage: this needs one number out of the header,
-		// without building and discarding the whole block index per entry.
-		if size, err := compression.SizeOf(entry.SourcePath); err == nil {
-			entry.Size = uint64(size)
-		}
-	}
 	s.sendDRead(st, 1, entry)
 }
 func (s *Server) sendDRead(st *session.State, result int32, e session.DirEntry) {
@@ -695,9 +721,12 @@ func (s *Server) handleGetStat(st *session.State, p []byte) {
 	}
 	size := uint64(info.Size())
 	if decompress && s.compressedSiblingsEnabled() {
-		if n, e := compression.SizeOf(real); e == nil {
-			size = uint64(n)
+		n, e := compression.SizeOf(real)
+		if e != nil {
+			s.sendGetStat(st, errno(e), 0, 0)
+			return
 		}
+		size = uint64(n)
 	}
 	s.sendGetStat(st, 0, filesystem.Mode(info), size)
 }
