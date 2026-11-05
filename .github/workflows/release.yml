@@ -529,8 +529,11 @@ jobs:
           no_onefile="single-file build unavailable in this release"
           table=$(
             row "Windows, normal (64-bit)"   PS2Servers-windows-x64-portable.zip   PS2Servers-windows-x64.zip           "$no_portable"
+            row_alternative PS2Servers-windows-x64-portable.zip PS2Servers-windows-x64.zip "Windows, 64-bit single-file alternative"
             row "Windows, older 32-bit PC"   PS2Servers-windows-x86-portable.zip   PS2Servers-windows-x86.zip           "$no_portable"
+            row_alternative PS2Servers-windows-x86-portable.zip PS2Servers-windows-x86.zip "Windows, 32-bit single-file alternative"
             row "Linux, x86_64"              PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz "$no_onefile"
+            row_alternative PS2Servers-linux-x64 PS2Servers-linux-x64-portable.tar.gz "Linux, x86_64 standalone folder"
             if [ -f PS2Servers-x86_64.AppImage ]; then
               row "Linux desktop, x86_64 AppImage" PS2Servers-x86_64.AppImage "" ""
             fi
