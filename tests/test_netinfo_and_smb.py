@@ -222,6 +222,13 @@ class ServerRegistryTests(unittest.TestCase):
                             {"port": 1445, "username": "p", "password": "s"})
         self.assertNotIn("every interface", hint)
 
+        # SMBv1 has no open_share toggle: a blank user is its open share.
+        hint = gui.opl_hint("smbv1", "192.168.1.100", {"port": 1025})
+        self.assertIn("every interface", hint)
+        hint = gui.opl_hint("smbv1", "192.168.1.100",
+                            {"port": 1025, "username": "p", "password": "s"})
+        self.assertNotIn("every interface", hint)
+
     def test_opl_hint_udpfs_names_no_server_ip(self):
         # OPL finds UDPFS by broadcast and never asks for a server IP; the hint
         # must not tell the user to enter one.
