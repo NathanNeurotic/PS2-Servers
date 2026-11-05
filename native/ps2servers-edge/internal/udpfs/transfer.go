@@ -20,11 +20,13 @@ func (s *Server) pruneAcked(st *session.State, ack uint16) {
 	st.TxBuffer = kept
 }
 func (s *Server) retransmit(st *session.State, from uint16) {
+	var packets [][]byte
 	for _, p := range st.TxBuffer {
 		if ((p.Sequence - from) & protocol.SequenceMask) < 2048 {
-			s.sendOn(s.responseSocket(st), p.Bytes, st.Peer)
+			packets = append(packets, p.Bytes)
 		}
 	}
+	s.sendPackets(s.responseSocket(st), packets, st.Peer)
 }
 func pad4(b []byte) []byte {
 	for len(b)%4 != 0 {
@@ -141,6 +143,15 @@ func (s *Server) sendTransferPackets(st *session.State, header, data []byte) boo
 	st.TxBuffer = nil
 	st.Mu.Unlock()
 
+	batching := s.cfg.UDPBatch && s.cfg.TxDelay == 0
+	var pending [][]byte
+	flush := func() {
+		if len(pending) > 0 {
+			s.sendPackets(s.responseSocket(st), pending, st.Peer)
+			pending = nil
+		}
+	}
+
 	first := true
 	windowPackets := 0
 	var finalSequence uint16
@@ -172,7 +183,11 @@ func (s *Server) sendTransferPackets(st *session.State, header, data []byte) boo
 		packet := append(protocol.Header{Type: protocol.Data, Sequence: sequence}.Marshal(), dh.Marshal()...)
 		packet = append(packet, payload...)
 		st.TxBuffer = append(st.TxBuffer, session.BufferedPacket{Sequence: sequence, Bytes: packet})
-		s.sendOn(s.responseSocket(st), packet, st.Peer)
+		if batching {
+			pending = append(pending, packet)
+		} else {
+			s.sendOn(s.responseSocket(st), packet, st.Peer)
+		}
 		st.TransmitSequence = protocol.Next(st.TransmitSequence)
 		st.Mu.Unlock()
 
@@ -180,6 +195,7 @@ func (s *Server) sendTransferPackets(st *session.State, header, data []byte) boo
 		windowPackets++
 		first = false
 		if len(data) > 0 && windowPackets >= windowSize {
+			flush()
 			if !s.confirmWindow(st, finalSequence) {
 				return false
 			}
@@ -192,6 +208,7 @@ func (s *Server) sendTransferPackets(st *session.State, header, data []byte) boo
 			windowPackets = 0
 		}
 	}
+	flush()
 	return s.confirmWindow(st, finalSequence)
 }
 

@@ -73,12 +73,18 @@ force a network topology: DATA is still accepted on either local socket.
 The native sender uses bounded 1408-byte packets, an eight-packet send window,
 cumulative ACK handling, immediate NACK retransmission, final-ACK confirmation,
 and bounded retry counts. ACK/NACK control packets bypass the per-peer request
-queue so a transfer can advance while the request worker is occupied.
+queue so a transfer can advance while the request worker is occupied. Optional
+`--udp-batch` mode submits each unpaced window or retransmission group through
+Linux `ipv4.PacketConn.WriteBatch`, with per-socket cached writers and portable
+per-packet fallback for every unsent suffix. Disabled batching, non-Linux hosts,
+and nonzero `--tx-delay-ms` retain the per-packet path; sequence numbers,
+retransmission contents, metrics, and traces are identical.
 
 ## Filesystem and images
 
-Edge serves writes unless started with `--read-only`. It rejects absolute paths,
-drive-qualified paths, `..`, and symlink escapes before opening files. Directory
+Edge serves writes unless started with `--read-only`. Leading separators are
+UDPFS root-relative syntax; it rejects drive-qualified and device paths, every
+`..` component, and symlink escapes before opening files. Directory
 enumeration omits entries that cannot be resolved safely beneath the configured
 root. `MKDIR`, `REMOVE` and `RMDIR` resolve only the parent of their path
 (`filesystem.Root.Entry`), so like `mkdir(2)`, `unlink(2)` and `rmdir(2)` they

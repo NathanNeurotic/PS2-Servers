@@ -23,6 +23,7 @@ config udpfs 'main'
     option read_only '1'
     option peer_timeout '1h'
     option tx_delay_ms '0'
+    option udp_batch '0'
     option log_format 'text'
     option verbose '0'
     option block_device ''
@@ -57,6 +58,7 @@ The UDPFS options map to Edge flags as follows:
 | `read_only` | `--read-only` | **`1` is read-only. Set `0` to let the console save.** |
 | `peer_timeout` | `--peer-timeout` | idle session timeout, `1m`–`24h` |
 | `tx_delay_ms` | `--tx-delay-ms` | inter-packet pacing; raise it if a slow router drops packets |
+| `udp_batch` | `--udp-batch` | opt-in Linux UDP window batching; off by default and used only when pacing is zero |
 | `log_format` | `--log-format` | `text` or `json` |
 | `verbose` | `--verbose` | protocol-level logging |
 | `block_device` | `--block-device` | disk image served over UDPFS block access; empty is off |

@@ -137,6 +137,7 @@ func main() {
 	singlePort := fs.Bool("single-port", envBool("SINGLE_PORT", false), "use discovery port for all traffic")
 	timeoutText := fs.String("peer-timeout", env("PEER_TIMEOUT", "1h"), "idle session timeout")
 	txDelayMs := fs.Float64("tx-delay-ms", envFloat("TX_DELAY_MS", 0.0), "inter-packet transmit delay in milliseconds")
+	udpBatch := fs.Bool("udp-batch", envBool("UDP_BATCH", false), "batch outgoing UDP packets on Linux (experimental)")
 	// Writable by default, matching the Desktop/Core server and udpfsd. UDPFS
 	// is a two-way protocol in practice -- a console that loads a game off the
 	// share usually wants to write its saves back to it -- so a read-only
@@ -238,7 +239,7 @@ func main() {
 		os.Exit(2)
 	}
 	logger := edgelog.New(os.Stdout, *logFormat, *quiet, *verbose)
-	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, ReadOnly: *readOnly, MetricsPeriod: metricsEvery, BlockDevice: *blockDevice, SectorSize: *sectorSize, NoCompression: *noCompression, CompressionCache: *compressionCache, SessionSummary: *sessionSummary, Log: logger, ServerName: "PS2 Servers Edge"})
+	server, err := udpfs.New(udpfs.Config{Root: *root, Bind: *bind, Port: *port, DataPort: *dataPort, SinglePort: *singlePort, ProtocolMode: profile, PeerTimeout: timeout, TxDelay: txDelay, UDPBatch: *udpBatch, ReadOnly: *readOnly, MetricsPeriod: metricsEvery, BlockDevice: *blockDevice, SectorSize: *sectorSize, NoCompression: *noCompression, CompressionCache: *compressionCache, SessionSummary: *sessionSummary, Log: logger, ServerName: "PS2 Servers Edge"})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

@@ -79,6 +79,7 @@ start_udpfs() {
         config_get_bool read_only main read_only 1
         [ "$read_only" -eq 1 ] && procd_append_param command --read-only
         append_bool_flag main single_port --single-port
+        append_bool_flag main udp_batch --udp-batch
         append_bool_flag main verbose --verbose
         append_bool_flag main session_summary --session-summary
 

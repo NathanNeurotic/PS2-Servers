@@ -22,7 +22,13 @@ The CD/DVD CHD and reference ISO fixtures under Edge's compression `testdata`
 come from the same revision. The adapted files identify their origin, and the
 full BSD license is included in
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). No upstream Git history or
-wholesale server implementation was imported.
+wholesale server implementation was imported. The optional Linux UDP batch
+writer in `internal/udpfs/udpwrite_linux.go` is a bounded adaptation from the
+same reference, with cached socket state and Edge's own fallback semantics.
+
+The Linux batch path uses `golang.org/x/net` (and `golang.org/x/sys`
+transitively), whose Go Authors license is reproduced in
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 The CSO implementation uses Go's standard-library zlib support. The ZSO decoder
 implements the published raw LZ4 block format with original bounded code; no

@@ -1,11 +1,15 @@
 package udpfs
 
 import (
+	"errors"
+
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"net"
 	"time"
 )
+
+var errUDPBatchUnsupported = errors.New("UDP batching is unsupported on this platform")
 
 func (s *Server) handleControl(st *session.State, dh protocol.DataHeader) {
 	st.Mu.Lock()
@@ -229,11 +233,68 @@ func (s *Server) sendOn(which session.Socket, p []byte, peer *net.UDPAddr) {
 		s.cfg.Log.Debug("UDP send failed", fields)
 		return
 	}
+	s.recordSendSuccess(conn, which, peer, p, n)
+}
+
+func (s *Server) recordSendSuccess(conn *net.UDPConn, which session.Socket, peer *net.UDPAddr, p []byte, n int) {
 	if s.cfg.MetricsPeriod > 0 {
 		s.stats.recordTX(which, n)
 	}
 	if s.cfg.Log.Verbose {
 		s.cfg.Log.Debug("UDP TX", datagramTraceFields(conn, which, peer, p, n))
+	}
+}
+
+func (s *Server) sendPackets(which session.Socket, packets [][]byte, peer *net.UDPAddr) {
+	if len(packets) == 0 {
+		return
+	}
+	if len(packets) == 1 || !s.cfg.UDPBatch || s.cfg.TxDelay > 0 {
+		for _, packet := range packets {
+			s.sendOn(which, packet, peer)
+		}
+		return
+	}
+	conn := s.data
+	if which == session.DiscoverySocket {
+		conn = s.discovery
+	}
+	if conn == nil {
+		return
+	}
+	s.batchWriteMu.Lock()
+	if s.batchWrite == nil || (s.batchWriteConn != nil && s.batchWriteConn != conn) {
+		s.batchWrite = newUDPBatchWriter(conn)
+		s.batchWriteConn = conn
+	}
+	writeBatch := s.batchWrite
+	s.batchWriteMu.Unlock()
+	n, err := writeBatch(peer, packets)
+	if n < 0 {
+		n = 0
+	}
+	if n > len(packets) {
+		n = len(packets)
+	}
+	for _, packet := range packets[:n] {
+		s.recordSendSuccess(conn, which, peer, packet, len(packet))
+	}
+	if err == errUDPBatchUnsupported {
+		for _, packet := range packets[n:] {
+			s.sendOn(which, packet, peer)
+		}
+		return
+	}
+	if err != nil || n < len(packets) {
+		if s.cfg.MetricsPeriod > 0 {
+			s.stats.txSendErrors.Add(1)
+		}
+		s.cfg.Log.Debug("UDP batch send failed", map[string]any{
+			"peer": peer.String(), "socket": which, "packets": len(packets), "written_packets": n, "error": err,
+		})
+		for _, packet := range packets[n:] {
+			s.sendOn(which, packet, peer)
+		}
 	}
 }
 

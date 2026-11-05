@@ -28,6 +28,7 @@ both can transfer concurrently.
 - file write: WRITE_REQ / WRITE_DATA / WRITE_DONE, chunk assembly, O_CREAT,
   O_TRUNC and O_APPEND, one writer per file at a time
 - retransmission, NACK handling, send windows, sequence wraparound
+- optional Linux UDP window batching with partial-send fallback
 - multiple clients and idle cleanup
 - safe rooted filesystem; writes allowed unless `--read-only` is passed
 - block access over UDPFS: `BREAD` / `BWRITE` against one `--block-device`
@@ -142,6 +143,15 @@ build with `CGO_ENABLED=1 go build -tags chd ./cmd/ps2servers-edge`. That build
 advertises `game.chd.iso` and decodes virtual aliases through the same bounded
 cache as CSO/ZSO; direct `.chd` paths remain raw. Default builds list real CHD
 files raw and do not advertise virtual CHD aliases.
+
+## Optional Linux UDP batching
+
+`--udp-batch` (or `UDP_BATCH=1`) enables Linux `sendmmsg` submission of unpaced
+send windows and retransmission groups. It is off by default. Non-Linux hosts,
+partial batches, and any `--tx-delay-ms` setting use the original per-packet
+path. Sequence numbers, retransmission contents, metrics, and traces are
+unchanged. Enable it only after measuring your own router; loopback benchmarks
+have not established a universal throughput advantage.
 
 ## Not claimed
 

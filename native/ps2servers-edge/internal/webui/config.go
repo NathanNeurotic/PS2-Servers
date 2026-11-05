@@ -17,6 +17,7 @@ type UDPFSConfig struct {
 	ReadOnly             bool    `json:"read_only"`
 	PeerTimeout          string  `json:"peer_timeout"`
 	TxDelayMs            float64 `json:"tx_delay_ms"`
+	UDPBatch             bool    `json:"udp_batch"`
 	LogFormat            string  `json:"log_format"`
 	Verbose              bool    `json:"verbose"`
 	BlockDevice          string  `json:"block_device"`
@@ -78,6 +79,7 @@ func DefaultConfig() *EdgeConfig {
 			ReadOnly:             true,
 			PeerTimeout:          "1h",
 			TxDelayMs:            0,
+			UDPBatch:             false,
 			LogFormat:            "text",
 			Verbose:              false,
 			BlockDevice:          "",

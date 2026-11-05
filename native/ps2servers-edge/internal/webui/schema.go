@@ -48,7 +48,8 @@ const (
 //	     matter at all. metrics_period is the first user: the server parses
 //	     it only when metrics is on, so an unconditional range would have a
 //	     validator reject disabled-metrics configs the binary accepts.
-const schemaVersion = 2
+//	3 -- udpfs.udp_batch added; disabled by default.
+const schemaVersion = 3
 
 type FieldSpec struct {
 	Name       string   `json:"name"`
@@ -112,6 +113,7 @@ func schema(version string) *Schema {
 					{Name: "read_only", Type: TypeBool, Default: true, Doc: "refuse writes. The package ships 1 (a router share is often a whole disk); the binary itself defaults to writable"},
 					{Name: "peer_timeout", Type: TypeDuration, Default: "1h", MinValue: "1m", MaxValue: "24h", EnforcedBy: EnforcedByServer, Doc: "idle session expiry; Go duration or plain seconds"},
 					{Name: "tx_delay_ms", Type: TypeFloat, Default: float64(0), Min: fnum(0), EnforcedBy: EnforcedByAPI, Doc: "inter-packet pacing in milliseconds; raise it if a slow link drops packets"},
+					{Name: "udp_batch", Type: TypeBool, Default: false, Doc: "batch outgoing UDP packets on Linux; used only when tx_delay_ms is zero"},
 					{Name: "log_format", Type: TypeEnum, Default: "text", Values: []string{"text", "json"}, EnforcedBy: EnforcedByAPI},
 					{Name: "verbose", Type: TypeBool, Default: false, Doc: "verbose protocol logging"},
 					{Name: "block_device", Type: TypePath, Default: "", Doc: "also serve this disk image over UDPFS block access; empty disables. Inherits read_only"},

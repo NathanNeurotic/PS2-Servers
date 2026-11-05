@@ -34,7 +34,10 @@ type Config struct {
 	ProtocolMode session.Profile
 	PeerTimeout  time.Duration
 	TxDelay      time.Duration
-	ReadOnly     bool
+	// UDPBatch enables Linux sendmmsg batching when TxDelay is zero. The
+	// portable per-packet path remains the default and the paced fallback.
+	UDPBatch bool
+	ReadOnly bool
 	// WindowAckTimeout is the quiet wait on a reply window before its packets
 	// are retransmitted. MaxWindowRetries bounds consecutive quiet waits before
 	// a transfer is aborted; either peer activity or forward progress resets
@@ -92,17 +95,22 @@ func (w *peerWorker) stop() {
 	w.stopOnce.Do(func() { close(w.done) })
 }
 
+type udpBatchWriter func(addr *net.UDPAddr, packets [][]byte) (int, error)
+
 type Server struct {
-	cfg        Config
-	root       *filesystem.Root
-	discovery  *net.UDPConn
-	data       *net.UDPConn
-	sessionsMu sync.Mutex
-	sessions   map[string]*peerWorker
-	incoming   chan inbound
-	closed     chan struct{}
-	closeOnce  sync.Once
-	wg         sync.WaitGroup
+	cfg            Config
+	root           *filesystem.Root
+	discovery      *net.UDPConn
+	data           *net.UDPConn
+	batchWrite     udpBatchWriter
+	batchWriteMu   sync.Mutex
+	batchWriteConn *net.UDPConn
+	sessionsMu     sync.Mutex
+	sessions       map[string]*peerWorker
+	incoming       chan inbound
+	closed         chan struct{}
+	closeOnce      sync.Once
+	wg             sync.WaitGroup
 
 	stats    metrics
 	summary  *sessionstats.Stats // nil unless cfg.SessionSummary

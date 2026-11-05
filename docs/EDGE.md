@@ -29,6 +29,9 @@ Important options:
 - `--data-port 0` — automatic data port; use a fixed value for strict firewalls
 - `--peer-timeout 1h`
 - `--tx-delay-ms 0` — inter-packet pacing; raise it if a slow link drops packets
+- `--udp-batch` — opt-in Linux `sendmmsg` window batching; off by default and
+  used only when pacing is zero, with per-packet fallback for unsupported
+  platforms and partial sends
 - `--log-format text|json`
 - `--verbose`, `--quiet`, `--version`
 

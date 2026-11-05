@@ -182,6 +182,10 @@
                             </div>
                         </div>
                         <div class="form-group">
+                            <label><input type="checkbox" name="udp_batch"> Enable UDP batching (Linux, experimental)</label>
+                            <small class="help-text">Off by default. Used only when inter-packet pacing is zero.</small>
+                        </div>
+                        <div class="form-group">
                             <label>Block Device</label>
                             <div class="input-with-btn">
                                 <input type="text" name="block_device" placeholder="/path/to/image.raw">
