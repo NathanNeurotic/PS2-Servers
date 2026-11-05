@@ -19,8 +19,8 @@ edge_rows() {
     case "$f" in
       *pc-64bit-amd64*) purpose="Linux PC / NAS, x86_64" ;;
       *pc-32bit-i386*) purpose="Linux PC, 32-bit x86" ;;
-      *arm64-pi3-pi4-pi5-nas*) purpose="Raspberry Pi 3/4/5, ARM64 NAS" ;;
-      *armv7-pi2-32bit-routers*) purpose="Raspberry Pi 2, 32-bit ARM routers" ;;
+      *arm64-pi3-pi4-pi5-nas*) purpose="Raspberry Pi 3/4/5 with a 64-bit OS, ARM64 NAS" ;;
+      *armv7-pi2-32bit-routers*) purpose="Raspberry Pi 2, Pi 3/4/5 with a 32-bit OS, ARMv7 routers" ;;
       *armv6-pi1-pi-zero*) purpose="Raspberry Pi 1 / Pi Zero" ;;
       *armv5-pogoplug-sheevaplug-dockstar*) purpose="ARMv5 Kirkwood routers" ;;
       *router-mips-little-endian-mt7621*) purpose="Little-endian MIPS routers (MT7621)" ;;

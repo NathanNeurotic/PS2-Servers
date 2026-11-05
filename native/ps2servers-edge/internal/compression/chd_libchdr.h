@@ -1,4 +1,7 @@
-/* Minimal libchdr declarations and hunk metadata access for CGo. */
+/* Minimal libchdr declarations and hunk metadata access for CGo.
+ * Adapted from pcm720/udpfsd at ee94414.
+ * Copyright 2026 Ivan V (pcm720). See THIRD_PARTY_NOTICES.md for the BSD license.
+ */
 #ifndef CHD_LIBCHDR_H
 #define CHD_LIBCHDR_H
 

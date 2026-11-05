@@ -47,6 +47,7 @@ class ReleaseDownloadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             Path(temp, "PS2Servers-source.zip").touch()
             Path(temp, "PS2ServersEdge-test-arm64-pi3-pi4-pi5-nas.tar.gz").touch()
+            Path(temp, "PS2ServersEdge-test-armv7-pi2-32bit-routers.tar.gz").touch()
             Path(temp, "PS2ServersEdge-test-windows-64bit.zip").touch()
             script_copy = Path(temp, "release-downloads.sh")
             shutil.copy(SCRIPT, script_copy)
@@ -62,7 +63,9 @@ class ReleaseDownloadTests(unittest.TestCase):
             "[`PS2ServersEdge-test-arm64-pi3-pi4-pi5-nas.tar.gz`]"
             "(https://github.com/NathanNeurotic/PS2-Servers/releases/download/"
             "v0.0.0-test/PS2ServersEdge-test-arm64-pi3-pi4-pi5-nas.tar.gz)", output)
-        self.assertIn("| Raspberry Pi 3/4/5, ARM64 NAS |", output)
+        self.assertIn("| Raspberry Pi 3/4/5 with a 64-bit OS, ARM64 NAS |", output)
+        self.assertIn(
+            "| Raspberry Pi 2, Pi 3/4/5 with a 32-bit OS, ARMv7 routers |", output)
         self.assertIn("| Windows, 64-bit (headless) |", output)
 
     def test_every_edge_target_has_a_purpose(self):
