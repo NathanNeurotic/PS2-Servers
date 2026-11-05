@@ -13,13 +13,16 @@ the clients this exists for -- Windows Explorer above all -- will not talk to a
 server that cannot do NTLMSSP.
 """
 
+import hmac
 import struct
+from hashlib import md5
 
 # Flat, not relative. The launcher loads a server by file path with its own
 # directory on sys.path (launcher/serve.py), so this package is never imported
 # as a package -- a relative import here works in a source checkout and fails in
 # the packaged build, which is the worst place to find out.
 from smb2_auth import AuthError
+import smb2_crypto
 
 NTLMSSP_SIGNATURE = b"NTLMSSP\x00"
 NTLM_NEGOTIATE = 1
@@ -32,22 +35,39 @@ NTLM_AUTHENTICATE = 3
 # EXTENDED_SESSIONSECURITY a client may fall back to something weaker.
 NEGOTIATE_UNICODE = 0x00000001
 REQUEST_TARGET = 0x00000004
+NEGOTIATE_SIGN = 0x00000010
 NEGOTIATE_NTLM = 0x00000200
 NEGOTIATE_ALWAYS_SIGN = 0x00008000
 NEGOTIATE_EXTENDED_SESSIONSECURITY = 0x00080000
 NEGOTIATE_TARGET_INFO = 0x00800000
+NEGOTIATE_VERSION = 0x02000000
 NEGOTIATE_128 = 0x20000000
+NEGOTIATE_KEY_EXCH = 0x40000000
 NEGOTIATE_56 = 0x80000000
 
 CHALLENGE_FLAGS = (NEGOTIATE_UNICODE | REQUEST_TARGET | NEGOTIATE_NTLM
                    | NEGOTIATE_ALWAYS_SIGN | NEGOTIATE_EXTENDED_SESSIONSECURITY
                    | NEGOTIATE_TARGET_INFO | NEGOTIATE_128 | NEGOTIATE_56)
 
+# Flags the server agrees to only when the client asked for them. SIGN and
+# KEY_EXCH are what a Windows client sends when it intends to sign the SMB2
+# session; echoing them tells it to wrap a fresh session key in the
+# AUTHENTICATE message (MS-NLMP 3.1.5.1.2). A client that never offered them
+# -- Neutrino's usmb2 -- sees exactly the challenge it always did.
+ECHOED_FLAGS = NEGOTIATE_SIGN | NEGOTIATE_KEY_EXCH | NEGOTIATE_VERSION
+
 MSV_AV_EOL = 0x0000
 MSV_AV_NB_COMPUTER_NAME = 0x0001
 MSV_AV_NB_DOMAIN_NAME = 0x0002
 MSV_AV_DNS_COMPUTER_NAME = 0x0003
 MSV_AV_DNS_DOMAIN_NAME = 0x0004
+MSV_AV_FLAGS = 0x0006
+AV_FLAG_MIC_PRESENT = 0x00000002
+
+# Where the MIC sits in an AUTHENTICATE message that carries one: after the
+# 64 bytes of fixed fields and the 8-byte Version (MS-NLMP 2.2.1.3).
+MIC_OFFSET = 72
+MIC_SIZE = 16
 
 SPNEGO_OID = bytes([0x06, 0x06, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x02])
 NTLMSSP_OID = bytes([0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01,
@@ -143,8 +163,46 @@ def _av_pair(kind, value):
     return struct.pack("<HH", kind, len(value)) + value
 
 
+def negotiate_flags(token):
+    """The NegotiateFlags a NEGOTIATE (type 1) message carries, or 0."""
+    if len(token) < 16:
+        return 0
+    return struct.unpack_from("<I", token, 12)[0]
+
+
+# Where each message type's (Len, MaxLen, Offset) fields sit, and the size of
+# its fixed part without the optional Version and MIC.
+_FIELD_OFFSETS = {NTLM_NEGOTIATE: ((16, 24), 32, 12),
+                  NTLM_AUTHENTICATE: ((12, 20, 28, 36, 44, 52), 64, 60)}
+
+
+def trim(token):
+    """`token` cut to the length its own fields say the message has.
+
+    extract_ntlm hands back everything from the signature to the end of the
+    security buffer. Inside SPNEGO that can include DER that follows the
+    message -- Windows puts a mechListMIC after its AUTHENTICATE -- and the
+    NTLM MIC is computed over the message alone, so the exact end matters.
+    """
+    token = bytes(token)
+    layout = _FIELD_OFFSETS.get(message_type(token))
+    if layout is None:
+        return token
+    field_offsets, fixed, flags_at = layout
+    if len(token) < fixed:
+        return token
+    end = fixed
+    if struct.unpack_from("<I", token, flags_at)[0] & NEGOTIATE_VERSION:
+        end += 8
+    for off in field_offsets:
+        length, _maxlen, at = struct.unpack_from("<HHI", token, off)
+        if length:
+            end = max(end, at + length)
+    return token[:min(end, len(token))]
+
+
 def build_challenge(challenge, target_name="WORKGROUP", computer="PS2SERVERS",
-                    compact=False):
+                    compact=False, client_flags=0):
     """The CHALLENGE (type 2) message.
 
     TargetInfo is not decoration: an NTLMv2 client folds these very bytes into
@@ -154,7 +212,11 @@ def build_challenge(challenge, target_name="WORKGROUP", computer="PS2SERVERS",
     compact keeps only the NetBIOS domain and computer pairs, the two MS-NLMP
     says a server MUST send. It exists for tiny clients that build their
     AUTHENTICATE in a fixed buffer -- see h_session_setup.
+
+    client_flags is what the client's NEGOTIATE offered; of it, only
+    ECHOED_FLAGS come back.
     """
+    flags = CHALLENGE_FLAGS | (client_flags & ECHOED_FLAGS)
     target = target_name.encode("utf-16-le")
     info = (_av_pair(MSV_AV_NB_DOMAIN_NAME, target)
             + _av_pair(MSV_AV_NB_COMPUTER_NAME, computer.encode("utf-16-le")))
@@ -169,7 +231,7 @@ def build_challenge(challenge, target_name="WORKGROUP", computer="PS2SERVERS",
     return (NTLMSSP_SIGNATURE
             + struct.pack("<I", NTLM_CHALLENGE)
             + struct.pack("<HHI", len(target), len(target), target_at)
-            + struct.pack("<I", CHALLENGE_FLAGS)
+            + struct.pack("<I", flags)
             + challenge
             + b"\x00" * 8                                   # Reserved
             + struct.pack("<HHI", len(info), len(info), info_at)
@@ -178,16 +240,28 @@ def build_challenge(challenge, target_name="WORKGROUP", computer="PS2SERVERS",
 
 
 class Credentials:
-    """What an AUTHENTICATE message claims, before anything is checked."""
+    """What an AUTHENTICATE message claims, before anything is checked.
 
-    __slots__ = ("user", "domain", "workstation", "nt_response", "lm_response")
+    Besides the proof itself it keeps what key agreement needs: the flags the
+    client settled on, the RC4-wrapped session key it sent if KEY_EXCH was
+    negotiated, the MIC over the three messages if it computed one, and the
+    whole message, because the MIC is checked over that.
+    """
 
-    def __init__(self, user, domain, workstation, nt_response, lm_response):
+    __slots__ = ("user", "domain", "workstation", "nt_response", "lm_response",
+                 "flags", "encrypted_session_key", "mic", "raw")
+
+    def __init__(self, user, domain, workstation, nt_response, lm_response,
+                 flags=0, encrypted_session_key=b"", mic=None, raw=b""):
         self.user = user
         self.domain = domain
         self.workstation = workstation
         self.nt_response = nt_response
         self.lm_response = lm_response
+        self.flags = flags
+        self.encrypted_session_key = encrypted_session_key
+        self.mic = mic
+        self.raw = raw
 
     @property
     def is_anonymous(self):
@@ -201,13 +275,86 @@ class Credentials:
         return not self.user and len(self.nt_response) == 0
 
 
+def av_pairs(nt_response):
+    """The AV_PAIR list inside an NTLMv2 response, as {id: value}.
+
+    The response is the 16-byte proof followed by the NTLMv2_CLIENT_CHALLENGE
+    (MS-NLMP 2.2.2.7): 28 bytes of fixed fields, then the pairs the client
+    copied from the server's TargetInfo plus any it added. Malformed input
+    yields what could be read; the proof check decides whether it mattered.
+    """
+    pairs = {}
+    at = 16 + 28
+    while at + 4 <= len(nt_response):
+        kind, length = struct.unpack_from("<HH", nt_response, at)
+        at += 4
+        if kind == MSV_AV_EOL:
+            break
+        pairs[kind] = bytes(nt_response[at:at + length])
+        at += length
+    return pairs
+
+
 def parse_authenticate(token):
     """Pull the claim out of an AUTHENTICATE (type 3) message."""
     if len(token) < 64:
         raise AuthError("STATUS_INVALID_PARAMETER", "AUTHENTICATE message too short")
+    token = trim(token)
     lm = _field(token, 12)
     nt = _field(token, 20)
     domain = _field(token, 28).decode("utf-16-le", "replace")
     user = _field(token, 36).decode("utf-16-le", "replace")
     workstation = _field(token, 44).decode("utf-16-le", "replace")
-    return Credentials(user, domain, workstation, nt, lm)
+    encrypted_key = _field(token, 52)
+    flags = struct.unpack_from("<I", token, 60)[0]
+
+    # The MIC field exists only in messages laid out with room for it: the
+    # client says it filled one in through MsvAvFlags in its own blob, and the
+    # payload must start at or after where the MIC ends.
+    mic = None
+    av_flags = av_pairs(nt).get(MSV_AV_FLAGS, b"")
+    if len(av_flags) >= 4 and struct.unpack_from("<I", av_flags)[0] & AV_FLAG_MIC_PRESENT:
+        payload_start = min((struct.unpack_from("<I", token, off + 4)[0]
+                             for off in (12, 20, 28, 36, 44, 52)
+                             if struct.unpack_from("<H", token, off)[0]),
+                            default=len(token))
+        if len(token) < MIC_OFFSET + MIC_SIZE or payload_start < MIC_OFFSET + MIC_SIZE:
+            raise AuthError("STATUS_INVALID_PARAMETER",
+                            "AUTHENTICATE claims a MIC it has no room for")
+        mic = token[MIC_OFFSET:MIC_OFFSET + MIC_SIZE]
+    return Credentials(user, domain, workstation, nt, lm,
+                       flags=flags, encrypted_session_key=encrypted_key,
+                       mic=mic, raw=token)
+
+
+def exported_session_key(session_base_key, creds):
+    """The key both sides sign SMB2 with, from NTLM's SessionBaseKey.
+
+    With KEY_EXCH negotiated the client chose a random session key and sent it
+    RC4-wrapped under the KeyExchangeKey, which for NTLMv2 is the
+    SessionBaseKey itself (MS-NLMP 3.4.5.1). Without it, the base key is the
+    session key.
+    """
+    if (creds.flags & NEGOTIATE_KEY_EXCH
+            and len(creds.encrypted_session_key) == 16):
+        return smb2_crypto.rc4(session_base_key, creds.encrypted_session_key)
+    return session_base_key
+
+
+def verify_mic(exported_key, negotiate, challenge, creds):
+    """Check the AUTHENTICATE's MIC: HMAC-MD5 over the three messages.
+
+    The MIC binds the whole exchange -- which flags were offered, which
+    challenge was answered -- so a server that negotiated signing is expected
+    to check it (MS-NLMP 3.2.5.1.2). The AUTHENTICATE is hashed with its own
+    MIC field zeroed.
+    """
+    if creds.mic is None:
+        return True
+    if not negotiate:
+        return False
+    auth = (creds.raw[:MIC_OFFSET] + b"\x00" * MIC_SIZE
+            + creds.raw[MIC_OFFSET + MIC_SIZE:])
+    expected = hmac.new(exported_key, bytes(negotiate) + bytes(challenge) + auth,
+                        md5).digest()
+    return hmac.compare_digest(expected, creds.mic)

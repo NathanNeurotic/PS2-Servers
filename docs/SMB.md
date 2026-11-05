@@ -37,13 +37,26 @@ the separate **Read-only** control determines whether writes are allowed.
 
 Windows Explorer uses TCP 445 rather than a custom SMB port. The optional
 **Take port 445 (admin)** setting temporarily stops Windows File Sharing to
-attempt to free that port; it can still fail if another service holds it.
-**Stop** starts Windows File Sharing again before the server exits. The
-launcher waits up to 20 seconds for that; only if the server is ended before it
-finishes (a crash, or Task Manager) does file sharing stay stopped until the next
-reboot. A
-client that supports a custom port can use 1445 without that setup. These modes
-do not enable the Windows SMB1 optional feature.
+free that port. Stopping the LanmanServer service alone is not enough on
+Windows 10 and 11, because the SMB kernel drivers (`srv`, `srv2`, `srvnet`)
+keep 445 bound, so the launcher pauses those too, in dependency order, and
+only when the port is still busy after the service has stopped. It can still
+fail if something else holds the port, and then names what does.
+**Stop** starts the drivers and Windows File Sharing again before the server
+exits. The launcher waits up to 20 seconds for that; only if the server is
+ended before it finishes (a crash, or Task Manager) does file sharing stay
+stopped until the next reboot. A client that supports a custom port can use
+1445 without that setup. These modes do not enable the Windows SMB1 optional
+feature.
+
+On port 445 Windows first sends an SMB1-framed negotiate; the server answers
+it with the SMB2 wildcard so the client moves to SMB2 without SMB1 being
+enabled. Windows 11 also requires every message to be signed. A password card
+signs (SMB 2.1 with HMAC-SHA256, SMB 3.x with AES-CMAC), so
+`net use \\<PC>\games <password> /user:<user>` and Explorer work. A **No
+password** card logs the client on as a guest, and guest sessions cannot be
+signed, so Windows refuses them unless the `AllowInsecureGuestAuth` policy is
+set; use a password card from Windows.
 
 The launcher saves credentials in its per-user configuration. Treat that file
 as private, and avoid including credentials or the full saved configuration in
@@ -110,10 +123,13 @@ against both cards; it runs in CI. RiptOPL's in-game reader is checked by
 RiptOPL's own `tests/smb2-live` harness, which passes against both cards. Both
 are host checks of the protocol, not tests on a PS2.
 
-Known limit: the server does not sign. The PS2 clients above sign only when the
-server requires it, so they are unaffected, but a desktop client whose policy
-requires signing (Samba's `smbclient`, Windows 11 24H2 by default) refuses the
-tree connect.
+The server signs. Signing is advertised as enabled but not required, so the PS2
+clients above, which do not sign, are served unsigned as before; a desktop
+client whose policy requires signing (Samba's `smbclient`, Windows 11 24H2 by
+default) gets signed replies and has its own requests verified. SMB 3.x
+signing is AES-CMAC, computed with the operating system's crypto library where
+there is one (Windows CNG, OpenSSL) and in pure Python elsewhere, where it is
+slow. Encryption (SMB 3 AES-CCM) and dialect 3.1.1 are not offered.
 
 ## Writes and testing
 

@@ -401,8 +401,11 @@ separate authenticated server, normally on TCP 1445.
 
 Windows Firewall changes are limited to rules named `PS2 Servers - ...`.
 Firewall actions, direct-link configuration, and optional **Take port 445**
-require elevation. Take port 445 temporarily stops Windows File Sharing while
-the server runs; default custom-port serving does not need administrator rights.
+require elevation. Take port 445 temporarily stops Windows File Sharing (and,
+for SMB2/3, the `srv`/`srv2`/`srvnet` drivers that keep the port bound) while
+the server runs, and starts them again on Stop; default custom-port serving
+does not need administrator rights. The SMB2/3 server signs, so Windows 11's
+default signing requirement is met with a password card.
 
 Automatic `main` releases include `SHA256SUMS.txt`, source archives, and GitHub
 artifact attestations. Tagged releases provide per-asset `.sha256.txt` files;
