@@ -290,10 +290,10 @@ func (s *Server) sendPackets(which session.Socket, packets [][]byte, peer *net.U
 		return
 	}
 	if err != nil || n < len(packets) {
-		if s.cfg.MetricsPeriod > 0 {
+		if err != nil && s.cfg.MetricsPeriod > 0 {
 			s.stats.txSendErrors.Add(1)
 		}
-		s.cfg.Log.Debug("UDP batch send failed", map[string]any{
+		s.cfg.Log.Debug("UDP batch send incomplete", map[string]any{
 			"peer": peer.String(), "socket": which, "packets": len(packets), "written_packets": n, "error": err,
 		})
 		for _, packet := range packets[n:] {

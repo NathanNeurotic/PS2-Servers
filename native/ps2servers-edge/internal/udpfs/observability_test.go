@@ -562,3 +562,80 @@ func TestIdleEndpointExpiresIndependently(t *testing.T) {
 		t.Fatal("idle endpoint's handles were not closed")
 	}
 }
+
+type blockingReadCloser struct {
+	started   chan struct{}
+	release   chan struct{}
+	closed    chan struct{}
+	startOnce sync.Once
+	closeOnce sync.Once
+}
+
+func (f *blockingReadCloser) Read(p []byte) (int, error) {
+	f.startOnce.Do(func() { close(f.started) })
+	<-f.release
+	for i := range p {
+		p[i] = 0x5a
+	}
+	return len(p), nil
+}
+
+func (f *blockingReadCloser) Seek(int64, int) (int64, error) { return 0, nil }
+
+func (f *blockingReadCloser) Close() error {
+	f.closeOnce.Do(func() { close(f.closed) })
+	return nil
+}
+
+func TestExpiryWaitsForActiveReadBeforeClosingHandles(t *testing.T) {
+	server, logs := newDirectObservabilityServer(true)
+	server.transferCap = 1 << 20
+	defer stopDirectWorkers(server)
+	peer := &net.UDPAddr{IP: net.ParseIP("192.0.2.41"), Port: 27000}
+	worker := server.getWorker(peer)
+	reader := &blockingReadCloser{
+		started: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{}),
+	}
+	worker.state.Mu.Lock()
+	worker.state.Profile = session.Standard
+	worker.state.Streaming = true
+	worker.state.ExpectedReceive = 2213
+	worker.state.Handles[81] = &session.Handle{Reader: reader, Closer: reader}
+	worker.state.Mu.Unlock()
+	worker.queue <- inbound{packet: dataPacket(2213, blockMsg(protocol.ReadRequest, 81, 512, 1)), peer: peer, socket: session.DataSocket}
+	select {
+	case <-reader.started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("worker did not begin the file read: %s", logs.String())
+	}
+	worker.state.Mu.Lock()
+	worker.state.LastActivity = time.Now().Add(-2 * time.Minute)
+	worker.state.Mu.Unlock()
+
+	expired := make(chan struct{})
+	go func() {
+		server.expireSessions(time.Now())
+		close(expired)
+	}()
+	var releaseOnce sync.Once
+	releaseRead := func() { releaseOnce.Do(func() { close(reader.release) }) }
+	defer releaseRead()
+	select {
+	case <-expired:
+		t.Fatal("expiry returned while the worker was still reading")
+	case <-reader.closed:
+		t.Fatal("expiry closed the file during its active read")
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseRead()
+	select {
+	case <-expired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expiry did not finish after the read completed")
+	}
+	select {
+	case <-reader.closed:
+	default:
+		t.Fatal("expiry returned without closing the file")
+	}
+}

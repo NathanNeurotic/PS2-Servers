@@ -20,6 +20,10 @@ import (
 
 const CHDAvailable = true
 
+var backendCHDHunkBytes = func(handle *C.chd_file) uint32 {
+	return uint32(C.ps2_chd_hunk_bytes(handle))
+}
+
 func openCHD(path string) (*Image, error) {
 	h, err := parseCHDHeader(path)
 	if err != nil {
@@ -27,9 +31,13 @@ func openCHD(path string) (*Image, error) {
 	}
 	cpath := C.CString(path)
 	defer C.free(unsafe.Pointer(cpath))
-	var handle *C.struct_chd_file
+	var handle *C.chd_file
 	if result := C.chd_open(cpath, C.CHD_OPEN_READ, nil, &handle); result != 0 {
 		return nil, fmt.Errorf("chd_open failed: %d", result)
+	}
+	if actual := backendCHDHunkBytes(handle); int64(actual) != h.hunkSize {
+		C.chd_close(handle)
+		return nil, fmt.Errorf("CHD hunk size mismatch: parsed %d, backend %d", h.hunkSize, actual)
 	}
 	info, err := os.Stat(path)
 	if err != nil {

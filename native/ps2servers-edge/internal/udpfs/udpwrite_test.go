@@ -65,6 +65,7 @@ func TestSendPacketsFallbackAndMetrics(t *testing.T) {
 		wantErr int64
 	}{
 		{"full", 3, nil, 0},
+		{"partial without error", 1, nil, 0},
 		{"partial", 1, errors.New("partial batch"), 1},
 		{"zero", 0, errors.New("failed batch"), 1},
 	} {

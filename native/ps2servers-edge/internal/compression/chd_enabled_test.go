@@ -2,11 +2,17 @@
 
 package compression
 
+/*
+#include "chd_libchdr.h"
+*/
+import "C"
+
 import (
 	"bytes"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -111,5 +117,21 @@ func TestCHDRejectsCorruptContainer(t *testing.T) {
 	}
 	if _, err := Open(path); err == nil {
 		t.Fatal("corrupt CHD was accepted")
+	}
+}
+
+func TestCHDRejectsBackendHunkSizeMismatch(t *testing.T) {
+	original := backendCHDHunkBytes
+	backendCHDHunkBytes = func(handle *C.chd_file) uint32 {
+		return uint32(C.ps2_chd_hunk_bytes(handle)) + 1
+	}
+	defer func() { backendCHDHunkBytes = original }()
+	img, err := openCHD(filepath.Join("testdata", "test_dvd.chd"))
+	if err == nil {
+		img.Close()
+		t.Fatal("backend hunk-size mismatch was accepted")
+	}
+	if !strings.Contains(err.Error(), "hunk size mismatch") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

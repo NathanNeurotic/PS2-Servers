@@ -88,6 +88,7 @@ type peerWorker struct {
 	state    *session.State
 	queue    chan inbound
 	done     chan struct{}
+	exited   chan struct{}
 	stopOnce sync.Once
 }
 
@@ -425,10 +426,11 @@ func (s *Server) expireSessions(now time.Time) {
 	s.sessionsMu.Unlock()
 
 	for _, item := range expired {
+		item.w.stop()
+		<-item.w.exited
 		item.w.state.Mu.Lock()
 		item.w.state.Close()
 		item.w.state.Mu.Unlock()
-		item.w.stop()
 		s.cfg.Log.Info("session expired", map[string]any{"peer": item.key, "idle": item.id.String()})
 	}
 }
@@ -455,7 +457,7 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	// reap, server shutdown -- runs through State, so hooking release here
 	// means a peer that disappears mid-write cannot strand a reservation.
 	st.ReleaseWriter = s.releaseWriter
-	w := &peerWorker{state: st, queue: make(chan inbound, 256), done: make(chan struct{})}
+	w := &peerWorker{state: st, queue: make(chan inbound, 256), done: make(chan struct{}), exited: make(chan struct{})}
 	s.sessions[key] = w
 	s.sessionRecord(st, "connections", 1) // a DISCOVERY that made a session: the console found us
 	s.cfg.Log.Debug("session created", map[string]any{
@@ -490,6 +492,7 @@ func (s *Server) sessionTouch(st *session.State) {
 
 func (s *Server) worker(w *peerWorker) {
 	defer s.wg.Done()
+	defer close(w.exited)
 	for {
 		select {
 		case <-w.done:

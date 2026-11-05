@@ -379,20 +379,21 @@ resumed UDPFS.
 The initial NHDDL discovery and negotiation are pre-handoff evidence. They do
 not count as post-reset Neutrino traffic.
 
-### The two handoff markers
+### Handoff markers
 
 Only one marker may be applicable to a given reset:
 
 | Marker | Trigger | Meaning |
 |---|---|---|
 | `seq0 discovery resolved to replacement session` | The same PS2 IP:port sends DISCOVERY sequence zero during a live stream, and its next payload-bearing DATA starts again at 0 (Standard) or 1 (Modulo) instead of continuing the old sequence | A new loader took over the endpoint, as Neutrino does from RiptOPL. Edge reset the transport only: the old loader's open handles stay open for Neutrino's FILEID backend, and the new loader may still open for writing, or delete, a file the old one was writing |
+| `nonzero discovery resolved to replacement session` | A live stream receives nonzero DISCOVERY, followed by payload DATA at `(DISCOVERY + 1) modulo 4096` instead of the old expected sequence | Edge confirmed a replacement, reset only transport, and preserved inherited FILEID handles; DATA at the old expected sequence instead continues the existing stream |
 | `peer sequence reset (seq 0 received)` | The same PS2 IP:port sends payload-bearing DATA sequence zero when zero is neither the next expected sequence nor its immediately previous sequence | Edge reset the transport and accepted a same-endpoint restart while preserving inherited FILEID handles |
 
 Seeing a marker proves a datagram matching that restart/replacement condition
 reached the corresponding Edge branch. Attribute it to Neutrino after the
 reset only when its timestamp follows the captured launch and link-down
 events. The marker does not, by itself, prove the following file open or game
-boot succeeded. Absence of both markers is not a failed handoff implementation
+boot succeeded. Absence of these markers is not a failed handoff implementation
 when no post-reset datagram was received.
 
 A payload-free control packet does not enter the reset branch. Sequence zero
@@ -427,7 +428,7 @@ The transport and handoff fields are:
 | `tx_send_errors` | UDP sends that returned an error |
 | `malformed_datagrams` | Received datagrams rejected during protocol parsing before application request handling |
 | `sequence_mismatches` | DATA sequence numbers that did not equal the session's next expected value |
-| `sequence_resets` | Same-endpoint sequence-zero handoffs accepted by Edge |
+| `sequence_resets` | Same-endpoint DATA-zero and confirmed nonzero-discovery handoffs accepted by Edge |
 | `last_rx_peer`, `last_rx_socket` | Endpoint and Edge socket of the most recently read datagram |
 | `last_rx_type`, `last_rx_sequence` | Parsed header values for that datagram, or `unknown` if its header could not be parsed |
 | `last_rx_age` | Time since Edge read that datagram; a growing value makes silence explicit |
@@ -475,8 +476,8 @@ after the NHDDL-created session, the defensible statement is:
 > No post-negotiation datagram was read by the Edge UDP sockets during the
 > captured interval.
 
-That result proves the sequence-reset, same-IP replacement, and file-open paths
-were not reached. It does **not** prove that:
+That result proves the sequence-reset and file-open paths were not reached.
+It does **not** prove that:
 
 - Neutrino never attempted to send;
 - a packet was not dropped before reaching the process;

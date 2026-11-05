@@ -1,18 +1,17 @@
-/* Minimal declarations for libchdr (CGo). Link with -lchdr. */
+/* Minimal libchdr declarations and hunk metadata access for CGo. */
 #ifndef CHD_LIBCHDR_H
 #define CHD_LIBCHDR_H
+
+#include <libchdr/chd.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define CHD_OPEN_READ 1
-
-struct chd_file;
-
-int chd_open(const char *filename, int mode, struct chd_file *parent, struct chd_file **chd_out);
-int chd_read(struct chd_file *chd, unsigned int hunknum, void *buffer);
-void chd_close(struct chd_file *chd);
+static unsigned int ps2_chd_hunk_bytes(chd_file *chd) {
+    const chd_header *header = chd_get_header(chd);
+    return header == NULL ? 0 : header->hunkbytes;
+}
 
 #ifdef __cplusplus
 }
