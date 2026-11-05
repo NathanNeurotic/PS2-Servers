@@ -12,6 +12,12 @@ row() { # row <label> <preferred> <fallback> <why-the-fallback>
   printf '| %s | [`%s`](%s/%s)%s |\n' "$1" "$asset" "$release_url" "$asset" "$note"
 }
 
+row_alternative() { # row_alternative <preferred> <alternative> <label>
+  if [ -f "$1" ] && [ -f "$2" ]; then
+    row "$3" "$2" "" ""
+  fi
+}
+
 edge_rows() {
   local f purpose
   for f in PS2ServersEdge-*.tar.gz PS2ServersEdge-*.zip; do
