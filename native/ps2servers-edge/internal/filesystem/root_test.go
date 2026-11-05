@@ -13,7 +13,7 @@ func TestTraversalRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"../x", "/etc/passwd", "..\\x", `C:\Windows\win.ini`, `D:/games`} {
+	for _, p := range []string{"../x", "/../etc/passwd", "..\\x", `C:\Windows\win.ini`, `D:/games`, `/C:/Windows/win.ini`, `//?/C:/Windows/win.ini`, `\\?\C:\Windows\win.ini`} {
 		if _, err := r.Resolve(p, false); err == nil {
 			t.Fatalf("accepted %q", p)
 		}
@@ -166,7 +166,7 @@ func TestEntryDoesNotFollowTheLastComponent(t *testing.T) {
 			t.Errorf("Entry(%q) = %q, %v, %v; want the root", client, p, isRoot, err)
 		}
 	}
-	for _, client := range []string{"..", "GAMES/..", "../x", "GAMES/../../x", "/x", `\x`, "C:x", "out/x"} {
+	for _, client := range []string{"..", "GAMES/..", "../x", "GAMES/../../x", "/../x", `\..\x`, "C:x", "/C:/x", "//?/C:/x", "out/x"} {
 		if p, _, err := r.Entry(client); !errors.Is(err, ErrEscape) {
 			t.Errorf("Entry(%q) = %q, %v; want ErrEscape", client, p, err)
 		}
@@ -230,5 +230,37 @@ func TestEntryRefusesNamesWindowsWouldReinterpret(t *testing.T) {
 		if p, _, err := r.Entry(client); !errors.Is(err, ErrEscape) {
 			t.Errorf("Entry(%q) = %q, %v; want ErrEscape", client, p, err)
 		}
+	}
+}
+
+func TestRootRelativePathsResolveInsideRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "DVD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(root, "DVD", "GAME.ISO"), "game")
+	r, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(canonical, "DVD", "GAME.ISO")
+	for _, client := range []string{"/DVD/GAME.ISO", `\DVD\GAME.ISO`, "///DVD/GAME.ISO", `\\\DVD\GAME.ISO`} {
+		if got, err := r.Resolve(client, false); err != nil || got != want {
+			t.Errorf("Resolve(%q) = %q, %v; want %q", client, got, err, want)
+		}
+		if got, isRoot, err := r.Entry(client); err != nil || isRoot || got != want {
+			t.Errorf("Entry(%q) = %q, %t, %v; want %q, false, nil", client, got, isRoot, err, want)
+		}
+		if err := r.RealFolders(client); err != nil {
+			t.Errorf("RealFolders(%q) = %v", client, err)
+		}
+	}
+	entries, err := r.List("/DVD")
+	if err != nil || len(entries) != 1 || entries[0].Name != "GAME.ISO" {
+		t.Fatalf("List(/DVD) = %+v, %v; want GAME.ISO", entries, err)
 	}
 }

@@ -341,10 +341,11 @@ is `fsync`ed before `WRITE_DONE`. The Desktop server takes these writes too.
 
 ## Security model
 
-Edge enforces a configured filesystem root. It rejects `..`, absolute and
-drive-qualified paths, unsafe symbolic links, oversized paths, oversized reads
-and writes, malformed packet lengths, unknown packet types, and excessive open
-handles. It serves writes, `MKDIR`, `REMOVE` and `RMDIR` unless started with
+Edge enforces a configured filesystem root. Leading `/` or `\` characters are
+UDPFS root-relative syntax, not permission to address the host filesystem. It
+rejects every `..` component, drive-qualified and device paths, unsafe symbolic
+links, oversized paths, oversized reads and writes, malformed packet lengths,
+unknown packet types, and excessive open handles. It serves writes, `MKDIR`, `REMOVE` and `RMDIR` unless started with
 `--read-only`. Those three act on the entry named: its parent must resolve
 inside the root, and a symlink in the last component is the link itself, so
 deleting one never reaches its target. `REMOVE` and `RMDIR` also refuse a path

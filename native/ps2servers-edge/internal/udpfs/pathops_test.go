@@ -468,7 +468,7 @@ func TestPathOpsCannotLeaveTheRoot(t *testing.T) {
 	for _, op := range []protocol.MessageType{protocol.MkdirRequest, protocol.RemoveRequest, protocol.RmdirRequest} {
 		for _, path := range []string{
 			"../x", "GAMES/../../x", "..", "GAMES/..", "GAMES/../real.elf",
-			"/x", `\x`, "C:x", "outdirlink/x",
+			"/../x", `\..\x`, "C:x", "/C:/x", "//?/C:/x", "outdirlink/x",
 		} {
 			// No subtests: the client's helpers fail the test that owns it.
 			if got := c.pathOp(op, path); got != errnoResult(eACCES) {
@@ -582,5 +582,35 @@ func TestPathOpsAreCountedAndLogged(t *testing.T) {
 			return r["operation"] == op
 		})
 		assertJSONField(t, record, "path", path)
+	}
+}
+
+func TestRootRelativeFileOperations(t *testing.T) {
+	root := t.TempDir()
+	c := dial(t, startServerAt(t, root, false))
+	handle := openForWriteOK(t, c, "/game.iso", fioRead|fioWrite|fioCreate)
+	if got := result(c.send(closeMsg(handle))); got != 0 {
+		t.Fatalf("CLOSE returned %d", got)
+	}
+
+	stat := c.send(pathMsg(protocol.GetStatRequest, "/game.iso", 0))
+	if got := result(stat); got != 0 {
+		t.Fatalf("GETSTAT /game.iso returned %d", got)
+	}
+	directory := result(c.send(openMsg("/", fioRead, true)))
+	if directory <= 0 {
+		t.Fatalf("DOPEN / returned %d", directory)
+	}
+	if got := result(c.send(closeMsg(directory))); got != 0 {
+		t.Fatalf("directory CLOSE returned %d", got)
+	}
+	if got := c.pathOp(protocol.MkdirRequest, "/NEW"); got != 0 {
+		t.Fatalf("MKDIR /NEW returned %d", got)
+	}
+	if got := c.pathOp(protocol.RemoveRequest, "/game.iso"); got != 0 {
+		t.Fatalf("REMOVE /game.iso returned %d", got)
+	}
+	if got := c.pathOp(protocol.RmdirRequest, "/NEW"); got != 0 {
+		t.Fatalf("RMDIR /NEW returned %d", got)
 	}
 }

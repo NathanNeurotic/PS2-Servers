@@ -190,15 +190,17 @@ func namesRoot(client string) bool {
 	return true
 }
 
-// candidate refuses any client path that could name a place outside the root
-// -- "..", absolute and drive-qualified paths -- and joins the rest to it.
+// candidate treats leading separators as UDPFS root-relative syntax, then
+// joins the remaining path to the root. Drive-qualified and device paths, and
+// every ".." component, remain forbidden.
 func (r *Root) candidate(client string) (string, error) {
-	normalized := strings.ReplaceAll(client, "\\", "/")
+	normalized := strings.TrimLeft(strings.ReplaceAll(client, "\\", "/"), "/")
 	windowsDrive := len(normalized) >= 2 && ((normalized[0] >= 'A' && normalized[0] <= 'Z') || (normalized[0] >= 'a' && normalized[0] <= 'z')) && normalized[1] == ':'
-	if filepath.IsAbs(client) || strings.HasPrefix(normalized, "/") || windowsDrive || filepath.VolumeName(client) != "" || hasDotDot(client) {
+	hostPath := filepath.FromSlash(normalized)
+	if filepath.IsAbs(hostPath) || windowsDrive || strings.HasPrefix(normalized, "?/") || filepath.VolumeName(hostPath) != "" || hasDotDot(normalized) {
 		return "", ErrEscape
 	}
-	clean := filepath.Clean(filepath.FromSlash(normalized))
+	clean := filepath.Clean(hostPath)
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", ErrEscape
 	}
