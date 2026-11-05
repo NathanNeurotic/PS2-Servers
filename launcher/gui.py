@@ -310,6 +310,17 @@ def opl_hint(key, ip, values):
             hint += ("\nLaunchstation / wLaunchELF → SMB shares (SMB2.CNF) block"
                      " (use Copy console config for the paste-ready text):"
                      "\n" + block)
+        # No password plus an all-interface bind (blank, 0.0.0.0 or ::) is the
+        # most exposed combination: say so, and point at Bind address. The
+        # SMBv1 card has no open_share toggle -- a blank user there IS the
+        # open share, the same state its argument builder would start.
+        bind = (values.get("bind") or "").strip()
+        is_open = bool(values.get("open_share")) or (
+            key == "smbv1" and not (values.get("username") or "").strip())
+        if is_open and bind in ("", "0.0.0.0", "::"):
+            hint += ("\nNo password, bound to every interface: this share is "
+                     "reachable on every network this PC joins. Set Bind address "
+                     "(Advanced) to restrict it to the LAN the console is on.")
         return hint
     if key == "udpfs":        # OPL never asks UDPFS for a server IP: the console broadcasts DISCOVERY
         # and the server answers. Naming the LAN IP as a "server IP" sent users

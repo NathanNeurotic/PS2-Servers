@@ -199,6 +199,36 @@ class ServerRegistryTests(unittest.TestCase):
         # Non-SMB cards have no console config to copy.
         self.assertEqual(gui.console_config_block("udpfs", "192.168.1.100", {}), "")
 
+    def test_open_share_without_bind_warns_about_every_interface(self):
+        # No password plus the default bind (every interface) is the most
+        # exposed combination: the hint says so and points at Bind address.
+        hint = gui.opl_hint("smbv2", "192.168.1.100",
+                            {"port": 1445, "open_share": True})
+        self.assertIn("every interface", hint)
+        self.assertIn("Bind address", hint)
+
+        # A wildcard bind is still every interface: the warning stays.
+        hint = gui.opl_hint("smbv2", "192.168.1.100",
+                            {"port": 1445, "open_share": True,
+                             "bind": "0.0.0.0"})
+        self.assertIn("every interface", hint)
+
+        # A Bind address set, or a password, silences it.
+        hint = gui.opl_hint("smbv2", "192.168.1.100",
+                            {"port": 1445, "open_share": True,
+                             "bind": "192.168.1.100"})
+        self.assertNotIn("every interface", hint)
+        hint = gui.opl_hint("smbv2", "192.168.1.100",
+                            {"port": 1445, "username": "p", "password": "s"})
+        self.assertNotIn("every interface", hint)
+
+        # SMBv1 has no open_share toggle: a blank user is its open share.
+        hint = gui.opl_hint("smbv1", "192.168.1.100", {"port": 1025})
+        self.assertIn("every interface", hint)
+        hint = gui.opl_hint("smbv1", "192.168.1.100",
+                            {"port": 1025, "username": "p", "password": "s"})
+        self.assertNotIn("every interface", hint)
+
     def test_opl_hint_udpfs_names_no_server_ip(self):
         # OPL finds UDPFS by broadcast and never asks for a server IP; the hint
         # must not tell the user to enter one.
