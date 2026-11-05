@@ -289,7 +289,8 @@ def opl_hint(key, ip, values):
                 "PS2-Servers-managed xeRAbora-derived engine · softcore only").format(
                     compatibility, ip)
     if key in ("smbv1", "smbv2", "smbv3"):
-        port = "445" if values.get("take_445") else str(values.get("port") or 1025)
+        port = "445" if values.get("take_445") else str(
+            values.get("port") or ("1025" if key == "smbv1" else "1445"))
         # Read back what this card is actually running, not what the defaults
         # were: a hint that says 'games' next to a share called 'roms' sends the
         # user to check their network when the name was the whole problem.
@@ -306,8 +307,8 @@ def opl_hint(key, ip, values):
         hint = ("In OPL → Network:  IP {}  ·  Port {}  ·  Share '{}'  "
                 "·  NetBIOS off  ·  {}".format(ip, port, share, creds))
         if block:
-            hint += ("\nLaunchstation / wLaunchELF → SMB shares (SMB2.CNF) block "
-                     "-- or use Copy console config:")
+            hint += ("\nLaunchstation / wLaunchELF → SMB shares (SMB2.CNF) block:"
+                     "\n" + block)
         return hint
     if key == "udpfs":        # OPL never asks UDPFS for a server IP: the console broadcasts DISCOVERY
         # and the server answers. Naming the LAN IP as a "server IP" sent users
@@ -343,7 +344,8 @@ def console_config_block(key, ip, values):
     """
     if key not in ("smbv1", "smbv2", "smbv3"):
         return ""
-    port = "445" if values.get("take_445") else str(values.get("port") or 1025)
+    port = "445" if values.get("take_445") else str(
+        values.get("port") or ("1025" if key == "smbv1" else "1445"))
     share = (values.get("share_name") or "games").strip() or "games"
     user = (values.get("username") or "").strip()
     password = values.get("password") or ""
@@ -351,12 +353,18 @@ def console_config_block(key, ip, values):
                            "NGCARD" if key == "smbv3" else "PC")]
     if key in ("smbv1", "smbv3"):
         lines.append("VERSION = " + ("1" if key == "smbv1" else "3"))
-    if user:
+    if values.get("open_share"):
+        # No-password mode: the server accepts the client's guest logon no
+        # matter what the user field holds, so the block says exactly that.
+        if key != "smbv1":
+            lines.append("USERNAME = guest")
+            lines.append("PASSWORD =")
+    elif user:
         lines.append("USERNAME = " + user)
         lines.append("PASSWORD = " + password)
     elif key != "smbv1":
-        # No-auth shares still take a logon: the client's default Guest with a
-        # blank password is what this card accepts (its 'No password' mode).
+        # No user configured: the client's default Guest with a blank
+        # password is what this card accepts (its 'No password' mode).
         lines.append("USERNAME = guest")
         lines.append("PASSWORD =")
     lines.append("URL = smb://{}:{}/{}".format(ip, port, share))
@@ -498,10 +506,22 @@ class ServerCard(ttk.LabelFrame):
         self.copy_cfg_btn.grid(row=row, column=2, sticky="e", padx=4, pady=(4, 0))
         bind_wraplength(self.hint, self._wrap_source(), reserve=CARD_TEXT_RESERVE,
                         siblings=(self.copy_cfg_btn,))
+        # Field edits and Revert to Default change what the card would serve:
+        # keep the console hint and the Copy button in step without waiting
+        # for a start/stop cycle.
+        for var in self.vars.values():
+            var.trace_add("write", lambda *_: self.refresh_status(
+                self.app.is_running(self.server.key)))
+
+    def _hint_values(self, running):
+        """What the card is serving: running values win over field edits."""
+        if running and self._active_values is not None:
+            return self._active_values
+        return self.values()
 
     def _copy_console_config(self):
         block = console_config_block(self.server.key, self.app.current_ip(),
-                                     self.values())
+                                     self._hint_values(self.app.is_running(self.server.key)))
         if not block:
             return
         self.clipboard_clear()
@@ -876,9 +896,7 @@ class ServerCard(ttk.LabelFrame):
         # Show the console hint from the running server's values when up, and
         # from the card's own fields when stopped, so it answers "what do I
         # type" while the card is still being filled in.
-        hint_values = (self._active_values
-                       if running and self._active_values is not None
-                       else self.values())
+        hint_values = self._hint_values(running)
         self.hint.config(text=opl_hint(self.server.key, self.app.current_ip(),
                                        hint_values))
         self.copy_cfg_btn.config(state="normal"

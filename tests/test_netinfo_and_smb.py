@@ -149,9 +149,12 @@ class ServerRegistryTests(unittest.TestCase):
             self.assertIn("Port 1025", hint)
             self.assertIn("User 'guest'", hint)
 
-            # Omitted/empty port should default to 1025
+            # Omitted/empty port falls back to the server's own default:
+            # 1025 for SMBv1, 1445 for SMBv2/SMBv3.
+            default = "1025" if key == "smbv1" else "1445"
             hint_fallback = gui.opl_hint(key, "192.168.1.100", {"share_name": "games", "username": "", "password": ""})
-            self.assertIn("Port 1025", hint_fallback)
+            self.assertIn("Port " + default, hint_fallback)
+            self.assertIn("URL = smb://192.168.1.100:" + default + "/games", hint_fallback)
 
     def test_console_config_block_smb_cards(self):
         # The paste-ready Launchstation/wLaunchELF block uses the card's own
@@ -170,6 +173,12 @@ class ServerRegistryTests(unittest.TestCase):
         block = gui.console_config_block("smbv2", "192.168.1.100",
                                          {"port": 1025, "share_name": "games",
                                           "username": "", "password": ""})
+        self.assertIn("USERNAME = guest\nPASSWORD =\n", block)
+
+        # No-password mode wins over a stale user field.
+        block = gui.console_config_block("smbv2", "192.168.1.100",
+                                         {"port": 1025, "open_share": True,
+                                          "username": "ps2", "password": "x"})
         self.assertIn("USERNAME = guest\nPASSWORD =\n", block)
 
         # SMBv3 card is marked VERSION = 3; SMBv1 VERSION = 1.
