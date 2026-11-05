@@ -153,6 +153,43 @@ class ServerRegistryTests(unittest.TestCase):
             hint_fallback = gui.opl_hint(key, "192.168.1.100", {"share_name": "games", "username": "", "password": ""})
             self.assertIn("Port 1025", hint_fallback)
 
+    def test_console_config_block_smb_cards(self):
+        # The paste-ready Launchstation/wLaunchELF block uses the card's own
+        # values and the dialect marker each card serves.
+        block = gui.console_config_block("smbv2", "192.168.1.100",
+                                         {"port": 1025, "share_name": "games",
+                                          "username": "player", "password": "secret"})
+        self.assertEqual(block,
+                         "NAME = PC\n"
+                         "USERNAME = player\n"
+                         "PASSWORD = secret\n"
+                         "URL = smb://192.168.1.100:1025/games")
+
+        # No user (No-password mode): the client's Guest with a blank password
+        # is what the server accepts.
+        block = gui.console_config_block("smbv2", "192.168.1.100",
+                                         {"port": 1025, "share_name": "games",
+                                          "username": "", "password": ""})
+        self.assertIn("USERNAME = guest\nPASSWORD =\n", block)
+
+        # SMBv3 card is marked VERSION = 3; SMBv1 VERSION = 1.
+        block = gui.console_config_block("smbv3", "192.168.1.100",
+                                         {"port": 1025, "username": "p", "password": "s"})
+        self.assertIn("VERSION = 3\n", block)
+        block = gui.console_config_block("smbv1", "192.168.1.100",
+                                         {"port": 1025, "username": "", "password": ""})
+        self.assertIn("VERSION = 1\n", block)
+        self.assertNotIn("USERNAME", block)
+
+        # take-445 serves on 445 no matter what the port field holds.
+        block = gui.console_config_block("smbv2", "192.168.1.100",
+                                         {"port": 1025, "take_445": True,
+                                          "username": "p", "password": "s"})
+        self.assertIn("URL = smb://192.168.1.100:445/", block)
+
+        # Non-SMB cards have no console config to copy.
+        self.assertEqual(gui.console_config_block("udpfs", "192.168.1.100", {}), "")
+
     def test_opl_hint_udpfs_names_no_server_ip(self):
         # OPL finds UDPFS by broadcast and never asks for a server IP; the hint
         # must not tell the user to enter one.
