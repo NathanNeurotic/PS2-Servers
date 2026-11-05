@@ -1512,26 +1512,29 @@ def take_445(stop_timeout=10.0, poll_interval=0.25, restore_timeout=10.0,
             ps("Start-Service Browser -ErrorAction SilentlyContinue")
 
     if initial == "Stopped":
+        # The drivers can still hold 445 (for example after an interrupted
+        # restore), so the port check below still runs.
         note("[445] LanmanServer was already stopped; leaving it unchanged.")
-        return restore
-    if not originally_running:
+    elif not originally_running:
         note("[445] cannot verify LanmanServer is running or stopped (state: %s)." %
              (initial or "unknown"))
         return None
 
-    note("[445] stopping LanmanServer (was: %s)..." % initial)
     try:
-        res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction Stop")
-        if res.returncode:
-            note("[445] could not stop LanmanServer; administrator rights or "
-                 "a dependent service may prevent takeover.", res.stderr.strip())
-            restore()  # Even a failed stop request may have changed its state.
-            return None
-        if not wait_for("LanmanServer", "Stopped", stop_timeout):
-            note("[445] LanmanServer did not reach Stopped within %.1fs." %
-                 stop_timeout)
-            restore()
-            return None
+        if originally_running:
+            note("[445] stopping LanmanServer (was: %s)..." % initial)
+            res = ps("Stop-Service -Name LanmanServer -Force -ErrorAction Stop")
+            if res.returncode:
+                note("[445] could not stop LanmanServer; administrator rights "
+                     "or a dependent service may prevent takeover.",
+                     res.stderr.strip())
+                restore()  # Even a failed stop request may have changed its state.
+                return None
+            if not wait_for("LanmanServer", "Stopped", stop_timeout):
+                note("[445] LanmanServer did not reach Stopped within %.1fs." %
+                     stop_timeout)
+                restore()
+                return None
 
         if port_free():
             return restore

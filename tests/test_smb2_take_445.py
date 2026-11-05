@@ -153,9 +153,27 @@ class WindowsTake445Tests(unittest.TestCase):
         """Preserve a user's previously stopped Windows File Sharing."""
         fake = FakeServices(initial="Stopped")
         with mock.patch("subprocess.run", side_effect=fake.run):
-            restore = smb2.take_445()
+            restore = smb2.take_445(port_free=lambda: True)
             self.assertTrue(callable(restore))
             restore()
+        self.assertEqual(fake.stops(), [])
+        self.assertEqual(fake.starts(), [])
+        self.assertEqual(fake.driver_stops(), [])
+        self.assertEqual(fake.state, "Stopped")
+
+    def test_initially_stopped_service_still_pauses_drivers_holding_445(self):
+        """An interrupted restore leaves LanmanServer Stopped with srvnet still
+        bound to 445; the next launch must still free the port, and must still
+        leave the service as it found it."""
+        fake = FakeServices(initial="Stopped")
+        with mock.patch("subprocess.run", side_effect=fake.run), \
+                mock.patch.object(smb2.time, "sleep"):
+            restore = smb2.take_445(port_free=fake.port_free)
+            self.assertTrue(callable(restore))
+            self.assertEqual(fake.driver_stops(), ["srv", "srv2", "srvnet"])
+            self.assertTrue(fake.port_free())
+            restore()
+        self.assertEqual(fake.driver_starts(), ["srvnet", "srv2", "srv"])
         self.assertEqual(fake.stops(), [])
         self.assertEqual(fake.starts(), [])
         self.assertEqual(fake.state, "Stopped")
