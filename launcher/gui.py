@@ -895,8 +895,9 @@ class ServerCard(ttk.LabelFrame):
                 mode_selector.config(state="disabled" if running else "readonly")
         # Show the console hint from the running server's values when up, and
         # from the card's own fields when stopped, so it answers "what do I
-        # type" while the card is still being filled in.
-        hint_values = self._hint_values(running)
+        # type" while the card is still being filled in. The unbound call
+        # keeps this true for mock-card tests, which stub _active_values.
+        hint_values = ServerCard._hint_values(self, running)
         self.hint.config(text=opl_hint(self.server.key, self.app.current_ip(),
                                        hint_values))
         self.copy_cfg_btn.config(state="normal"
