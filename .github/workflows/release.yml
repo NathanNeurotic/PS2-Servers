@@ -48,16 +48,8 @@ jobs:
             echo "not a tag build; source version is $(python3 tools/version_source.py --print-display)"
           fi
 
-  # One release per tag, created exactly once, before anything builds.
-  #
-  # Edge's legs attach straight to the tag's release (this workflow does not
-  # build Edge), and softprops/action-gh-release is find-or-create: eleven
-  # Edge legs plus this workflow's own attachers each looked for a release
-  # that did not exist yet and created their own, and the action's create
-  # path hardcodes draft -- so the losers of that race were left behind as
-  # empty draft releases (v0.5.3 shipped one). With the release already here,
-  # every attacher takes the find path, and only the publish job below sets
-  # the name, the notes, and the draft -> published flip.
+  # Create one draft before the build jobs. The publish job below is the only
+  # step that attaches assets, sets the notes, and publishes the release.
   create-release:
     name: Create the release up front
     needs: verify-version
@@ -440,9 +432,7 @@ jobs:
   # anyone who will not run a binary they cannot inspect, which makes it exactly
   # the wrong one to be missing from the releases people are pointed at.
   #
-  # Edge binaries are NOT built here: edge.yml already runs on v* tags and
-  # attaches them through edge-build.yml. Adding a second Edge job would build
-  # the same eleven targets twice and race to attach them.
+  # The shared Edge job supplies artifacts to this run's generated download table.
   source:
     name: Package source archive
     needs: verify-version
@@ -478,40 +468,28 @@ jobs:
             PS2Servers-source.zip.sha256.txt
           if-no-files-found: error
 
-  # Publishing is its own job so the release notes can be written by something
-  # that has seen every asset.
-  #
-  # They used to be composed inside the build matrix, which meant each of the
-  # five runners wrote its own copy and attached it -- so the Windows runner
-  # produced a download table while having no way to know whether the Linux
-  # portable build or the AppImage had succeeded. The table was therefore
-  # hardcoded, and since the portable and AppImage steps are deliberately
-  # continue-on-error, a release could publish with the notes recommending a
-  # file that was not attached. That row is the one that matters most: the
-  # portable build is recommended precisely because the single-file .exe trips
-  # antivirus, so the download a wary user is steered to was the one that could
-  # go missing.
-  #
-  # Attaching from one job also ends a race: three attach steps times five
-  # matrix legs each set the release body, all with the same text, all at once.
+  edge:
+    name: Build Edge binaries
+    needs: verify-version
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/edge-build.yml
+
+  # Publish once, after the notes generator has seen every available artifact.
   release:
     name: Publish release
     needs:
       - build
       - source
       - create-release
-    # Tags publish; the manual "Run workflow" button still builds and uploads
-    # artifacts without creating a release.
-    #
-    # !cancelled() rather than the default success(): a plain `needs: build` on a
-    # matrix waits for every leg to succeed, so one flaky macOS runner would take
-    # the whole release down -- which the old per-leg attach steps tolerated,
-    # since each leg published its own assets. It would also make the missing-row
-    # handling below unreachable, because a leg that fails to produce its primary
-    # asset fails outright, so every primary asset would always be present.
-    # Publishing what did build keeps the old resilience and lets the notes tell
-    # the truth about what is there; the step refuses outright if nothing built.
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
+      - edge
+    # Tags publish only after the required Edge artifacts arrive. Optional
+    # desktop variants retain their existing fallback behavior. Manual test
+    # builds skip Edge and never publish.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') && needs.edge.result == 'success' }}
     runs-on: ubuntu-latest
     # Narrower than the workflow-level block: this job publishes, it does not
     # attest, so it has no use for id-token or attestations.

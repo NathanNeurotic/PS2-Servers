@@ -223,6 +223,8 @@ jobs:
   build:
     name: Build Edge
     needs: [test, udpfs-parity]
+    # Tagged releases use release.yml's shared job so its notes see these artifacts.
+    if: github.ref_type != 'tag'
     permissions:
       contents: write
       id-token: write

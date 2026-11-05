@@ -44,7 +44,7 @@ def workflow_script(text, step_name):
 
 class ReleaseDownloadTests(unittest.TestCase):
     def test_source_and_platform_rows(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
+        with tempfile.TemporaryDirectory() as temp:
             Path(temp, "PS2Servers-source.zip").touch()
             Path(temp, "PS2ServersEdge-test-arm64-pi3-pi4-pi5-nas.tar.gz").touch()
             Path(temp, "PS2ServersEdge-test-windows-64bit.zip").touch()
@@ -89,8 +89,23 @@ class ReleaseDownloadTests(unittest.TestCase):
             self.assertIn("edge_rows", text)
             self.assertNotIn("<details>", text)
 
+    def test_tagged_edge_artifacts_are_collected_before_publish(self):
+        workflows = ROOT / ".github" / "workflows"
+        release = (workflows / "release.yml").read_text(encoding="utf-8")
+        edge_job = release.split("  edge:\n", 1)[1]
+        self.assertIn("uses: ./.github/workflows/edge-build.yml", edge_job)
+        self.assertIn("if: startsWith(github.ref, 'refs/tags/')", edge_job)
+        publish = release.split("  release:\n", 1)[1]
+        self.assertIn("      - edge\n", publish)
+        self.assertIn("needs.edge.result == 'success'", publish)
+        reusable = (workflows / "edge-build.yml").read_text(encoding="utf-8")
+        self.assertNotIn("Attach Edge artifact to tagged release", reusable)
+        validation = (workflows / "edge.yml").read_text(encoding="utf-8")
+        build = validation.split("  build:\n", 1)[1]
+        self.assertIn("if: github.ref_type != 'tag'", build)
+
     def test_workflows_generate_complete_notes_and_links(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
+        with tempfile.TemporaryDirectory() as temp:
             assets = Path(temp, "release-assets")
             assets.mkdir()
             for name in (
