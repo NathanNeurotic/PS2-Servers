@@ -510,6 +510,9 @@ func stopDirectWorkers(server *Server) {
 		worker.stop()
 	}
 	server.wg.Wait()
+	server.sessionsMu.Lock()
+	server.expiryWG.Wait()
+	server.sessionsMu.Unlock()
 	for _, worker := range workers {
 		worker.state.Close()
 	}
@@ -558,8 +561,18 @@ func TestIdleEndpointExpiresIndependently(t *testing.T) {
 	if server.sessions[idlePeer.String()] != nil {
 		t.Fatal("idle endpoint remains registered after expiry")
 	}
-	if idle.state.Handles[8] != nil {
-		t.Fatal("idle endpoint's handles were not closed")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		idle.state.Mu.Lock()
+		closed := idle.state.Handles[8] == nil
+		idle.state.Mu.Unlock()
+		if closed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("idle endpoint's handles were not closed")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -587,7 +600,7 @@ func (f *blockingReadCloser) Close() error {
 	return nil
 }
 
-func TestExpiryWaitsForActiveReadBeforeClosingHandles(t *testing.T) {
+func TestExpiryDrainsWithoutBlockingReaper(t *testing.T) {
 	server, logs := newDirectObservabilityServer(true)
 	server.transferCap = 1 << 20
 	defer stopDirectWorkers(server)
@@ -622,20 +635,20 @@ func TestExpiryWaitsForActiveReadBeforeClosingHandles(t *testing.T) {
 	defer releaseRead()
 	select {
 	case <-expired:
-		t.Fatal("expiry returned while the worker was still reading")
 	case <-reader.closed:
 		t.Fatal("expiry closed the file during its active read")
+	case <-time.After(2 * time.Second):
+		t.Fatal("a blocked worker stopped the reaper from finishing its pass")
+	}
+	select {
+	case <-reader.closed:
+		t.Fatal("expiry closed the file before the read finished")
 	case <-time.After(50 * time.Millisecond):
 	}
 	releaseRead()
 	select {
-	case <-expired:
-	case <-time.After(2 * time.Second):
-		t.Fatal("expiry did not finish after the read completed")
-	}
-	select {
 	case <-reader.closed:
-	default:
-		t.Fatal("expiry returned without closing the file")
+	case <-time.After(2 * time.Second):
+		t.Fatal("expiry did not close the file after the read completed")
 	}
 }

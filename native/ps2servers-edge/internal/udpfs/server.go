@@ -112,6 +112,7 @@ type Server struct {
 	closed         chan struct{}
 	closeOnce      sync.Once
 	wg             sync.WaitGroup
+	expiryWG       sync.WaitGroup
 
 	stats    metrics
 	summary  *sessionstats.Stats // nil unless cfg.SessionSummary
@@ -349,8 +350,12 @@ func (s *Server) Close() error {
 			w.stop()
 		}
 		// Every worker is in s.wg, so this returns only once none of them can
-		// still be touching a session.
+		// still be touching a session. Expiry cleanup is tracked separately;
+		// sessionsMu prevents new drain registrations while it completes.
 		s.wg.Wait()
+		s.sessionsMu.Lock()
+		s.expiryWG.Wait()
+		s.sessionsMu.Unlock()
 		for _, w := range workers {
 			w.state.Close()
 		}
@@ -421,17 +426,21 @@ func (s *Server) expireSessions(now time.Time) {
 		if idle > s.cfg.PeerTimeout {
 			expired = append(expired, expiredSession{key: key, w: w, id: idle})
 			delete(s.sessions, key)
+			s.expiryWG.Add(1)
 		}
 	}
 	s.sessionsMu.Unlock()
 
 	for _, item := range expired {
 		item.w.stop()
-		<-item.w.exited
-		item.w.state.Mu.Lock()
-		item.w.state.Close()
-		item.w.state.Mu.Unlock()
-		s.cfg.Log.Info("session expired", map[string]any{"peer": item.key, "idle": item.id.String()})
+		go func(item expiredSession) {
+			defer s.expiryWG.Done()
+			<-item.w.exited
+			item.w.state.Mu.Lock()
+			item.w.state.Close()
+			item.w.state.Mu.Unlock()
+			s.cfg.Log.Info("session expired", map[string]any{"peer": item.key, "idle": item.id.String()})
+		}(item)
 	}
 }
 
