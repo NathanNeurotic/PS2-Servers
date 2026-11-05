@@ -246,6 +246,9 @@ func ValidateConfig(cfg *EdgeConfig) error {
 		}
 	}
 
+	if cfg.UDPFS.Enabled && cfg.UDPFS.Root == "" && cfg.UDPFS.BlockDevice == "" {
+		return fmt.Errorf("udpfs: root or block_device is required")
+	}
 	if cfg.UDPFS.SectorSize <= 0 || cfg.UDPFS.SectorSize > 1<<16 {
 		return fmt.Errorf("udpfs.sector_size: %d is out of range (1-65536)", cfg.UDPFS.SectorSize)
 	}

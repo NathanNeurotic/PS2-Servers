@@ -186,6 +186,9 @@ func hasCompressedImageExtension(name string) bool {
 }
 
 func (s *Server) resolveImagePath(client string) (string, bool, error) {
+	if s.root == nil {
+		return "", false, os.ErrNotExist
+	}
 	p, err := s.root.Resolve(client, false)
 	if err == nil {
 		return p, false, nil
@@ -237,6 +240,10 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 	id := st.NextHandle
 	st.NextHandle++
 	if isDir {
+		if s.root == nil {
+			s.sendOpen(st, -eNOENT, 0, 0)
+			return
+		}
 		entries, err := s.root.List(path)
 		if err != nil {
 			s.sendOpen(st, errno(err), 0, 0)
@@ -272,6 +279,10 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 // image. A write to a compressed file is refused outright, and a compressed
 // sibling is never substituted for a missing .iso the way the read path does.
 func (s *Server) openForWrite(st *session.State, id int32, path string, flags uint16) {
+	if s.root == nil {
+		s.sendOpen(st, -eNOENT, 0, 0)
+		return
+	}
 	create := flags&0x0200 != 0
 	truncate := flags&0x0400 != 0
 	appendMode := flags&0x0100 != 0
@@ -360,6 +371,10 @@ func (s *Server) handleClose(st *session.State, p []byte) {
 		return
 	}
 	id := int32(binary.LittleEndian.Uint32(p[4:8]))
+	if id == blockHandle {
+		s.sendSimple(st, result8(protocol.CloseReply, 0))
+		return
+	}
 	// CloseHandle also drops any single-writer reservation and discards a
 	// partially assembled write aimed at this handle.
 	if !st.CloseHandle(id) {
@@ -658,6 +673,10 @@ func (s *Server) handleGetStat(st *session.State, p []byte) {
 	path, err := cString(p[4:])
 	if err != nil {
 		s.sendGetStat(st, -eNAMETOOLONG, 0, 0)
+		return
+	}
+	if path == "" && s.blockDev != nil {
+		s.sendGetStat(st, 0, 0, uint64(s.blockDev.sectorCount()*s.blockDev.sectorSize))
 		return
 	}
 	real, decompress, err := s.resolveImagePath(path)

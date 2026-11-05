@@ -43,8 +43,8 @@ type Config struct {
 	// default when zero and are set explicitly only by tests.
 	WindowAckTimeout time.Duration
 	MaxWindowRetries int
-	// BlockDevice serves one disk image over UDPFS BREAD/BWRITE alongside the
-	// file share, as the Desktop server's --block-device and udpfsd's -bdpath
+	// BlockDevice serves one disk image over UDPFS BREAD/BWRITE, with or without
+	// a file share, as the Desktop server's --block-device and udpfsd's -bdpath
 	// do. Empty disables it.
 	BlockDevice string
 	// SectorSize applies to that image. 512 is what every known client uses;
@@ -198,9 +198,16 @@ func New(cfg Config) (*Server, error) {
 	if cfg.MaxTransferBytes <= 0 {
 		cfg.MaxTransferBytes = memory.Detect().TransferCap(preferredTransfer)
 	}
-	root, err := filesystem.Open(cfg.Root)
-	if err != nil {
-		return nil, err
+	if cfg.Root == "" && cfg.BlockDevice == "" {
+		return nil, fmt.Errorf("root or block device is required")
+	}
+	var root *filesystem.Root
+	var err error
+	if cfg.Root != "" {
+		root, err = filesystem.Open(cfg.Root)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s := &Server{cfg: cfg, root: root, sessions: make(map[string]*peerWorker), incoming: make(chan inbound, 256), closed: make(chan struct{}), transferCap: cfg.MaxTransferBytes}
 	s.stats.started = time.Now()
@@ -267,7 +274,11 @@ func (s *Server) Serve(ctx context.Context) error {
 	// transfer_cap is logged because it is derived from the host's RAM rather
 	// than fixed: an operator on a small router who sees a large write refused
 	// should be able to find the reason in the first line of the log.
-	s.cfg.Log.Info("UDPFS listening", map[string]any{"root": s.root.Path(), "discovery": disc.String(), "data": data.String(), "protocol": s.cfg.ProtocolMode, "read_only": s.cfg.ReadOnly, "transfer_cap": s.transferCap})
+	rootPath := "<disabled>"
+	if s.root != nil {
+		rootPath = s.root.Path()
+	}
+	s.cfg.Log.Info("UDPFS listening", map[string]any{"root": rootPath, "discovery": disc.String(), "data": data.String(), "protocol": s.cfg.ProtocolMode, "read_only": s.cfg.ReadOnly, "transfer_cap": s.transferCap})
 	s.wg.Add(1)
 	go s.readLoop(s.discovery, session.DiscoverySocket)
 	if s.data != s.discovery {

@@ -69,14 +69,14 @@ func pathOpName(t protocol.MessageType) string {
 
 // pathRequest decodes the request the three share: msg_type, a reserved byte,
 // a 16-bit mode and a NUL-terminated path. ok is false when the request has
-// already been refused: a short one with EINVAL, and on a read-only server
-// any other with EACCES, before its path is looked at.
+// already been refused: a short one with EINVAL, and on a read-only server or
+// one without a filesystem root any other with EACCES, before its path is looked at.
 func (s *Server) pathRequest(st *session.State, p []byte) (mode uint16, path string, ok bool) {
 	if len(p) < 4 {
 		s.sendPathResult(st, -eINVAL)
 		return 0, "", false
 	}
-	if s.cfg.ReadOnly {
+	if s.cfg.ReadOnly || s.root == nil {
 		s.sendPathResult(st, -eACCES)
 		return 0, "", false
 	}

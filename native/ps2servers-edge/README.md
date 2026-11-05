@@ -81,16 +81,20 @@ Guarantees:
 ## Block access over UDPFS
 
 `--block-device` serves one disk image through the `BREAD` (`0x28`) and `BWRITE`
-(`0x2A`) opcodes, alongside the file share, from the same instance:
+(`0x2A`) opcodes, with or without a file share, from the same instance:
 
 ```sh
 ./ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img
 ./ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img --sector-size 2048
+# Image-only service (no --root required):
+./ps2servers-edge udpfs --block-device /mnt/ps2.img
 ```
 
 This is the same feature as the Desktop server's `--block-device` and udpfsd's
 `-bdpath`, and is distinct from the `udpbd` subcommand below — that is another
-protocol on another port.
+protocol on another port. One of `--root` or `--block-device` is required.
+Empty-path GETSTAT reports sector-aligned image capacity, and CLOSE of handle 0
+succeeds without closing the shared image.
 
 The image lives on handle 0, which `OPEN` never hands out, so a client
 addressing handle 0 is unambiguously addressing the image. Access is positional:

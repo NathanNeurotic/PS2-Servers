@@ -84,16 +84,22 @@ drive:
 
 ```sh
 ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img
+# Or serve only the image, with no filesystem root:
+ps2servers-edge udpfs --block-device /mnt/ps2.img
 ```
 
 This matches the Desktop server's `--block-device` and udpfsd's `-bdpath`. It is
 **not** the same thing as the `udpbd` subcommand below, which speaks a different
-protocol on a different port.
+protocol on a different port. One of `--root` or `--block-device` is required.
 
 All access is positional. One image is shared by every session, so a seek cursor
 would let two consoles move each other's read position. Reads past the end of
 the image are refused rather than answered with zero padding, and the image
-inherits `--read-only`.
+inherits `--read-only`. Empty-path GETSTAT reports the block image's
+sector-aligned capacity, never the share directory's metadata. CLOSE of the
+reserved block handle 0 succeeds without closing the shared image. Filesystem
+requests on an image-only server return an error rather than dereferencing a
+missing root.
 
 ## Compression cache
 

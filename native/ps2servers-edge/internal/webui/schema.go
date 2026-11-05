@@ -103,7 +103,7 @@ func schema(version string) *Schema {
 					"block access. The recommended mode for most setups.",
 				Fields: []FieldSpec{
 					{Name: "enabled", Type: TypeBool, Default: true, Doc: "start this service at boot"},
-					{Name: "root", Type: TypePath, Default: "/mnt/sda1/PS2", Doc: "directory served to consoles; required to start"},
+					{Name: "root", Type: TypePath, Default: "/mnt/sda1/PS2", Doc: "directory served to consoles; required when block_device is empty"},
 					{Name: "bind", Type: TypeString, Default: "0.0.0.0", Doc: "IPv4 address to listen on"},
 					{Name: "port", Type: TypeInt, Default: 62966, Min: fnum(0), Max: fnum(65535), EnforcedBy: EnforcedByAPI, Doc: "UDP discovery port (0xF5F6)"},
 					{Name: "data_port", Type: TypeInt, Default: 0, Min: fnum(0), Max: fnum(65535), EnforcedBy: EnforcedByAPI, Doc: "fixed UDP data port; 0 chooses automatically"},

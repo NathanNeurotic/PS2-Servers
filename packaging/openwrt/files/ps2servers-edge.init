@@ -61,8 +61,9 @@ start_udpfs() {
         config_get metrics_period main metrics_period 1m
 
         procd_open_instance udpfs
-        procd_set_param command "$PROG" udpfs \
-                --root "$root" \
+        procd_set_param command "$PROG" udpfs
+        [ -n "$root" ] && procd_append_param command --root "$root"
+        procd_append_param command \
                 --bind "$bind" \
                 --port "$port" \
                 --data-port "$data_port" \

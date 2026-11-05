@@ -30,12 +30,13 @@ var version = "dev"
 func usage() {
 	fmt.Fprintf(os.Stderr, "PS2 Servers Edge %s\n\nUsage:\n"+
 		"  ps2servers-edge udpfs --root /games [options]\n"+
+		"  ps2servers-edge udpfs --block-device /path/ps2.img [options]\n"+
 		"  ps2servers-edge udpbd --image /path/ps2.img [options]\n"+
 		"  ps2servers-edge smb --share games=/games [options]\n"+
 		"  ps2servers-edge webui [options]\n"+
 		"  ps2servers-edge --version\n"+
 		"  ps2servers-edge --dump-schema\n\n"+
-		"  udpfs serves a folder as a network file share.\n"+
+		"  udpfs serves a folder and/or a block image over UDPFS.\n"+
 		"  udpbd serves one disk image as a network hard drive.\n"+
 		"  smb   serves folders over SMBv1, for OPL's game list and POPSTARTER.\n"+
 		"  webui serves a web dashboard to configure and manage Edge servers.\n\n", version)
@@ -86,6 +87,13 @@ func applyMemoryLimit() {
 	}
 }
 
+func validateUDPFSStorage(root, blockDevice string) error {
+	if root == "" && blockDevice == "" {
+		return fmt.Errorf("--root or --block-device is required")
+	}
+	return nil
+}
+
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "version") {
 		fmt.Printf("ps2servers-edge %s\n", version)
@@ -120,7 +128,7 @@ func main() {
 	}
 	fs := flag.NewFlagSet("udpfs", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	root := fs.String("root", os.Getenv("FSROOT"), "game root directory")
+	root := fs.String("root", os.Getenv("FSROOT"), "game root directory; required unless --block-device is set")
 	bind := fs.String("bind", env("BIND", "0.0.0.0"), "IPv4 bind address")
 	port := fs.Int("port", envInt("PORT", 0xF5F6), "discovery UDP port")
 	dataPort := fs.Int("data-port", envInt("DATA_PORT", 0), "fixed data UDP port; 0 chooses automatically")
@@ -160,8 +168,8 @@ func main() {
 		fmt.Printf("ps2servers-edge %s\n", version)
 		return
 	}
-	if *root == "" {
-		fmt.Fprintln(os.Stderr, "error: --root is required")
+	if err := validateUDPFSStorage(*root, *blockDevice); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(2)
 	}
 	if *sectorSize <= 0 || *sectorSize > 65536 || *sectorSize%512 != 0 {

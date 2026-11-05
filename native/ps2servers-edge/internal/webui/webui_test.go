@@ -666,3 +666,16 @@ func TestServerPortFallback(t *testing.T) {
 		t.Fatalf("Serve returned error: %v", err)
 	}
 }
+
+func TestUDPFSConfigRequiresRootOrBlockDevice(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.UDPFS.Root = ""
+	cfg.UDPFS.BlockDevice = "/mnt/ps2.img"
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("block-device-only UDPFS config rejected: %v", err)
+	}
+	cfg.UDPFS.BlockDevice = ""
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatal("UDPFS config with neither root nor block device was accepted")
+	}
+}
