@@ -11,6 +11,8 @@ import (
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 )
 
+const sessionReplaceQuiet = time.Second
+
 // A fresh Modulo client opens with discovery sequence 0 and waits for the
 // compatibility INFORM before sending anything. handleDiscovery used to treat
 // sequence 0 as proof of a standard client: it committed Profile to Standard

@@ -23,6 +23,7 @@ config udpfs 'main'
     option read_only '1'
     option peer_timeout '1h'
     option tx_delay_ms '0'
+    option udp_batch '0'
     option log_format 'text'
     option verbose '0'
     option block_device ''
@@ -48,7 +49,7 @@ The UDPFS options map to Edge flags as follows:
 | Option | Flag | Notes |
 |---|---|---|
 | `enabled` | — | `0` stops the service starting at boot |
-| `root` | `--root` | game directory; must be mounted before the service starts |
+| `root` | `--root` | game directory; must be mounted before the service starts, or empty for block-only mode |
 | `bind` | `--bind` | `0.0.0.0` listens on every interface; a specific IP binds both sockets |
 | `port` | `--port` | discovery port, UDP 62966 (`0xF5F6`) |
 | `data_port` | `--data-port` | `0` picks automatically; set it for strict firewalls |
@@ -57,6 +58,7 @@ The UDPFS options map to Edge flags as follows:
 | `read_only` | `--read-only` | **`1` is read-only. Set `0` to let the console save.** |
 | `peer_timeout` | `--peer-timeout` | idle session timeout, `1m`–`24h` |
 | `tx_delay_ms` | `--tx-delay-ms` | inter-packet pacing; raise it if a slow router drops packets |
+| `udp_batch` | `--udp-batch` | opt-in Linux UDP window batching; off by default and used only when pacing is zero |
 | `log_format` | `--log-format` | `text` or `json` |
 | `verbose` | `--verbose` | protocol-level logging |
 | `block_device` | `--block-device` | disk image served over UDPFS block access; empty is off |
@@ -88,7 +90,11 @@ as well as the file share.
 the same instance already serving files, so a console can reach a game folder
 and a virtual drive without a second service:
 
+For block-device-only service, clear the default root as well; leave it set to
+serve files and the image together:
+
 ```sh
+uci set ps2servers-edge.main.root=''
 uci set ps2servers-edge.main.block_device='/mnt/sda1/ps2.img'
 uci set ps2servers-edge.main.read_only='0'
 uci commit ps2servers-edge

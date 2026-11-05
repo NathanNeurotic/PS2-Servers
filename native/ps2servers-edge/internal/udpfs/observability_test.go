@@ -510,90 +510,145 @@ func stopDirectWorkers(server *Server) {
 		worker.stop()
 	}
 	server.wg.Wait()
+	server.sessionsMu.Lock()
+	server.expiryWG.Wait()
+	server.sessionsMu.Unlock()
 	for _, worker := range workers {
 		worker.state.Close()
 	}
 }
 
-func TestSameIPSourcePortReplacementInstrumentation(t *testing.T) {
-	t.Run("eligible replacement", func(t *testing.T) {
-		server, logs := newDirectObservabilityServer(true)
-		defer stopDirectWorkers(server)
-		oldPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.30"), Port: 26000}
-		newPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.30"), Port: 26001}
-		server.getWorker(oldPeer)
-		server.getWorker(newPeer)
+func TestSameIPDifferentPortsRemainConcurrent(t *testing.T) {
+	server, _ := newDirectObservabilityServer(true)
+	defer stopDirectWorkers(server)
+	firstPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.30"), Port: 26000}
+	secondPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.30"), Port: 26001}
+	first := server.getWorker(firstPeer)
+	first.state.Handles[7] = &session.Handle{}
 
-		if got := metricInt64(t, server.stats.snapshot(), "same_ip_replacements"); got != 1 {
-			t.Fatalf("same_ip_replacements = %d, want 1", got)
+	if second := server.getWorker(secondPeer); second == nil {
+		t.Fatal("second endpoint did not get a worker")
+	}
+	if got := len(server.sessions); got != 2 {
+		t.Fatalf("two endpoints from one IP have %d sessions, want 2", got)
+	}
+	if server.getWorker(firstPeer) != first {
+		t.Fatal("first endpoint was replaced when the second endpoint appeared")
+	}
+	if first.state.Handles[7] == nil {
+		t.Fatal("second endpoint closed the first endpoint's handles")
+	}
+}
+
+func TestIdleEndpointExpiresIndependently(t *testing.T) {
+	server, _ := newDirectObservabilityServer(true)
+	server.cfg.PeerTimeout = time.Minute
+	defer stopDirectWorkers(server)
+	idlePeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.40"), Port: 27000}
+	freshPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.40"), Port: 27001}
+	idle := server.getWorker(idlePeer)
+	idle.state.Handles[8] = &session.Handle{}
+	fresh := server.getWorker(freshPeer)
+	now := time.Now()
+	idle.state.LastActivity = now.Add(-2 * time.Minute)
+	fresh.state.LastActivity = now
+
+	server.expireSessions(now)
+
+	if server.getWorker(freshPeer) != fresh {
+		t.Fatal("fresh endpoint expired with the idle endpoint")
+	}
+	if server.sessions[idlePeer.String()] != nil {
+		t.Fatal("idle endpoint remains registered after expiry")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		idle.state.Mu.Lock()
+		closed := idle.state.Handles[8] == nil
+		idle.state.Mu.Unlock()
+		if closed {
+			break
 		}
-		records := parseJSONLogRecords(t, logs.String())
-		candidate := findJSONLogRecord(t, records, "same-IP session replacement candidate", nil)
-		assertJSONField(t, candidate, "old_peer", oldPeer.String())
-		assertJSONField(t, candidate, "new_peer", newPeer.String())
-		assertJSONField(t, candidate, "old_source_port", oldPeer.Port)
-		assertJSONField(t, candidate, "new_source_port", newPeer.Port)
-		assertJSONField(t, candidate, "write_active", false)
-		assertJSONField(t, candidate, "eligible", true)
-		assertJSONField(t, candidate, "reason", "no_active_write")
-		findJSONLogRecord(t, records, "replacing stale session for IP", func(record map[string]any) bool {
-			return record["reason"] == "no_active_write" && record["eligible"] == true
-		})
-	})
-
-	t.Run("recent active write is retained", func(t *testing.T) {
-		server, logs := newDirectObservabilityServer(true)
-		defer stopDirectWorkers(server)
-		oldPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.31"), Port: 26100}
-		newPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.31"), Port: 26101}
-		oldWorker := server.getWorker(oldPeer)
-		oldWorker.state.Mu.Lock()
-		oldWorker.state.WriteActive = true
-		oldWorker.state.LastActivity = time.Now()
-		oldWorker.state.Mu.Unlock()
-		server.getWorker(newPeer)
-
-		if got := metricInt64(t, server.stats.snapshot(), "same_ip_replacements"); got != 0 {
-			t.Fatalf("same_ip_replacements = %d, want 0", got)
+		if time.Now().After(deadline) {
+			t.Fatal("idle endpoint's handles were not closed")
 		}
-		records := parseJSONLogRecords(t, logs.String())
-		candidate := findJSONLogRecord(t, records, "same-IP session replacement candidate", nil)
-		assertJSONField(t, candidate, "old_peer", oldPeer.String())
-		assertJSONField(t, candidate, "new_peer", newPeer.String())
-		assertJSONField(t, candidate, "write_active", true)
-		assertJSONField(t, candidate, "eligible", false)
-		assertJSONField(t, candidate, "reason", "active_write_recent")
-		for _, record := range records {
-			if record["message"] == "replacing stale session for IP" {
-				t.Fatalf("recent active-write session was reported as replaced: %#v", record)
-			}
-		}
-	})
+		time.Sleep(time.Millisecond)
+	}
+}
 
-	t.Run("stale active write is replaced", func(t *testing.T) {
-		server, logs := newDirectObservabilityServer(true)
-		defer stopDirectWorkers(server)
-		oldPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.32"), Port: 26200}
-		newPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.32"), Port: 26201}
-		oldWorker := server.getWorker(oldPeer)
-		oldWorker.state.Mu.Lock()
-		oldWorker.state.WriteActive = true
-		oldWorker.state.LastActivity = time.Now().Add(-2 * sessionReplaceQuiet)
-		oldWorker.state.Mu.Unlock()
-		server.getWorker(newPeer)
+type blockingReadCloser struct {
+	started   chan struct{}
+	release   chan struct{}
+	closed    chan struct{}
+	startOnce sync.Once
+	closeOnce sync.Once
+}
 
-		if got := metricInt64(t, server.stats.snapshot(), "same_ip_replacements"); got != 1 {
-			t.Fatalf("same_ip_replacements = %d, want 1", got)
-		}
-		records := parseJSONLogRecords(t, logs.String())
-		candidate := findJSONLogRecord(t, records, "same-IP session replacement candidate", nil)
-		assertJSONField(t, candidate, "old_peer", oldPeer.String())
-		assertJSONField(t, candidate, "new_peer", newPeer.String())
-		assertJSONField(t, candidate, "write_active", true)
-		assertJSONField(t, candidate, "eligible", true)
-		assertJSONField(t, candidate, "reason", "active_write_quiet_over_1s")
-		findJSONLogRecord(t, records, "replacing stale session for IP", func(record map[string]any) bool {
-			return record["reason"] == "active_write_quiet_over_1s" && record["eligible"] == true
-		})
-	})
+func (f *blockingReadCloser) Read(p []byte) (int, error) {
+	f.startOnce.Do(func() { close(f.started) })
+	<-f.release
+	for i := range p {
+		p[i] = 0x5a
+	}
+	return len(p), nil
+}
+
+func (f *blockingReadCloser) Seek(int64, int) (int64, error) { return 0, nil }
+
+func (f *blockingReadCloser) Close() error {
+	f.closeOnce.Do(func() { close(f.closed) })
+	return nil
+}
+
+func TestExpiryDrainsWithoutBlockingReaper(t *testing.T) {
+	server, logs := newDirectObservabilityServer(true)
+	server.transferCap = 1 << 20
+	defer stopDirectWorkers(server)
+	peer := &net.UDPAddr{IP: net.ParseIP("192.0.2.41"), Port: 27000}
+	worker := server.getWorker(peer)
+	reader := &blockingReadCloser{
+		started: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{}),
+	}
+	worker.state.Mu.Lock()
+	worker.state.Profile = session.Standard
+	worker.state.Streaming = true
+	worker.state.ExpectedReceive = 2213
+	worker.state.Handles[81] = &session.Handle{Reader: reader, Closer: reader}
+	worker.state.Mu.Unlock()
+	worker.queue <- inbound{packet: dataPacket(2213, blockMsg(protocol.ReadRequest, 81, 512, 1)), peer: peer, socket: session.DataSocket}
+	select {
+	case <-reader.started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("worker did not begin the file read: %s", logs.String())
+	}
+	worker.state.Mu.Lock()
+	worker.state.LastActivity = time.Now().Add(-2 * time.Minute)
+	worker.state.Mu.Unlock()
+
+	expired := make(chan struct{})
+	go func() {
+		server.expireSessions(time.Now())
+		close(expired)
+	}()
+	var releaseOnce sync.Once
+	releaseRead := func() { releaseOnce.Do(func() { close(reader.release) }) }
+	defer releaseRead()
+	select {
+	case <-expired:
+	case <-reader.closed:
+		t.Fatal("expiry closed the file during its active read")
+	case <-time.After(2 * time.Second):
+		t.Fatal("a blocked worker stopped the reaper from finishing its pass")
+	}
+	select {
+	case <-reader.closed:
+		t.Fatal("expiry closed the file before the read finished")
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseRead()
+	select {
+	case <-reader.closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expiry did not close the file after the read completed")
+	}
 }

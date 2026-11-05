@@ -1,6 +1,7 @@
 package udpfs
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"net"
@@ -196,4 +197,113 @@ func TestModuloFallbackWrapAndDiscoverySocket(t *testing.T) {
 		t.Fatalf("GETSTAT size %d", size)
 	}
 	_, _ = client.WriteToUDP(ackPacket(respHeader.Sequence), responseAddr)
+}
+
+func nonLoopbackIPv4(t *testing.T) net.IP {
+	t.Helper()
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range addresses {
+		var ip net.IP
+		switch value := address.(type) {
+		case *net.IPNet:
+			ip = value.IP
+		case *net.IPAddr:
+			ip = value.IP
+		}
+		if ip = ip.To4(); ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
+			continue
+		}
+		probe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: ip, Port: 0})
+		if err == nil {
+			_ = probe.Close()
+			return ip
+		}
+	}
+	t.Skip("no non-loopback IPv4 interface available")
+	return nil
+}
+
+func startServerOnIP(t *testing.T, root string, ip net.IP) *net.UDPAddr {
+	t.Helper()
+	server, err := New(Config{
+		Root: root, Bind: ip.String(), Port: freeUDPPort(t), DataPort: 0,
+		ProtocolMode: session.Standard, PeerTimeout: time.Minute,
+		Log: edgelog.New(discardWriter{}, "text", true, false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	disc, _ := server.Addr()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("Serve: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("server did not stop")
+		}
+	})
+	return disc
+}
+
+func dialOnIP(t *testing.T, disc *net.UDPAddr, ip net.IP) *client {
+	t.Helper()
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: ip, Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if _, err := conn.WriteToUDP(discoveryPacket(0), disc); err != nil {
+		t.Fatal(err)
+	}
+	_, dataAddr := recvPacket(t, conn)
+	return &client{t: t, conn: conn, dataAddr: dataAddr}
+}
+
+func TestSameIPDifferentPortsRemainConcurrentOnWire(t *testing.T) {
+	ip := nonLoopbackIPv4(t)
+	root := t.TempDir()
+	content := []byte("0123456789abcdef")
+	if err := os.WriteFile(filepath.Join(root, "game.iso"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	disc := startServerOnIP(t, root, ip)
+	first := dialOnIP(t, disc, ip)
+	firstHandle := openForWriteOK(t, first, "game.iso", fioRead)
+	second := dialOnIP(t, disc, ip)
+	secondHandle := openForWriteOK(t, second, "game.iso", fioRead)
+
+	for _, test := range []struct {
+		name   string
+		client *client
+		handle int32
+	}{{"first", first, firstHandle}, {"second", second, secondHandle}} {
+		request := make([]byte, 12)
+		request[0] = byte(protocol.ReadRequest)
+		binary.LittleEndian.PutUint32(request[4:8], uint32(test.handle))
+		binary.LittleEndian.PutUint32(request[8:12], uint32(len(content)))
+		reply := test.client.send(request)
+		if len(reply) < 8 {
+			t.Errorf("%s endpoint READ returned an empty control reply", test.name)
+			continue
+		}
+		if got := result(reply); got != int32(len(content)) {
+			t.Errorf("%s endpoint READ returned %d (opcode %#x), want %d", test.name, got, reply[0], len(content))
+			continue
+		}
+		if got := reply[8 : 8+len(content)]; !bytes.Equal(got, content) {
+			t.Errorf("%s endpoint returned %q", test.name, got)
+		}
+	}
 }

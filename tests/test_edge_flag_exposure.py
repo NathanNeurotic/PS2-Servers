@@ -22,7 +22,11 @@ Run:  python -m unittest tests.test_edge_flag_exposure -v
 
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_GO = os.path.join(
@@ -47,6 +51,7 @@ FLAG_TO_UCI = {
     "--single-port": "single_port",
     "--peer-timeout": "peer_timeout",
     "--tx-delay-ms": "tx_delay_ms",
+    "--udp-batch": "udp_batch",
     "--read-only": "read_only",
     "--block-device": "block_device",
     "--sector-size": "sector_size",
@@ -223,6 +228,68 @@ class UdpfsFlagsAreDocumented(unittest.TestCase):
             "the config block in docs/OPENWRT.md has drifted from the file the "
             "package actually installs: only in the file %s; only in the doc %s"
             % (sorted(shipped - documented), sorted(documented - shipped))))
+
+
+OPENWRT_HARNESS = r'''
+config_get_bool() { eval "$1=1"; }
+config_get() {
+    local value
+    case "$3" in
+        root) value="${4-}" ;;
+        block_device) value="${TEST_BLOCK_DEVICE-/tmp/card.bin}" ;;
+        bind) value=127.0.0.1 ;;
+        port) value=62966 ;;
+        sector_size) value=512 ;;
+        compression_cache_size) value=32 ;;
+        metrics_period) value=1m ;;
+        peer_timeout) value=1h ;;
+        protocol) value=auto ;;
+        log_format) value=text ;;
+        *) value=0 ;;
+    esac
+    printf -v "$1" '%s' "$value"
+}
+procd_open_instance() { :; }
+procd_close_instance() { :; }
+common_params() { :; }
+procd_set_param() {
+    [ "$1" != command ] || command="ps2servers-edge $2"
+}
+procd_append_param() {
+    [ "$1" != command ] && return
+    shift
+    printf -v quoted '%q ' "$@"
+    command="$command $quoted"
+}
+source ./ps2servers-edge.init
+start_udpfs
+printf '%s\n' "$command"
+'''
+
+
+class OpenWrtBlockOnlyService(unittest.TestCase):
+    def run_openwrt(self, setup=""):
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("OpenWrt command construction requires Bash on this host")
+        with tempfile.TemporaryDirectory() as temp:
+            shutil.copy(UCI_INIT, Path(temp, "ps2servers-edge.init"))
+            result = subprocess.run(
+                [bash, "-c", setup + OPENWRT_HARNESS], cwd=temp,
+                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.strip()
+
+    def test_empty_root_does_not_restore_the_filesystem_default(self):
+        command = self.run_openwrt()
+        self.assertIn("--block-device /tmp/card.bin", command)
+        self.assertNotRegex(command, r"--root\b",
+                            "an empty root must not turn into /mnt/sda1/PS2")
+
+    def test_no_storage_choice_keeps_the_default_root(self):
+        command = self.run_openwrt("TEST_BLOCK_DEVICE=''\n")
+        self.assertIn("--root /mnt/sda1/PS2", command)
+        self.assertNotRegex(command, r"--block-device\b")
 
 
 if __name__ == "__main__":

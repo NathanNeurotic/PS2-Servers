@@ -1274,29 +1274,46 @@ class UdpfsServer:
         return False
 
     def _transform_compressed_name(self, name: str) -> str:
-        """Transform supported compressed extensions to .iso for directory listing."""
+        """Append .iso to supported compressed names for directory listing."""
         if not self.enable_compression:
             return name
         lower_name = name.lower()
         for ext in COMPRESSED_EXTENSIONS:
             if lower_name.endswith(ext):
-                return name[:-len(ext)] + '.iso'
+                return name + '.iso'
         return name
 
     def _resolve_compressed_sibling(self, path: str) -> Optional[str]:
-        """Resolve a client '.iso' path to an existing compressed sibling file.
+        """Resolve a virtual ISO alias to its compressed source.
 
-        Directory listings rename e.g. 'Game.chd' to 'Game.iso'; this is the
-        reverse mapping used when the client then opens or stats that virtual
-        name. Collects existing siblings in COMPRESSED_EXTENSIONS order, then
-        prefers one whose header actually parses -- so a corrupt file that
-        sorts earlier (an interrupted 'Game.zso' download beside a good
-        'Game.cso') never hides a decodable later one. Returns the resolved
-        host path, or None.
+        Canonical aliases append .iso to the complete container name, so
+        'Game.cso.iso' maps only to 'Game.cso'. Legacy 'Game.iso' aliases probe
+        same-stem containers and prefer one whose header parses. Direct paths
+        never come through this resolver and therefore remain raw.
         """
         if not self.enable_compression or not path.lower().endswith('.iso'):
             return None
-        base_path = path[:-4]  # Remove .iso
+        base_path = path[:-4]
+        canonical_ext = os.path.splitext(base_path)[1].lower()
+        if canonical_ext in COMPRESSED_EXTENSIONS:
+            resolved = self._resolve_path(base_path)
+            if resolved and os.path.exists(resolved):
+                return resolved
+            if resolved and resolved != self.root_dir:
+                dirname, stem = os.path.split(resolved)
+                requested_stem = os.path.splitext(stem)[0]
+                try:
+                    listing = os.listdir(dirname)
+                except OSError:
+                    listing = []
+                for entry in listing:
+                    entry_stem, entry_ext = os.path.splitext(entry)
+                    if entry_stem != requested_stem or entry_ext.lower() != canonical_ext:
+                        continue
+                    candidate = os.path.join(dirname, entry)
+                    if self._resolve_path(os.path.relpath(candidate, self.root_dir)):
+                        return candidate
+            return None
 
         candidates: List[str] = []
         seen = set()
@@ -1306,18 +1323,12 @@ class UdpfsServer:
                 seen.add(host_path)
                 candidates.append(host_path)
 
-        # Exact-case probe (the common path); each candidate is containment-checked.
         for ext in COMPRESSED_EXTENSIONS:
             _add(self._resolve_path(base_path + ext))
 
-        # Case-insensitive fallback for the EXTENSION only. The listing transform
-        # preserves stem case round-trip, so match the stem exactly and just fold
-        # the extension -- otherwise 'Game.iso' could bind to a different image
-        # 'game.cso' on a case-sensitive filesystem.
+        # Fold only the extension, never the stem: case-distinct games must not
+        # bind to one another on a case-sensitive filesystem.
         resolved_base = self._resolve_path(base_path)
-        # resolved_base == root means base_path was empty (e.g. '/.iso'); its
-        # parent dir is OUTSIDE root, so splitting it would let a sibling of the
-        # games folder escape containment. Require a real name component.
         if resolved_base and resolved_base != self.root_dir:
             dirname, stem = os.path.split(resolved_base)
             try:
@@ -1334,16 +1345,11 @@ class UdpfsServer:
                 if not entry:
                     continue
                 candidate = os.path.join(dirname, entry)
-                # dirname came from a split, not _resolve_path -- re-validate
-                # that the match is still contained before considering it.
                 if self._resolve_path(os.path.relpath(candidate, self.root_dir)):
                     _add(candidate)
 
         if not candidates:
             return None
-        # Prefer a sibling whose header parses so a corrupt earlier-sorted file
-        # never hides a decodable one; else return the first existing candidate
-        # so callers surface a coherent EIO (open) / ENOENT (stat).
         for candidate in candidates:
             if get_compressed_info(candidate) is not None:
                 return candidate
@@ -1698,6 +1704,29 @@ class UdpfsServer:
             self._print_event(f"[{addr[0]}:{addr[1]}] Unknown message type: 0x{msg_type:02x}")
             self._send_ack(addr, is_ack=True)
 
+    def _prepare_directory_entries(self, entries):
+        """Build one advertised namespace, retaining real names over aliases."""
+        real_names = {entry.name for entry in entries}
+        prepared = []
+        for entry in entries:
+            display_name = self._transform_compressed_name(entry.name)
+            if display_name == entry.name:
+                prepared.append({'name': display_name, 'source': entry,
+                                 'stat_info': None})
+                continue
+            if display_name in real_names or len(display_name.encode('utf-8')) > 255:
+                continue
+            try:
+                st = entry.stat(follow_symlinks=False)
+                compressed_stat = self._get_compressed_stat(entry.path, st)
+            except OSError:
+                continue
+            if compressed_stat is None:
+                continue
+            prepared.append({'name': display_name, 'source': entry,
+                             'stat_info': compressed_stat})
+        return prepared
+
     # --- File operation handlers ---
 
     def _handle_open(self, addr: Tuple[str, int], payload: bytes):
@@ -1728,7 +1757,7 @@ class UdpfsServer:
         if is_dir:
             # Directory open
             try:
-                entries = list(os.scandir(resolved))
+                entries = self._prepare_directory_entries(list(os.scandir(resolved)))
                 handle = self._alloc_handle({'entries': entries, 'index': 0}, is_dir=True)
                 if handle < 0:
                     self._send_open_reply(addr, handle)
@@ -1747,20 +1776,16 @@ class UdpfsServer:
                 self._send_open_reply(addr, -errno.EACCES)
                 return
 
-            # Check if we should open compressed version
             actual_resolved = compressed_resolved if compressed_resolved else resolved
-            
+
             # Check if the file exists (skip for O_CREAT)
             if not os.path.exists(actual_resolved) and not (flags & 0x0200):
                 self._print_event(f"[{addr[0]}:{addr[1]}] OPEN '{path}' -> ENOENT (file not found)")
                 self._send_open_reply(addr, -errno.ENOENT)
                 return
 
-            # Check if the file is a compressed format
-            is_compressed = False
-            if self.enable_compression:
-                if actual_resolved.lower().endswith(COMPRESSED_EXTENSIONS):
-                    is_compressed = True
+            # Only a virtual ISO alias decodes. An existing container path is raw.
+            is_compressed = compressed_resolved is not None
 
             py_mode = self._flags_to_mode(flags, file_exists=os.path.exists(actual_resolved))
             try:
@@ -2119,8 +2144,17 @@ class UdpfsServer:
         # console cannot tell that from a complete one: OPL took every later cover
         # in ART/ to be missing, and later games never appeared in the list.
         while dir_data['index'] < len(dir_data['entries']):
-            entry = dir_data['entries'][dir_data['index']]
+            advertised = dir_data['entries'][dir_data['index']]
             dir_data['index'] += 1
+            if isinstance(advertised, dict):
+                entry = advertised['source']
+                display_name = advertised['name']
+                advertised_stat = advertised['stat_info']
+            else:
+                # Internal callers may supply raw scandir entries directly.
+                entry = advertised
+                display_name = self._transform_compressed_name(entry.name)
+                advertised_stat = None
 
             try:
                 st = entry.stat(follow_symlinks=False)
@@ -2128,18 +2162,11 @@ class UdpfsServer:
                 self._print_event(f"[{addr[0]}:{addr[1]}] DREAD stat error, skipping '{entry.name}': {e}")
                 continue
 
-            # Check if this is a compressed file and transform display
-            display_name = entry.name
-            stat_info = self._stat_to_bytes(st)
-
-            if self.enable_compression:
-                # Present supported compressed files as .iso with their
-                # uncompressed size (the transform is a no-op for other names)
-                display_name = self._transform_compressed_name(entry.name)
-                if display_name != entry.name:
-                    compressed_stat = self._get_compressed_stat(entry.path, st)
-                    if compressed_stat:
-                        stat_info = compressed_stat
+            if not isinstance(advertised, dict) and display_name != entry.name:
+                advertised_stat = self._get_compressed_stat(entry.path, st)
+                if advertised_stat is None:
+                    continue
+            stat_info = advertised_stat or self._stat_to_bytes(st)
 
             if self.verbose:
                 if display_name != entry.name:
@@ -2201,13 +2228,6 @@ class UdpfsServer:
         try:
             st = os.stat(resolved)
             stat_info = self._stat_to_bytes(st)
-            
-            # Check if this is a compressed file
-            if self.enable_compression:
-                if resolved.lower().endswith(COMPRESSED_EXTENSIONS):
-                    compressed_stat = self._get_compressed_stat(resolved, st)
-                    if compressed_stat:
-                        stat_info = compressed_stat
 
             if self.verbose:
                 self._print_event(f"[{addr[0]}:{addr[1]}] GETSTAT '{path}' -> size={stat_info['size']}")

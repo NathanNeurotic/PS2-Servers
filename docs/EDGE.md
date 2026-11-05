@@ -29,6 +29,9 @@ Important options:
 - `--data-port 0` — automatic data port; use a fixed value for strict firewalls
 - `--peer-timeout 1h`
 - `--tx-delay-ms 0` — inter-packet pacing; raise it if a slow link drops packets
+- `--udp-batch` — opt-in Linux `sendmmsg` window batching; off by default and
+  used only when pacing is zero, with per-packet fallback for unsupported
+  platforms and partial sends
 - `--log-format text|json`
 - `--verbose`, `--quiet`, `--version`
 
@@ -84,16 +87,22 @@ drive:
 
 ```sh
 ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img
+# Or serve only the image, with no filesystem root:
+ps2servers-edge udpfs --block-device /mnt/ps2.img
 ```
 
 This matches the Desktop server's `--block-device` and udpfsd's `-bdpath`. It is
 **not** the same thing as the `udpbd` subcommand below, which speaks a different
-protocol on a different port.
+protocol on a different port. One of `--root` or `--block-device` is required.
 
 All access is positional. One image is shared by every session, so a seek cursor
 would let two consoles move each other's read position. Reads past the end of
 the image are refused rather than answered with zero padding, and the image
-inherits `--read-only`.
+inherits `--read-only`. Empty-path GETSTAT reports the block image's
+sector-aligned capacity, never the share directory's metadata. CLOSE of the
+reserved block handle 0 succeeds without closing the shared image. Filesystem
+requests on an image-only server return an error rather than dereferencing a
+missing root.
 
 ## Compression cache
 
@@ -165,15 +174,19 @@ the service starts.
 
 ## Compression matrix
 
-| Format | Desktop/Core | Edge generic static builds |
-|---|---:|---:|
-| ISO | Yes | Yes |
-| CSO/CISO | Yes | Yes, pure Go zlib |
-| ZSO/ZISO | Yes when LZ4 is available | Yes, bounded pure-Go LZ4 block decoder |
-| CHD | Yes when `libchdr` is available | No |
+| Format | Desktop/Core | Edge generic static builds | Edge source build with `-tags chd` |
+|---|---:|---:|---:|
+| ISO | Yes | Yes | Yes |
+| CSO/CISO | Yes | Yes, pure Go zlib | Yes |
+| ZSO/ZISO | Yes when LZ4 is available | Yes, bounded pure-Go LZ4 block decoder | Yes |
+| CHD | Yes when `libchdr` is available | No | Yes, with CGO and libchdr |
 
-CHD is not implemented in the generic CGO-free Edge binaries. Use Desktop/Core
-with `libchdr` for CHD; no separate Edge CHD download is currently provided.
+Generic CGO-free Edge downloads remain CHD-free. To build optional CHD support
+from source, install libchdr and compile with
+`CGO_ENABLED=1 go build -tags chd ./cmd/ps2servers-edge`. Only that build
+advertises `.chd.iso` aliases; default builds list real CHD files raw and never
+substitute decoded data for them. Use Desktop/Core if you cannot provide CGO and
+libchdr on the target.
 
 ## UDPBD
 
@@ -341,10 +354,11 @@ is `fsync`ed before `WRITE_DONE`. The Desktop server takes these writes too.
 
 ## Security model
 
-Edge enforces a configured filesystem root. It rejects `..`, absolute and
-drive-qualified paths, unsafe symbolic links, oversized paths, oversized reads
-and writes, malformed packet lengths, unknown packet types, and excessive open
-handles. It serves writes, `MKDIR`, `REMOVE` and `RMDIR` unless started with
+Edge enforces a configured filesystem root. Leading `/` or `\` characters are
+UDPFS root-relative syntax, not permission to address the host filesystem. It
+rejects every `..` component, drive-qualified and device paths, unsafe symbolic
+links, oversized paths, oversized reads and writes, malformed packet lengths,
+unknown packet types, and excessive open handles. It serves writes, `MKDIR`, `REMOVE` and `RMDIR` unless started with
 `--read-only`. Those three act on the entry named: its parent must resolve
 inside the root, and a symlink in the last component is the link itself, so
 deleting one never reaches its target. `REMOVE` and `RMDIR` also refuse a path
@@ -366,6 +380,10 @@ logs do not print full requested host paths.
 - shared UDPFS conformance probe (`conformance/integration/udpfs_probe.py`): yes, run
   against a live Edge process in CI — standard plus three Modulo-shaped clients
   concurrently, covering the 4095 → 0 sequence wrap
+- three-server differential probe (`conformance/integration/udpfs_parity.py`):
+  matched fixtures against pinned `udpfsd`, Core, and Edge on a non-loopback
+  interface, covering sessions, paths, compression, block-only service, restart,
+  rediscovery, and transport fault injection; host evidence, not hardware proof
 - parser fuzz seeds: yes
 - `go vet`: passed in the implementation environment
 - sixteen target builds (eleven Linux, three Windows, two macOS): compiled and

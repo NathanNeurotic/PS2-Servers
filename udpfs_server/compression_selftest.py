@@ -8,10 +8,10 @@ code that once shipped a bug where CHD files silently vanished from OPL game
 lists because the DREAD/GETSTAT handlers' hardcoded extension checks drifted
 out of sync with the open path:
 
-  * LISTING  -- supported compressed files appear as .iso with their
-                UNCOMPRESSED sizes; plain .iso entries are untouched.
-  * GETSTAT  -- a virtual .iso resolves to its compressed sibling; a raw
-                compressed path reports the uncompressed size.
+  * LISTING  -- supported compressed files append .iso to their complete names
+                and report UNCOMPRESSED sizes; plain .iso entries are untouched.
+  * GETSTAT  -- a virtual .iso alias reports the uncompressed size; a direct
+                compressed path reports its raw container size.
   * GATING   -- formats missing from COMPRESSED_EXTENSIONS (library not
                 available) are never renamed, probed, or advertised.
   * DATA     -- a real CSO round-trips byte-exact through OPEN; a corrupt
@@ -141,6 +141,18 @@ class Driver:
         self.server._handle_getstat(self.addr, b'\x00' * 4 + path.encode() + b'\x00')
         return self.replies.pop()
 
+    def listnames(self, path='/'):
+        handle, _ = self.open(path, is_dir=True)
+        assert handle >= 0, "DOPEN %r failed: %d" % (path, handle)
+        entries = []
+        while True:
+            self.server._handle_dread(self.addr, struct.pack('<BBBBi', 0, 0, 0, 0, handle))
+            result, name, stat_info = self.replies.pop()
+            if result <= 0:
+                break
+            entries.append(name)
+        return entries
+
     def listdir(self, path='/'):
         handle, _ = self.open(path, is_dir=True)
         assert handle >= 0, "DOPEN %r failed: %d" % (path, handle)
@@ -169,8 +181,7 @@ def check(cond, what):
 # Tests
 # --------------------------------------------------------------------------- #
 def test_listing_and_getstat(root):
-    """All formats advertised: compressed entries list as .iso with
-    uncompressed sizes; GETSTAT resolves both virtual and raw paths."""
+    """Compressed entries append .iso; direct container stats stay raw."""
     print("[listing] all formats advertised")
     saved = srv.COMPRESSED_EXTENSIONS
     srv.COMPRESSED_EXTENSIONS = ('.zso', '.cso', '.chd')
@@ -178,30 +189,30 @@ def test_listing_and_getstat(root):
     try:
         entries = d.listdir()
         check(entries.get('Plain.iso') == 4096, "plain .iso listed unchanged")
-        check(entries.get('GameA.iso') == 5000, "CSO listed as .iso with uncompressed size")
-        check(entries.get('GameB.iso') == DVD_CHD_SIZE, "DVD CHD listed as .iso with stored size")
-        check(entries.get('GameC.iso') == CD_EXPECTED, "CD CHD listed as .iso with frame-corrected size")
-        check(entries.get('GameD.iso') == ZSO_SIZE, "ZSO listed as .iso with uncompressed size")
-        check(entries.get('UPPER.iso') == DVD_CHD_SIZE,
-              "uppercase-extension CHD listed as .iso")
+        check(entries.get('GameA.cso.iso') == 5000, "CSO listed by appended .iso with uncompressed size")
+        check(entries.get('GameB.chd.iso') == DVD_CHD_SIZE, "DVD CHD listed by appended .iso")
+        check(entries.get('GameC.chd.iso') == CD_EXPECTED, "CD CHD listed with frame-corrected size")
+        check(entries.get('GameD.zso.iso') == ZSO_SIZE, "ZSO listed by appended .iso")
+        check(entries.get('UPPER.CHD.iso') == DVD_CHD_SIZE,
+              "uppercase-extension CHD keeps its name and appends .iso")
         check('GameA.cso' not in entries and 'GameB.chd' not in entries,
               "raw compressed names not listed")
+        check('Corrupt.cso.iso' not in entries,
+              "undecodable virtual alias is omitted while valid entries remain")
 
         print("[getstat]")
-        result, stat_info = d.getstat('/GameB.iso')
+        result, stat_info = d.getstat('/GameB.chd.iso')
         check(result == 0 and stat_info['size'] == DVD_CHD_SIZE,
-              "GETSTAT virtual .iso resolves CHD sibling")
-        # On case-sensitive filesystems (Linux CI) this exercises the
-        # case-insensitive sibling fallback in _resolve_compressed_sibling
-        result, stat_info = d.getstat('/UPPER.iso')
+              "GETSTAT canonical CHD alias reports decoded size")
+        result, stat_info = d.getstat('/UPPER.CHD.iso')
         check(result == 0 and stat_info['size'] == DVD_CHD_SIZE,
-              "GETSTAT virtual .iso resolves uppercase-extension sibling")
-        result, stat_info = d.getstat('/GameA.iso')
+              "GETSTAT uppercase canonical alias reports decoded size")
+        result, stat_info = d.getstat('/GameA.cso.iso')
         check(result == 0 and stat_info['size'] == 5000,
-              "GETSTAT virtual .iso resolves CSO sibling")
+              "GETSTAT canonical CSO alias reports decoded size")
         result, stat_info = d.getstat('/GameB.chd')
-        check(result == 0 and stat_info['size'] == DVD_CHD_SIZE,
-              "GETSTAT raw .chd reports uncompressed size")
+        check(result == 0 and stat_info['size'] == 64,
+              "GETSTAT direct .chd reports raw container size")
         result, _ = d.getstat('/Missing.iso')
         check(result == -errno.ENOENT, "GETSTAT missing .iso -> ENOENT")
     finally:
@@ -210,21 +221,20 @@ def test_listing_and_getstat(root):
 
 
 def test_gating(root):
-    """Formats absent from COMPRESSED_EXTENSIONS (library unavailable) are
-    never advertised: no rename in listings, no sibling probe, no open."""
+    """Formats absent from COMPRESSED_EXTENSIONS are never advertised."""
     print("[gating] only CSO advertised")
     saved = srv.COMPRESSED_EXTENSIONS
     srv.COMPRESSED_EXTENSIONS = ('.cso',)
     d = Driver(root)
     try:
         entries = d.listdir()
-        check(entries.get('GameA.iso') == 5000, "CSO still advertised")
+        check(entries.get('GameA.cso.iso') == 5000, "CSO still advertised")
         check(entries.get('GameB.chd') == 64, "unsupported CHD listed raw with container size")
-        check('GameB.iso' not in entries, "unsupported CHD not renamed to .iso")
-        result, _ = d.getstat('/GameB.iso')
-        check(result == -errno.ENOENT, "GETSTAT does not probe unsupported sibling")
-        result, _ = d.open('/GameB.iso')
-        check(result == -errno.ENOENT, "OPEN does not probe unsupported sibling")
+        check('GameB.chd.iso' not in entries, "unsupported CHD not renamed")
+        result, _ = d.getstat('/GameB.chd.iso')
+        check(result == -errno.ENOENT, "GETSTAT does not probe unsupported canonical alias")
+        result, _ = d.open('/GameB.chd.iso')
+        check(result == -errno.ENOENT, "OPEN does not probe unsupported canonical alias")
         handle, stat_info = d.open('/GameB.chd')
         check(handle >= 0 and stat_info['size'] == 64,
               "unsupported CHD still opens raw by its real name")
@@ -234,35 +244,82 @@ def test_gating(root):
 
 
 def test_data_roundtrip(root, cso_data):
-    """OPEN of the virtual .iso serves byte-exact decompressed data; a corrupt
-    container is refused with EIO instead of being served raw."""
+    """Virtual aliases decode; direct containers remain byte-for-byte raw."""
     print("[data] CSO round-trip and corrupt-container refusal")
     d = Driver(root)
     try:
-        handle, stat_info = d.open('/GameA.iso')
+        handle, stat_info = d.open('/GameA.cso.iso')
         check(handle >= 0 and stat_info['size'] == 5000,
-              "OPEN virtual .iso -> compressed wrapper handle")
+              "OPEN canonical alias -> compressed wrapper handle")
         wrapper = d.handle_obj(handle)
         wrapper.seek(0)
         check(wrapper.read(len(cso_data)) == cso_data,
               "decompressed bytes match the original image exactly")
 
-        # Uppercase container: on case-sensitive filesystems the exact-case
-        # probe misses and the case-insensitive fallback must find MIXED.CSO
-        handle, stat_info = d.open('/MIXED.iso')
+        handle, stat_info = d.open('/MIXED.CSO.iso')
         check(handle >= 0 and stat_info['size'] == 5000,
-              "OPEN virtual .iso resolves uppercase-extension CSO sibling")
+              "OPEN uppercase canonical alias decodes")
         wrapper = d.handle_obj(handle)
         wrapper.seek(0)
         check(wrapper.read(len(cso_data)) == cso_data,
-              "uppercase sibling decompresses byte-exact too")
+              "uppercase canonical alias decompresses byte-exact too")
 
-        result, _ = d.open('/Corrupt.iso')
-        check(result == -errno.EIO, "OPEN virtual .iso over corrupt container -> EIO, not raw bytes")
+        handle, stat_info = d.open('/GameA.cso')
+        check(handle >= 0 and stat_info['size'] == os.path.getsize(os.path.join(root, 'GameA.cso')),
+              "OPEN direct CSO reports raw container size")
+        raw = d.handle_obj(handle)
+        raw.seek(0)
+        check(raw.read(4) == b'CISO', "OPEN direct CSO returns container magic, not decoded bytes")
+
+        result, _ = d.open('/Corrupt.cso.iso')
+        check(result == -errno.EIO, "OPEN corrupt canonical alias -> EIO, not raw bytes")
         handle, stat_info = d.open('/Corrupt.cso')
         check(handle >= 0 and stat_info['size'] == os.path.getsize(os.path.join(root, 'Corrupt.cso')),
               "corrupt container still opens raw by its real name")
     finally:
+        d.close()
+
+
+def test_duplicate_stem_names(root, cso_data):
+    """A plain ISO and CSO sharing a stem remain independently openable."""
+    print("[collision] plain ISO and compressed image with one stem")
+    make_cso(os.path.join(root, 'Plain.cso'), cso_data)
+    d = Driver(root)
+    try:
+        entries = d.listdir()
+        check(entries.get('Plain.iso') == 4096, "plain ISO keeps its advertised name")
+        check(entries.get('Plain.cso.iso') == 5000, "same-stem CSO gets a distinct advertised name")
+        handle, stat_info = d.open('/Plain.iso')
+        check(handle >= 0 and stat_info['size'] == 4096, "plain ISO opens independently")
+        check(d.handle_obj(handle).read(4096) == make_plain_iso(os.path.join(root, '_expected.bin'), 4096),
+              "plain ISO returns its own bytes")
+        os.remove(os.path.join(root, '_expected.bin'))
+        handle, stat_info = d.open('/Plain.cso.iso')
+        check(handle >= 0 and stat_info['size'] == 5000, "same-stem CSO alias opens independently")
+        check(d.handle_obj(handle).read(5000) == cso_data,
+              "same-stem CSO alias returns decoded CSO bytes")
+    finally:
+        d.close()
+
+
+def test_legacy_aliases(root, cso_data):
+    """The old stem.iso aliases remain compatible when no plain ISO exists."""
+    print("[compatibility] legacy stem.iso aliases")
+    saved = srv.COMPRESSED_EXTENSIONS
+    srv.COMPRESSED_EXTENSIONS = ('.zso', '.cso', '.chd')
+    d = Driver(root)
+    try:
+        for path in ('/GameA.iso', '/MIXED.iso'):
+            handle, stat_info = d.open(path)
+            check(handle >= 0 and stat_info['size'] == 5000,
+                  f"legacy alias {path} still opens compressed source")
+            check(d.handle_obj(handle).read(5000) == cso_data,
+                  f"legacy alias {path} still returns decoded bytes")
+        result, stat_info = d.getstat('/GameB.iso')
+        check(result == 0 and stat_info['size'] == DVD_CHD_SIZE,
+              "legacy CHD alias still reports decoded size")
+    finally:
+        srv.COMPRESSED_EXTENSIONS = saved
         d.close()
 
 
@@ -272,37 +329,67 @@ def test_compression_disabled(root):
     d = Driver(root, enable_compression=False)
     try:
         entries = d.listdir()
-        check('GameA.cso' in entries and 'GameA.iso' not in entries,
+        check('GameA.cso' in entries and 'GameA.cso.iso' not in entries,
               "compressed files listed raw when compression is off")
-        result, _ = d.open('/GameA.iso')
-        check(result == -errno.ENOENT, "virtual .iso not probed when compression is off")
+        result, _ = d.open('/GameA.cso.iso')
+        check(result == -errno.ENOENT, "canonical alias not probed when compression is off")
     finally:
         d.close()
 
 
+def test_canonical_alias_folds_only_extension_case(root):
+    """A missing extension-case alias selects its exact stem, not a decoy."""
+    make_cso(os.path.join(root, 'Fold.cso'), bytes(range(256)) * 20)
+    make_cso(os.path.join(root, 'Fold.CSO.cso'), b'wrong' * 1000)
+    d = Driver(root)
+    original_exists = srv.os.path.exists
+    original_resolve = d.server._resolve_path
+    def preserve_requested_case(path):
+        if path.replace('\\', '/').lstrip('/') == 'Fold.CSO':
+            return os.path.join(root, 'Fold.CSO')
+        return original_resolve(path)
+    def missing_requested_case(path):
+        if os.fspath(path).replace('\\', '/').endswith('/Fold.CSO'):
+            return False
+        return original_exists(path)
+    d.server._resolve_path = preserve_requested_case
+    srv.os.path.exists = missing_requested_case
+    try:
+        resolved = d.server._resolve_compressed_sibling('/Fold.CSO.iso')
+    finally:
+        d.server._resolve_path = original_resolve
+        srv.os.path.exists = original_exists
+        d.close()
+    check(resolved == os.path.join(root, 'Fold.cso'),
+          f"canonical extension-case fallback selected {resolved!r}")
+
+
 def test_prefers_parseable_sibling(root):
-    """A corrupt sibling that sorts earlier in COMPRESSED_EXTENSIONS must not
-    hide a valid later one -- both GETSTAT and OPEN pick the decodable image."""
+    """Legacy aliases skip a corrupt sibling; canonical aliases stay exact."""
     print("[prefer-parseable] corrupt earlier sibling doesn't hide a valid one")
     saved = srv.COMPRESSED_EXTENSIONS
     srv.COMPRESSED_EXTENSIONS = ('.zso', '.cso', '.chd')
     d = Driver(root)
     try:
-        # PrefG.zso is garbage (sorts first); PrefG.cso is a valid 5000-byte image.
         result, stat_info = d.getstat('/PrefG.iso')
         check(result == 0 and stat_info['size'] == 5000,
-              "GETSTAT skips corrupt .zso, reports the valid .cso size")
+              "legacy GETSTAT skips corrupt .zso, reports valid .cso size")
         handle, stat_info = d.open('/PrefG.iso')
         check(handle >= 0 and stat_info['size'] == 5000,
-              "OPEN skips corrupt .zso, opens the valid .cso")
+              "legacy OPEN skips corrupt .zso, opens valid .cso")
+        handle, stat_info = d.open('/PrefG.cso.iso')
+        check(handle >= 0 and stat_info['size'] == 5000,
+              "canonical CSO alias opens its exact source")
+        result, _ = d.open('/PrefG.zso.iso')
+        check(result == -errno.EIO,
+              "corrupt canonical ZSO alias fails instead of substituting another format")
     finally:
         srv.COMPRESSED_EXTENSIONS = saved
         d.close()
 
 
 def test_exact_stem_no_case_collision(root):
-    """On a case-sensitive filesystem, 'Coll.iso' must resolve to the exact-stem
-    sibling 'Coll.CSO', never a different-cased 'coll.cso' (a distinct game)."""
+    """Case-only names keep distinct canonical and legacy mappings."""
     probe = os.path.join(root, 'CaseProbe.marker')
     with open(probe, 'w'):
         pass
@@ -316,15 +403,48 @@ def test_exact_stem_no_case_collision(root):
     srv.COMPRESSED_EXTENSIONS = ('.zso', '.cso', '.chd')
     d = Driver(root)
     try:
+        up = d.server._resolve_compressed_sibling('/Coll.CSO.iso')
+        check(up is not None and os.path.basename(up) == 'Coll.CSO',
+              "Coll.CSO.iso resolves exactly to Coll.CSO")
+        lo = d.server._resolve_compressed_sibling('/coll.cso.iso')
+        check(lo is not None and os.path.basename(lo) == 'coll.cso',
+              "coll.cso.iso resolves exactly to coll.cso")
         up = d.server._resolve_compressed_sibling('/Coll.iso')
         check(up is not None and os.path.basename(up) == 'Coll.CSO',
-              "Coll.iso resolves to exact-stem Coll.CSO, not coll.cso")
+              "legacy Coll.iso resolves to exact-stem Coll.CSO")
         lo = d.server._resolve_compressed_sibling('/coll.iso')
         check(lo is not None and os.path.basename(lo) == 'coll.cso',
-              "coll.iso resolves to exact-stem coll.cso")
+              "legacy coll.iso resolves to exact-stem coll.cso")
     finally:
         srv.COMPRESSED_EXTENSIONS = saved
         d.close()
+
+
+def test_listing_namespace(cso_data):
+    """Real names win collisions and virtual aliases fit the wire name limit."""
+    print("[namespace] real-name collisions and encoded limits")
+    root = tempfile.mkdtemp(prefix='udpfs_namespace_')
+    d = Driver(root)
+    try:
+        make_cso(os.path.join(root, 'game.cso'), cso_data)
+        with open(os.path.join(root, 'game.cso.iso'), 'wb') as f:
+            f.write(b'REAL')
+        for name in ('a' * 247 + '.cso', 'b' * 248 + '.cso',
+                     'é' * 123 + '.cso', 'é' * 124 + '.cso'):
+            make_cso(os.path.join(root, name), cso_data)
+        names = d.listnames()
+        check(names.count('game.cso.iso') == 1,
+              "real ISO and compressed alias share one advertised name")
+        for name in ('a' * 247 + '.cso.iso', 'é' * 123 + '.cso.iso'):
+            check(names.count(name) == 1, f"boundary alias {name!r} is advertised once")
+        for name in ('b' * 248 + '.cso.iso', 'é' * 124 + '.cso.iso'):
+            check(name not in names, f"overlength alias {name!r} is suppressed")
+        handle, stat_info = d.open('/game.cso.iso')
+        check(handle >= 0 and d.handle_obj(handle).read(4) == b'REAL',
+              "real ISO wins the colliding virtual alias")
+    finally:
+        d.close()
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_extension_gating_builder():
@@ -405,9 +525,13 @@ def main():
         test_listing_and_getstat(root)
         test_gating(root)
         test_data_roundtrip(root, cso_data)
+        test_duplicate_stem_names(root, cso_data)
+        test_legacy_aliases(root, cso_data)
         test_compression_disabled(root)
+        test_canonical_alias_folds_only_extension_case(root)
         test_prefers_parseable_sibling(root)
         test_exact_stem_no_case_collision(root)
+        test_listing_namespace(cso_data)
         test_extension_gating_builder()
         test_extension_alias_mapping()
     finally:

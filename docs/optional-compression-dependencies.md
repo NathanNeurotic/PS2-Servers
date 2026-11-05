@@ -1,9 +1,16 @@
 # Optional compression dependencies
 
 Desktop/Core UDPFS can expose compressed images as `.iso` files when optional
-compression support is available. HTTP uses the same CHD/CSO readers but passes
-ZSO through to the console without needing PC-side LZ4. Edge has a separate
-built-in CSO/ZSO decoder and no CHD support. See [the editions](EDITIONS.md).
+compression support is available. Advertised aliases append `.iso` to the full
+container name (`game.cso.iso`), avoiding collisions with a same-stem plain ISO;
+legacy `game.iso` aliases remain available when no plain ISO exists. Opening the
+container's real name returns its raw bytes and size, while a virtual alias
+returns decoded bytes and size.
+
+HTTP uses the same CHD/CSO readers but passes ZSO through to the console without
+needing PC-side LZ4. Edge has a separate built-in CSO/ZSO decoder; optional CHD
+support requires an explicit `-tags chd` CGO build with libchdr. Generic static
+Edge builds do not include CHD. See [the editions](EDITIONS.md).
 
 ## GUI behavior
 

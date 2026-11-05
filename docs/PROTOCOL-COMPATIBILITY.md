@@ -22,8 +22,13 @@ not classify the protocol profile.
 
 Every session stores its own profile, response socket, receive sequence,
 transmit sequence, fallback state, and file handles. Discovery traffic from one
-peer cannot reset another peer, and a background sequence-zero discovery does
-not reset a recently active transfer.
+peer cannot reset another peer, and background discovery of any sequence does
+not reset an active transfer or close its handles. The server remembers a
+possible replacement sequence until subsequent payload DATA resolves it. DATA
+at the old expected sequence continues the stream; DATA at `(DISCOVERY + 1)
+modulo 4096`, or DATA 0/1 after sequence-zero discovery, performs a
+handle-preserving transport handoff. Forced Modulo keeps its explicit
+resynchronization behavior.
 
 ## Standard only — diagnostics
 

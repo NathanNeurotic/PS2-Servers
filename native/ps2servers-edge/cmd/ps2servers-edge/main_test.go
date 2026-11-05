@@ -24,3 +24,19 @@ func TestParseMetricsPeriodOnlyAppliesWhenMetricsAreOn(t *testing.T) {
 		t.Errorf("metrics on, period 30s: got (%v, %v), want (30s, nil)", d, err)
 	}
 }
+
+func TestValidateUDPFSStorage(t *testing.T) {
+	for _, test := range []struct {
+		root, block string
+		valid       bool
+	}{
+		{"", "", false},
+		{"/games", "", true},
+		{"", "/images/ps2.img", true},
+		{"/games", "/images/ps2.img", true},
+	} {
+		if err := validateUDPFSStorage(test.root, test.block); (err == nil) != test.valid {
+			t.Errorf("validateUDPFSStorage(%q, %q) = %v, valid=%t", test.root, test.block, err, test.valid)
+		}
+	}
+}

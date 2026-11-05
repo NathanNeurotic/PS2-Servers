@@ -28,11 +28,13 @@ both can transfer concurrently.
 - file write: WRITE_REQ / WRITE_DATA / WRITE_DONE, chunk assembly, O_CREAT,
   O_TRUNC and O_APPEND, one writer per file at a time
 - retransmission, NACK handling, send windows, sequence wraparound
+- optional Linux UDP window batching with partial-send fallback
 - multiple clients and idle cleanup
 - safe rooted filesystem; writes allowed unless `--read-only` is passed
 - block access over UDPFS: `BREAD` / `BWRITE` against one `--block-device`
   image on handle 0, positional, bounds-checked against integer overflow
 - ISO, CSO/CISO, ZSO/ZISO, with a `--compression-cache-size` block cache
+- optional CHD with a `-tags chd` CGO build and libchdr
 - `--no-compression` to serve containers as raw bytes (a diagnostic)
 - `--metrics` periodic transfer counters
 - `--session-summary` one `SESSION` line per console (udpfs, smb and udpbd)
@@ -81,16 +83,20 @@ Guarantees:
 ## Block access over UDPFS
 
 `--block-device` serves one disk image through the `BREAD` (`0x28`) and `BWRITE`
-(`0x2A`) opcodes, alongside the file share, from the same instance:
+(`0x2A`) opcodes, with or without a file share, from the same instance:
 
 ```sh
 ./ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img
 ./ps2servers-edge udpfs --root /mnt/games --block-device /mnt/ps2.img --sector-size 2048
+# Image-only service (no --root required):
+./ps2servers-edge udpfs --block-device /mnt/ps2.img
 ```
 
 This is the same feature as the Desktop server's `--block-device` and udpfsd's
 `-bdpath`, and is distinct from the `udpbd` subcommand below — that is another
-protocol on another port.
+protocol on another port. One of `--root` or `--block-device` is required.
+Empty-path GETSTAT reports sector-aligned image capacity, and CLOSE of handle 0
+succeeds without closing the shared image.
 
 The image lives on handle 0, which `OPEN` never hands out, so a client
 addressing handle 0 is unambiguously addressing the image. Access is positional:
@@ -129,6 +135,23 @@ Implemented: INFO, READ with RDMA streaming and the upstream block-size
 optimizer, and WRITE with the RDMA handshake. Out-of-range, truncated and
 unsolicited RDMA packets are refused rather than written. A read-only image
 reports failure rather than faking a successful save.
+
+## Optional CHD builds
+
+Generic static downloads omit CHD. To enable it from source, install libchdr and
+build with `CGO_ENABLED=1 go build -tags chd ./cmd/ps2servers-edge`. That build
+advertises `game.chd.iso` and decodes virtual aliases through the same bounded
+cache as CSO/ZSO; direct `.chd` paths remain raw. Default builds list real CHD
+files raw and do not advertise virtual CHD aliases.
+
+## Optional Linux UDP batching
+
+`--udp-batch` (or `UDP_BATCH=1`) enables Linux `sendmmsg` submission of unpaced
+send windows and retransmission groups. It is off by default. Non-Linux hosts,
+partial batches, and any `--tx-delay-ms` setting use the original per-packet
+path. Sequence numbers, retransmission contents, metrics, and traces are
+unchanged. Enable it only after measuring your own router; loopback benchmarks
+have not established a universal throughput advantage.
 
 ## Not claimed
 

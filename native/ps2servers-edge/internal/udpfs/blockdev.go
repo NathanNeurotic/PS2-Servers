@@ -389,15 +389,10 @@ func (s *Server) completeFileBlockWrite(st *session.State, handle int32, buf []b
 	s.sendWriteDone(st, int32(len(buf)))
 }
 
-// openImage opens a game image with the configured cache size, and without the
-// decompression layer when --no-compression is set.
-//
-// With compression off a CSO/ZSO container is served as the raw bytes on disk.
-// That is what the flag means on the Desktop server and udpfsd: it is a
-// diagnostic for comparing against an undecoded transfer, not a way to make a
-// console read a compressed image -- the PS2 cannot interpret those bytes.
-func (s *Server) openImage(path string) (*compression.Image, error) {
-	if s.cfg.NoCompression {
+// openImage opens raw existing paths byte-for-byte and decodes only virtual
+// ISO aliases. --no-compression suppresses aliases and always selects raw I/O.
+func (s *Server) openImage(path string, decompress bool) (*compression.Image, error) {
+	if s.cfg.NoCompression || !decompress {
 		return compression.OpenRaw(path)
 	}
 	cache := s.cfg.CompressionCache

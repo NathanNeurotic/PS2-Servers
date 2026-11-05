@@ -11,7 +11,6 @@ import (
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -172,32 +171,91 @@ func cString(b []byte) (string, error) {
 	}
 	return string(b), nil
 }
-func (s *Server) resolveImagePath(client string) (string, error) {
-	p, err := s.root.Resolve(client, false)
-	if err == nil {
-		return p, nil
+func compressedImageExtensions() []string {
+	extensions := []string{".cso", ".ciso", ".zso", ".ziso"}
+	if compression.CHDAvailable {
+		extensions = append(extensions, ".chd")
 	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	// With --no-compression a missing .iso must stay missing: answering with a
-	// CSO/ZSO container under an .iso name would hand the console bytes it
-	// cannot read.
-	if !s.compressedSiblingsEnabled() {
-		return "", err
-	}
-	if !strings.HasSuffix(strings.ToLower(client), ".iso") {
-		return "", err
-	}
-	base := client[:len(client)-4]
-	for _, ext := range []string{".cso", ".ciso", ".zso", ".ziso"} {
-		candidate, er := s.root.Resolve(base+ext, false)
-		if er == nil {
-			return candidate, nil
+	return extensions
+}
+
+func hasCompressedImageExtension(name string) bool {
+	lower := strings.ToLower(name)
+	for _, ext := range compressedImageExtensions() {
+		if strings.HasSuffix(lower, ext) {
+			return true
 		}
 	}
-	return "", err
+	return false
 }
+
+func (s *Server) resolveImagePath(client string) (string, bool, error) {
+	if s.root == nil {
+		return "", false, os.ErrNotExist
+	}
+	p, err := s.root.Resolve(client, false)
+	if err == nil {
+		return p, false, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", false, err
+	}
+	if !s.compressedSiblingsEnabled() || !strings.HasSuffix(strings.ToLower(client), ".iso") {
+		return "", false, err
+	}
+	base := client[:len(client)-4]
+	if hasCompressedImageExtension(base) {
+		candidate, er := s.root.Resolve(base, false)
+		if er != nil {
+			return "", false, er
+		}
+		return candidate, true, nil
+	}
+	first := ""
+	for _, ext := range compressedImageExtensions() {
+		candidate, er := s.root.Resolve(base+ext, false)
+		if er != nil {
+			continue
+		}
+		if first == "" {
+			first = candidate
+		}
+		if _, err := compression.SizeOf(candidate); err == nil {
+			return candidate, true, nil
+		}
+	}
+	if first != "" {
+		return first, true, nil
+	}
+	return "", false, err
+}
+
+func (s *Server) prepareDirectory(entries []session.DirEntry) []session.DirEntry {
+	realNames := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		realNames[entry.Name] = struct{}{}
+	}
+	out := make([]session.DirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !s.compressedSiblingsEnabled() || !hasCompressedImageExtension(entry.Name) {
+			out = append(out, entry)
+			continue
+		}
+		alias := entry.Name + ".iso"
+		if _, exists := realNames[alias]; exists || len(alias) > 255 {
+			continue
+		}
+		size, err := compression.SizeOf(entry.SourcePath)
+		if err != nil {
+			continue
+		}
+		entry.Name = alias
+		entry.Size = uint64(size)
+		out = append(out, entry)
+	}
+	return out
+}
+
 func (s *Server) handleOpen(st *session.State, p []byte) {
 	if len(p) < 8 {
 		s.sendOpen(st, -eINVAL, 0, 0)
@@ -223,12 +281,16 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 	id := st.NextHandle
 	st.NextHandle++
 	if isDir {
+		if s.root == nil {
+			s.sendOpen(st, -eNOENT, 0, 0)
+			return
+		}
 		entries, err := s.root.List(path)
 		if err != nil {
 			s.sendOpen(st, errno(err), 0, 0)
 			return
 		}
-		st.Handles[id] = &session.Handle{Directory: entries}
+		st.Handles[id] = &session.Handle{Directory: s.prepareDirectory(entries)}
 		s.sendOpen(st, id, 0x1000, 0)
 		return
 	}
@@ -236,12 +298,12 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 		s.openForWrite(st, id, path, flags)
 		return
 	}
-	real, err := s.resolveImagePath(path)
+	real, decompress, err := s.resolveImagePath(path)
 	if err != nil {
 		s.sendOpen(st, errno(err), 0, 0)
 		return
 	}
-	img, err := s.openImage(real)
+	img, err := s.openImage(real, decompress)
 	if err != nil {
 		s.sendOpen(st, errno(err), 0, 0)
 		return
@@ -258,6 +320,10 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 // image. A write to a compressed file is refused outright, and a compressed
 // sibling is never substituted for a missing .iso the way the read path does.
 func (s *Server) openForWrite(st *session.State, id int32, path string, flags uint16) {
+	if s.root == nil {
+		s.sendOpen(st, -eNOENT, 0, 0)
+		return
+	}
 	create := flags&0x0200 != 0
 	truncate := flags&0x0400 != 0
 	appendMode := flags&0x0100 != 0
@@ -346,6 +412,10 @@ func (s *Server) handleClose(st *session.State, p []byte) {
 		return
 	}
 	id := int32(binary.LittleEndian.Uint32(p[4:8]))
+	if id == blockHandle {
+		s.sendSimple(st, result8(protocol.CloseReply, 0))
+		return
+	}
 	// CloseHandle also drops any single-writer reservation and discards a
 	// partially assembled write aimed at this handle.
 	if !st.CloseHandle(id) {
@@ -604,27 +674,6 @@ func (s *Server) handleDRead(st *session.State, p []byte) {
 	}
 	entry := h.Directory[h.Index]
 	h.Index++
-	// Compressed containers are listed under an .iso name with their
-	// decompressed size, so the console sees what it will actually receive.
-	// --no-compression turns that off: the entry keeps its real name and size.
-	if s.compressedSiblingsEnabled() {
-		lower := strings.ToLower(entry.Name)
-		for _, ext := range []string{".cso", ".ciso", ".zso", ".ziso"} {
-			if strings.HasSuffix(lower, ext) {
-				entry.Name = entry.Name[:len(entry.Name)-len(ext)] + ".iso"
-				// SizeOf, not openImage: this needs one number out of the
-				// 24-byte header, and opening the image to get it built the
-				// whole block index -- megabytes per entry, discarded
-				// immediately, once for every compressed game in the folder.
-				// Reachable by a console simply listing a directory, which is
-				// what made it the likeliest way to exhaust a small router.
-				if size, err := compression.SizeOf(entry.SourcePath); err == nil {
-					entry.Size = uint64(size)
-				}
-				break
-			}
-		}
-	}
 	s.sendDRead(st, 1, entry)
 }
 func (s *Server) sendDRead(st *session.State, result int32, e session.DirEntry) {
@@ -656,7 +705,11 @@ func (s *Server) handleGetStat(st *session.State, p []byte) {
 		s.sendGetStat(st, -eNAMETOOLONG, 0, 0)
 		return
 	}
-	real, err := s.resolveImagePath(path)
+	if path == "" && s.blockDev != nil {
+		s.sendGetStat(st, 0, 0, uint64(s.blockDev.sectorCount()*s.blockDev.sectorSize))
+		return
+	}
+	real, decompress, err := s.resolveImagePath(path)
 	if err != nil {
 		s.sendGetStat(st, errno(err), 0, 0)
 		return
@@ -667,12 +720,13 @@ func (s *Server) handleGetStat(st *session.State, p []byte) {
 		return
 	}
 	size := uint64(info.Size())
-	if ext := strings.ToLower(filepath.Ext(real)); s.compressedSiblingsEnabled() &&
-		(ext == ".cso" || ext == ".ciso" || ext == ".zso" || ext == ".ziso") {
-		// Header only, for the same reason as the DREAD path above.
-		if n, e := compression.SizeOf(real); e == nil {
-			size = uint64(n)
+	if decompress && s.compressedSiblingsEnabled() {
+		n, e := compression.SizeOf(real)
+		if e != nil {
+			s.sendGetStat(st, errno(e), 0, 0)
+			return
 		}
+		size = uint64(n)
 	}
 	s.sendGetStat(st, 0, filesystem.Mode(info), size)
 }

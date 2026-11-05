@@ -1,11 +1,15 @@
 package udpfs
 
 import (
+	"errors"
+
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/protocol"
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"net"
 	"time"
 )
+
+var errUDPBatchUnsupported = errors.New("UDP batching is unsupported on this platform")
 
 func (s *Server) handleControl(st *session.State, dh protocol.DataHeader) {
 	st.Mu.Lock()
@@ -92,19 +96,20 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 		"peer": in.peer.String(), "socket": in.socket, "sequence": h.Sequence,
 		"profile": st.Profile, "streaming": st.Streaming, "quiet": quiet.String(), "known": known,
 	})
-	// Both client families may keep broadcasting sequence-zero discovery while
-	// an established transfer is active, but a new loader can also take over the
-	// same UDP endpoint immediately. RiptOPL -> Neutrino does exactly that: the
-	// old stream can still be hot when Neutrino starts a fresh sequence at 0/1.
-	// Do not destroy the old stream on discovery alone; mark the ambiguity and
-	// let the next payload-bearing DATA packet resolve it.
-	if st.Streaming && h.Sequence == 0 {
-		st.PendingZeroDiscovery = time.Now()
-		// A console that keeps broadcasting discovery mid-reply is alive: both
-		// client families poll discovery for the life of a transfer, and the
-		// reference server resets its retransmit budget on any inbound peer
-		// packet. Surface the validated discovery as liveness so confirmWindow's
-		// quiet budget resets; the stream itself still resolves on the next DATA.
+	// Discovery never proves that an established stream ended. Record a
+	// possible replacement sequence and resolve it on subsequent payload DATA.
+	if st.Streaming {
+		st.Touch()
+		if h.Sequence == 0 {
+			st.PendingZeroDiscovery = time.Now()
+			st.PendingDiscoverySequence = nil
+		} else {
+			sequence := h.Sequence
+			st.PendingDiscoverySequence = &sequence
+			st.PendingZeroDiscovery = time.Time{}
+		}
+		// A console that keeps broadcasting discovery mid-reply is alive. Surface
+		// the validated packet as liveness without acknowledging TX progress.
 		select {
 		case st.AckEvents <- session.AckEvent{ACK: false, Sequence: h.Sequence}:
 		default:
@@ -232,11 +237,68 @@ func (s *Server) sendOn(which session.Socket, p []byte, peer *net.UDPAddr) {
 		s.cfg.Log.Debug("UDP send failed", fields)
 		return
 	}
+	s.recordSendSuccess(conn, which, peer, p, n)
+}
+
+func (s *Server) recordSendSuccess(conn *net.UDPConn, which session.Socket, peer *net.UDPAddr, p []byte, n int) {
 	if s.cfg.MetricsPeriod > 0 {
 		s.stats.recordTX(which, n)
 	}
 	if s.cfg.Log.Verbose {
 		s.cfg.Log.Debug("UDP TX", datagramTraceFields(conn, which, peer, p, n))
+	}
+}
+
+func (s *Server) sendPackets(which session.Socket, packets [][]byte, peer *net.UDPAddr) {
+	if len(packets) == 0 {
+		return
+	}
+	if len(packets) == 1 || !s.cfg.UDPBatch || s.cfg.TxDelay > 0 {
+		for _, packet := range packets {
+			s.sendOn(which, packet, peer)
+		}
+		return
+	}
+	conn := s.data
+	if which == session.DiscoverySocket {
+		conn = s.discovery
+	}
+	if conn == nil {
+		return
+	}
+	s.batchWriteMu.Lock()
+	if s.batchWrite == nil || (s.batchWriteConn != nil && s.batchWriteConn != conn) {
+		s.batchWrite = newUDPBatchWriter(conn)
+		s.batchWriteConn = conn
+	}
+	writeBatch := s.batchWrite
+	s.batchWriteMu.Unlock()
+	n, err := writeBatch(peer, packets)
+	if n < 0 {
+		n = 0
+	}
+	if n > len(packets) {
+		n = len(packets)
+	}
+	for _, packet := range packets[:n] {
+		s.recordSendSuccess(conn, which, peer, packet, len(packet))
+	}
+	if err == errUDPBatchUnsupported {
+		for _, packet := range packets[n:] {
+			s.sendOn(which, packet, peer)
+		}
+		return
+	}
+	if err != nil || n < len(packets) {
+		if err != nil && s.cfg.MetricsPeriod > 0 {
+			s.stats.txSendErrors.Add(1)
+		}
+		s.cfg.Log.Debug("UDP batch send incomplete", map[string]any{
+			"peer": peer.String(), "socket": which, "packets": len(packets), "written_packets": n, "error": err,
+		})
+		for _, packet := range packets[n:] {
+			s.sendOn(which, packet, peer)
+		}
 	}
 }
 
@@ -298,6 +360,31 @@ func (s *Server) handleData(st *session.State, in inbound) {
 			st.Touch()
 			s.stats.sequenceResets.Add(1)
 			s.cfg.Log.Info("seq0 discovery resolved to replacement session", map[string]any{
+				"peer": inboundPeerString(in.peer), "socket": in.socket,
+				"old_expected": expected, "first_data_sequence": h.Sequence,
+				"profile": profile,
+			})
+		}
+	}
+
+	if len(payload) > 0 && st.PendingDiscoverySequence != nil {
+		discovery := *st.PendingDiscoverySequence
+		switch {
+		case h.Sequence == st.ExpectedReceive:
+			st.PendingDiscoverySequence = nil
+		case h.Sequence == protocol.Next(discovery):
+			expected := st.ExpectedReceive
+			profile := session.Pending
+			if s.cfg.ProtocolMode == session.Standard || s.cfg.ProtocolMode == session.Modulo {
+				profile = s.cfg.ProtocolMode
+			}
+			st.HandOff(profile)
+			st.DiscoverySequence = discovery
+			st.FallbackGeneration++
+			st.ResponseSocket = in.socket
+			st.Touch()
+			s.stats.sequenceResets.Add(1)
+			s.cfg.Log.Info("nonzero discovery resolved to replacement session", map[string]any{
 				"peer": inboundPeerString(in.peer), "socket": in.socket,
 				"old_expected": expected, "first_data_sequence": h.Sequence,
 				"profile": profile,
@@ -375,8 +462,8 @@ func (s *Server) handleData(st *session.State, in inbound) {
 			return
 		}
 		if h.Sequence == 0 {
-			// A peer restarted on the same address (e.g. NHDDL -> Neutrino handoff).
-			// Reset connection state so old handles and sequence numbers do not leak into the replacement session.
+			// A DATA-first restart still owns inherited FILEID handles. Reset only
+			// transport and mark those handles for the replacement loader.
 			prof := st.Profile
 			if prof == "" || prof == session.Pending {
 				prof = session.Standard
@@ -386,7 +473,7 @@ func (s *Server) handleData(st *session.State, in inbound) {
 				"expected": expected, "received": h.Sequence, "ack": dh.AckSequence,
 				"flags": dh.Flags, "outcome": "session_reset",
 			})
-			st.Reset(prof)
+			st.HandOff(prof)
 			st.ResponseSocket = in.socket
 			st.ExpectedReceive = 0
 			st.Touch()

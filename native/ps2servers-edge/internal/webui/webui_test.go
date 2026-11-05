@@ -666,3 +666,53 @@ func TestServerPortFallback(t *testing.T) {
 		t.Fatalf("Serve returned error: %v", err)
 	}
 }
+
+func TestUDPFSConfigRequiresRootOrBlockDevice(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.UDPFS.Root = ""
+	cfg.UDPFS.BlockDevice = "/mnt/ps2.img"
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("block-device-only UDPFS config rejected: %v", err)
+	}
+	cfg.UDPFS.BlockDevice = ""
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatal("UDPFS config with neither root nor block device was accepted")
+	}
+}
+
+func TestUDPBatchConfigDefaultsOffAndAppearsInSchema(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.UDPFS.UDPBatch {
+		t.Fatal("UDP batching is enabled by default")
+	}
+	for _, section := range schema("test").Sections {
+		if section.Name != "udpfs" {
+			continue
+		}
+		for _, field := range section.Fields {
+			if field.Name == "udp_batch" {
+				if field.Type != TypeBool || field.Default != false {
+					t.Fatalf("udp_batch schema = %+v", field)
+				}
+				if schemaVersion < 3 {
+					t.Fatalf("schema version = %d, want at least 3", schemaVersion)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("udp_batch is missing from the schema")
+}
+
+func TestUCIBoolMatchesOpenWrtTrueValues(t *testing.T) {
+	for _, value := range []string{"1", "true", "on", "yes", "enabled"} {
+		if !uciBool(value) {
+			t.Errorf("uciBool(%q) = false, want true", value)
+		}
+	}
+	for _, value := range []string{"0", "false", "off", "no", "disabled", ""} {
+		if uciBool(value) {
+			t.Errorf("uciBool(%q) = true, want false", value)
+		}
+	}
+}

@@ -16,14 +16,13 @@ import (
 )
 
 const (
-	defaultFallback     = 250 * time.Millisecond
-	sessionReplaceQuiet = 1 * time.Second
-	windowSize          = 8
-	windowAckTimeout    = 100 * time.Millisecond
-	maxWindowRetries    = 200
-	maxDatagram         = 64 * 1024
-	maxPathBytes        = 1024
-	maxHandles          = 64
+	defaultFallback  = 250 * time.Millisecond
+	windowSize       = 8
+	windowAckTimeout = 100 * time.Millisecond
+	maxWindowRetries = 200
+	maxDatagram      = 64 * 1024
+	maxPathBytes     = 1024
+	maxHandles       = 64
 )
 
 type Config struct {
@@ -35,7 +34,10 @@ type Config struct {
 	ProtocolMode session.Profile
 	PeerTimeout  time.Duration
 	TxDelay      time.Duration
-	ReadOnly     bool
+	// UDPBatch enables Linux sendmmsg batching when TxDelay is zero. The
+	// portable per-packet path remains the default and the paced fallback.
+	UDPBatch bool
+	ReadOnly bool
 	// WindowAckTimeout is the quiet wait on a reply window before its packets
 	// are retransmitted. MaxWindowRetries bounds consecutive quiet waits before
 	// a transfer is aborted; either peer activity or forward progress resets
@@ -44,8 +46,8 @@ type Config struct {
 	// default when zero and are set explicitly only by tests.
 	WindowAckTimeout time.Duration
 	MaxWindowRetries int
-	// BlockDevice serves one disk image over UDPFS BREAD/BWRITE alongside the
-	// file share, as the Desktop server's --block-device and udpfsd's -bdpath
+	// BlockDevice serves one disk image over UDPFS BREAD/BWRITE, with or without
+	// a file share, as the Desktop server's --block-device and udpfsd's -bdpath
 	// do. Empty disables it.
 	BlockDevice string
 	// SectorSize applies to that image. 512 is what every known client uses;
@@ -86,6 +88,7 @@ type peerWorker struct {
 	state    *session.State
 	queue    chan inbound
 	done     chan struct{}
+	exited   chan struct{}
 	stopOnce sync.Once
 }
 
@@ -93,17 +96,23 @@ func (w *peerWorker) stop() {
 	w.stopOnce.Do(func() { close(w.done) })
 }
 
+type udpBatchWriter func(addr *net.UDPAddr, packets [][]byte) (int, error)
+
 type Server struct {
-	cfg        Config
-	root       *filesystem.Root
-	discovery  *net.UDPConn
-	data       *net.UDPConn
-	sessionsMu sync.Mutex
-	sessions   map[string]*peerWorker
-	incoming   chan inbound
-	closed     chan struct{}
-	closeOnce  sync.Once
-	wg         sync.WaitGroup
+	cfg            Config
+	root           *filesystem.Root
+	discovery      *net.UDPConn
+	data           *net.UDPConn
+	batchWrite     udpBatchWriter
+	batchWriteMu   sync.Mutex
+	batchWriteConn *net.UDPConn
+	sessionsMu     sync.Mutex
+	sessions       map[string]*peerWorker
+	incoming       chan inbound
+	closed         chan struct{}
+	closeOnce      sync.Once
+	wg             sync.WaitGroup
+	expiryWG       sync.WaitGroup
 
 	stats    metrics
 	summary  *sessionstats.Stats // nil unless cfg.SessionSummary
@@ -199,9 +208,16 @@ func New(cfg Config) (*Server, error) {
 	if cfg.MaxTransferBytes <= 0 {
 		cfg.MaxTransferBytes = memory.Detect().TransferCap(preferredTransfer)
 	}
-	root, err := filesystem.Open(cfg.Root)
-	if err != nil {
-		return nil, err
+	if cfg.Root == "" && cfg.BlockDevice == "" {
+		return nil, fmt.Errorf("root or block device is required")
+	}
+	var root *filesystem.Root
+	var err error
+	if cfg.Root != "" {
+		root, err = filesystem.Open(cfg.Root)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s := &Server{cfg: cfg, root: root, sessions: make(map[string]*peerWorker), incoming: make(chan inbound, 256), closed: make(chan struct{}), transferCap: cfg.MaxTransferBytes}
 	s.stats.started = time.Now()
@@ -268,7 +284,11 @@ func (s *Server) Serve(ctx context.Context) error {
 	// transfer_cap is logged because it is derived from the host's RAM rather
 	// than fixed: an operator on a small router who sees a large write refused
 	// should be able to find the reason in the first line of the log.
-	s.cfg.Log.Info("UDPFS listening", map[string]any{"root": s.root.Path(), "discovery": disc.String(), "data": data.String(), "protocol": s.cfg.ProtocolMode, "read_only": s.cfg.ReadOnly, "transfer_cap": s.transferCap})
+	rootPath := "<disabled>"
+	if s.root != nil {
+		rootPath = s.root.Path()
+	}
+	s.cfg.Log.Info("UDPFS listening", map[string]any{"root": rootPath, "discovery": disc.String(), "data": data.String(), "protocol": s.cfg.ProtocolMode, "read_only": s.cfg.ReadOnly, "transfer_cap": s.transferCap})
 	s.wg.Add(1)
 	go s.readLoop(s.discovery, session.DiscoverySocket)
 	if s.data != s.discovery {
@@ -330,8 +350,12 @@ func (s *Server) Close() error {
 			w.stop()
 		}
 		// Every worker is in s.wg, so this returns only once none of them can
-		// still be touching a session.
+		// still be touching a session. Expiry cleanup is tracked separately;
+		// sessionsMu prevents new drain registrations while it completes.
 		s.wg.Wait()
+		s.sessionsMu.Lock()
+		s.expiryWG.Wait()
+		s.sessionsMu.Unlock()
 		for _, w := range workers {
 			w.state.Close()
 		}
@@ -381,33 +405,42 @@ func (s *Server) reaper() {
 		case <-s.closed:
 			return
 		case now := <-tick.C:
-			type expiredSession struct {
-				key string
-				w   *peerWorker
-				id  time.Duration
-			}
-			var expired []expiredSession
-			s.sessionsMu.Lock()
-			for key, w := range s.sessions {
-				w.state.Mu.Lock()
-				idle := now.Sub(w.state.LastActivity)
-				w.state.Mu.Unlock()
-				if idle > s.cfg.PeerTimeout {
-					expired = append(expired, expiredSession{key: key, w: w, id: idle})
-					delete(s.sessions, key)
-				}
-			}
-			s.sessionsMu.Unlock()
-
-			for _, item := range expired {
-				item.w.state.Mu.Lock()
-				item.w.state.Close()
-				item.w.state.Mu.Unlock()
-				item.w.stop()
-				s.cfg.Log.Info("session expired", map[string]any{"peer": item.key, "idle": item.id.String()})
-			}
+			s.expireSessions(now)
 			s.summary.Expire() // consoles quiet for a minute get their SESSION line
 		}
+	}
+}
+
+func (s *Server) expireSessions(now time.Time) {
+	type expiredSession struct {
+		key string
+		w   *peerWorker
+		id  time.Duration
+	}
+	var expired []expiredSession
+	s.sessionsMu.Lock()
+	for key, w := range s.sessions {
+		w.state.Mu.Lock()
+		idle := now.Sub(w.state.LastActivity)
+		w.state.Mu.Unlock()
+		if idle > s.cfg.PeerTimeout {
+			expired = append(expired, expiredSession{key: key, w: w, id: idle})
+			delete(s.sessions, key)
+			s.expiryWG.Add(1)
+		}
+	}
+	s.sessionsMu.Unlock()
+
+	for _, item := range expired {
+		item.w.stop()
+		go func(item expiredSession) {
+			defer s.expiryWG.Done()
+			<-item.w.exited
+			item.w.state.Mu.Lock()
+			item.w.state.Close()
+			item.w.state.Mu.Unlock()
+			s.cfg.Log.Info("session expired", map[string]any{"peer": item.key, "idle": item.id.String()})
+		}(item)
 	}
 }
 
@@ -418,58 +451,7 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	if w := s.sessions[key]; w != nil {
 		return w
 	}
-	// Evict any stale session from the same remote IP address (e.g. PS2 rebooted and changed source port),
-	// but skip loopback test peers (127.0.0.1) so multi-client unit tests are not evicted.
 	peerIP := peer.IP.String()
-	if !peer.IP.IsLoopback() {
-		var oldKey string
-		var oldWorker *peerWorker
-		var replacementFields map[string]any
-		now := time.Now()
-		for k, w := range s.sessions {
-			if w.state != nil && w.state.Peer != nil && w.state.Peer.IP.Equal(peer.IP) {
-				w.state.Mu.Lock()
-				quiet := now.Sub(w.state.LastActivity)
-				writeActive := w.state.WriteActive
-				w.state.Mu.Unlock()
-				eligible := !writeActive || quiet > sessionReplaceQuiet
-				reason := "active_write_recent"
-				if !writeActive {
-					reason = "no_active_write"
-				} else if eligible {
-					reason = "active_write_quiet_over_1s"
-				}
-				candidateFields := map[string]any{
-					"ip":              peerIP,
-					"old_peer":        k,
-					"new_peer":        key,
-					"old_source_port": w.state.Peer.Port,
-					"new_source_port": peer.Port,
-					"quiet":           quiet.String(),
-					"write_active":    writeActive,
-					"eligible":        eligible,
-					"reason":          reason,
-				}
-				s.cfg.Log.Debug("same-IP session replacement candidate", candidateFields)
-				if eligible {
-					oldKey = k
-					oldWorker = w
-					replacementFields = candidateFields
-					break
-				}
-			}
-		}
-		if oldWorker != nil {
-			s.cfg.Log.Info("replacing stale session for IP", replacementFields)
-			s.stats.sameIPReplacements.Add(1)
-			delete(s.sessions, oldKey)
-			oldWorker.state.Mu.Lock()
-			oldWorker.state.Close()
-			oldWorker.state.Mu.Unlock()
-			oldWorker.stop()
-		}
-	}
-
 	if len(s.sessions) >= 256 {
 		s.cfg.Log.Warn("max session limit reached", map[string]any{"peer": key})
 		return nil
@@ -484,7 +466,7 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	// reap, server shutdown -- runs through State, so hooking release here
 	// means a peer that disappears mid-write cannot strand a reservation.
 	st.ReleaseWriter = s.releaseWriter
-	w := &peerWorker{state: st, queue: make(chan inbound, 256), done: make(chan struct{})}
+	w := &peerWorker{state: st, queue: make(chan inbound, 256), done: make(chan struct{}), exited: make(chan struct{})}
 	s.sessions[key] = w
 	s.sessionRecord(st, "connections", 1) // a DISCOVERY that made a session: the console found us
 	s.cfg.Log.Debug("session created", map[string]any{
@@ -519,6 +501,7 @@ func (s *Server) sessionTouch(st *session.State) {
 
 func (s *Server) worker(w *peerWorker) {
 	defer s.wg.Done()
+	defer close(w.exited)
 	for {
 		select {
 		case <-w.done:

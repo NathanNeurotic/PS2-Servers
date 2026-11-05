@@ -88,8 +88,13 @@ Edge operates on a one-command-per-process model. To run multiple services concu
   <tbody>
     <tr>
       <td><code>--root PATH</code></td>
-      <td><i>(Required)</i></td>
+      <td><i>(Required unless <code>--block-device</code> is set)</i></td>
       <td>Root folder holding your <code>DVD/</code> and <code>CD/</code> collections.</td>
+    </tr>
+    <tr>
+      <td><code>--block-device PATH</code></td>
+      <td><code>""</code> (disabled)</td>
+      <td>Serve this disk image through UDPFS BREAD/BWRITE. May be used without <code>--root</code>; empty-path GETSTAT reports sector-aligned image capacity.</td>
     </tr>
     <tr>
       <td><code>--bind IP</code></td>
@@ -120,6 +125,11 @@ Edge operates on a one-command-per-process model. To run multiple services concu
       <td><code>--peer-timeout</code></td>
       <td><code>1h</code></td>
       <td>Inactivity duration before closing peer handles (accepts <code>1m</code> to <code>24h</code>).</td>
+    </tr>
+    <tr>
+      <td><code>--udp-batch</code></td>
+      <td><code>false</code></td>
+      <td>Opt-in Linux UDP window batching. Used only when pacing is zero; partial batches fall back to individual sends.</td>
     </tr>
     <tr>
       <td><code>--read-only</code></td>

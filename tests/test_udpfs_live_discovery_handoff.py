@@ -341,8 +341,8 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         self.assertEqual(ack_packets[0]["ack_sequence"], 1)
         self.assertEqual(ack_packets[0]["flags"] & 0x1, 0x1)
 
-    def test_active_stream_nonzero_still_preserved_without_inform(self):
-        """Existing nonzero guard must remain: active + seq!=0 + quiet<2s -> no reset, no inform."""
+    def test_active_stream_nonzero_preserved_with_canonical_inform(self):
+        """Nonzero discovery preserves the stream and receives canonical INFORM."""
         addr = ("192.0.2.10", 5002)
         server = _make_server(protocol_mode="auto")
         sess = _make_active_session(addr, quiet_seconds=0.5)
@@ -364,11 +364,11 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         finally:
             time.monotonic = real_mono
 
-        self.assertEqual(len(canonical_calls), 0)
+        self.assertEqual(len(canonical_calls), 1)
         self.assertEqual(len(reset_calls), 0)
         self.assertIn(1, sess.handles)
         self.assertTrue(sess.rx_streaming)
-        self.assertEqual(len(server._sent), 0)
+        self.assertEqual(len(server._sent), 1)
 
     def test_modulo_mode_unchanged(self):
         """Modulo mode must not be affected by new seq0 guard (early modulo branch)."""
@@ -420,7 +420,7 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         finally:
             time.monotonic = real_mono
         self.assertTrue(any("DISCOVERY seq=0 during active stream" in m for m in logs))
-        self.assertTrue(any("defer replacement decision" in m for m in logs))
+        self.assertTrue(any("preserve existing session" in m for m in logs))
 
     def test_recent_seq0_then_old_expected_data_preserves_session(self):
         """Background seq0 discovery followed by the old stream stays live."""
@@ -539,6 +539,36 @@ class LiveDiscoveryHandoffTests(unittest.TestCase):
         self.assertEqual(replies[0][0], addr)
         self.assertEqual(replies[0][1], 512)
         self.assertEqual(replies[0][2], game_data[:512])
+
+    def test_nonzero_discovery_data_selects_continuation_or_handoff(self):
+        cases = (
+            ("continuation", 7, 2213, CORE.PROFILE_STANDARD, 2214),
+            ("replacement", 7, 8, CORE.PROFILE_MODULO, 9),
+            ("wrapped replacement", 4095, 0, CORE.PROFILE_MODULO, 1),
+        )
+        for name, discovery, first_data, profile, next_sequence in cases:
+            with self.subTest(name=name):
+                addr = ("192.0.2.10", 5009)
+                server = _make_server(protocol_mode="auto")
+                sess = _make_active_session(addr, handle_id=81)
+                sess.handles[81] = _FakeHandle(b"game" * 256)
+                sess._handle_ref = sess.handles[81]
+                sess.next_handle = 82
+                sess.rx_seq_nr_expected = 2213
+                server.sessions[addr] = sess
+                server._get_or_create_session = lambda a: sess
+                server._handle_discovery(_pack_discovery(discovery), addr)
+                self.assertEqual(sess.rx_seq_nr_expected, 2213)
+                consumed, acknowledgements = _exercise_payload_data(
+                    server, sess, addr, first_data)
+                self.assertEqual(len(consumed), 1,
+                                 "valid post-discovery DATA was rejected")
+                self.assertEqual(acknowledgements[0]["flags"] & 0x1, 0x1)
+                self.assertEqual(sess.protocol_profile, profile)
+                self.assertEqual(sess.rx_seq_nr_expected, next_sequence)
+                self.assertFalse(sess._handle_ref.closed)
+                self.assertIs(sess.handles[81], sess._handle_ref)
+                self.assertEqual(sess.next_handle, 82)
 
     def test_standard_mode_preserves_too(self):
         """Preservation must be profile-agnostic (standard mode)."""

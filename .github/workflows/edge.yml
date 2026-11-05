@@ -73,6 +73,13 @@ jobs:
           python udpfs_server/multiclient_selftest.py
           python udpfs_server/pathguard_selftest.py
           python udpfs_server/compression_selftest.py
+      - name: Install libchdr for optional Edge CHD tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libchdr-dev
+      - name: Test optional CHD build
+        working-directory: native/ps2servers-edge
+        run: CGO_ENABLED=1 go test -tags chd ./internal/compression ./internal/udpfs -count=1
 
       # Drives the shared conformance probe against a real Edge process over
       # real UDP sockets: standards client plus three Modulo-shaped ones,
@@ -178,9 +185,46 @@ jobs:
           echo "Edge and Core wrote byte-identical images"
         working-directory: native/ps2servers-edge
 
+  udpfs-parity:
+    name: Differential UDPFS parity
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.25"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Check out the pinned udpfsd reference
+        run: |
+          set -euo pipefail
+          git init udpfsd
+          git -C udpfsd remote add origin https://github.com/pcm720/udpfsd.git
+          git -C udpfsd fetch --depth 1 origin ee94414f9f45ed33b8dd4ca4e03847440df946e9
+          git -C udpfsd checkout --detach FETCH_HEAD
+      - name: Build the reference and Edge
+        run: |
+          set -euo pipefail
+          pushd udpfsd
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/udpfsd-reference" ./cmd/udpfsd
+          popd
+          cd native/ps2servers-edge
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/ps2servers-edge" ./cmd/ps2servers-edge
+      - name: Run three-server differential conformance
+        run: |
+          python conformance/integration/udpfs_parity.py \
+            --reference-binary "$RUNNER_TEMP/udpfsd-reference" \
+            --edge-binary "$RUNNER_TEMP/ps2servers-edge"
+
   build:
     name: Build Edge
-    needs: test
+    needs: [test, udpfs-parity]
+    # Tagged releases use release.yml's shared job so its notes see these artifacts.
+    if: github.ref_type != 'tag'
     permissions:
       contents: write
       id-token: write

@@ -35,7 +35,7 @@ func TestConfirmWindowPeerActivityResetsQuietBudget(t *testing.T) {
 	s := newTestServer(t)
 	st := session.New(&net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9699}, session.Standard)
 	for seq := uint16(0); seq < 3; seq++ {
-		st.TxBuffer = append(st.TxBuffer, session.BufferedPacket{Sequence: seq})
+		st.TxBuffer = append(st.TxBuffer, session.BufferedPacket{Sequence: seq, Sent: true})
 	}
 	target := uint16(3)
 
@@ -76,7 +76,7 @@ func TestConfirmWindowPeerActivityResetsQuietBudget(t *testing.T) {
 func TestConfirmWindowQuietPeerAborts(t *testing.T) {
 	s := newTestServer(t)
 	st := session.New(&net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9699}, session.Standard)
-	st.TxBuffer = append(st.TxBuffer, session.BufferedPacket{Sequence: 0})
+	st.TxBuffer = append(st.TxBuffer, session.BufferedPacket{Sequence: 0, Sent: true})
 
 	start := time.Now()
 	if s.confirmWindow(st, 1) {
@@ -93,7 +93,7 @@ func TestConfirmWindowProgressResetsQuietBudget(t *testing.T) {
 	s := newTestServer(t)
 	st := session.New(&net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9699}, session.Standard)
 	for seq := uint16(0); seq < 4; seq++ {
-		st.TxBuffer = append(st.TxBuffer, session.BufferedPacket{Sequence: seq})
+		st.TxBuffer = append(st.TxBuffer, session.BufferedPacket{Sequence: seq, Sent: true})
 	}
 	target := uint16(4)
 
@@ -114,7 +114,7 @@ func TestConfirmWindowProgressResetsQuietBudget(t *testing.T) {
 		select {
 		case <-prune.C:
 			st.Mu.Lock()
-			st.TxBuffer = append(st.TxBuffer[1:], session.BufferedPacket{Sequence: next})
+			st.TxBuffer = append(st.TxBuffer[1:], session.BufferedPacket{Sequence: next, Sent: true})
 			next++
 			st.Mu.Unlock()
 		case <-live.C:

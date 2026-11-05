@@ -17,6 +17,7 @@ type UDPFSConfig struct {
 	ReadOnly             bool    `json:"read_only"`
 	PeerTimeout          string  `json:"peer_timeout"`
 	TxDelayMs            float64 `json:"tx_delay_ms"`
+	UDPBatch             bool    `json:"udp_batch"`
 	LogFormat            string  `json:"log_format"`
 	Verbose              bool    `json:"verbose"`
 	BlockDevice          string  `json:"block_device"`
@@ -78,6 +79,7 @@ func DefaultConfig() *EdgeConfig {
 			ReadOnly:             true,
 			PeerTimeout:          "1h",
 			TxDelayMs:            0,
+			UDPBatch:             false,
 			LogFormat:            "text",
 			Verbose:              false,
 			BlockDevice:          "",
@@ -246,6 +248,9 @@ func ValidateConfig(cfg *EdgeConfig) error {
 		}
 	}
 
+	if cfg.UDPFS.Enabled && cfg.UDPFS.Root == "" && cfg.UDPFS.BlockDevice == "" {
+		return fmt.Errorf("udpfs: root or block_device is required")
+	}
 	if cfg.UDPFS.SectorSize <= 0 || cfg.UDPFS.SectorSize > 1<<16 {
 		return fmt.Errorf("udpfs.sector_size: %d is out of range (1-65536)", cfg.UDPFS.SectorSize)
 	}

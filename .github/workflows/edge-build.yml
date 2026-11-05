@@ -2,14 +2,12 @@ name: Build Edge binaries (reusable)
 
 # Single source of truth for the PS2 Servers Edge build matrix and packaging.
 # Called by:
-#   - edge.yml            (PR / push validation, and tagged-release attach)
-#   - release-on-main.yml (so rolling main-* pre-releases carry Edge binaries
-#                          too -- they previously shipped launcher builds only,
-#                          leaving router users to dig through workflow
-#                          artifacts)
+#   - edge.yml            (PR / main-branch validation)
+#   - release.yml         (tagged releases, with artifacts collected for notes)
+#   - release-on-main.yml (rolling pre-releases)
 #
-# Kept as one reusable workflow rather than copied into both callers so the
-# 11-target matrix and its device descriptions cannot drift apart.
+# One reusable workflow keeps the 16-target matrix and device descriptions
+# consistent. The caller publishes all artifacts after its build jobs finish.
 
 on:
   workflow_call:
@@ -465,21 +463,4 @@ jobs:
             out/*.zip
             out/*.zip.sha256
           if-no-files-found: error
-      - name: Attach Edge artifact to tagged release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          # Legs attach files and nothing more. draft: true makes the action's
-          # finalize step a no-op, so a leg can never publish the release
-          # mid-build with an empty body (the first leg used to do exactly
-          # that), and its empty name/body inputs leave the release's metadata
-          # alone. release.yml owns the release: its create-release job makes
-          # the draft every leg finds, and its publish job is the only step
-          # that sets the notes and flips draft -> published.
-          draft: true
-          files: |
-            out/*.tar.gz
-            out/*.tar.gz.sha256
-            out/*.zip
-            out/*.zip.sha256
 

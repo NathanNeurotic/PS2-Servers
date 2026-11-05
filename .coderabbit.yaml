@@ -183,6 +183,9 @@ reviews:
         or an over-broad `permissions:` block, is welcome.
 
   pre_merge_checks:
+    # The repository has not adopted a docstring convention; keep substantive review.
+    docstrings:
+      mode: off
     title:
       mode: warning
     description:

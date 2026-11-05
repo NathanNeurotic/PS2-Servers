@@ -11,6 +11,15 @@ import (
 
 type uciBackend struct{}
 
+func uciBool(value string) bool {
+	switch strings.ToLower(value) {
+	case "1", "on", "true", "yes", "enabled":
+		return true
+	default:
+		return false
+	}
+}
+
 func (b *uciBackend) Load() (*EdgeConfig, error) {
 	cfg := DefaultConfig()
 
@@ -76,6 +85,8 @@ func (b *uciBackend) Load() (*EdgeConfig, error) {
 			if d, err := strconv.ParseFloat(val, 64); err == nil {
 				cfg.UDPFS.TxDelayMs = d
 			}
+		case "ps2servers-edge.main.udp_batch":
+			cfg.UDPFS.UDPBatch = uciBool(val)
 		case "ps2servers-edge.main.log_format":
 			cfg.UDPFS.LogFormat = val
 		case "ps2servers-edge.main.verbose":
@@ -228,6 +239,7 @@ func (b *uciBackend) Save(cfg *EdgeConfig) error {
 	addCmd("main.read_only", cfg.UDPFS.ReadOnly)
 	addCmd("main.peer_timeout", cfg.UDPFS.PeerTimeout)
 	addCmd("main.tx_delay_ms", cfg.UDPFS.TxDelayMs)
+	addCmd("main.udp_batch", cfg.UDPFS.UDPBatch)
 	addCmd("main.log_format", cfg.UDPFS.LogFormat)
 	addCmd("main.verbose", cfg.UDPFS.Verbose)
 	addCmd("main.block_device", cfg.UDPFS.BlockDevice)

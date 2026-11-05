@@ -54,11 +54,13 @@ and open handles. No global client profile exists.
 7. Preserve the selected response socket and protocol counters for that peer.
 
 Sequence, socket, fallback, and file state cannot leak between sessions.
-Sequence-zero background discovery is answered without resetting a recently
-active transfer. A quiet or nonzero re-handshake replaces the old peer state and
-closes its handles. A sequence-zero discovery followed by DATA that starts again
-at 0 or 1 is a new loader taking over the endpoint: the transport is reset but
-the old loader's handles stay open, as Neutrino's FILEID backend needs
+Background discovery of any sequence is answered without resetting an active
+transfer or closing its handles; only sequence zero records an ambiguous loader
+handoff for subsequent DATA to resolve. A quiet or nonzero re-handshake of an
+idle, non-streaming session replaces the old peer state and closes its handles.
+A sequence-zero discovery followed by DATA that starts again at 0 or 1, or
+unexpected payload DATA zero without rediscovery, resets transport while keeping
+the old loader's handles open, as Neutrino's FILEID backend needs
 (`session.State.HandOff`). The new loader opening for writing a file one of
 them holds for writing closes that handle and takes over its write reservation;
 deleting such a file closes the handle the same way.
@@ -71,12 +73,18 @@ force a network topology: DATA is still accepted on either local socket.
 The native sender uses bounded 1408-byte packets, an eight-packet send window,
 cumulative ACK handling, immediate NACK retransmission, final-ACK confirmation,
 and bounded retry counts. ACK/NACK control packets bypass the per-peer request
-queue so a transfer can advance while the request worker is occupied.
+queue so a transfer can advance while the request worker is occupied. Optional
+`--udp-batch` mode submits each unpaced window or retransmission group through
+Linux `ipv4.PacketConn.WriteBatch`, with per-socket cached writers and portable
+per-packet fallback for every unsent suffix. Disabled batching, non-Linux hosts,
+and nonzero `--tx-delay-ms` retain the per-packet path; sequence numbers,
+retransmission contents, metrics, and traces are identical.
 
 ## Filesystem and images
 
-Edge serves writes unless started with `--read-only`. It rejects absolute paths,
-drive-qualified paths, `..`, and symlink escapes before opening files. Directory
+Edge serves writes unless started with `--read-only`. Leading separators are
+UDPFS root-relative syntax; it rejects drive-qualified and device paths, every
+`..` component, and symlink escapes before opening files. Directory
 enumeration omits entries that cannot be resolved safely beneath the configured
 root. `MKDIR`, `REMOVE` and `RMDIR` resolve only the parent of their path
 (`filesystem.Root.Entry`), so like `mkdir(2)`, `unlink(2)` and `rmdir(2)` they
@@ -92,13 +100,19 @@ error code (`crtErrno` in `internal/udpfs/errno.go` follows CPython's table).
 Replies never use Go's `syscall` constants for this: on Windows most of those
 are values Go invented from 2^29 up rather than errno numbers.
 
-Plain files and ISO images are read directly. CSO uses zlib and ZSO uses a
-bounded raw-LZ4 decoder. Compressed images are exposed with virtual `.iso`
-names and their uncompressed size, and decompressed blocks are cached per open
-image up to `--compression-cache-size`. `--no-compression` turns both the
-decoding and the `.iso` substitution off, so a container is served as the raw
-bytes on disk under its real name. CHD is deliberately not in the default
-CGO-free implementation; see [Edge configuration](EDGE.md).
+Plain files, ISO images, and directly named compressed containers are read as
+raw bytes with their on-disk size. CSO uses zlib and ZSO uses a bounded raw-LZ4
+decoder. A compressed container is advertised by appending `.iso` to its full
+name (`game.cso` becomes `game.cso.iso`) and reporting its uncompressed size, so
+a same-stem plain ISO cannot collide with it. That canonical alias decodes its
+exact source; legacy `game.iso` aliases still resolve same-stem containers when
+no plain ISO exists. Decompressed blocks are cached per open image up to
+`--compression-cache-size`. `--no-compression` disables aliases and decoding, so
+a container is served as raw bytes under its real name. CHD is deliberately not
+in the default CGO-free implementation. An explicit `-tags chd` CGO build adds a
+bounded libchdr backend with the same Image read/seek/cache path and enables
+`.chd.iso` aliases only when that backend is present; see
+[Edge configuration](EDGE.md).
 
 `--block-device` additionally serves one image through the UDPFS `BREAD`/
 `BWRITE` opcodes on handle 0, which `OPEN` never returns. Access is positional
