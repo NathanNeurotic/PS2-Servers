@@ -92,19 +92,16 @@ func (s *Server) handleDiscovery(in inbound, h protocol.Header) {
 		"peer": in.peer.String(), "socket": in.socket, "sequence": h.Sequence,
 		"profile": st.Profile, "streaming": st.Streaming, "quiet": quiet.String(), "known": known,
 	})
-	// Both client families may keep broadcasting sequence-zero discovery while
-	// an established transfer is active, but a new loader can also take over the
-	// same UDP endpoint immediately. RiptOPL -> Neutrino does exactly that: the
-	// old stream can still be hot when Neutrino starts a fresh sequence at 0/1.
-	// Do not destroy the old stream on discovery alone; mark the ambiguity and
-	// let the next payload-bearing DATA packet resolve it.
-	if st.Streaming && h.Sequence == 0 {
-		st.PendingZeroDiscovery = time.Now()
-		// A console that keeps broadcasting discovery mid-reply is alive: both
-		// client families poll discovery for the life of a transfer, and the
-		// reference server resets its retransmit budget on any inbound peer
-		// packet. Surface the validated discovery as liveness so confirmWindow's
-		// quiet budget resets; the stream itself still resolves on the next DATA.
+	// Discovery never proves that an established stream ended. Only a
+	// sequence-zero discovery is ambiguous about a loader handoff; resolve that
+	// marker on subsequent payload DATA. Every other discovery sequence is just
+	// background traffic and must not reset transport or close handles.
+	if st.Streaming {
+		if h.Sequence == 0 {
+			st.PendingZeroDiscovery = time.Now()
+		}
+		// A console that keeps broadcasting discovery mid-reply is alive. Surface
+		// the validated packet as liveness without acknowledging TX progress.
 		select {
 		case st.AckEvents <- session.AckEvent{ACK: false, Sequence: h.Sequence}:
 		default:
@@ -375,8 +372,8 @@ func (s *Server) handleData(st *session.State, in inbound) {
 			return
 		}
 		if h.Sequence == 0 {
-			// A peer restarted on the same address (e.g. NHDDL -> Neutrino handoff).
-			// Reset connection state so old handles and sequence numbers do not leak into the replacement session.
+			// A DATA-first restart still owns inherited FILEID handles. Reset only
+			// transport and mark those handles for the replacement loader.
 			prof := st.Profile
 			if prof == "" || prof == session.Pending {
 				prof = session.Standard
@@ -386,7 +383,7 @@ func (s *Server) handleData(st *session.State, in inbound) {
 				"expected": expected, "received": h.Sequence, "ack": dh.AckSequence,
 				"flags": dh.Flags, "outcome": "session_reset",
 			})
-			st.Reset(prof)
+			st.HandOff(prof)
 			st.ResponseSocket = in.socket
 			st.ExpectedReceive = 0
 			st.Touch()

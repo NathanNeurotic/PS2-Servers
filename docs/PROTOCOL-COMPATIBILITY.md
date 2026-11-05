@@ -22,8 +22,9 @@ not classify the protocol profile.
 
 Every session stores its own profile, response socket, receive sequence,
 transmit sequence, fallback state, and file handles. Discovery traffic from one
-peer cannot reset another peer, and a background sequence-zero discovery does
-not reset a recently active transfer.
+peer cannot reset another peer, and background discovery of any sequence does
+not reset an active transfer or close its handles. Sequence zero additionally
+records a possible loader handoff, which subsequent payload DATA must confirm.
 
 ## Standard only — diagnostics
 

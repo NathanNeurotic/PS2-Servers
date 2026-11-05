@@ -54,11 +54,13 @@ and open handles. No global client profile exists.
 7. Preserve the selected response socket and protocol counters for that peer.
 
 Sequence, socket, fallback, and file state cannot leak between sessions.
-Sequence-zero background discovery is answered without resetting a recently
-active transfer. A quiet or nonzero re-handshake replaces the old peer state and
-closes its handles. A sequence-zero discovery followed by DATA that starts again
-at 0 or 1 is a new loader taking over the endpoint: the transport is reset but
-the old loader's handles stay open, as Neutrino's FILEID backend needs
+Background discovery of any sequence is answered without resetting an active
+transfer or closing its handles; only sequence zero records an ambiguous loader
+handoff for subsequent DATA to resolve. A quiet or nonzero re-handshake of an
+idle, non-streaming session replaces the old peer state and closes its handles.
+A sequence-zero discovery followed by DATA that starts again at 0 or 1, or
+unexpected payload DATA zero without rediscovery, resets transport while keeping
+the old loader's handles open, as Neutrino's FILEID backend needs
 (`session.State.HandOff`). The new loader opening for writing a file one of
 them holds for writing closes that handle and takes over its write reservation;
 deleting such a file closes the handle the same way.
