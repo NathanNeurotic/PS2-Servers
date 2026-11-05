@@ -74,7 +74,14 @@ def note(*a):
 
 
 def _local_ipv4_addresses():
-    """IPv4 addresses this host answers on, for the open-share warning."""
+    """IPv4 addresses this host answers on, for the open-share warning.
+
+    Best effort, dependency free. The hostname lookup sees every address on
+    Windows hosts; POSIX hosts whose hostname resolves only to loopback get
+    a per-interface ioctl enumeration instead, and a would-be outbound route
+    covers the rest. An interface the listing misses is exactly why the
+    warning points at --bind rather than relying on this list.
+    """
     ips = set()
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None,
@@ -85,9 +92,26 @@ def _local_ipv4_addresses():
     except OSError:
         pass
     if not ips:
-        # The hostname lookup can miss interfaces; asking the stack for the
-        # source address of a would-be outbound route finds the primary one.
-        # TEST-NET-1 is unroutable, so no traffic is actually sent.
+        try:
+            import fcntl  # POSIX only; guarded so Windows never imports it
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                for _, name in socket.if_nameindex():
+                    try:
+                        ip = socket.inet_ntoa(fcntl.ioctl(
+                            s.fileno(), 0x8915,  # SIOCGIFADDR
+                            struct.pack("256s", name.encode()[:15]))[20:24])
+                    except OSError:
+                        continue  # an interface without an IPv4 address
+                    if ip and not ip.startswith("127."):
+                        ips.add(ip)
+            finally:
+                s.close()
+        except (ImportError, OSError):
+            pass
+    if not ips:
+        # TEST-NET-1 is unroutable, so no traffic is actually sent; the
+        # connect only asks the stack which interface such a route would use.
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
@@ -98,6 +122,28 @@ def _local_ipv4_addresses():
         except OSError:
             pass
     return sorted(ips)
+
+
+def _is_all_interface_bind(bind):
+    return bind in ("", "0.0.0.0", "::")
+
+
+def _open_share_warning_lines(bind):
+    """Banner lines for an open share, when the bind leaves it exposed.
+
+    Computed before the listening socket exists so a slow hostname lookup
+    cannot sit between bind() and serve_forever(); an empty address list is
+    fine, the --bind advice is the load-bearing half.
+    """
+    if not _is_all_interface_bind(bind):
+        return []
+    lines = []
+    ips = _local_ipv4_addresses()
+    if ips:
+        lines.append("  Reachable on: " + ", ".join(ips))
+    lines.append("  Bound to every interface; use --bind <address> to serve "
+                 "only one network, such as the LAN the console is on.")
+    return lines
 
 
 class Handle:
@@ -1725,6 +1771,11 @@ def main(argv=None):
 
     auth = build_authenticator(args.user, args.open)
     ceiling = wire.CEILING_SMB3 if args.smb_version == 3 else wire.CEILING_SMB2
+    # The open-share warning's address listing can wait on a slow hostname
+    # lookup; do it before the socket exists so it never sits between
+    # bind() and serve_forever().
+    open_share_warnings = (_open_share_warning_lines(args.bind)
+                           if auth.is_open else [])
 
     try:
         server = Smb2Server(shares, auth, ceiling=ceiling, read_only=args.read_only,
@@ -1768,12 +1819,8 @@ def main(argv=None):
                                          " (read-only)" if args.read_only else ""))
         if auth.is_open:
             note("  NO PASSWORD: anyone who can reach this port can read the share.")
-            if args.bind in ("", "0.0.0.0", "::"):
-                ips = _local_ipv4_addresses()
-                if ips:
-                    note("  Reachable on: " + ", ".join(ips))
-                note("  Bound to every interface; use --bind <address> to serve "
-                     "only one network, such as the LAN the console is on.")
+            for line in open_share_warnings:
+                note(line)
         else:
             note("  users: " + ", ".join(sorted(args.user and
                                                 [u.split(":", 1)[0] for u in args.user])))

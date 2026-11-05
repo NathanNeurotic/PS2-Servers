@@ -207,6 +207,12 @@ class ServerRegistryTests(unittest.TestCase):
         self.assertIn("every interface", hint)
         self.assertIn("Bind address", hint)
 
+        # A wildcard bind is still every interface: the warning stays.
+        hint = gui.opl_hint("smbv2", "192.168.1.100",
+                            {"port": 1445, "open_share": True,
+                             "bind": "0.0.0.0"})
+        self.assertIn("every interface", hint)
+
         # A Bind address set, or a password, silences it.
         hint = gui.opl_hint("smbv2", "192.168.1.100",
                             {"port": 1445, "open_share": True,
