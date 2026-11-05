@@ -135,7 +135,7 @@ In your loader's <b>Network Settings</b>:
 </div>
 
 <div class="callout warn"><div class="h">Take Port 445 (Admin Option)</div>
-Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (admin)</b> toggle in Desktop attempts to temporarily stop the Windows Server service to free TCP 445. <b>Stop</b> starts the service again before the server exits (the launcher waits up to 20 seconds for it); if the server is ended some other way, a reboot brings it back. For ordinary PS2 gaming, this is unnecessary: configure your loader with port <b>1445</b> instead.
+Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (admin)</b> toggle in Desktop temporarily stops the Windows Server service to free TCP 445; on Windows 10 and 11 the SMB kernel drivers (<code>srv</code>, <code>srv2</code>, <code>srvnet</code>) keep the port bound after that, so they are paused too, in dependency order. <b>Stop</b> starts the drivers and the service again before the server exits (the launcher waits up to 20 seconds for it); if the server is ended some other way, a reboot brings them back. Use a card <b>with a password</b> from Windows: Windows 11 requires SMB signing, which a password session provides, while a No-password card logs Windows on as a guest, which it refuses to mount unless the <code>AllowInsecureGuestAuth</code> policy is set. For ordinary PS2 gaming, this is unnecessary: configure your loader with port <b>1445</b> instead.
 </div>
 
 <h3 id="neutrino-smb">Neutrino SMB</h3>
@@ -156,7 +156,7 @@ Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (a
   <li><b>Share:</b> the card's share (<code>games</code>). In RiptOPL you can leave it blank and pick it from the server's share list.</li>
   <li><b>Login:</b> the card's username and password. With a <b>No password</b> card any user works (a blank one logs on as <code>Guest</code>). Launchstation keeps <code>USERNAME</code> and <code>PASSWORD</code> to 31 characters.</li>
 </ul>
-<p>A CI check builds the two libsmb2 versions those drivers use and lists, stats, reads, writes, truncates and enumerates shares through both cards; RiptOPL's own host harness checks its in-game reader. Both are host checks of the protocol, not tests on a PS2. The server does not sign: the PS2 clients only sign when a server requires it, but a desktop client that requires signing (Samba's <code>smbclient</code>, Windows 11 24H2 by default) refuses it.</p>
+<p>A CI check builds the two libsmb2 versions those drivers use and lists, stats, reads, writes, truncates and enumerates shares through both cards; RiptOPL's own host harness checks its in-game reader. Both are host checks of the protocol, not tests on a PS2. The server signs: signing is advertised as enabled but not required, so the PS2 clients, which do not sign, are served unsigned as before, while a desktop client that requires signing (Samba's <code>smbclient</code>, Windows 11 24H2 by default) gets signed replies and has its requests verified. SMB 3 signing (AES-CMAC) uses the operating system's crypto library where there is one. Encryption and dialect 3.1.1 are not offered.</p>
 
 <h2 id="vmc-writes">3. Writes &amp; Virtual Memory Cards (VMC)</h2>
 <p>Both SMBv1 and SMB2/3 in PS2 Servers allow write access by default:</p>

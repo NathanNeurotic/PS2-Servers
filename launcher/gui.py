@@ -144,7 +144,7 @@ Advanced port 445 mode
 
 Port 445 is the standard Windows SMB/File Sharing port, and the only one Windows' own SMB client (Explorer) can connect to. If you choose the advanced port 445 option, PS2 Servers needs administrator rights because Windows normally owns that port.
 
-In that mode, PS2 Servers temporarily pauses Windows File Sharing / LanmanServer while the SMB server is running, then returns control when the server stops. It stops the service, never disables it, so even a hard kill self-heals on the next boot. SMBv1 mode first checks that nothing else pins the port (Docker Desktop's service is the usual one) and refuses, naming what holds it, rather than pause software that depends on it. This is only for the advanced 445 path. Normal custom-port mode does not need it.
+In that mode, PS2 Servers temporarily pauses Windows File Sharing / LanmanServer while the SMB server is running, then returns control when the server stops. On Windows 10 and 11 the SMB kernel drivers (srv, srv2, srvnet) keep port 445 bound after the service stops, so the SMB2/3 modes pause those too and start them again on Stop. It stops services and drivers, never disables them, so even a hard kill self-heals on the next boot. With a password card, Windows 11's required SMB signing is honoured; a No-password card logs Windows on as a guest, which Windows refuses to mount by default. SMBv1 mode first checks that nothing else pins the port (Docker Desktop's service is the usual one) and refuses, naming what holds it, rather than pause software that depends on it. This is only for the advanced 445 path. Normal custom-port mode does not need it.
 
 Windows Firewall changes
 
