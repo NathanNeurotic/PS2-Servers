@@ -387,13 +387,12 @@ Only one marker may be applicable to a given reset:
 |---|---|---|
 | `seq0 discovery resolved to replacement session` | The same PS2 IP:port sends DISCOVERY sequence zero during a live stream, and its next payload-bearing DATA starts again at 0 (Standard) or 1 (Modulo) instead of continuing the old sequence | A new loader took over the endpoint, as Neutrino does from RiptOPL. Edge reset the transport only: the old loader's open handles stay open for Neutrino's FILEID backend, and the new loader may still open for writing, or delete, a file the old one was writing |
 | `peer sequence reset (seq 0 received)` | The same PS2 IP:port sends payload-bearing DATA sequence zero when zero is neither the next expected sequence nor its immediately previous sequence | Edge discarded stale stream state and accepted a same-endpoint restart |
-| `replacing stale session for IP` | A packet arrives from the same PS2 IP with a different UDP source port, and the old session has no active write or that write has been quiet for more than one second | Edge removed the old endpoint's worker/session and created one for the new endpoint |
 
 Seeing a marker proves a datagram matching that restart/replacement condition
 reached the corresponding Edge branch. Attribute it to Neutrino after the
 reset only when its timestamp follows the captured launch and link-down
 events. The marker does not, by itself, prove the following file open or game
-boot succeeded. Absence of all three markers is not a failed handoff implementation
+boot succeeded. Absence of both markers is not a failed handoff implementation
 when no post-reset datagram was received.
 
 A payload-free control packet does not enter the reset branch. Sequence zero
@@ -404,10 +403,9 @@ decisive packet evidence.
 
 The loader-replacement line includes `old_expected`, `first_data_sequence`,
 `profile` and `socket`. The sequence-reset line includes `expected`,
-`received`, `profile`, `socket`, and `outcome`. The same-IP replacement line includes `old_peer`, `new_peer`,
-both source ports, quiet time, active-write state, eligibility, and `reason`.
-With verbose logging, `same-IP session replacement candidate` also records a
-candidate that was deliberately retained to protect a recent active write.
+`received`, `profile`, `socket`, and `outcome`. A different source port is a
+distinct endpoint, not a replacement: its session and handles remain independent
+until that endpoint exceeds the configured idle timeout.
 
 ### Datagram counters versus operation counters
 
@@ -430,7 +428,6 @@ The transport and handoff fields are:
 | `malformed_datagrams` | Received datagrams rejected during protocol parsing before application request handling |
 | `sequence_mismatches` | DATA sequence numbers that did not equal the session's next expected value |
 | `sequence_resets` | Same-endpoint sequence-zero handoffs accepted by Edge |
-| `same_ip_replacements` | Old sessions replaced after the same IP appeared from a new source port |
 | `last_rx_peer`, `last_rx_socket` | Endpoint and Edge socket of the most recently read datagram |
 | `last_rx_type`, `last_rx_sequence` | Parsed header values for that datagram, or `unknown` if its header could not be parsed |
 | `last_rx_age` | Time since Edge read that datagram; a growing value makes silence explicit |

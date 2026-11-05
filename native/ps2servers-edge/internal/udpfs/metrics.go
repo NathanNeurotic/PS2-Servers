@@ -50,7 +50,6 @@ type metrics struct {
 	malformedDatagrams   atomic.Int64
 	sequenceMismatches   atomic.Int64
 	sequenceResets       atomic.Int64
-	sameIPReplacements   atomic.Int64
 
 	rxOrdinal atomic.Uint64
 	lastRX    atomic.Pointer[lastRXObservation]
@@ -161,7 +160,6 @@ func (m *metrics) snapshot() map[string]any {
 		"malformed_datagrams":    m.malformedDatagrams.Load(),
 		"sequence_mismatches":    m.sequenceMismatches.Load(),
 		"sequence_resets":        m.sequenceResets.Load(),
-		"same_ip_replacements":   m.sameIPReplacements.Load(),
 	}
 	if last := m.lastRX.Load(); last != nil {
 		age := time.Since(last.at)

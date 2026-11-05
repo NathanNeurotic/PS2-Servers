@@ -16,14 +16,13 @@ import (
 )
 
 const (
-	defaultFallback     = 250 * time.Millisecond
-	sessionReplaceQuiet = 1 * time.Second
-	windowSize          = 8
-	windowAckTimeout    = 100 * time.Millisecond
-	maxWindowRetries    = 200
-	maxDatagram         = 64 * 1024
-	maxPathBytes        = 1024
-	maxHandles          = 64
+	defaultFallback  = 250 * time.Millisecond
+	windowSize       = 8
+	windowAckTimeout = 100 * time.Millisecond
+	maxWindowRetries = 200
+	maxDatagram      = 64 * 1024
+	maxPathBytes     = 1024
+	maxHandles       = 64
 )
 
 type Config struct {
@@ -381,33 +380,37 @@ func (s *Server) reaper() {
 		case <-s.closed:
 			return
 		case now := <-tick.C:
-			type expiredSession struct {
-				key string
-				w   *peerWorker
-				id  time.Duration
-			}
-			var expired []expiredSession
-			s.sessionsMu.Lock()
-			for key, w := range s.sessions {
-				w.state.Mu.Lock()
-				idle := now.Sub(w.state.LastActivity)
-				w.state.Mu.Unlock()
-				if idle > s.cfg.PeerTimeout {
-					expired = append(expired, expiredSession{key: key, w: w, id: idle})
-					delete(s.sessions, key)
-				}
-			}
-			s.sessionsMu.Unlock()
-
-			for _, item := range expired {
-				item.w.state.Mu.Lock()
-				item.w.state.Close()
-				item.w.state.Mu.Unlock()
-				item.w.stop()
-				s.cfg.Log.Info("session expired", map[string]any{"peer": item.key, "idle": item.id.String()})
-			}
+			s.expireSessions(now)
 			s.summary.Expire() // consoles quiet for a minute get their SESSION line
 		}
+	}
+}
+
+func (s *Server) expireSessions(now time.Time) {
+	type expiredSession struct {
+		key string
+		w   *peerWorker
+		id  time.Duration
+	}
+	var expired []expiredSession
+	s.sessionsMu.Lock()
+	for key, w := range s.sessions {
+		w.state.Mu.Lock()
+		idle := now.Sub(w.state.LastActivity)
+		w.state.Mu.Unlock()
+		if idle > s.cfg.PeerTimeout {
+			expired = append(expired, expiredSession{key: key, w: w, id: idle})
+			delete(s.sessions, key)
+		}
+	}
+	s.sessionsMu.Unlock()
+
+	for _, item := range expired {
+		item.w.state.Mu.Lock()
+		item.w.state.Close()
+		item.w.state.Mu.Unlock()
+		item.w.stop()
+		s.cfg.Log.Info("session expired", map[string]any{"peer": item.key, "idle": item.id.String()})
 	}
 }
 
@@ -418,58 +421,7 @@ func (s *Server) getWorker(peer *net.UDPAddr) *peerWorker {
 	if w := s.sessions[key]; w != nil {
 		return w
 	}
-	// Evict any stale session from the same remote IP address (e.g. PS2 rebooted and changed source port),
-	// but skip loopback test peers (127.0.0.1) so multi-client unit tests are not evicted.
 	peerIP := peer.IP.String()
-	if !peer.IP.IsLoopback() {
-		var oldKey string
-		var oldWorker *peerWorker
-		var replacementFields map[string]any
-		now := time.Now()
-		for k, w := range s.sessions {
-			if w.state != nil && w.state.Peer != nil && w.state.Peer.IP.Equal(peer.IP) {
-				w.state.Mu.Lock()
-				quiet := now.Sub(w.state.LastActivity)
-				writeActive := w.state.WriteActive
-				w.state.Mu.Unlock()
-				eligible := !writeActive || quiet > sessionReplaceQuiet
-				reason := "active_write_recent"
-				if !writeActive {
-					reason = "no_active_write"
-				} else if eligible {
-					reason = "active_write_quiet_over_1s"
-				}
-				candidateFields := map[string]any{
-					"ip":              peerIP,
-					"old_peer":        k,
-					"new_peer":        key,
-					"old_source_port": w.state.Peer.Port,
-					"new_source_port": peer.Port,
-					"quiet":           quiet.String(),
-					"write_active":    writeActive,
-					"eligible":        eligible,
-					"reason":          reason,
-				}
-				s.cfg.Log.Debug("same-IP session replacement candidate", candidateFields)
-				if eligible {
-					oldKey = k
-					oldWorker = w
-					replacementFields = candidateFields
-					break
-				}
-			}
-		}
-		if oldWorker != nil {
-			s.cfg.Log.Info("replacing stale session for IP", replacementFields)
-			s.stats.sameIPReplacements.Add(1)
-			delete(s.sessions, oldKey)
-			oldWorker.state.Mu.Lock()
-			oldWorker.state.Close()
-			oldWorker.state.Mu.Unlock()
-			oldWorker.stop()
-		}
-	}
-
 	if len(s.sessions) >= 256 {
 		s.cfg.Log.Warn("max session limit reached", map[string]any{"peer": key})
 		return nil

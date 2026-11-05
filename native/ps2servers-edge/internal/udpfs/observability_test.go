@@ -515,85 +515,50 @@ func stopDirectWorkers(server *Server) {
 	}
 }
 
-func TestSameIPSourcePortReplacementInstrumentation(t *testing.T) {
-	t.Run("eligible replacement", func(t *testing.T) {
-		server, logs := newDirectObservabilityServer(true)
-		defer stopDirectWorkers(server)
-		oldPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.30"), Port: 26000}
-		newPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.30"), Port: 26001}
-		server.getWorker(oldPeer)
-		server.getWorker(newPeer)
+func TestSameIPDifferentPortsRemainConcurrent(t *testing.T) {
+	server, _ := newDirectObservabilityServer(true)
+	defer stopDirectWorkers(server)
+	firstPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.30"), Port: 26000}
+	secondPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.30"), Port: 26001}
+	first := server.getWorker(firstPeer)
+	first.state.Handles[7] = &session.Handle{}
 
-		if got := metricInt64(t, server.stats.snapshot(), "same_ip_replacements"); got != 1 {
-			t.Fatalf("same_ip_replacements = %d, want 1", got)
-		}
-		records := parseJSONLogRecords(t, logs.String())
-		candidate := findJSONLogRecord(t, records, "same-IP session replacement candidate", nil)
-		assertJSONField(t, candidate, "old_peer", oldPeer.String())
-		assertJSONField(t, candidate, "new_peer", newPeer.String())
-		assertJSONField(t, candidate, "old_source_port", oldPeer.Port)
-		assertJSONField(t, candidate, "new_source_port", newPeer.Port)
-		assertJSONField(t, candidate, "write_active", false)
-		assertJSONField(t, candidate, "eligible", true)
-		assertJSONField(t, candidate, "reason", "no_active_write")
-		findJSONLogRecord(t, records, "replacing stale session for IP", func(record map[string]any) bool {
-			return record["reason"] == "no_active_write" && record["eligible"] == true
-		})
-	})
+	if second := server.getWorker(secondPeer); second == nil {
+		t.Fatal("second endpoint did not get a worker")
+	}
+	if got := len(server.sessions); got != 2 {
+		t.Fatalf("two endpoints from one IP have %d sessions, want 2", got)
+	}
+	if server.getWorker(firstPeer) != first {
+		t.Fatal("first endpoint was replaced when the second endpoint appeared")
+	}
+	if first.state.Handles[7] == nil {
+		t.Fatal("second endpoint closed the first endpoint's handles")
+	}
+}
 
-	t.Run("recent active write is retained", func(t *testing.T) {
-		server, logs := newDirectObservabilityServer(true)
-		defer stopDirectWorkers(server)
-		oldPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.31"), Port: 26100}
-		newPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.31"), Port: 26101}
-		oldWorker := server.getWorker(oldPeer)
-		oldWorker.state.Mu.Lock()
-		oldWorker.state.WriteActive = true
-		oldWorker.state.LastActivity = time.Now()
-		oldWorker.state.Mu.Unlock()
-		server.getWorker(newPeer)
+func TestIdleEndpointExpiresIndependently(t *testing.T) {
+	server, _ := newDirectObservabilityServer(true)
+	server.cfg.PeerTimeout = time.Minute
+	defer stopDirectWorkers(server)
+	idlePeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.40"), Port: 27000}
+	freshPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.40"), Port: 27001}
+	idle := server.getWorker(idlePeer)
+	idle.state.Handles[8] = &session.Handle{}
+	fresh := server.getWorker(freshPeer)
+	now := time.Now()
+	idle.state.LastActivity = now.Add(-2 * time.Minute)
+	fresh.state.LastActivity = now
 
-		if got := metricInt64(t, server.stats.snapshot(), "same_ip_replacements"); got != 0 {
-			t.Fatalf("same_ip_replacements = %d, want 0", got)
-		}
-		records := parseJSONLogRecords(t, logs.String())
-		candidate := findJSONLogRecord(t, records, "same-IP session replacement candidate", nil)
-		assertJSONField(t, candidate, "old_peer", oldPeer.String())
-		assertJSONField(t, candidate, "new_peer", newPeer.String())
-		assertJSONField(t, candidate, "write_active", true)
-		assertJSONField(t, candidate, "eligible", false)
-		assertJSONField(t, candidate, "reason", "active_write_recent")
-		for _, record := range records {
-			if record["message"] == "replacing stale session for IP" {
-				t.Fatalf("recent active-write session was reported as replaced: %#v", record)
-			}
-		}
-	})
+	server.expireSessions(now)
 
-	t.Run("stale active write is replaced", func(t *testing.T) {
-		server, logs := newDirectObservabilityServer(true)
-		defer stopDirectWorkers(server)
-		oldPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.32"), Port: 26200}
-		newPeer := &net.UDPAddr{IP: net.ParseIP("192.0.2.32"), Port: 26201}
-		oldWorker := server.getWorker(oldPeer)
-		oldWorker.state.Mu.Lock()
-		oldWorker.state.WriteActive = true
-		oldWorker.state.LastActivity = time.Now().Add(-2 * sessionReplaceQuiet)
-		oldWorker.state.Mu.Unlock()
-		server.getWorker(newPeer)
-
-		if got := metricInt64(t, server.stats.snapshot(), "same_ip_replacements"); got != 1 {
-			t.Fatalf("same_ip_replacements = %d, want 1", got)
-		}
-		records := parseJSONLogRecords(t, logs.String())
-		candidate := findJSONLogRecord(t, records, "same-IP session replacement candidate", nil)
-		assertJSONField(t, candidate, "old_peer", oldPeer.String())
-		assertJSONField(t, candidate, "new_peer", newPeer.String())
-		assertJSONField(t, candidate, "write_active", true)
-		assertJSONField(t, candidate, "eligible", true)
-		assertJSONField(t, candidate, "reason", "active_write_quiet_over_1s")
-		findJSONLogRecord(t, records, "replacing stale session for IP", func(record map[string]any) bool {
-			return record["reason"] == "active_write_quiet_over_1s" && record["eligible"] == true
-		})
-	})
+	if server.getWorker(freshPeer) != fresh {
+		t.Fatal("fresh endpoint expired with the idle endpoint")
+	}
+	if server.sessions[idlePeer.String()] != nil {
+		t.Fatal("idle endpoint remains registered after expiry")
+	}
+	if idle.state.Handles[8] != nil {
+		t.Fatal("idle endpoint's handles were not closed")
+	}
 }
