@@ -380,6 +380,10 @@ logs do not print full requested host paths.
 - shared UDPFS conformance probe (`conformance/integration/udpfs_probe.py`): yes, run
   against a live Edge process in CI — standard plus three Modulo-shaped clients
   concurrently, covering the 4095 → 0 sequence wrap
+- three-server differential probe (`conformance/integration/udpfs_parity.py`):
+  matched fixtures against pinned `udpfsd`, Core, and Edge on a non-loopback
+  interface, covering sessions, paths, compression, block-only service, restart,
+  rediscovery, and transport fault injection; host evidence, not hardware proof
 - parser fuzz seeds: yes
 - `go vet`: passed in the implementation environment
 - sixteen target builds (eleven Linux, three Windows, two macOS): compiled and
