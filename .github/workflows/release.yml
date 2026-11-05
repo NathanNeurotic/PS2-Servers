@@ -543,33 +543,23 @@ jobs:
           set -euo pipefail
           notes="$RUNNER_TEMP/release-notes.md"
 
-          # Build the "which file do I download" table from the files that are
-          # actually here, using the same shape as the rolling build so a user
-          # moving between the two reads the same instructions. A row falls back
-          # to the single-file build when the portable one is missing and says
-          # so; if neither exists the row is dropped rather than pointing at a
-          # 404.
+          # List only files produced by this run, with fallbacks for optional builds.
           cd release-assets
-          # The fallback note is a parameter, not a fixed string. The Windows
-          # rows fall back from the portable build to the single file, but the
-          # Linux row falls the other way -- so a hardcoded "portable build
-          # unavailable" would have offered the reader the portable tarball
-          # while telling them the portable build was missing.
-          row() { # row <label> <preferred> <fallback> <why-the-fallback>
-            if [ -n "$2" ] && [ -f "$2" ]; then
-              printf '| %s | **`%s`** |\n' "$1" "$2"
-            elif [ -n "$3" ] && [ -f "$3" ]; then
-              printf '| %s | **`%s`** — %s |\n' "$1" "$3" "$4"
-            fi
-          }
+          export RELEASE_TAG="$TAG"
+          source "$GITHUB_WORKSPACE/.github/scripts/release-downloads.sh"
           no_portable="portable build unavailable in this release"
           no_onefile="single-file build unavailable in this release"
           table=$(
             row "Windows, normal (64-bit)"   PS2Servers-windows-x64-portable.zip   PS2Servers-windows-x64.zip           "$no_portable"
             row "Windows, older 32-bit PC"   PS2Servers-windows-x86-portable.zip   PS2Servers-windows-x86.zip           "$no_portable"
-            row "Linux"                      PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz "$no_onefile"
+            row "Linux, x86_64"              PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz "$no_onefile"
+            if [ -f PS2Servers-x86_64.AppImage ]; then
+              row "Linux desktop, x86_64 AppImage" PS2Servers-x86_64.AppImage "" ""
+            fi
             row "Mac, Apple Silicon (M1–M4)" PS2Servers-macos-arm64.zip            ""                                   ""
             row "Mac, Intel"                 PS2Servers-macos-x64.zip              ""                                   ""
+            row "Source / inspection"        PS2Servers-source.zip                 ""                                   ""
+            edge_rows
           )
           # A leg that failed outright now leaves its row out rather than
           # blocking the release, so say so where a maintainer will see it.
@@ -581,12 +571,6 @@ jobs:
             echo "no downloadable assets were produced; refusing to publish empty notes" >&2
             exit 1
           fi
-          # Carries its own leading space, so an absent AppImage leaves the
-          # preceding sentence ending cleanly rather than with a trailing space.
-          appimage=""
-          if [ -f PS2Servers-x86_64.AppImage ]; then
-            appimage=" On Linux you can also take \`PS2Servers-x86_64.AppImage\` for desktop and menu shortcuts (via AppImageLauncher); it includes AppImageUpdate metadata. The adjacent \`.zsync\` file is updater metadata, not another app to launch."
-          fi
           cd ..
 
           # Quoted heredoc: the text is written literally, so backticks and
@@ -594,87 +578,29 @@ jobs:
           # afterwards. The previous unquoted version had to backslash-escape
           # every backtick in the notes.
           cat > "$notes" <<'HEADER'
-          Built from the tagged `__TAG__` source, so this release matches `main` at that tag.
+          Built from the tagged `__TAG__` source.
 
           ## Downloads
 
-          There are a lot of files below. **You need exactly one.** Find your
-          computer in this table and ignore everything else:
-
-          | Your computer | Download this |
+          | Platform / purpose | Asset |
           |---|---|
           __DOWNLOADS_TABLE__
-
-          On Windows: unzip it, open the folder, run `PS2Servers.exe`. That's it.
-
-          <details>
-          <summary>Why "portable", and what are the other files?</summary>
-
-          The **portable** build is the same app laid out as a plain folder,
-          with no self-extracting wrapper. This avoids one source of heuristic
-          detections, but the portable app remains unsigned and can also be
-          flagged. The single-file `PS2Servers-windows-x64.zip` is published
-          for convenience; verify the exact file with its checksum/attestation.
-
-          On Linux, `PS2Servers-linux-x64` is a single executable; take
-          `PS2Servers-linux-x64-portable.tar.gz` instead if `/tmp` is mounted
-          `noexec`.__APPIMAGE_NOTE__
-
-          macOS ships as a `.app` inside the zip — unzip and right-click → Open,
-          since it is unsigned.
-
-          `PS2Servers-source.zip` is the source, for running from Python
-          directly or for inspection.
-
-          Everything beginning **`PS2ServersEdge-`** is a different program —
-          see the section below. Choose it for headless use; Desktop is the
-          graphical launcher.
-
-          Each download has a matching `.sha256.txt` next to it.
-
-          Portable and AppImage builds are best-effort: their build steps are
-          allowed to fail without blocking the primary downloads. The table
-          above is generated from the files actually attached, so anything it
-          lists is present.
-          </details>
-
-          Compression note: ZSO/LZ4 support is bundled. CHD support is backed by
-          a libchdr native library built from source during release packaging.
           HEADER
 
           # Passed through the environment rather than interpolated into the
           # script, so a value containing quotes or backslashes stays literal.
           export DOWNLOADS_TABLE="$table"
-          export APPIMAGE_NOTE="$appimage"
           python3 - "$notes" <<'PYSUB'
           import os, sys
           p = sys.argv[1]
           s = open(p, encoding="utf-8").read()
           s = s.replace("__TAG__", os.environ["TAG"])
           s = s.replace("__DOWNLOADS_TABLE__", os.environ["DOWNLOADS_TABLE"].rstrip())
-          s = s.replace("__APPIMAGE_NOTE__", os.environ["APPIMAGE_NOTE"])
           open(p, "w", encoding="utf-8").write(s)
           PYSUB
 
-          # Everything true of every release lives in
-          # .github/release-notes-common.md and is appended rather than
-          # duplicated. The same prose used to be pasted into this workflow and
-          # release-on-main.yml, escaped differently in each, and it drifted: it
-          # still described Edge as read-only after writes became the default,
-          # and never mentioned Edge gaining UDPBD.
-          #
-          # The leading maintainer comment is stripped -- it explains why the
-          # file exists, which is not something a user should read here.
+          # Append the short shared changelog, excluding its maintainer comment.
           sed '/^<!--/,/^-->/d' .github/release-notes-common.md >> "$notes"
-
-          cat >> "$notes" <<'TAILEOF'
-
-          CI checks host behavior and cross-implementation conformance.
-          Those checks do not establish PS2 gameplay. HTTP remains experimental;
-          Edge gameplay and write paths require separate console validation.
-
-          Built by GitHub Actions (Intel macOS cross-built on Apple Silicon).
-          TAILEOF
 
           echo "path=$notes" >> "$GITHUB_OUTPUT"
 

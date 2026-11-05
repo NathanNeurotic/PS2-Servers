@@ -315,35 +315,23 @@ jobs:
           sha256sum "${present[@]}" > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-          # Build the "which file do I download" table from what is actually
-          # here. The portable build is best-effort (continue-on-error above),
-          # so a static table could recommend a download that failed to build
-          # and is not attached -- pointing a non-technical user at a 404 on the
-          # exact row the notes tell them to use. When a portable asset is
-          # missing the row falls back to that OS's single-file build and says
-          # why, and if neither exists the row is omitted entirely rather than
-          # listed as broken.
-          # The fallback note is a parameter rather than a fixed string. Most
-          # rows fall back from the portable build to the single file, but the
-          # Linux row falls the other way -- so a hardcoded "portable build
-          # unavailable" would offer the reader the portable tarball while
-          # telling them the portable build was missing.
-          row() { # row <label> <preferred> <fallback> <why-the-fallback>
-            if [ -n "$2" ] && [ -f "$2" ]; then
-              printf '| %s | **`%s`** |\n' "$1" "$2"
-            elif [ -n "$3" ] && [ -f "$3" ]; then
-              printf '| %s | **`%s`** — %s |\n' "$1" "$3" "$4"
-            fi
-          }
+          # List only files produced by this run, with fallbacks for optional builds.
+          export RELEASE_TAG="main-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+          source "$GITHUB_WORKSPACE/.github/scripts/release-downloads.sh"
           no_portable="portable build unavailable in this release"
           no_onefile="single-file build unavailable in this release"
           {
             echo "downloads_table<<PS2SERVERS_EOF"
             row "Windows, normal (64-bit)"   PS2Servers-windows-x64-portable.zip   PS2Servers-windows-x64.zip           "$no_portable"
             row "Windows, older 32-bit PC"   PS2Servers-windows-x86-portable.zip   PS2Servers-windows-x86.zip           "$no_portable"
-            row "Linux"                      PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz "$no_onefile"
+            row "Linux, x86_64"              PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz "$no_onefile"
+            if [ -f PS2Servers-x86_64.AppImage ]; then
+              row "Linux desktop, x86_64 AppImage" PS2Servers-x86_64.AppImage "" ""
+            fi
             row "Mac, Apple Silicon (M1–M4)" PS2Servers-macos-arm64.zip            ""                                   ""
             row "Mac, Intel"                 PS2Servers-macos-x64.zip              ""                                   ""
+            row "Source / inspection"        PS2Servers-source.zip                 ""                                   ""
+            edge_rows
             echo "PS2SERVERS_EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -357,13 +345,7 @@ jobs:
       - name: Assemble release notes
         id: notes
         shell: bash
-        # The prose that is true of every release lives in
-        # .github/release-notes-common.md, not inline here. It used to be
-        # pasted into this workflow and release.yml separately, escaped
-        # differently in each, and it drifted -- it still called Edge
-        # read-only after writes became the default, and never mentioned that
-        # Edge had gained UDPBD. One file, edited in the same PR as the change
-        # it describes.
+        # Both workflows append the same short shared changelog.
         env:
           DOWNLOADS_TABLE: ${{ steps.sums.outputs.downloads_table }}
           COMMIT_SHA: ${{ github.sha }}
@@ -371,43 +353,17 @@ jobs:
           set -euo pipefail
           notes="$RUNNER_TEMP/release-notes.md"
           cat > "$notes" <<'HEADER'
-          Automatic development build from `main`, published as a
-          **pre-release**. For stable downloads use the
+          Automatic development build from `main`, published as a **pre-release**.
+          For stable downloads use the
           [latest tagged release](https://github.com/NathanNeurotic/PS2-Servers/releases/latest).
 
           Commit: __COMMIT_SHA__
 
           ## Downloads
 
-          There are a lot of files below. **You need exactly one.** Find your
-          computer in this table and ignore everything else:
-
-          | Your computer | Download this |
+          | Platform / purpose | Asset |
           |---|---|
           __DOWNLOADS_TABLE__
-
-          On Windows: unzip it, open the folder, run `PS2Servers.exe`. That's it.
-
-          <details>
-          <summary>Why "portable", and what are the other files?</summary>
-
-          The **portable** build is the same app laid out as a plain folder,
-          with no self-extracting wrapper. This avoids one source of heuristic
-          detections, but the portable app remains unsigned and can also be
-          flagged. The single-file `PS2Servers-windows-x64.zip` is published
-          for convenience; verify the exact file with its checksum/attestation.
-
-          On Linux, `PS2Servers-linux-x64` is a single executable; take
-          `PS2Servers-linux-x64-portable.tar.gz` instead if `/tmp` is mounted
-          `noexec`. macOS ships as a `.app` inside the zip.
-
-          `PS2Servers-source.zip` is the source, for running from Python
-          directly or for inspection.
-
-          Everything beginning **`PS2ServersEdge-`** is a different program —
-          see the section below. Choose it for headless use; Desktop is the
-          graphical launcher.
-          </details>
           HEADER
           # Substitute the two dynamic values, then append the shared tail.
           python3 - "$notes" <<'PYSUB'
