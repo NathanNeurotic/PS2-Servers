@@ -2145,8 +2145,15 @@ class UdpfsServer:
         while dir_data['index'] < len(dir_data['entries']):
             advertised = dir_data['entries'][dir_data['index']]
             dir_data['index'] += 1
-            entry = advertised['source']
-            display_name = advertised['name']
+            if isinstance(advertised, dict):
+                entry = advertised['source']
+                display_name = advertised['name']
+                advertised_stat = advertised['stat_info']
+            else:
+                # Internal callers may supply raw scandir entries directly.
+                entry = advertised
+                display_name = self._transform_compressed_name(entry.name)
+                advertised_stat = None
 
             try:
                 st = entry.stat(follow_symlinks=False)
@@ -2154,7 +2161,11 @@ class UdpfsServer:
                 self._print_event(f"[{addr[0]}:{addr[1]}] DREAD stat error, skipping '{entry.name}': {e}")
                 continue
 
-            stat_info = advertised['stat_info'] or self._stat_to_bytes(st)
+            if not isinstance(advertised, dict) and display_name != entry.name:
+                advertised_stat = self._get_compressed_stat(entry.path, st)
+                if advertised_stat is None:
+                    continue
+            stat_info = advertised_stat or self._stat_to_bytes(st)
 
             if self.verbose:
                 if display_name != entry.name:
