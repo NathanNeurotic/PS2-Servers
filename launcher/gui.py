@@ -289,7 +289,8 @@ def opl_hint(key, ip, values):
                 "PS2-Servers-managed xeRAbora-derived engine · softcore only").format(
                     compatibility, ip)
     if key in ("smbv1", "smbv2", "smbv3"):
-        port = "445" if values.get("take_445") else str(values.get("port") or 1025)
+        port = "445" if values.get("take_445") else str(
+            values.get("port") or ("1025" if key == "smbv1" else "1445"))
         # Read back what this card is actually running, not what the defaults
         # were: a hint that says 'games' next to a share called 'roms' sends the
         # user to check their network when the name was the whole problem.
@@ -302,10 +303,15 @@ def opl_hint(key, ip, values):
             user_display = user or "guest"
             creds = "User '{}'  ·  Password {}".format(
                 user_display, "as set" if password else "blank")
-        return ("In OPL → Network:  IP {}  ·  Port {}  ·  Share '{}'  "
+        block = console_config_block(key, ip, values, mask_password=True)
+        hint = ("In OPL → Network:  IP {}  ·  Port {}  ·  Share '{}'  "
                 "·  NetBIOS off  ·  {}".format(ip, port, share, creds))
-    if key == "udpfs":
-        # OPL never asks UDPFS for a server IP: the console broadcasts DISCOVERY
+        if block:
+            hint += ("\nLaunchstation / wLaunchELF → SMB shares (SMB2.CNF) block"
+                     " (use Copy console config for the paste-ready text):"
+                     "\n" + block)
+        return hint
+    if key == "udpfs":        # OPL never asks UDPFS for a server IP: the console broadcasts DISCOVERY
         # and the server answers. Naming the LAN IP as a "server IP" sent users
         # to type it somewhere, and the field is not even what this server binds
         # to. What has to match is the PS2's own address: on the same network as
@@ -328,6 +334,44 @@ def opl_hint(key, ip, values):
     if key == "udpbd":
         return "In OPL → select UDPBD  ·  auto-discovered (no IP or port needed)"
     return ""
+
+
+def console_config_block(key, ip, values, mask_password=False):
+    """The paste-ready share block for Launchstation / wLaunchELF's SMB2.CNF.
+
+    The same values the OPL hint above names, in the file those launchers
+    actually read: one block per server, the URL line closing the block. A
+    user can copy this into SMB2.CNF without translating field names.
+    mask_password is for the on-screen hint: the visible label never prints
+    the password, the Copy button puts the real block on the clipboard.
+    """
+    if key not in ("smbv1", "smbv2", "smbv3"):
+        return ""
+    port = "445" if values.get("take_445") else str(
+        values.get("port") or ("1025" if key == "smbv1" else "1445"))
+    share = (values.get("share_name") or "games").strip() or "games"
+    user = (values.get("username") or "").strip()
+    password = values.get("password") or ""
+    lines = ["NAME = " + ("OLDBOX" if key == "smbv1" else
+                           "NGCARD" if key == "smbv3" else "PC")]
+    if key in ("smbv1", "smbv3"):
+        lines.append("VERSION = " + ("1" if key == "smbv1" else "3"))
+    if values.get("open_share"):
+        # No-password mode: the server accepts the client's guest logon no
+        # matter what the user field holds, so the block says exactly that.
+        if key != "smbv1":
+            lines.append("USERNAME = guest")
+            lines.append("PASSWORD =")
+    elif user:
+        lines.append("USERNAME = " + user)
+        lines.append("PASSWORD = " + ("********" if mask_password else password))
+    elif key != "smbv1":
+        # No user configured: the client's default Guest with a blank
+        # password is what this card accepts (its 'No password' mode).
+        lines.append("USERNAME = guest")
+        lines.append("PASSWORD =")
+    lines.append("URL = smb://{}:{}/{}".format(ip, port, share))
+    return "\n".join(lines)
 
 
 class ServerCard(ttk.LabelFrame):
@@ -458,9 +502,33 @@ class ServerCard(ttk.LabelFrame):
             _sync_port_entry()
 
         self.hint = ttk.Label(self, text="", style="CardHint.TLabel")
-        self.hint.grid(row=row, column=0, columnspan=3, sticky="w",
+        self.hint.grid(row=row, column=0, columnspan=2, sticky="w",
                        padx=4, pady=(4, 0))
-        bind_wraplength(self.hint, self._wrap_source(), reserve=CARD_TEXT_RESERVE)
+        self.copy_cfg_btn = ttk.Button(self, text="Copy console config",
+                                       command=self._copy_console_config)
+        self.copy_cfg_btn.grid(row=row, column=2, sticky="e", padx=4, pady=(4, 0))
+        bind_wraplength(self.hint, self._wrap_source(), reserve=CARD_TEXT_RESERVE,
+                        siblings=(self.copy_cfg_btn,))
+        # Field edits and Revert to Default change what the card would serve:
+        # keep the console hint and the Copy button in step without waiting
+        # for a start/stop cycle.
+        for var in self.vars.values():
+            var.trace_add("write", lambda *_: self.refresh_status(
+                self.app.is_running(self.server.key)))
+
+    def _hint_values(self, running):
+        """What the card is serving: running values win over field edits."""
+        if running and self._active_values is not None:
+            return self._active_values
+        return self.values()
+
+    def _copy_console_config(self):
+        block = console_config_block(self.server.key, self.app.current_ip(),
+                                     self._hint_values(self.app.is_running(self.server.key)))
+        if not block:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(block)
 
     def _use_shared_game_folder(self):
         """Explicitly reuse one unambiguous active share for Caduceus pairing."""
@@ -828,12 +896,16 @@ class ServerCard(ttk.LabelFrame):
             mode_selector = self.field_widgets.get("mode")
             if mode_selector is not None:
                 mode_selector.config(state="disabled" if running else "readonly")
-        if running:
-            hint_values = self._active_values if self._active_values is not None else self.values()
-            self.hint.config(text=opl_hint(self.server.key, self.app.current_ip(),
-                                           hint_values))
-        else:
-            self.hint.config(text="")
+        # Show the console hint from the running server's values when up, and
+        # from the card's own fields when stopped, so it answers "what do I
+        # type" while the card is still being filled in. The unbound call
+        # keeps this true for mock-card tests, which stub _active_values.
+        hint_values = ServerCard._hint_values(self, running)
+        self.hint.config(text=opl_hint(self.server.key, self.app.current_ip(),
+                                       hint_values))
+        self.copy_cfg_btn.config(state="normal"
+                                 if console_config_block(self.server.key, "", hint_values)
+                                 else "disabled")
 
 
 class LauncherApp:
