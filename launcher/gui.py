@@ -303,11 +303,12 @@ def opl_hint(key, ip, values):
             user_display = user or "guest"
             creds = "User '{}'  ·  Password {}".format(
                 user_display, "as set" if password else "blank")
-        block = console_config_block(key, ip, values)
+        block = console_config_block(key, ip, values, mask_password=True)
         hint = ("In OPL → Network:  IP {}  ·  Port {}  ·  Share '{}'  "
                 "·  NetBIOS off  ·  {}".format(ip, port, share, creds))
         if block:
-            hint += ("\nLaunchstation / wLaunchELF → SMB shares (SMB2.CNF) block:"
+            hint += ("\nLaunchstation / wLaunchELF → SMB shares (SMB2.CNF) block"
+                     " (use Copy console config for the paste-ready text):"
                      "\n" + block)
         return hint
     if key == "udpfs":        # OPL never asks UDPFS for a server IP: the console broadcasts DISCOVERY
@@ -335,12 +336,14 @@ def opl_hint(key, ip, values):
     return ""
 
 
-def console_config_block(key, ip, values):
+def console_config_block(key, ip, values, mask_password=False):
     """The paste-ready share block for Launchstation / wLaunchELF's SMB2.CNF.
 
     The same values the OPL hint above names, in the file those launchers
     actually read: one block per server, the URL line closing the block. A
     user can copy this into SMB2.CNF without translating field names.
+    mask_password is for the on-screen hint: the visible label never prints
+    the password, the Copy button puts the real block on the clipboard.
     """
     if key not in ("smbv1", "smbv2", "smbv3"):
         return ""
@@ -361,7 +364,7 @@ def console_config_block(key, ip, values):
             lines.append("PASSWORD =")
     elif user:
         lines.append("USERNAME = " + user)
-        lines.append("PASSWORD = " + password)
+        lines.append("PASSWORD = " + ("********" if mask_password else password))
     elif key != "smbv1":
         # No user configured: the client's default Guest with a blank
         # password is what this card accepts (its 'No password' mode).
