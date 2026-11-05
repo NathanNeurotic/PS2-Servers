@@ -17,12 +17,19 @@ Why this exists rather than more handlers bolted onto smbv1_server:
 What it is NOT, stated plainly because a half-implemented SMB2 already shipped
 once in this project and cost a release's worth of trust:
 
-  * No signing and no encryption. Both are AES-CMAC/AES-CCM below SMB 3.1.1, and
-    this repo is stdlib-only -- Python has no AES, and a pure-Python one would
-    have to run over every byte of every transfer. The server therefore
-    advertises signing as enabled-but-not-required, which is what a default
-    Windows client accepts. A client whose policy REQUIRES signing will refuse
-    this server, and that is an honest refusal rather than a broken transfer.
+  * Signing is supported, encryption is not. A password-proven session gets a
+    signing key (HMAC-SHA256 on 2.x, AES-CMAC on 3.x, see smb2_crypto.py), the
+    server verifies signed requests, refuses unsigned ones when the client
+    declared signing required, and signs its replies. That is what Windows 11
+    (which requires signing by default) needs to mount the share. Signing is
+    advertised as enabled, never required, so clients that do not sign -- the
+    PS2 loaders -- are served unsigned as before. The AES-CMAC runs on the
+    OS crypto library where one is available (Windows bcrypt, OpenSSL) and
+    falls back to pure Python elsewhere. Encryption (AES-CCM) is not offered.
+  * Open mode (no password) logs the client on as a guest. Guest sessions have
+    no session key, so they cannot be signed; Windows refuses unsigned guest
+    access unless AllowInsecureGuestAuth is set. Use a password card from
+    Windows.
   * Dialect 3.1.1 is not offered. It needs negotiate contexts (a
     pre-authentication integrity hash the client verifies), and claiming it
     without them makes Windows drop the connection. 3.0.2 is negotiated instead,
@@ -49,6 +56,7 @@ import time
 
 from smb2_auth import AuthError, Authenticator, server_challenge
 from smb2_paths import PathError, Share
+import smb2_crypto
 import smb2_spnego as spnego
 import smb2_srvsvc as srvsvc
 import smb2_wire as wire
@@ -135,6 +143,20 @@ class Connection:
         self.authenticated = False
         self.user = ""
         self.challenge = None
+        # The NTLM NEGOTIATE and CHALLENGE messages of the exchange in flight:
+        # the client's MIC in its AUTHENTICATE is computed over both.
+        self.ntlm_negotiate = None
+        self.ntlm_challenge = None
+        # Signing state. signing_key is set when a password-proven session
+        # exists; signing_required when the client said in SESSION_SETUP that
+        # it signs everything, which is when every reply must be signed too.
+        self.signing_key = None
+        self.signing_required = False
+        # What the client's SMB2 NEGOTIATE said, kept so that
+        # FSCTL_VALIDATE_NEGOTIATE_INFO can confirm nobody rewrote it in transit.
+        self.negotiate_claims = None
+        # Set when the protocol says the only correct answer is to hang up.
+        self.terminate = False
         self.trees = {}          # tree_id -> Share
         self.handles = {}        # volatile id -> Handle
         self._next_tree = 1
@@ -300,6 +322,9 @@ class Smb2Server:
                 if msg == b"":
                     continue
                 self._dispatch_all(conn, msg)
+                if conn.terminate:
+                    log("terminating connection from", peer, "as the protocol requires")
+                    break
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
             log("client", peer, "went away")
         except OSError as e:
@@ -331,6 +356,8 @@ class Smb2Server:
         while offset < len(msg):
             hdr = wire.parse_header(msg[offset:])
             if hdr is None:
+                if offset == 0:
+                    self._not_smb2(conn, msg)
                 return
             end = offset + hdr.next_command if hdr.next_command else len(msg)
             body = msg[offset + wire.HEADER_SIZE:end]
@@ -343,8 +370,11 @@ class Smb2Server:
                     hdr.session_id = prev[0].session_id
                 if hdr.tree_id == 0xFFFFFFFF:
                     hdr.tree_id = prev[0].tree_id
+            refusal = self._signature_check(conn, hdr, msg[offset:end])
             if related and prev[1] not in (None, wire.STATUS_SUCCESS):
                 status, reply_body, tree_id = prev[1], wire.error_body(), None
+            elif refusal is not None:
+                status, reply_body, tree_id = refusal, wire.error_body(), None
             else:
                 status, reply_body, tree_id = self._handle(conn, hdr, body)
             if (hdr.command == wire.CMD_CREATE and status == wire.STATUS_SUCCESS
@@ -373,13 +403,21 @@ class Smb2Server:
                 aligned = (total + 7) & ~7
                 padded = reply_body + b"\x00" * (aligned - total)
                 next_command = aligned
-            out += wire.pack_header(
+            flags = wire.FLAG_RELATED if (i and hdr.flags & wire.FLAG_RELATED) else 0
+            sign = self._should_sign(conn, hdr, status)
+            if sign:
+                flags |= wire.FLAG_SIGNED
+            piece = wire.pack_header(
                 hdr.command, status, hdr.message_id,
                 tree_id=hdr.tree_id if tree_id is None else tree_id,
                 session_id=conn.session_id or hdr.session_id,
-                credits=grant,
-                flags=wire.FLAG_RELATED if (i and hdr.flags & wire.FLAG_RELATED) else 0,
+                credits=grant, flags=flags,
                 next_command=next_command) + padded
+            if sign:
+                # Each message of a compound is signed on its own, over its
+                # header, body and the padding up to NextCommand.
+                piece = smb2_crypto.signed(conn.signing_key, conn.dialect, piece)
+            out += piece
         if out:
             wire.send_msg(conn.sock, out)
             # Count served bytes only once the reply left: a send that raised
@@ -387,6 +425,83 @@ class Smb2Server:
             for hdr, status, reply_body, _tree_id, _grant in replies:
                 if hdr.command == wire.CMD_READ and status == wire.STATUS_SUCCESS:
                     self._session_record(conn, "bytes", len(reply_body) - 16)
+
+    def _not_smb2(self, conn, msg):
+        """A first frame that is not SMB2 (MS-SMB2 3.3.5.3.1).
+
+        Windows (and macOS) open with an SMB1-framed SMB_COM_NEGOTIATE that
+        lists "SMB 2.???" and "SMB 2.002" among the dialects. The answer is
+        an SMB2 NEGOTIATE response: dialect 0x02FF ("send a real SMB2
+        NEGOTIATE") when the wildcard was offered, 2.0.2 when only that was.
+        Leaving it unanswered is why Windows Explorer spent 100 seconds and
+        five connections before giving up with "network name is no longer
+        available". A client offering no SMB2 dialect at all speaks SMB1
+        only, which is the SMBv1 server's job.
+        """
+        dialects = smb1_negotiate_dialects(msg)
+        if dialects is None:
+            log("ignoring a frame that is not SMB2 from", conn.peer, msg[:8].hex())
+            return
+        if "SMB 2.???" in dialects:
+            dialect = 0x02FF
+        elif "SMB 2.002" in dialects and wire.DIALECT_202 <= self.ceiling:
+            dialect = wire.DIALECT_202
+            conn.dialect = dialect
+        else:
+            note("%s offered only SMB1 dialects (%s); this server speaks SMB2/SMB3. "
+                 "Run the SMBv1 server for this client (OPL needs it)."
+                 % (conn.peer[0], ", ".join(dialects)))
+            return
+        log("SMB1-framed NEGOTIATE from %s -> SMB2 dialect 0x%04x" % (conn.peer, dialect))
+        conn.credits += 1
+        out = wire.pack_header(wire.CMD_NEGOTIATE, wire.STATUS_SUCCESS, 0, credits=1)
+        wire.send_msg(conn.sock, out + negotiate_response(self, dialect))
+
+    # -- signing ----------------------------------------------------------- #
+    # Requests that are legitimately unsigned on a session that signs: the
+    # ones that happen before a key exists, and CANCEL, which MS-SMB2 3.3.5.1
+    # exempts outright.
+    _UNSIGNED_OK = frozenset((wire.CMD_NEGOTIATE, wire.CMD_SESSION_SETUP,
+                              wire.CMD_CANCEL))
+
+    def _signature_check(self, conn, hdr, message):
+        """A status to refuse `message` with, or None if it may be served.
+
+        A signed request is verified against the session's key; a bad
+        signature is a request from someone who does not hold the key, and it
+        is refused rather than served under the session's identity. An
+        unsigned request on a session whose client declared signing required
+        is refused the same way: MS-SMB2 3.3.5.2.4. A signed request on a
+        session with no key (open mode has no secret to sign with) cannot be
+        verified and is served as if unsigned.
+        """
+        signed = bool(hdr.flags & wire.FLAG_SIGNED)
+        if conn.signing_key is None:
+            return None
+        if signed:
+            if smb2_crypto.verify(conn.signing_key, conn.dialect, message):
+                return None
+            log(hdr, "-> bad signature from", conn.peer)
+            return wire.STATUS_ACCESS_DENIED
+        if conn.signing_required and hdr.command not in self._UNSIGNED_OK:
+            log(hdr, "-> unsigned request on a session that requires signing")
+            return wire.STATUS_ACCESS_DENIED
+        return None
+
+    def _should_sign(self, conn, hdr, status):
+        """Whether one reply is signed (MS-SMB2 3.3.4.1.1).
+
+        Yes when the session has a key and either the client required signing
+        or signed this very request. So a PS2 client, which never signs, gets
+        the bytes it always did, and Windows, which signs everything once it
+        has a key, gets every reply signed -- including the final
+        SESSION_SETUP, whose signature it checks before trusting the session.
+        The mid-exchange SESSION_SETUP (MORE_PROCESSING_REQUIRED) has no key
+        yet and is never signed.
+        """
+        if conn.signing_key is None or status == wire.STATUS_MORE_PROCESSING_REQUIRED:
+            return False
+        return conn.signing_required or bool(hdr.flags & wire.FLAG_SIGNED)
 
     # The most credits one client may hold at once. Enough for libsmb2 to keep
     # a compound and a few large reads in flight; a client asks for what it
@@ -557,13 +672,14 @@ def _status_for_oserror(e):
 def h_negotiate(srv, conn, hdr, body):
     if len(body) < 36:
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short NEGOTIATE")
-    _size, dialect_count, _mode, _res, _caps = struct.unpack_from("<HHHHI", body, 0)
+    _size, dialect_count, mode, _res, caps = struct.unpack_from("<HHHHI", body, 0)
     offered = []
     for i in range(dialect_count):
         at = 36 + i * 2
         if at + 2 > len(body):
             break
         offered.append(struct.unpack_from("<H", body, at)[0])
+    conn.negotiate_claims = (caps, bytes(body[12:28]), mode, tuple(offered))
 
     dialect = wire.pick_dialect(offered, srv.ceiling)
     if dialect is None:
@@ -581,7 +697,11 @@ def h_negotiate(srv, conn, hdr, body):
                         "no common dialect; client offered %s" % offered_text)
     conn.dialect = dialect
     log("negotiated dialect 0x%04x with %s" % (dialect, conn.peer))
+    return wire.STATUS_SUCCESS, negotiate_response(srv, dialect)
 
+
+def negotiate_response(srv, dialect):
+    """The NEGOTIATE response body for `dialect` (MS-SMB2 2.2.4)."""
     token = spnego.neg_token_init()
     body_out = struct.pack(
         "<HHHH16sIIIIQQHHI",
@@ -598,7 +718,32 @@ def h_negotiate(srv, conn, hdr, body):
         len(token),
         0,                                      # NegotiateContextOffset
     )
-    return wire.STATUS_SUCCESS, body_out + token
+    return body_out + token
+
+
+# An SMB1-framed SMB_COM_NEGOTIATE (MS-CIFS 2.2.4.52): 32-byte header, then
+# WordCount, ByteCount and the dialect strings, each 0x02 + NUL-terminated.
+SMB1_MAGIC = b"\xffSMB"
+SMB1_COM_NEGOTIATE = 0x72
+SMB1_HEADER_SIZE = 32
+
+
+def smb1_negotiate_dialects(msg):
+    """The dialect strings of an SMB1 NEGOTIATE, or None if `msg` is not one."""
+    if (len(msg) < SMB1_HEADER_SIZE + 3 or msg[:4] != SMB1_MAGIC
+            or msg[4] != SMB1_COM_NEGOTIATE):
+        return None
+    word_count = msg[SMB1_HEADER_SIZE]
+    at = SMB1_HEADER_SIZE + 1 + word_count * 2
+    if at + 2 > len(msg):
+        return None
+    byte_count = struct.unpack_from("<H", msg, at)[0]
+    blob = msg[at + 2:at + 2 + byte_count]
+    dialects = []
+    for item in blob.split(b"\x00"):
+        if item.startswith(b"\x02"):
+            dialects.append(item[1:].decode("ascii", "replace"))
+    return dialects
 
 
 def h_session_setup(srv, conn, hdr, body):
@@ -630,7 +775,12 @@ def h_session_setup(srv, conn, hdr, body):
         # buffer, and copies TargetInfo into it; the DNS pairs are optional
         # and would only eat that room.
         chal = spnego.build_challenge(conn.challenge, srv.domain, srv.server_name,
-                                      compact=raw)
+                                      compact=raw,
+                                      client_flags=spnego.negotiate_flags(token))
+        conn.ntlm_negotiate = spnego.trim(token)
+        conn.ntlm_challenge = chal
+        conn.signing_key = None
+        conn.signing_required = False
         if raw:
             out = chal
         else:
@@ -651,6 +801,7 @@ def h_session_setup(srv, conn, hdr, body):
 
     creds = spnego.parse_authenticate(token)
     session_flags = 0
+    session_key = None
     if creds.is_anonymous:
         # A null session proves nothing. It is accepted only where the operator
         # has already said the share needs no password; otherwise it is a
@@ -665,12 +816,28 @@ def h_session_setup(srv, conn, hdr, body):
         # folds it into the key, so substituting the server's default for a
         # client that sent none derives a different key and fails a correct
         # password. Empty is a value here, not a missing one.
-        srv.auth.verify(creds.user, creds.nt_response, conn.challenge,
-                        domain=creds.domain)
+        base_key = srv.auth.verify(creds.user, creds.nt_response, conn.challenge,
+                                   domain=creds.domain)
+        if base_key is None:
+            # Open mode: nothing was proved, so there is no key to sign with.
+            # Say so with IS_GUEST rather than pretend; a client whose policy
+            # requires signing decides for itself whether a guest session
+            # without it is acceptable (Windows: AllowInsecureGuestAuth).
+            session_flags = wire.SESSION_FLAG_IS_GUEST
+        else:
+            session_key = spnego.exported_session_key(base_key, creds)
+            if not spnego.verify_mic(session_key, conn.ntlm_negotiate,
+                                     conn.ntlm_challenge, creds):
+                raise Smb2Error(wire.STATUS_LOGON_FAILURE,
+                                "NTLM MIC does not match for %r" % (creds.user,))
 
     conn.authenticated = True
     conn.user = creds.user or "(anonymous)"
     conn.challenge = None
+    conn.ntlm_negotiate = conn.ntlm_challenge = None
+    if session_key is not None:
+        conn.signing_key = smb2_crypto.signing_key(session_key, conn.dialect or 0)
+        conn.signing_required = bool(_mode & wire.SECURITY_MODE_SIGNING_REQUIRED)
     if conn.session_id == 0:
         conn.session_id = int.from_bytes(os.urandom(8), "little") or 1
     note("session established for %r from %s (dialect 0x%04x)"
@@ -688,6 +855,8 @@ def h_logoff(srv, conn, hdr, body):
     conn.close_all()
     conn.authenticated = False
     conn.trees.clear()
+    # The signing key stays until the next SESSION_SETUP replaces it: the
+    # LOGOFF reply is packed after this returns and must still be signed.
     return wire.STATUS_SUCCESS, struct.pack("<HH", 4, 0)
 
 
@@ -1133,29 +1302,58 @@ def h_ioctl(srv, conn, hdr, body):
     if len(body) < 56:
         raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short IOCTL")
     ctl_code = struct.unpack_from("<I", body, 4)[0]
-    if ctl_code != wire.FSCTL_PIPE_TRANSCEIVE:
-        raise Smb2Error(wire.STATUS_NOT_SUPPORTED, "ioctl 0x%08x is not served" % ctl_code)
-    h = conn.handle_from(body[8:24])
-    if h.pipe is None:
-        raise Smb2Error(wire.STATUS_INVALID_DEVICE_REQUEST, "transceive on a file")
     in_off, in_len, _max_in, _out_off, _out_len, max_out, flags = struct.unpack_from(
         "<IIIIIII", body, 24)
     data = request_buffer(body, in_off, in_len, "IOCTL input",
                           least=wire.HEADER_SIZE + 56)
-    try:
-        out = h.pipe.transact(data)
-    except srvsvc.RpcError as e:
-        raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "srvsvc: %s" % e)
     status = wire.STATUS_SUCCESS
-    if max_out and len(out) > max_out:
-        # The rest waits in the pipe for READs, as on Windows.
-        h.pipe.outbox = out[max_out:] + h.pipe.outbox
-        out = out[:max_out]
-        status = wire.STATUS_BUFFER_OVERFLOW
+    if ctl_code == wire.FSCTL_VALIDATE_NEGOTIATE_INFO:
+        out = validate_negotiate_info(srv, conn, data)
+    elif ctl_code == wire.FSCTL_PIPE_TRANSCEIVE:
+        h = conn.handle_from(body[8:24])
+        if h.pipe is None:
+            raise Smb2Error(wire.STATUS_INVALID_DEVICE_REQUEST, "transceive on a file")
+        try:
+            out = h.pipe.transact(data)
+        except srvsvc.RpcError as e:
+            raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "srvsvc: %s" % e)
+        if max_out and len(out) > max_out:
+            # The rest waits in the pipe for READs, as on Windows.
+            h.pipe.outbox = out[max_out:] + h.pipe.outbox
+            out = out[:max_out]
+            status = wire.STATUS_BUFFER_OVERFLOW
+    else:
+        raise Smb2Error(wire.STATUS_NOT_SUPPORTED, "ioctl 0x%08x is not served" % ctl_code)
     off = wire.HEADER_SIZE + 48
     body_out = struct.pack("<HHI16sIIIIII", 49, 0, ctl_code, bytes(body[8:24]),
                            off, 0, off, len(out), 0, 0)
     return status, body_out + out
+
+
+def validate_negotiate_info(srv, conn, data):
+    """FSCTL_VALIDATE_NEGOTIATE_INFO (MS-SMB2 3.3.5.15.12).
+
+    An SMB 3.x client re-sends, inside a signed message, what it offered in its
+    NEGOTIATE; the server checks it against what it actually received and
+    answers with what it actually sent. The signature is what makes this
+    worth doing: a man in the middle who downgraded the unsigned NEGOTIATE
+    cannot forge this exchange. Windows and smbprotocol refuse the share when
+    the answer is missing. A mismatch means the NEGOTIATE was tampered with
+    and the connection is dropped, as the protocol requires.
+    """
+    if len(data) < 24:
+        raise Smb2Error(wire.STATUS_INVALID_PARAMETER, "short VALIDATE_NEGOTIATE_INFO")
+    caps, guid, mode, count = struct.unpack_from("<I16sHH", data, 0)
+    dialects = tuple(struct.unpack_from("<%dH" % count, data, 24)) if (
+        24 + count * 2 <= len(data)) else None
+    claimed = (caps, guid, mode, dialects)
+    if conn.negotiate_claims is None or claimed != conn.negotiate_claims:
+        note("%s: VALIDATE_NEGOTIATE_INFO does not match its NEGOTIATE; "
+             "dropping the connection" % (conn.peer[0],))
+        conn.terminate = True
+        raise Smb2Error(wire.STATUS_ACCESS_DENIED, "negotiate validation failed")
+    return struct.pack("<I16sHH", wire.GLOBAL_CAP_LARGE_MTU, srv.guid,
+                       wire.SECURITY_MODE_SIGNING_ENABLED, conn.dialect)
 
 
 _HANDLERS = {
@@ -1182,14 +1380,43 @@ _HANDLERS = {
 # CLI
 # --------------------------------------------------------------------------- #
 
-def take_445(stop_timeout=10.0, poll_interval=0.25, restore_timeout=10.0):
+# The kernel side of Windows file sharing. srvnet.sys owns the TCP 445 listener
+# and stays loaded while anything depends on it: srv2.sys (the SMB2/3 server)
+# and srv.sys (the SMB1 server driver, loaded even when SMB1 is disabled).
+# Stopping LanmanServer alone leaves all three running and 445 bound, so the
+# takeover pauses them in dependency order -- srv, then srv2, then srvnet --
+# and starts them again in reverse. Stop only, never disable.
+_SMB_DRIVERS = ("srv", "srv2", "srvnet")
+_TAKE_445_SERVICES = frozenset(("LanmanServer", "Browser") + _SMB_DRIVERS)
+
+
+def _port_free(bind, port):
+    """True if a TCP bind on (bind, port) succeeds right now: the direct test
+    for whether Windows has released the port, rather than service states."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind((bind, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
+def take_445(stop_timeout=10.0, poll_interval=0.25, restore_timeout=10.0,
+             bind="0.0.0.0", port_free=None):
     """Temporarily stop Windows file sharing before taking port 445.
 
     The service can report that Stop-Service returned while it is still
-    stopping. Verify its state before binding; the separate listener retry
-    handles srvnet.sys holding the port briefly after the service stops.
-    Never enable SMB1 or change the service's startup configuration.
-    Returns a restore callback, or None if stopping failed.
+    stopping, so its state is verified before anything else happens. If TCP
+    445 is still bound once LanmanServer is Stopped, the SMB kernel drivers
+    (srv, srv2, srvnet) are paused too, in dependency order, and only when
+    nothing outside Windows file sharing depends on them. Never enable SMB1
+    or change any service's startup configuration.
+
+    `port_free` is a zero-argument probe of TCP 445 (tests inject one; the
+    default really binds `bind`:445). Returns a restore callback, or None if
+    the takeover was refused or failed.
     """
     import subprocess
 
@@ -1199,6 +1426,9 @@ def take_445(stop_timeout=10.0, poll_interval=0.25, restore_timeout=10.0):
                               "v1.0", "powershell.exe")
     if not os.path.isfile(powershell):
         powershell = "powershell"
+    if port_free is None:
+        def port_free():
+            return _port_free(bind, 445)
 
     def ps(cmd):
         return subprocess.run([powershell, "-NoProfile", "-Command", cmd],
@@ -1208,45 +1438,76 @@ def take_445(stop_timeout=10.0, poll_interval=0.25, restore_timeout=10.0):
         return ps("(Get-Service %s -ErrorAction SilentlyContinue).Status" %
                   name).stdout.strip()
 
+    def foreign_dependents(name):
+        """Running services that depend on `name` and are not part of Windows
+        file sharing itself. Other people's software is never paused."""
+        out = ps("(Get-Service %s -ErrorAction SilentlyContinue).DependentServices"
+                 " | Where-Object { $_.Status -eq 'Running' }"
+                 " | ForEach-Object { $_.Name }" % name).stdout.split()
+        return [n for n in out if n not in _TAKE_445_SERVICES]
+
+    def wait_for(name, want, timeout):
+        deadline = time.monotonic() + timeout
+        while status(name) != want:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(poll_interval)
+        return True
+
     initial = status("LanmanServer")
     browser = status("Browser")
     originally_running = initial == "Running"
+    stopped_drivers = []  # in stop order; restored in reverse
     restored = []
 
-    def restore():
-        """Restore a previously running service only after its stop finishes.
+    def start_service(name):
+        """Start `name` only after its stop finishes; True once it is Running.
 
         A timed-out Stop-Service can leave Windows in StopPending. Start-Service
         cannot reliably run in that state, so wait for Stopped before starting.
-        Only mark success when the service actually reaches Running; on timeout,
-        log the recovery command and leave the callback retryable.
+        Only report success when the service actually reaches Running; on
+        timeout, log the recovery command and let the caller retry later.
+        """
+        deadline = time.monotonic() + restore_timeout
+        while True:
+            state = status(name)
+            if state == "Running":
+                return True
+            if state == "Stopped":
+                res = ps("Start-Service %s -ErrorAction Stop" % name)
+                if res.returncode:
+                    note("[445] WARNING: Start-Service %s failed:" % name,
+                         res.stderr.strip())
+            elif state not in ("StopPending", "StartPending"):
+                note("[445] WARNING: cannot verify %s state:" % name,
+                     state or "unknown")
+                return False
+            if time.monotonic() >= deadline:
+                note("[445] WARNING: %s was not restored; run 'Start-Service %s' "
+                     "in elevated PowerShell after its pending transition "
+                     "completes." % (name, name))
+                return False
+            time.sleep(poll_interval)
+
+    def restore():
+        """Put Windows file sharing back exactly as it was found, once.
+
+        Drivers first, in reverse order (srvnet carries srv2; srv2 carries srv
+        and LanmanServer), then the service. The callback stays retryable
+        until LanmanServer is seen Running again.
         """
         if restored:
             return
+        for name in reversed(stopped_drivers):
+            note("[445] restoring %s driver..." % name)
+            start_service(name)
         if not originally_running:
             restored.append(True)
             return
         note("[445] restoring LanmanServer...")
-        deadline = time.monotonic() + restore_timeout
-        while True:
-            state = status("LanmanServer")
-            if state == "Running":
-                restored.append(True)
-                break
-            if state == "Stopped":
-                res = ps("Start-Service LanmanServer -ErrorAction Stop")
-                if res.returncode:
-                    note("[445] WARNING: Start-Service failed:", res.stderr.strip())
-            elif state not in ("StopPending", "StartPending"):
-                note("[445] WARNING: cannot verify LanmanServer state:",
-                     state or "unknown")
-                return
-            if time.monotonic() >= deadline:
-                note("[445] WARNING: LanmanServer was not restored; run "
-                     "'Start-Service LanmanServer' in elevated PowerShell "
-                     "after its pending transition completes.")
-                return
-            time.sleep(poll_interval)
+        if not start_service("LanmanServer"):
+            return
+        restored.append(True)
         if browser == "Running":
             ps("Start-Service Browser -ErrorAction SilentlyContinue")
 
@@ -1266,14 +1527,45 @@ def take_445(stop_timeout=10.0, poll_interval=0.25, restore_timeout=10.0):
                  "a dependent service may prevent takeover.", res.stderr.strip())
             restore()  # Even a failed stop request may have changed its state.
             return None
-        deadline = time.monotonic() + stop_timeout
-        while status("LanmanServer") != "Stopped":
-            if time.monotonic() >= deadline:
-                note("[445] LanmanServer did not reach Stopped within %.1fs." %
-                     stop_timeout)
+        if not wait_for("LanmanServer", "Stopped", stop_timeout):
+            note("[445] LanmanServer did not reach Stopped within %.1fs." %
+                 stop_timeout)
+            restore()
+            return None
+
+        if port_free():
+            return restore
+        note("[445] TCP 445 is still bound by the SMB kernel drivers; "
+             "pausing them too (srv, srv2, srvnet)...")
+        for name in _SMB_DRIVERS:
+            if status(name) != "Running":
+                continue
+            pinned = foreign_dependents(name)
+            if pinned:
+                note("[445] %s is pinned by %s. Not pausing other software: "
+                     "keep the custom port instead of --take-445." %
+                     (name, ", ".join(pinned)))
                 restore()
                 return None
-            time.sleep(poll_interval)
+            note("[445] stopping %s driver..." % name)
+            stopped_drivers.append(name)  # A failed stop may still change state.
+            # No -Force: Windows must refuse rather than stop a dependent we
+            # did not inspect.
+            res = ps("Stop-Service -Name %s -ErrorAction Stop" % name)
+            if res.returncode:
+                note("[445] could not stop the %s driver:" % name,
+                     res.stderr.strip())
+                restore()
+                return None
+            if not wait_for(name, "Stopped", stop_timeout):
+                note("[445] %s did not reach Stopped within %.1fs." %
+                     (name, stop_timeout))
+                restore()
+                return None
+        if not port_free():
+            # Release can lag the driver stop by a moment; the listener's own
+            # retry covers that. Anything longer is reported by bind_hint.
+            note("[445] 445 not released yet; the listener will retry briefly.")
     except BaseException:
         # Preserve the previous Windows file-sharing state if startup is
         # interrupted after the stop request.
@@ -1310,11 +1602,13 @@ def bind_hint(port, err, take_445=False):
     if port != 445:
         return ""
     if take_445 and os.name == "nt":
-        return ("TCP 445 remained unavailable after Windows file sharing was "
-                "stopped and the bind was retried. Another service, srvnet.sys, "
-                "or a Windows port reservation may still block it. Check "
-                "Get-NetTCPConnection -LocalPort 445 and running dependents "
-                "of Get-Service srvnet. Do not disable Windows services.")
+        return ("TCP 445 remained unavailable after Windows file sharing "
+                "(LanmanServer and the srv, srv2, srvnet drivers) was paused "
+                "and the bind was retried. Another program or a Windows port "
+                "reservation may still hold it. Check 'Get-NetTCPConnection "
+                "-LocalPort 445' and 'netsh int ipv4 show excludedportrange "
+                "tcp'. Do not disable Windows services; the custom port works "
+                "for everything except Windows Explorer and Neutrino.")
     if err.errno in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", -1)):
         if os.name == "nt":
             return ("Port 445 belongs to Windows file sharing. Tick 'Take port "
@@ -1422,7 +1716,7 @@ def main(argv=None):
         want_port = args.port
         if args.take_445:
             want_port = 445
-            restore = take_445()
+            restore = take_445(bind=args.bind)
             if restore is None:
                 return 1
         try:
