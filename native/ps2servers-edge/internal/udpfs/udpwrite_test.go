@@ -122,10 +122,17 @@ func TestBatchedTransferPreservesSequenceAndRetransmission(t *testing.T) {
 	server, _, peer, receiver := newUDPWriteTestServer(t, true)
 	st := session.New(peer, session.Standard)
 	st.TransmitSequence = 4090
-	st.TransmitAcked = 3
+	st.TransmitAcked = protocol.Previous(4090)
 	var windows []int
+	first := true
 	server.batchWrite = func(addr *net.UDPAddr, batch [][]byte) (int, error) {
 		windows = append(windows, len(batch))
+		if first {
+			first = false
+			st.Mu.Lock()
+			st.TransmitAcked = 4097
+			st.Mu.Unlock()
+		}
 		for _, packet := range batch {
 			if _, err := server.data.WriteToUDP(packet, addr); err != nil {
 				t.Fatal(err)
@@ -133,14 +140,14 @@ func TestBatchedTransferPreservesSequenceAndRetransmission(t *testing.T) {
 		}
 		return len(batch), nil
 	}
-	if !server.sendTransferPackets(st, nil, make([]byte, protocol.MaxPayload*10)) {
-		t.Fatal("transfer was not confirmed")
+	if server.sendTransferPackets(st, nil, make([]byte, protocol.MaxPayload*10)) {
+		t.Fatal("unacknowledged final window was confirmed")
 	}
-	if len(windows) != 2 || windows[0] != 8 || windows[1] != 2 {
-		t.Fatalf("batch windows = %v, want [8 2]", windows)
+	if len(windows) != 3 || windows[0] != 8 || windows[1] != 2 || windows[2] != 2 {
+		t.Fatalf("batch windows = %v, want [8 2 2]", windows)
 	}
-	received := receiveDatagrams(t, receiver, 10)
-	for i, packet := range received {
+	received := receiveDatagrams(t, receiver, 12)
+	for i, packet := range received[:10] {
 		h, err := protocol.ParseHeader(packet)
 		if err != nil {
 			t.Fatal(err)
@@ -149,20 +156,25 @@ func TestBatchedTransferPreservesSequenceAndRetransmission(t *testing.T) {
 		if h.Sequence != wantSequence {
 			t.Errorf("packet %d sequence = %d, want %d", i, h.Sequence, wantSequence)
 		}
-		if !bytes.Equal(st.TxBuffer[i].Bytes, packet) || st.TxBuffer[i].Sequence != wantSequence {
+	}
+	if len(st.TxBuffer) != 2 {
+		t.Fatalf("retransmission buffer has %d packets, want 2", len(st.TxBuffer))
+	}
+	for i, packet := range received[10:] {
+		h, err := protocol.ParseHeader(packet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantSequence := uint16(4098+i) & protocol.SequenceMask
+		if h.Sequence != wantSequence {
+			t.Errorf("retransmitted sequence = %d, want %d", h.Sequence, wantSequence)
+		}
+		if !bytes.Equal(st.TxBuffer[i].Bytes, received[8+i]) || st.TxBuffer[i].Sequence != wantSequence {
 			t.Errorf("retransmission buffer differs at %d", i)
 		}
 	}
 	if st.TransmitSequence != 4 {
 		t.Fatalf("next sequence = %d, want 4", st.TransmitSequence)
-	}
-	server.retransmit(st, 4098)
-	retransmitted := receiveDatagrams(t, receiver, 2)
-	for i, packet := range retransmitted {
-		h, _ := protocol.ParseHeader(packet)
-		if want := uint16(4098+i) & protocol.SequenceMask; h.Sequence != want {
-			t.Errorf("retransmitted sequence = %d, want %d", h.Sequence, want)
-		}
 	}
 }
 
@@ -269,6 +281,26 @@ func TestBatchedMultiWindowRead(t *testing.T) {
 	}
 }
 
+func TestBatchedFlushPrunesAcknowledgedPackets(t *testing.T) {
+	server, _, peer, _ := newUDPWriteTestServer(t, true)
+	server.batchWriteConn = server.data
+	st := session.New(peer, session.Standard)
+	server.batchWrite = func(addr *net.UDPAddr, packets [][]byte) (int, error) {
+		st.Mu.Lock()
+		st.TransmitAcked = 1
+		st.Mu.Unlock()
+		return len(packets), nil
+	}
+	if !server.sendTransferPackets(st, nil, make([]byte, 2048)) {
+		t.Fatal("transfer was not confirmed")
+	}
+	st.Mu.Lock()
+	defer st.Mu.Unlock()
+	if len(st.TxBuffer) != 0 {
+		t.Fatalf("ACKed batch retained %d packets", len(st.TxBuffer))
+	}
+}
+
 func TestBatchFlushSynchronizesPeerSnapshot(t *testing.T) {
 	server, _, peer, _ := newUDPWriteTestServer(t, true)
 	server.batchWriteConn = server.data
@@ -357,7 +389,7 @@ func TestBatchedTransferDoesNotPublishQueuedPacketsBeforeFlush(t *testing.T) {
 			server, _, peer, receiver := newUDPWriteTestServer(t, true)
 			st := session.New(peer, session.Standard)
 			st.TransmitSequence = 4090
-			st.TransmitAcked = 3
+			st.TransmitAcked = protocol.Previous(4090)
 			first := true
 			server.batchWrite = func(addr *net.UDPAddr, batch [][]byte) (int, error) {
 				if first {
@@ -365,8 +397,12 @@ func TestBatchedTransferDoesNotPublishQueuedPacketsBeforeFlush(t *testing.T) {
 					if control == "nack" {
 						server.retransmit(st, 4090)
 					} else {
-						server.pruneAcked(st, 4097)
+						server.handleControl(st, protocol.DataHeader{Flags: protocol.FlagACK, AckSequence: 4097})
 					}
+				} else if control == "ack" {
+					st.Mu.Lock()
+					st.TransmitAcked = 4099
+					st.Mu.Unlock()
 				}
 				for _, packet := range batch {
 					if _, err := server.data.WriteToUDP(packet, addr); err != nil {
@@ -375,22 +411,34 @@ func TestBatchedTransferDoesNotPublishQueuedPacketsBeforeFlush(t *testing.T) {
 				}
 				return len(batch), nil
 			}
-			if !server.sendTransferPackets(st, nil, make([]byte, protocol.MaxPayload*10)) {
-				t.Fatal("transfer was not confirmed")
+			confirmed := server.sendTransferPackets(st, nil, make([]byte, protocol.MaxPayload*10))
+			if confirmed != (control == "ack") {
+				t.Fatalf("confirmed = %v for %s", confirmed, control)
 			}
-			received := receiveDatagrams(t, receiver, 10)
+			wantPackets := 10
+			if control == "nack" {
+				wantPackets = 16
+			}
+			received := receiveDatagrams(t, receiver, wantPackets)
 			for i, packet := range received {
 				h, err := protocol.ParseHeader(packet)
 				if err != nil {
 					t.Fatal(err)
 				}
 				want := uint16(4090+i) & protocol.SequenceMask
+				if control == "nack" && i >= 8 {
+					want = uint16(4090+i-8) & protocol.SequenceMask
+				}
 				if h.Sequence != want {
 					t.Errorf("packet %d sequence = %d, want %d", i, h.Sequence, want)
 				}
 			}
-			if len(st.TxBuffer) != 10 {
-				t.Fatalf("control pruned or lost retransmission entries: %d", len(st.TxBuffer))
+			wantRetained := 8
+			if control == "ack" {
+				wantRetained = 0
+			}
+			if len(st.TxBuffer) != wantRetained {
+				t.Fatalf("control left %d retransmission entries, want %d", len(st.TxBuffer), wantRetained)
 			}
 		})
 	}

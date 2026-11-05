@@ -230,18 +230,13 @@ class UdpfsFlagsAreDocumented(unittest.TestCase):
             % (sorted(shipped - documented), sorted(documented - shipped))))
 
 
-class OpenWrtBlockOnlyService(unittest.TestCase):
-    def test_empty_root_does_not_restore_the_filesystem_default(self):
-        bash = shutil.which("bash")
-        if bash is None:
-            self.skipTest("OpenWrt command construction requires Bash on this host")
-        harness = r'''
+OPENWRT_HARNESS = r'''
 config_get_bool() { eval "$1=1"; }
 config_get() {
     local value
     case "$3" in
         root) value="${4-}" ;;
-        block_device) value=/tmp/card.bin ;;
+        block_device) value="${TEST_BLOCK_DEVICE-/tmp/card.bin}" ;;
         bind) value=127.0.0.1 ;;
         port) value=62966 ;;
         sector_size) value=512 ;;
@@ -270,16 +265,31 @@ source ./ps2servers-edge.init
 start_udpfs
 printf '%s\n' "$command"
 '''
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
+
+
+class OpenWrtBlockOnlyService(unittest.TestCase):
+    def run_openwrt(self, setup=""):
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("OpenWrt command construction requires Bash on this host")
+        with tempfile.TemporaryDirectory() as temp:
             shutil.copy(UCI_INIT, Path(temp, "ps2servers-edge.init"))
             result = subprocess.run(
-                [bash, "-c", harness], cwd=temp,
+                [bash, "-c", setup + OPENWRT_HARNESS], cwd=temp,
                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
-        command = result.stdout.strip()
+        return result.stdout.strip()
+
+    def test_empty_root_does_not_restore_the_filesystem_default(self):
+        command = self.run_openwrt()
         self.assertIn("--block-device /tmp/card.bin", command)
         self.assertNotRegex(command, r"--root\b",
                             "an empty root must not turn into /mnt/sda1/PS2")
+
+    def test_no_storage_choice_keeps_the_default_root(self):
+        command = self.run_openwrt("TEST_BLOCK_DEVICE=''\n")
+        self.assertIn("--root /mnt/sda1/PS2", command)
+        self.assertNotRegex(command, r"--block-device\b")
 
 
 if __name__ == "__main__":

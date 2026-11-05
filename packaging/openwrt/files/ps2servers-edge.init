@@ -61,6 +61,8 @@ start_udpfs() {
         config_get metrics_period main metrics_period 1m
 
         procd_open_instance udpfs
+        # Keep the old default only when no storage is configured.
+        [ -z "$root" ] && [ -z "$block_device" ] && root=/mnt/sda1/PS2
         procd_set_param command "$PROG" udpfs
         [ -n "$root" ] && procd_append_param command --root "$root"
         procd_append_param command \

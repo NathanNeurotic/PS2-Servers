@@ -90,7 +90,11 @@ as well as the file share.
 the same instance already serving files, so a console can reach a game folder
 and a virtual drive without a second service:
 
+For block-device-only service, clear the default root as well; leave it set to
+serve files and the image together:
+
 ```sh
+uci set ps2servers-edge.main.root=''
 uci set ps2servers-edge.main.block_device='/mnt/sda1/ps2.img'
 uci set ps2servers-edge.main.read_only='0'
 uci commit ps2servers-edge
@@ -100,9 +104,6 @@ service ps2servers-edge restart
 The image must be readable — and, for saves, writable — by the `ps2edge` user
 the service runs as, not by root. An image owned by `root:root` with mode `0644`
 produces a share that mounts and then fails every write.
-
-For block-device-only service, clear the root explicitly so the shipped default
-is not restored: `uci set ps2servers-edge.main.root=''`.
 
 This is distinct from the `udpbd` subcommand, which speaks a different protocol
 on its own port and has its own config section — see below.

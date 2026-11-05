@@ -162,6 +162,7 @@ func (s *Server) sendTransferPackets(st *session.State, header, data []byte) boo
 					}
 				}
 			}
+			s.pruneAcked(st, st.TransmitAcked)
 			st.Mu.Unlock()
 			pending = nil
 		}
