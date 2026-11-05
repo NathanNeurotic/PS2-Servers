@@ -2,11 +2,6 @@
 
 package compression
 
-/*
-#include "chd_libchdr.h"
-*/
-import "C"
-
 import (
 	"bytes"
 	"io"
@@ -14,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func readCHDReference(t *testing.T) []byte {
@@ -122,9 +118,7 @@ func TestCHDRejectsCorruptContainer(t *testing.T) {
 
 func TestCHDRejectsBackendHunkSizeMismatch(t *testing.T) {
 	original := backendCHDHunkBytes
-	backendCHDHunkBytes = func(handle *C.chd_file) uint32 {
-		return uint32(C.ps2_chd_hunk_bytes(handle)) + 1
-	}
+	backendCHDHunkBytes = func(unsafe.Pointer) uint32 { return 1 }
 	defer func() { backendCHDHunkBytes = original }()
 	img, err := openCHD(filepath.Join("testdata", "test_dvd.chd"))
 	if err == nil {

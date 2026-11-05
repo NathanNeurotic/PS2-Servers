@@ -302,9 +302,9 @@ def bindable_host():
     raise UdpfsError("no bindable non-loopback IPv4 address")
 
 
-def free_port():
+def free_port(host):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("127.0.0.1", 0))
+    sock.bind((host, 0))
     port = sock.getsockname()[1]
     sock.close()
     return port
@@ -363,7 +363,7 @@ class Server:
         self.root = root
         self.host = host
         self.protocol = protocol
-        self.port = free_port()
+        self.port = free_port(host)
         self.log = root / f"{name}-{block_only}.log"
         args = self.command(binary, block_only)
         self.process = subprocess.Popen(args, cwd=ROOT, stdout=self.log.open("wb"),
