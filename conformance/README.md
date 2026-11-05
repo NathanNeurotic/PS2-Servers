@@ -41,6 +41,9 @@ python conformance/integration/udpfs_parity.py \
 ```
 
 The reference is built from `ee94414f9f45ed33b8dd4ca4e03847440df946e9` in CI.
+Namespace collision and encoded-name-limit checks run on Core and Edge only.
+DREAD listing assertions check selected expected and forbidden entries; they do
+not compare exact listings.
 The harness documents intentional differences instead of copying upstream bugs:
 its virtual OPEN size is zero, virtual-alias GETSTAT is unsupported, legacy stem
 aliases are Core/Edge extensions, and its short delayed-ACK budget differs from

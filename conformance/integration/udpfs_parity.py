@@ -524,7 +524,7 @@ def case_namespace(server):
         if server.name != "core" or srv.LZ4_AVAILABLE:
             handle, _, _ = c.open("/NAMESPACE/PrefG.zso.iso")
             expect(len(c.read(handle, 5000)) == 5000, "valid ZSO decode")
-        if server.name != "reference":
+        if server.name != "reference" and (server.name != "core" or srv.LZ4_AVAILABLE):
             handle, _, _ = c.open("/NAMESPACE/PrefG.iso")
             expect(len(c.read(handle, 5000)) == 5000,
                    "legacy alias did not select parseable sibling")

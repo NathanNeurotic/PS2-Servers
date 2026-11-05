@@ -49,7 +49,7 @@ The UDPFS options map to Edge flags as follows:
 | Option | Flag | Notes |
 |---|---|---|
 | `enabled` | — | `0` stops the service starting at boot |
-| `root` | `--root` | game directory; must be mounted before the service starts |
+| `root` | `--root` | game directory; must be mounted before the service starts, or empty for block-only mode |
 | `bind` | `--bind` | `0.0.0.0` listens on every interface; a specific IP binds both sockets |
 | `port` | `--port` | discovery port, UDP 62966 (`0xF5F6`) |
 | `data_port` | `--data-port` | `0` picks automatically; set it for strict firewalls |
@@ -100,6 +100,9 @@ service ps2servers-edge restart
 The image must be readable — and, for saves, writable — by the `ps2edge` user
 the service runs as, not by root. An image owned by `root:root` with mode `0644`
 produces a share that mounts and then fails every write.
+
+For block-device-only service, clear the root explicitly so the shipped default
+is not restored: `uci set ps2servers-edge.main.root=''`.
 
 This is distinct from the `udpbd` subcommand, which speaks a different protocol
 on its own port and has its own config section — see below.

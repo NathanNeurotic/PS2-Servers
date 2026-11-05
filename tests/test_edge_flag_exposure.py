@@ -22,7 +22,11 @@ Run:  python -m unittest tests.test_edge_flag_exposure -v
 
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_GO = os.path.join(
@@ -224,6 +228,58 @@ class UdpfsFlagsAreDocumented(unittest.TestCase):
             "the config block in docs/OPENWRT.md has drifted from the file the "
             "package actually installs: only in the file %s; only in the doc %s"
             % (sorted(shipped - documented), sorted(documented - shipped))))
+
+
+class OpenWrtBlockOnlyService(unittest.TestCase):
+    def test_empty_root_does_not_restore_the_filesystem_default(self):
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("OpenWrt command construction requires Bash on this host")
+        harness = r'''
+config_get_bool() { eval "$1=1"; }
+config_get() {
+    local value
+    case "$3" in
+        root) value="${4-}" ;;
+        block_device) value=/tmp/card.bin ;;
+        bind) value=127.0.0.1 ;;
+        port) value=62966 ;;
+        sector_size) value=512 ;;
+        compression_cache_size) value=32 ;;
+        metrics_period) value=1m ;;
+        peer_timeout) value=1h ;;
+        protocol) value=auto ;;
+        log_format) value=text ;;
+        *) value=0 ;;
+    esac
+    printf -v "$1" '%s' "$value"
+}
+procd_open_instance() { :; }
+procd_close_instance() { :; }
+common_params() { :; }
+procd_set_param() {
+    [ "$1" != command ] || command="ps2servers-edge $2"
+}
+procd_append_param() {
+    [ "$1" != command ] && return
+    shift
+    printf -v quoted '%q ' "$@"
+    command="$command $quoted"
+}
+source ./ps2servers-edge.init
+start_udpfs
+printf '%s\n' "$command"
+'''
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
+            shutil.copy(UCI_INIT, Path(temp, "ps2servers-edge.init"))
+            result = subprocess.run(
+                [bash, "-c", harness], cwd=temp,
+                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        command = result.stdout.strip()
+        self.assertIn("--block-device /tmp/card.bin", command)
+        self.assertNotRegex(command, r"--root\b",
+                            "an empty root must not turn into /mnt/sda1/PS2")
 
 
 if __name__ == "__main__":
