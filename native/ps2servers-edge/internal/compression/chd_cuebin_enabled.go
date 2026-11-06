@@ -20,17 +20,17 @@ import (
 const cdBinCacheBytes = 4 << 20
 
 type chdBinReader struct {
-	handle          *C.chd_file
-	table           cdTrackTable
-	layout          *cdLayout
-	framesPerHunk   int64
-	hunkBuffer      []byte
-	position        int64
-	blocks          int64
-	cache           map[int64][]byte
-	cacheOrder      []int64
-	cachedBytes     int64
-	closed          bool
+	handle        *C.chd_file
+	table         cdTrackTable
+	layout        *cdLayout
+	framesPerHunk int64
+	hunkBuffer    []byte
+	position      int64
+	blocks        int64
+	cache         map[int64][]byte
+	cacheOrder    []int64
+	cachedBytes   int64
+	closed        bool
 }
 
 func openCHDBIN(path string, table cdTrackTable, layout *cdLayout, expected os.FileInfo) (io.ReadSeeker, io.Closer, error) {
@@ -63,9 +63,13 @@ func openCHDBIN(path string, table cdTrackTable, layout *cdLayout, expected os.F
 		blocks++
 	}
 	reader := &chdBinReader{
-		handle: handle, table: table, layout: layout,
-		framesPerHunk: framesPerHunk, hunkBuffer: make([]byte, table.hunkBytes),
-		blocks: blocks, cache: make(map[int64][]byte),
+		handle:        handle,
+		table:         table,
+		layout:        layout,
+		framesPerHunk: framesPerHunk,
+		hunkBuffer:    make([]byte, table.hunkBytes),
+		blocks:        blocks,
+		cache:         make(map[int64][]byte),
 	}
 	return reader, reader, nil
 }
