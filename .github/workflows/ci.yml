@@ -96,6 +96,12 @@ jobs:
         # safe on a headless runner; see tests/test_gui_layout.py.
         run: python -m unittest discover -s tests -t . -v
 
+      - name: Verify documentation links and generated index
+        run: |
+          python tools/build_docs_index.py
+          git diff --exit-code -- docs/data/search-index.json
+          python tools/verify_docs.py
+
       - name: Check release compliance posture
         run: python tools/check_release_compliance.py
 
