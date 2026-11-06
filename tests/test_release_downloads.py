@@ -101,6 +101,8 @@ class ReleaseDownloadTests(unittest.TestCase):
         publish = release.split("  release:\n", 1)[1]
         self.assertIn("      - edge\n", publish)
         self.assertIn("needs.edge.result == 'success'", publish)
+        for pattern in ("*.tar.gz", "*.zip", "*.sha256"):
+            self.assertIn(f"release-assets/PS2ServersEdge-{pattern}", publish)
         reusable = (workflows / "edge-build.yml").read_text(encoding="utf-8")
         self.assertNotIn("Attach Edge artifact to tagged release", reusable)
         validation = (workflows / "edge.yml").read_text(encoding="utf-8")

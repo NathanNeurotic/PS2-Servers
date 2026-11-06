@@ -595,8 +595,10 @@ jobs:
           body_path: ${{ steps.notes.outputs.path }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
-          # One glob covering every asset and its checksum. Unmatched patterns
-          # are skipped rather than failing, which is what keeps an absent
-          # optional build from blocking the release.
+          # Include desktop and Edge archives plus their checksums. Unmatched
+          # optional files are skipped so an absent build does not block release.
           files: |
             release-assets/PS2Servers-*
+            release-assets/PS2ServersEdge-*.tar.gz
+            release-assets/PS2ServersEdge-*.zip
+            release-assets/PS2ServersEdge-*.sha256
