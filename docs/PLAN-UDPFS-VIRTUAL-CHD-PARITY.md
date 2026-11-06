@@ -1,6 +1,6 @@
 # UDPFS virtual CD CHD CUE/BIN: implementation status and acceptance plan
 
-> **IMPLEMENTATION IN PROGRESS (2026-11-06).** This branch contains Python/Core and Go Edge providers plus synthetic metadata/layout tests. The PR remains draft. The focused Python provider and related regression set passes (48 tests, 3 real-libchdr skips). A full `python3 -m unittest discover` run is red: 1,420 tests, 300 errors, 3 failures, and 65 skips; output includes sandbox-denied socket binds and unavailable native `rcheevos`, so the full suite is not verified. The Go toolchain is unavailable, and no real-console acceptance has been performed. Treat unchecked items below as outstanding; do not describe the feature as release-ready.
+> **IMPLEMENTATION IN PROGRESS (2026-11-06).** Python/Core and Go Edge providers are implemented. On commit `b9af084`, GitHub Actions passed CI, PS2 Servers Edge, UDPFS Neutrino compatibility replay, and Attribution Policy. CI passed the Python suite, bundled libchdr smoke test and real-CHD strict inspection/RA hash checks. Edge passed Go tests, vet, formatting, the optional `cgo && chd` tests, protocol probes, differential parity, and cross-platform builds. The focused local Core set passes (48 tests, 3 skips because local libchdr is unavailable). Local full discovery remains red because sandbox socket binds are denied and native `rcheevos` is unavailable; CI's Python suite passed. No physical-console acceptance has been performed. Independent `chdman extractcd` fixture comparison, restart/reopen and concurrent-reader coverage, and console acceptance remain outstanding. The PR stays draft; do not describe the feature as release-ready.
 >
 > **Goal:** Maintain PS2-Servers behavioral parity or better with pcm720/udpfsd and compatible UDPFS clients (Neutrino as launched by NHDDL, RiptOPL, POPStarter via UDPFS Assault, and Ember), without discarding existing Core/Edge reliability wins. The largest missing feature identified is **CD-format CHD presented transparently as virtual CUE and raw BIN files**.
 
@@ -71,12 +71,12 @@ The contributor reported matching extracted BIN SHA-1 against chdman extractcd f
 
 ## Phase A: inspect + design without regressions (P0)
 
-- [ ] Rebase/review PS2-Servers main, upstream udpfsd main, and both Okeanos branches; note changed assumptions and existing local PRs before touching code.
-- [ ] Map the full namespace path for Python/Core and Go Edge: DOPEN/DREAD, path resolution, GETSTAT, OPEN, READ/BREAD, read-only enforcement, per-peer file-handle cleanup, and non-CHD compressed ISO aliases.
-- [ ] Design a minimal virtual-view provider abstraction: compressed extension registration; list of presented names and stat; open by requested virtual name; cached/seekable stream; safe close. Implement format-specific track parsing outside the generic filesystem.
-- [ ] Define collision behavior **for the entire generated pair**: real Game.cue with virtual Game.bin (or inverse) risks silently mismatching disc content. Either verify a compatible pair or suppress virtual aliases/pair with a clear diagnostic. Preserve strict real-file precedence for direct OPEN and GETSTAT. Do not silently serve a mismatched pair.
-- [ ] Ensure the same virtual names are consistently advertised by DREAD and accepted by GETSTAT/OPEN; handle malformed input, file replacement while scanning, casing, symlinks, path escape, overlength names (255-byte UDPFS name boundary, plus RiptOPL's stricter title limits), and duplicate aliases.
-- [ ] Decide codec availability by real runtime/build capability. Compression disabled, missing libchdr, invalid CHD, and unsupported CD track layouts must degrade safely.
+- [x] Rebase/review PS2-Servers main, upstream udpfsd main, and both Okeanos branches; note changed assumptions and existing local PRs before touching code.
+- [x] Map the full namespace path for Python/Core and Go Edge: DOPEN/DREAD, path resolution, GETSTAT, OPEN, READ/BREAD, read-only enforcement, per-peer file-handle cleanup, and non-CHD compressed ISO aliases.
+- [x] Design a minimal virtual-view provider abstraction: compressed extension registration; list of presented names and stat; open by requested virtual name; cached/seekable stream; safe close. Implement format-specific track parsing outside the generic filesystem.
+- [x] Define collision behavior **for the entire generated pair**: real Game.cue with virtual Game.bin (or inverse) risks silently mismatching disc content. Either verify a compatible pair or suppress virtual aliases/pair with a clear diagnostic. Preserve strict real-file precedence for direct OPEN and GETSTAT. Do not silently serve a mismatched pair.
+- [x] Ensure the same virtual names are consistently advertised by DREAD and accepted by GETSTAT/OPEN; handle malformed input, file replacement while scanning, casing, symlinks, path escape, overlength names (255-byte UDPFS name boundary, plus RiptOPL's stricter title limits), and duplicate aliases.
+- [x] Decide codec availability by real runtime/build capability. Compression disabled, missing libchdr, invalid CHD, and unsupported CD track layouts must degrade safely.
 
 **Do not:** cherry-pick the entire experimental filesystem, change the UDPFS wire protocol, alter default discovery behavior, or rewrite existing save/recovery paths to add this read-only feature.
 
@@ -90,15 +90,15 @@ The contributor reported matching extracted BIN SHA-1 against chdman extractcd f
 - [x] Preserve root containment, reject symlink CHD sources and prevent writes through virtual aliases while retaining real-file behavior.
 - [x] Add and run synthetic Core tests for track layout/CUE bytes, raw BIN samples, 74/75-sector BREAD reads, malformed metadata, directory enumeration, collisions, disabled compression and write protection.
 - [ ] Add independent complete-fixture hashes against `chdman extractcd`, plus restart/reopen and concurrent-reader coverage. Current Core coverage uses synthetic CHD metadata and a fake libchdr reader.
-- [ ] Verify existing non-CHD Core tests still pass, including UDPFS DREAD/ART regression and VMC write paths.
+- [x] Verify existing non-CHD Core tests still pass, including UDPFS DREAD/ART regression and VMC write paths. GitHub Actions' full Python test suite and UDPFS self-tests passed on `b9af084`.
 
 ## Phase C: Go Edge implementation and packaging (P1, after Core passes)
 
-- [x] Implement Go CHD metadata, virtual CUE and raw BIN streaming within Edge's existing filesystem and protocol handlers. A pure Go metadata/layout regression test is added but unrun because Go is unavailable here.
+- [x] Implement Go CHD metadata, virtual CUE and raw BIN streaming within Edge's existing filesystem and protocol handlers. The pure Go metadata/layout regression tests passed in GitHub Actions on `b9af084`.
 - [x] Keep existing Edge compressed ISO aliases stable and gate virtual CD views on the existing CGO + `chd` + libchdr availability constant; generic builds keep CHD raw and unadvertised.
 - [ ] Avoid repeated metadata parses on directory/DREAD hot paths with bounded identity-keyed caching; decoded hunks already use a bounded 4 MiB cache.
 - [ ] Add and run Edge protocol integration tests for DREAD, GETSTAT, OPEN, READ/LSEEK/BREAD and virtual-write rejection.
-- [ ] Compile and test Edge on supported targets (including router/ARM, Windows and Linux as relevant); Go is unavailable in this environment.
+- [x] Compile and test Edge on supported targets (including router/ARM, ARM, Windows and Linux); GitHub Actions builds and tests passed on `b9af084`.
 - [ ] Extend Edge unit/integration tests for all Core fixtures and adverse cases; retain existing transfer caps and per-peer resource bounds.
 - [ ] Compare Core and Edge byte-for-byte on a pinned fixture corpus and against independent chdman extractcd output; exclude incompatible upstream reference behavior from a false-positive parity claim.
 
