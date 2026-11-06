@@ -435,12 +435,12 @@ jobs:
                   with open(path, "rb") as f:
                       z.writestr(info, f.read())
           PYZIP
-            sha256sum "out/${package}.zip" > "out/${package}.zip.sha256"
+            (cd out && sha256sum "${package}.zip" > "${package}.zip.sha256")
           else
             tar --sort=name --owner=0 --group=0 --numeric-owner \
               --mtime="@${EPOCH}" \
               -czf "out/${package}.tar.gz" -C out "${package}"
-            sha256sum "out/${package}.tar.gz" > "out/${package}.tar.gz.sha256"
+            (cd out && sha256sum "${package}.tar.gz" > "${package}.tar.gz.sha256")
           fi
           printf '%s\n' "${package}" > out/artifact-name.txt
       - name: Attest build provenance

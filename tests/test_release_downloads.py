@@ -109,6 +109,28 @@ class ReleaseDownloadTests(unittest.TestCase):
         build = validation.split("  build:\n", 1)[1]
         self.assertIn("if: github.ref_type != 'tag'", build)
 
+    def test_edge_checksum_sidecars_validate_in_download_directory(self):
+        workflow = (ROOT / ".github" / "workflows" / "edge-build.yml").read_text(
+            encoding="utf-8")
+        commands = [
+            line.strip() for line in workflow.splitlines()
+            if line.strip().startswith(("sha256sum ", "(cd out && sha256sum "))
+        ]
+        self.assertEqual(len(commands), 2)
+        with tempfile.TemporaryDirectory() as temp:
+            Path(temp, "out").mkdir()
+            package = "PS2ServersEdge-test"
+            archive = f"{package}.tar.gz"
+            Path(temp, "out", archive).write_bytes(b"fixture")
+            Path(temp, "out", f"{package}.zip").write_bytes(b"fixture")
+            script = "\n".join(commands)
+            script += f"\ncd out && sha256sum -c {archive}.sha256"
+            result = subprocess.run(
+                [bash_command(), "-c", script], cwd=temp,
+                env=dict(os.environ, package=package),
+                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_workflows_generate_complete_notes_and_links(self):
         with tempfile.TemporaryDirectory() as temp:
             assets = Path(temp, "release-assets")
