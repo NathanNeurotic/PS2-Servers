@@ -20,7 +20,8 @@ class AttributionWorkflowTests(unittest.TestCase):
         tag = f"attribution-empty-range-{os.getpid()}"
         try:
             subprocess.run(
-                ["git", "tag", "-a", tag, "-m", "attribution test", "HEAD"],
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                 "tag", "-a", tag, "-m", "attribution test", "HEAD"],
                 cwd=ROOT, check=True, capture_output=True, text=True)
             after = subprocess.check_output(
                 ["git", "rev-parse", tag], cwd=ROOT, text=True).strip()
