@@ -184,9 +184,12 @@ the service starts.
 Generic CGO-free Edge downloads remain CHD-free. To build optional CHD support
 from source, install libchdr and compile with
 `CGO_ENABLED=1 go build -tags chd ./cmd/ps2servers-edge`. Only that build
-advertises `.chd.iso` aliases; default builds list real CHD files raw and never
-substitute decoded data for them. Use Desktop/Core if you cannot provide CGO and
-libchdr on the target.
+advertises `.chd.iso` aliases and virtual `.cue`/`.bin` pairs for supported raw
+CD CHD v5 track layouts (`MODE1_RAW`, `MODE2_RAW`, and `AUDIO`). The BIN
+contains 2352-byte sectors, omits subchannel data, and is read-only. Cooked CD
+tracks and legacy binary CD metadata are not advertised as CUE/BIN. Default
+builds list real CHD files raw and never substitute decoded data for them. Use
+Desktop/Core if you cannot provide CGO and libchdr on the target.
 
 ## UDPBD
 

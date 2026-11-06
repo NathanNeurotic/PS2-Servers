@@ -212,5 +212,8 @@ alongside the download for verification.
 
 **CHD note:** Generic static Edge builds support **CSO and ZSO** but not CHD.
 Source builds can opt into CHD with `-tags chd`, CGO, and libchdr; that native
-library is intentionally excluded from these portable downloads. If your games are CHD files, use the
-Desktop server, or convert them.
+library is intentionally excluded from these portable downloads. CHD-enabled
+source builds also expose virtual `.cue`/`.bin` pairs for supported raw CD track
+layouts. Cooked CD CHDs and legacy binary CD metadata are not exposed through
+that pair. If you need CHD support without CGO and libchdr, use the Desktop
+server or convert the images.

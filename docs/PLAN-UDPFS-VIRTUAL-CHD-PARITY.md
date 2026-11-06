@@ -1,6 +1,6 @@
-# Agent handoff: UDPFS virtual CD CHD CUE/BIN, upstream parity, and safety gates
+# UDPFS virtual CD CHD CUE/BIN: implementation status and acceptance plan
 
-> **PLAN ONLY / NOT IMPLEMENTED.** This document is a reviewable implementation handoff, not an assertion that these features ship. Do not merge the planning-only PR as a feature release. The next agent should use the checklist, confirm repository HEAD and upstream changes, implement in reviewable commits, and report evidence. No runtime files were changed by the initial plan commit.
+> **IMPLEMENTATION IN PROGRESS (2026-11-06).** This branch contains Python/Core and Go Edge providers plus synthetic metadata/layout tests. The PR remains draft. The focused Python provider and related regression set passes (48 tests, 3 real-libchdr skips). A full `python3 -m unittest discover` run is red: 1,420 tests, 300 errors, 3 failures, and 65 skips; output includes sandbox-denied socket binds and unavailable native `rcheevos`, so the full suite is not verified. The Go toolchain is unavailable, and no real-console acceptance has been performed. Treat unchecked items below as outstanding; do not describe the feature as release-ready.
 >
 > **Goal:** Maintain PS2-Servers behavioral parity or better with pcm720/udpfsd and compatible UDPFS clients (Neutrino as launched by NHDDL, RiptOPL, POPStarter via UDPFS Assault, and Ember), without discarding existing Core/Edge reliability wins. The largest missing feature identified is **CD-format CHD presented transparently as virtual CUE and raw BIN files**.
 
@@ -82,21 +82,23 @@ The contributor reported matching extracted BIN SHA-1 against chdman extractcd f
 
 ## Phase B: Python/Core implementation (P0; first implementation work)
 
-- [ ] Add an isolated CHD CD track-table/CUE/BIN provider under udpfs_server/compressed_iso/ (adapt Okeanos's Python implementation with proper upstream attribution/license).
-- [ ] Parse CHD v5 CD metadata safely: validate header, geometry, track count/order, frame bounds, supported track modes, pregaps and offsets before allocating or seeking.
-- [ ] Implement a virtual in-memory CUE (CRLF, single BIN reference) and a read-only, seekable raw BIN stream that decodes via libchdr on demand. Support unaligned READ and 512-byte-addressed BREAD, EOF, backward seek and repeated reads.
-- [ ] Use explicit resource cleanup and a bounded hunk LRU; do not leak descriptors on stat, directory scan, failed open or read.
-- [ ] Extend _prepare_directory_entries, _handle_open, _handle_getstat, and related path resolution to use the shared virtual-view provider. Keep original .cso/.zso/.chd.iso aliases and real-file precedence intact.
-- [ ] Preserve local path containment, no symlink escape, read-only virtual paths even when server's ordinary file write support is enabled.
-- [ ] Add Python tests for track table, CUE bytes, raw BIN samples, complete fixture hashes, BREAD 74/75-sector patterns, EOF, malformed and disabled codecs, directory listing, collisions, handle close and restart/reopen.
+- [x] Add an isolated CHD CD track-table/CUE/BIN provider under udpfs_server/compressed_iso/. Okeanos86's prototype is credited as a behavioral reference; its source is not copied.
+- [x] Parse bounded CHD v5 CD metadata and validate track order, frame bounds, supported raw track modes, pregaps and offsets before advertising a pair.
+- [x] Implement a virtual in-memory CUE and a read-only, seekable raw BIN stream decoded through libchdr on demand. Core tests cover unaligned reads, seek, EOF and 74/75-sector BREAD patterns.
+- [x] Use explicit handle cleanup and a 4 MiB decoded-hunk LRU; virtual aliases do not open a persistent file descriptor during directory listing or GETSTAT.
+- [x] Extend Core DREAD, OPEN, GETSTAT and path resolution while preserving the existing compressed ISO aliases and real-file precedence.
+- [x] Preserve root containment, reject symlink CHD sources and prevent writes through virtual aliases while retaining real-file behavior.
+- [x] Add and run synthetic Core tests for track layout/CUE bytes, raw BIN samples, 74/75-sector BREAD reads, malformed metadata, directory enumeration, collisions, disabled compression and write protection.
+- [ ] Add independent complete-fixture hashes against `chdman extractcd`, plus restart/reopen and concurrent-reader coverage. Current Core coverage uses synthetic CHD metadata and a fake libchdr reader.
 - [ ] Verify existing non-CHD Core tests still pass, including UDPFS DREAD/ART regression and VMC write paths.
 
 ## Phase C: Go Edge implementation and packaging (P1, after Core passes)
 
-- [ ] Reuse the validated behavior and wire-visible fixtures from Core; take the Okeanos Go handler-registry design as a reference rather than replacing Edge internals.
-- [ ] Implement Go CHD metadata, virtual CUE and raw BIN streaming with equivalent names/bytes/GETSTAT/OPEN/DREAD/BREAD semantics.
-- [ ] Keep the existing Edge compression functions and .chd.iso/.cso.iso/.zso.iso aliases stable. Avoid repeat parses in scanning hot paths; use bounded metadata caching keyed to file identity/mtime/size where appropriate, and bounded decoded-hunk caches.
-- [ ] **Resolve availability before advertising the feature.** Edge's CHD backend currently requires CGO + the chd build tag + libchdr. Confirm packaging on supported targets (including router/ARM, Windows and Linux as relevant) or explicitly show the unsupported state; do not advertise CHD CUE/BIN on builds where CHD cannot decode.
+- [x] Implement Go CHD metadata, virtual CUE and raw BIN streaming within Edge's existing filesystem and protocol handlers. A pure Go metadata/layout regression test is added but unrun because Go is unavailable here.
+- [x] Keep existing Edge compressed ISO aliases stable and gate virtual CD views on the existing CGO + `chd` + libchdr availability constant; generic builds keep CHD raw and unadvertised.
+- [ ] Avoid repeated metadata parses on directory/DREAD hot paths with bounded identity-keyed caching; decoded hunks already use a bounded 4 MiB cache.
+- [ ] Add and run Edge protocol integration tests for DREAD, GETSTAT, OPEN, READ/LSEEK/BREAD and virtual-write rejection.
+- [ ] Compile and test Edge on supported targets (including router/ARM, Windows and Linux as relevant); Go is unavailable in this environment.
 - [ ] Extend Edge unit/integration tests for all Core fixtures and adverse cases; retain existing transfer caps and per-peer resource bounds.
 - [ ] Compare Core and Edge byte-for-byte on a pinned fixture corpus and against independent chdman extractcd output; exclude incompatible upstream reference behavior from a false-positive parity claim.
 

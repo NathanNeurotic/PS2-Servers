@@ -1,5 +1,13 @@
 # Third-party notices
 
+## Okeanos86/neutrino (behavioral reference)
+
+The virtual CD CHD layout and interoperability behavior were informed by the
+Python prototype at
+[Okeanos86/neutrino, commit 6aed059a289c000753f40b04ed1ded0f7e503830](https://github.com/Okeanos86/neutrino/tree/6aed059a289c000753f40b04ed1ded0f7e503830/pc).
+PS2-Servers' Python and Go providers are separate implementations; no source
+code from that prototype is included here.
+
 ## pcm720/udpfsd
 
 Technical reference reviewed for UDPFS behavior, deployment targets, and the

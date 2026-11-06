@@ -46,6 +46,10 @@ type DirEntry struct {
 	Mode       uint32
 	Size       uint64
 	ModTime    time.Time
+	// VirtualPath is a client-relative generated CUE/BIN name. DREAD
+	// re-resolves it before returning a cached listing entry so a real file
+	// created after DOPEN can still take precedence.
+	VirtualPath string
 }
 
 type AckEvent struct {
