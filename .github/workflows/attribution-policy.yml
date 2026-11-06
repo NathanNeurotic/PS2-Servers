@@ -61,5 +61,9 @@ jobs:
             BEFORE=$(git merge-base "$BEFORE" "$AFTER")
           fi
           git log --format='%H%x00%B%x00' "$BEFORE..$AFTER" > /tmp/attribution-pushed-commits.log
-          python .github/scripts/check_ai_attribution.py \
-            --commits-log /tmp/attribution-pushed-commits.log
+          if [ ! -s /tmp/attribution-pushed-commits.log ]; then
+            echo "No new commit messages in this range; nothing to validate."
+          else
+            python .github/scripts/check_ai_attribution.py \
+              --commits-log /tmp/attribution-pushed-commits.log
+          fi
