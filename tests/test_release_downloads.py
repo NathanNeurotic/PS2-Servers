@@ -110,6 +110,11 @@ class ReleaseDownloadTests(unittest.TestCase):
         self.assertIn("if: github.ref_type != 'tag'", build)
 
     def test_edge_checksum_sidecars_validate_in_download_directory(self):
+        probe = subprocess.run(
+            [bash_command(), "-c", "command -v sha256sum"],
+            capture_output=True, text=True, timeout=30)
+        if probe.returncode != 0:
+            self.skipTest("sha256sum is not installed in this shell")
         workflow = (ROOT / ".github" / "workflows" / "edge-build.yml").read_text(
             encoding="utf-8")
         commands = [
