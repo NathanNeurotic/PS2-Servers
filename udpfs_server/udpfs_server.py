@@ -49,6 +49,7 @@ from typing import Dict, List, Optional, Tuple
 
 # Compressed ISO support
 from compressed_iso import CompressedFileWrapper, ZsoFileWrapper, CsoFileWrapper, ChdFileWrapper, LIBCHDR_AVAILABLE
+from compressed_iso.chd_cuebin import find_virtual_view, list_virtual_entries
 
 # Router status protocol. Encoding only -- see docs/ROUTER-STATUS.md.
 import router_status
@@ -1355,6 +1356,30 @@ class UdpfsServer:
                 return candidate
         return candidates[0]
 
+    def _resolve_virtual_chd(self, path: str):
+        """Resolve a missing CUE/BIN alias to a supported CD CHD, if enabled.
+
+        Physical entries win. The provider also suppresses the complete pair if
+        either generated name collides with a real directory entry.
+        """
+        if (not self.enable_compression or
+                not path.lower().endswith(('.cue', '.bin'))):
+            return None
+        resolved = self._resolve_path(path)
+        if resolved is None:
+            return None
+        try:
+            if self._through_linked_folder(path):
+                return None
+        except OSError:
+            return None
+        entry_path = self._resolve_entry(path)
+        if entry_path is not None and os.path.lexists(entry_path):
+            return None
+        if os.path.lexists(resolved):
+            return None
+        return find_virtual_view(resolved)
+
     def _get_compressed_stat(self, file_path: str, original_stat) -> Optional[dict]:
         """Get stat info for a compressed file, returning uncompressed size."""
         info = get_compressed_info(file_path)
@@ -1371,6 +1396,14 @@ class UdpfsServer:
             'atime': self._encode_time(original_stat.st_atime),
             'mtime': self._encode_time(original_stat.st_mtime),
         }
+
+    def _virtual_stat(self, view, original_stat) -> dict:
+        """Use the CHD timestamps with the virtual CUE/BIN size."""
+        stat_info = self._stat_to_bytes(original_stat)
+        stat_info['mode'] = FIO_S_IFREG
+        stat_info['size'] = view.size & 0xFFFFFFFF
+        stat_info['hisize'] = (view.size >> 32) & 0xFFFFFFFF
+        return stat_info
 
     def _alloc_handle(self, obj, is_dir: bool = False) -> int:
         """Allocate a new handle"""
@@ -1706,6 +1739,7 @@ class UdpfsServer:
 
     def _prepare_directory_entries(self, entries):
         """Build one advertised namespace, retaining real names over aliases."""
+        entries = list(entries)
         real_names = {entry.name for entry in entries}
         prepared = []
         for entry in entries:
@@ -1725,6 +1759,24 @@ class UdpfsServer:
                 continue
             prepared.append({'name': display_name, 'source': entry,
                              'stat_info': compressed_stat})
+
+        # A CD CHD contributes both virtual names as one collision-sensitive
+        # pair. The provider receives the full directory snapshot so it can
+        # suppress both aliases if either real name already exists.
+        if self.enable_compression:
+            sources = {os.path.abspath(entry.path): entry for entry in entries}
+            directory = os.path.dirname(entries[0].path) if entries else self.root_dir
+            for name, view in list_virtual_entries(directory, entries):
+                source = sources.get(os.path.abspath(view.chd_path))
+                if source is None:
+                    continue
+                try:
+                    st = source.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                virtual_stat = self._virtual_stat(view, st)
+                prepared.append({'name': name, 'source': source,
+                                 'stat_info': virtual_stat, 'virtual': view})
         return prepared
 
     # --- File operation handlers ---
@@ -1743,13 +1795,19 @@ class UdpfsServer:
         self._session_record(addr, "list" if is_dir else "open")
 
         resolved = self._resolve_path(path)
-        
+        entry_path = self._resolve_entry(path)
+        real_entry_exists = entry_path is not None and os.path.lexists(entry_path)
+        real_file_exists = (resolved is not None and os.path.exists(resolved)) or real_entry_exists
+
         # Check for compressed version when .iso is requested but file doesn't exist
         compressed_resolved = None
-        if resolved is None or not os.path.exists(resolved):
+        if not real_file_exists:
             compressed_resolved = self._resolve_compressed_sibling(path)
-        
-        if resolved is None and compressed_resolved is None:
+        virtual_view = None
+        if not real_file_exists and compressed_resolved is None:
+            virtual_view = self._resolve_virtual_chd(path)
+
+        if resolved is None and compressed_resolved is None and virtual_view is None:
             self._print_event(f"[{addr[0]}:{addr[1]}] OPEN '{path}' -> EACCES (path traversal or no root_dir)")
             self._send_open_reply(addr, -errno.EACCES)
             return
@@ -1774,6 +1832,40 @@ class UdpfsServer:
             if self.read_only and (flags & 0x02):  # O_WRONLY or O_RDWR
                 self._print_event(f"[{addr[0]}:{addr[1]}] OPEN '{path}' -> EACCES (read-only)")
                 self._send_open_reply(addr, -errno.EACCES)
+                return
+
+            if virtual_view is not None:
+                # PS2 flags encode O_RDONLY as 1, O_WRONLY as 2 and O_RDWR as
+                # 3. Virtual image views never accept creation, truncation,
+                # append, or writes, even when the server is otherwise writable.
+                if ((flags & 0x03) != 0x01 or
+                        (flags & (0x0100 | 0x0200 | 0x0400))):
+                    self._print_event(
+                        f"[{addr[0]}:{addr[1]}] OPEN '{path}' -> EACCES "
+                        "(virtual CD CHD is read-only)")
+                    self._send_open_reply(addr, -errno.EACCES)
+                    return
+                wrapper = None
+                try:
+                    wrapper = virtual_view.open(self.compression_cache_size)
+                    st = os.stat(virtual_view.chd_path, follow_symlinks=False)
+                    stat_info = self._virtual_stat(virtual_view, st)
+                    handle = self._alloc_handle(wrapper, is_dir=False)
+                    if handle < 0:
+                        wrapper.close()
+                        self._send_open_reply(addr, handle)
+                        return
+                    self._print_event(
+                        f"[{addr[0]}:{addr[1]}] OPEN '{path}' -> handle={handle}, "
+                        f"size={virtual_view.size} (virtual CD CHD)")
+                    self._send_open_reply(addr, handle, stat_info=stat_info)
+                except (ImportError, ValueError, OSError, struct.error) as e:
+                    if wrapper is not None:
+                        wrapper.close()
+                    self._print_event(
+                        f"[{addr[0]}:{addr[1]}] OPEN '{path}' -> virtual CHD error: "
+                        f"{type(e).__name__}: {e}")
+                    self._send_open_reply(addr, -errno.EIO)
                 return
 
             actual_resolved = compressed_resolved if compressed_resolved else resolved
@@ -2150,11 +2242,18 @@ class UdpfsServer:
                 entry = advertised['source']
                 display_name = advertised['name']
                 advertised_stat = advertised['stat_info']
+                virtual = advertised.get('virtual')
             else:
                 # Internal callers may supply raw scandir entries directly.
                 entry = advertised
                 display_name = self._transform_compressed_name(entry.name)
                 advertised_stat = None
+                virtual = None
+
+            if virtual is not None:
+                stem, _ = os.path.splitext(virtual.path)
+                if os.path.lexists(stem + ".cue") or os.path.lexists(stem + ".bin"):
+                    continue
 
             try:
                 st = entry.stat(follow_symlinks=False)
@@ -2162,11 +2261,17 @@ class UdpfsServer:
                 self._print_event(f"[{addr[0]}:{addr[1]}] DREAD stat error, skipping '{entry.name}': {e}")
                 continue
 
-            if not isinstance(advertised, dict) and display_name != entry.name:
+            if virtual is not None:
+                if not stat_mod.S_ISREG(st.st_mode):
+                    continue
+                stat_info = self._virtual_stat(virtual, st)
+            elif not isinstance(advertised, dict) and display_name != entry.name:
                 advertised_stat = self._get_compressed_stat(entry.path, st)
                 if advertised_stat is None:
                     continue
-            stat_info = advertised_stat or self._stat_to_bytes(st)
+                stat_info = advertised_stat
+            else:
+                stat_info = advertised_stat or self._stat_to_bytes(st)
 
             if self.verbose:
                 if display_name != entry.name:
@@ -2207,7 +2312,10 @@ class UdpfsServer:
             return
 
         resolved = self._resolve_path(path)
-        if resolved is None or not os.path.exists(resolved):
+        entry_path = self._resolve_entry(path)
+        real_entry_exists = entry_path is not None and os.path.lexists(entry_path)
+        real_file_exists = (resolved is not None and os.path.exists(resolved)) or real_entry_exists
+        if not real_file_exists:
             # Check for compressed version when .iso is requested
             compressed_resolved = self._resolve_compressed_sibling(path)
             if compressed_resolved:
@@ -2219,6 +2327,20 @@ class UdpfsServer:
                             self._print_event(f"[{addr[0]}:{addr[1]}] GETSTAT '{path}' -> compressed size={compressed_stat['size']} (from {os.path.basename(compressed_resolved)})")
                         self._send_getstat_reply(addr, result=0, stat_info=compressed_stat)
                         return
+                except OSError:
+                    pass
+
+            virtual_view = self._resolve_virtual_chd(path)
+            if virtual_view is not None:
+                try:
+                    st = os.stat(virtual_view.chd_path, follow_symlinks=False)
+                    stat_info = self._virtual_stat(virtual_view, st)
+                    if self.verbose:
+                        self._print_event(
+                            f"[{addr[0]}:{addr[1]}] GETSTAT '{path}' -> "
+                            f"virtual CD CHD size={virtual_view.size}")
+                    self._send_getstat_reply(addr, result=0, stat_info=stat_info)
+                    return
                 except OSError:
                     pass
             self._send_getstat_reply(

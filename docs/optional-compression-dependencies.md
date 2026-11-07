@@ -10,7 +10,12 @@ returns decoded bytes and size.
 HTTP uses the same CHD/CSO readers but passes ZSO through to the console without
 needing PC-side LZ4. Edge has a separate built-in CSO/ZSO decoder; optional CHD
 support requires an explicit `-tags chd` CGO build with libchdr. Generic static
-Edge builds do not include CHD. See [the editions](EDITIONS.md).
+Edge builds do not include CHD. With CHD enabled, both Core and Edge can expose
+supported raw CD CHDs as a virtual `.cue`/`.bin` pair alongside the existing
+`.chd.iso` view. CUE/BIN support is limited to CHD v5 track metadata with
+`MODE1_RAW`, `MODE2_RAW`, or `AUDIO` tracks. These aliases are read-only; the
+BIN contains raw 2352-byte sectors without CHD subchannel data. Pair aliases
+are hidden when either real filename collides. See [the editions](EDITIONS.md).
 
 ## GUI behavior
 

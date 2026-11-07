@@ -11,6 +11,7 @@ import (
 	"github.com/NathanNeurotic/PS2-Servers/native/ps2servers-edge/internal/session"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -230,10 +231,34 @@ func (s *Server) resolveImagePath(client string) (string, bool, error) {
 	return "", false, err
 }
 
-func (s *Server) prepareDirectory(entries []session.DirEntry) []session.DirEntry {
+func (s *Server) resolveVirtualCD(client string) (*compression.VirtualCDFile, error) {
+	if s.root == nil || !s.compressedSiblingsEnabled() || !compression.CHDAvailable {
+		return nil, nil
+	}
+	ext := strings.ToLower(filepath.Ext(client))
+	if ext != ".cue" && ext != ".bin" {
+		return nil, nil
+	}
+	if _, err := s.root.Resolve(client, false); err == nil {
+		return nil, nil // a real entry always wins
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	path, err := s.root.Resolve(client, true)
+	if err != nil {
+		return nil, err
+	}
+	return compression.FindVirtualCD(path)
+}
+
+func (s *Server) prepareDirectory(clientDir, realDir string, entries []session.DirEntry) []session.DirEntry {
 	realNames := make(map[string]struct{}, len(entries))
+	names := make([]string, 0, len(entries))
+	sources := make(map[string]session.DirEntry, len(entries))
 	for _, entry := range entries {
 		realNames[entry.Name] = struct{}{}
+		names = append(names, entry.Name)
+		sources[filepath.Clean(entry.SourcePath)] = entry
 	}
 	out := make([]session.DirEntry, 0, len(entries))
 	for _, entry := range entries {
@@ -252,6 +277,19 @@ func (s *Server) prepareDirectory(entries []session.DirEntry) []session.DirEntry
 		entry.Name = alias
 		entry.Size = uint64(size)
 		out = append(out, entry)
+	}
+	if s.compressedSiblingsEnabled() {
+		for _, view := range compression.ListVirtualCD(realDir, names) {
+			source, ok := sources[filepath.Clean(view.SourcePath)]
+			if !ok {
+				continue
+			}
+			entry := source
+			entry.Name = view.Name
+			entry.Size = uint64(view.Size)
+			entry.VirtualPath = filepath.ToSlash(filepath.Join(clientDir, view.Name))
+			out = append(out, entry)
+		}
 	}
 	return out
 }
@@ -290,12 +328,30 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 			s.sendOpen(st, errno(err), 0, 0)
 			return
 		}
-		st.Handles[id] = &session.Handle{Directory: s.prepareDirectory(entries)}
+		realDir, err := s.root.Resolve(path, false)
+		if err != nil {
+			s.sendOpen(st, errno(err), 0, 0)
+			return
+		}
+		st.Handles[id] = &session.Handle{Directory: s.prepareDirectory(path, realDir, entries)}
 		s.sendOpen(st, id, 0x1000, 0)
 		return
 	}
 	if wantWrite {
 		s.openForWrite(st, id, path, flags)
+		return
+	}
+	if view, err := s.resolveVirtualCD(path); err != nil {
+		s.sendOpen(st, errno(err), 0, 0)
+		return
+	} else if view != nil {
+		reader, closer, err := view.Open()
+		if err != nil {
+			s.sendOpen(st, errno(err), 0, 0)
+			return
+		}
+		st.Handles[id] = &session.Handle{Reader: reader, Closer: closer}
+		s.sendOpen(st, id, 0x2000, uint64(view.Size))
 		return
 	}
 	real, decompress, err := s.resolveImagePath(path)
@@ -322,6 +378,14 @@ func (s *Server) handleOpen(st *session.State, p []byte) {
 func (s *Server) openForWrite(st *session.State, id int32, path string, flags uint16) {
 	if s.root == nil {
 		s.sendOpen(st, -eNOENT, 0, 0)
+		return
+	}
+	if view, err := s.resolveVirtualCD(path); err != nil {
+		s.sendOpen(st, errno(err), 0, 0)
+		return
+	} else if view != nil {
+		s.cfg.Log.Warn("refusing write to virtual CD CHD view", map[string]any{"peer": st.Peer, "path": path})
+		s.sendOpen(st, -eACCES, 0, 0)
 		return
 	}
 	create := flags&0x0200 != 0
@@ -668,13 +732,18 @@ func (s *Server) handleDRead(st *session.State, p []byte) {
 		s.sendDRead(st, -eBADF, session.DirEntry{})
 		return
 	}
-	if h.Index >= len(h.Directory) {
-		s.sendDRead(st, 0, session.DirEntry{})
+	for h.Index < len(h.Directory) {
+		entry := h.Directory[h.Index]
+		h.Index++
+		if entry.VirtualPath != "" {
+			if _, err := s.root.Resolve(entry.VirtualPath, false); err == nil {
+				continue
+			}
+		}
+		s.sendDRead(st, 1, entry)
 		return
 	}
-	entry := h.Directory[h.Index]
-	h.Index++
-	s.sendDRead(st, 1, entry)
+	s.sendDRead(st, 0, session.DirEntry{})
 }
 func (s *Server) sendDRead(st *session.State, result int32, e session.DirEntry) {
 	name := []byte(e.Name)
@@ -707,6 +776,13 @@ func (s *Server) handleGetStat(st *session.State, p []byte) {
 	}
 	if path == "" && s.blockDev != nil {
 		s.sendGetStat(st, 0, 0, uint64(s.blockDev.sectorCount()*s.blockDev.sectorSize))
+		return
+	}
+	if view, err := s.resolveVirtualCD(path); err != nil {
+		s.sendGetStat(st, errno(err), 0, 0)
+		return
+	} else if view != nil {
+		s.sendGetStat(st, 0, 0x2000, uint64(view.Size))
 		return
 	}
 	real, decompress, err := s.resolveImagePath(path)
