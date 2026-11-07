@@ -160,7 +160,8 @@ func (table *cdTrackTable) layout() (*cdLayout, error) {
 		layout.spans = append(layout.spans, cdSpan{start: virtual, frames: track.frames, physicalBase: physical, audio: track.audio()})
 		layout.tracks = append(layout.tracks, cdTrackIndex{track: track, index0: index0, index1: index1})
 		virtual += track.frames
-		physical += track.frames + (-track.frames)%cdTrackPadding
+		pad := (cdTrackPadding - (track.frames % cdTrackPadding)) % cdTrackPadding
+		physical += track.frames + pad
 		if track.postgap > 0 {
 			layout.spans = append(layout.spans, cdSpan{start: virtual, frames: track.postgap, physicalBase: -1, audio: track.audio()})
 			virtual += track.postgap

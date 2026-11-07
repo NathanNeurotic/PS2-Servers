@@ -1363,11 +1363,15 @@ class UdpfsServer:
         either generated name collides with a real directory entry.
         """
         if (not self.enable_compression or
-                not path.lower().endswith(('.cue', '.bin')) or
-                self._through_linked_folder(path)):
+                not path.lower().endswith(('.cue', '.bin'))):
             return None
         resolved = self._resolve_path(path)
         if resolved is None:
+            return None
+        try:
+            if self._through_linked_folder(path):
+                return None
+        except OSError:
             return None
         entry_path = self._resolve_entry(path)
         if entry_path is not None and os.path.lexists(entry_path):

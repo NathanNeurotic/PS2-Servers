@@ -45,7 +45,7 @@ func writeSyntheticCDCHD(t *testing.T, tracks ...string) string {
 
 func TestCDTrackTableGeneratesVirtualLayoutAndCue(t *testing.T) {
 	path := writeSyntheticCDCHD(t,
-		"TRACK:1 TYPE:MODE1_RAW SUBTYPE:NONE FRAMES:4 PREGAP:2 PGTYPE:VAUDIO PGSUB:NONE POSTGAP:1\x00",
+		"TRACK:1 TYPE:MODE1_RAW SUBTYPE:NONE FRAMES:3 PREGAP:2 PGTYPE:VAUDIO PGSUB:NONE POSTGAP:1\x00",
 		"TRACK:2 TYPE:AUDIO SUBTYPE:NONE FRAMES:3 PREGAP:2 PGTYPE:MODE1 PGSUB:NONE POSTGAP:0\x00",
 	)
 	table, _, err := readCDTrackTable(path)
@@ -56,16 +56,16 @@ func TestCDTrackTableGeneratesVirtualLayoutAndCue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := layout.size(), int64(10*cdSectorBytes); got != want {
+	if got, want := layout.size(), int64(9*cdSectorBytes); got != want {
 		t.Fatalf("virtual BIN size = %d, want %d", got, want)
 	}
-	if span := layout.spanAt(4); span == nil || span.physicalBase != -1 {
+	if span := layout.spanAt(3); span == nil || span.physicalBase != -1 {
 		t.Fatalf("postgap span = %+v, want synthetic silence", span)
 	}
-	if span := layout.spanAt(5); span == nil || span.physicalBase != -1 {
+	if span := layout.spanAt(4); span == nil || span.physicalBase != -1 {
 		t.Fatalf("non-stored pregap span = %+v, want synthetic silence", span)
 	}
-	if span := layout.spanAt(7); span == nil || span.physicalBase != 4 {
+	if span := layout.spanAt(6); span == nil || span.physicalBase != 4 {
 		t.Fatalf("second track span = %+v, want CHD frame 4", span)
 	}
 	got := string(layout.cue("disc.bin"))
@@ -74,8 +74,8 @@ func TestCDTrackTableGeneratesVirtualLayoutAndCue(t *testing.T) {
 		"    INDEX 00 00:00:00\r\n" +
 		"    INDEX 01 00:00:02\r\n" +
 		"  TRACK 02 AUDIO\r\n" +
-		"    INDEX 00 00:00:05\r\n" +
-		"    INDEX 01 00:00:07\r\n"
+		"    INDEX 00 00:00:04\r\n" +
+		"    INDEX 01 00:00:06\r\n"
 	if got != want {
 		t.Fatalf("CUE mismatch\n got: %q\nwant: %q", got, want)
 	}

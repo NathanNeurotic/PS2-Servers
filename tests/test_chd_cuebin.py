@@ -392,6 +392,12 @@ class ChdCueNamespaceTests(_ChdFixtureMixin, unittest.TestCase):
         self.assertEqual(bin_stat[1], 0)
         self.assertEqual(bin_stat[2]["size"], 9 * cuebin.CD_SECTOR_BYTES)
 
+        # Missing parent folders do not raise OSError and reply with ENOENT.
+        getstat("missing/dir/Game.bin")
+        self.assertEqual(replies.pop()[1], -errno.ENOENT)
+        server._handle_open(addr, struct.pack("<BBHi", 0, 0, 1, 0) + b"missing/dir/Game.bin\0")
+        self.assertEqual(replies.pop()[1], -errno.ENOENT)
+
         # A writable server still refuses write access to the virtual views.
         server._handle_open(addr, struct.pack("<BBHi", 0, 0, 2, 0) + b"Game.bin\0")
         self.assertEqual(replies.pop()[1], -errno.EACCES)
