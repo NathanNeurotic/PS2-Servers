@@ -380,7 +380,10 @@ func (s *Server) openForWrite(st *session.State, id int32, path string, flags ui
 		s.sendOpen(st, -eNOENT, 0, 0)
 		return
 	}
-	if view, err := s.resolveVirtualCD(path); err == nil && view != nil {
+	if view, err := s.resolveVirtualCD(path); err != nil {
+		s.sendOpen(st, errno(err), 0, 0)
+		return
+	} else if view != nil {
 		s.cfg.Log.Warn("refusing write to virtual CD CHD view", map[string]any{"peer": st.Peer, "path": path})
 		s.sendOpen(st, -eACCES, 0, 0)
 		return
