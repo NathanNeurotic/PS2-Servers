@@ -13,11 +13,19 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 )
+
+func stemKey(stem string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(stem)
+	}
+	return stem
+}
 
 const (
 	cdFrameBytes       = 2448
@@ -407,7 +415,7 @@ func ListVirtualCD(directory string, names []string) []VirtualCDFile {
 		if extension != ".chd" {
 			continue
 		}
-		key := strings.ToLower(stem)
+		key := stemKey(stem)
 		if _, exists := sources[key]; exists {
 			ambiguous[key] = struct{}{}
 		} else {
@@ -478,16 +486,17 @@ func FindVirtualCD(path string) (*VirtualCDFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	wantedCue, wantedBin := strings.ToLower(stem+".cue"), strings.ToLower(stem+".bin")
+	wantedCue, wantedBin := stemKey(stem+".cue"), stemKey(stem+".bin")
 	var candidates []string
+	key := stemKey(stem)
 	for _, entry := range entries {
 		name := entry.Name()
-		lower := strings.ToLower(name)
-		if lower == wantedCue || lower == wantedBin {
+		k := stemKey(name)
+		if k == wantedCue || k == wantedBin {
 			return nil, nil
 		}
 		candidateStem := strings.TrimSuffix(name, filepath.Ext(name))
-		if strings.EqualFold(candidateStem, stem) && strings.EqualFold(filepath.Ext(name), ".chd") {
+		if stemKey(candidateStem) == key && strings.EqualFold(filepath.Ext(name), ".chd") {
 			candidates = append(candidates, filepath.Join(directory, name))
 		}
 	}

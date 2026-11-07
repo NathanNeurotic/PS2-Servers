@@ -1362,7 +1362,9 @@ class UdpfsServer:
         Physical entries win. The provider also suppresses the complete pair if
         either generated name collides with a real directory entry.
         """
-        if not self.enable_compression or self._through_linked_folder(path):
+        if (not self.enable_compression or
+                not path.lower().endswith(('.cue', '.bin')) or
+                self._through_linked_folder(path)):
             return None
         resolved = self._resolve_path(path)
         if resolved is None:
@@ -1841,7 +1843,7 @@ class UdpfsServer:
                     return
                 wrapper = None
                 try:
-                    wrapper = virtual_view.open()
+                    wrapper = virtual_view.open(self.compression_cache_size)
                     st = os.stat(virtual_view.chd_path, follow_symlinks=False)
                     stat_info = self._virtual_stat(virtual_view, st)
                     handle = self._alloc_handle(wrapper, is_dir=False)
@@ -2245,27 +2247,9 @@ class UdpfsServer:
                 virtual = None
 
             if virtual is not None:
-                # Directory entries are a snapshot. Re-resolve each virtual
-                # alias so a replaced image or newly-created real CUE/BIN pair
-                # cannot leave a stale or colliding name in the listing.
-                current_view = find_virtual_view(virtual.path)
-                if current_view is None:
+                stem, _ = os.path.splitext(virtual.path)
+                if os.path.lexists(stem + ".cue") or os.path.lexists(stem + ".bin"):
                     continue
-                try:
-                    st = os.stat(current_view.chd_path, follow_symlinks=False)
-                except OSError as e:
-                    self._print_event(
-                        f"[{addr[0]}:{addr[1]}] DREAD stat error, skipping "
-                        f"'{entry.name}': {e}")
-                    continue
-                stat_info = self._virtual_stat(current_view, st)
-                if self.verbose:
-                    self._print_event(
-                        f"[{addr[0]}:{addr[1]}] DREAD handle={handle} -> "
-                        f"'{display_name}' (virtual CD CHD)")
-                self._send_dread_reply(addr, result=1, name=display_name,
-                                       stat_info=stat_info)
-                return
 
             try:
                 st = entry.stat(follow_symlinks=False)
@@ -2273,11 +2257,17 @@ class UdpfsServer:
                 self._print_event(f"[{addr[0]}:{addr[1]}] DREAD stat error, skipping '{entry.name}': {e}")
                 continue
 
-            if not isinstance(advertised, dict) and display_name != entry.name:
+            if virtual is not None:
+                if not stat_mod.S_ISREG(st.st_mode):
+                    continue
+                stat_info = self._virtual_stat(virtual, st)
+            elif not isinstance(advertised, dict) and display_name != entry.name:
                 advertised_stat = self._get_compressed_stat(entry.path, st)
                 if advertised_stat is None:
                     continue
-            stat_info = advertised_stat or self._stat_to_bytes(st)
+                stat_info = advertised_stat
+            else:
+                stat_info = advertised_stat or self._stat_to_bytes(st)
 
             if self.verbose:
                 if display_name != entry.name:

@@ -27,6 +27,7 @@ MAX_TRACK_METADATA_BYTES = 4096
 MAX_TRACKS = 99
 MAX_HUNK_BYTES = 16 * 1024 * 1024
 MAX_CACHE_BYTES = 4 * 1024 * 1024
+DEFAULT_CACHE_BLOCKS = 32
 _PADDING_FRAMES = 4
 _CD_TRACK_TAGS = {b"CHT2", b"CHTR"}
 _UNSUPPORTED_CD_TAGS = {b"CHCD", b"CHGD", b"CHGT"}
@@ -75,11 +76,13 @@ class TrackTable:
     tracks: Tuple[Track, ...]
 
     def layout(self) -> "Layout":
+        if self.logical_bytes <= 0 or self.logical_bytes % CD_FRAME_BYTES != 0:
+            raise ChdCueError("invalid CD logical size")
         spans: List[Span] = []
         indexes: List[TrackIndex] = []
         virtual_frame = 0
         physical_frame = 0
-        total_frames = (self.logical_bytes + CD_FRAME_BYTES - 1) // CD_FRAME_BYTES
+        total_frames = self.logical_bytes // CD_FRAME_BYTES
 
         for track in self.tracks:
             if track.kind not in _RAW_TRACK_TYPES:
@@ -218,6 +221,9 @@ def _parse_track(raw: bytes) -> Track:
 def read_track_table(path: str) -> TrackTable:
     """Read and validate the bounded CD metadata chain from a CHD v5 file."""
     try:
+        st = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(st.st_mode):
+            raise ChdCueError("CHD source is not a regular file")
         with open(path, "rb") as image:
             file_size = os.fstat(image.fileno()).st_size
             header = image.read(HEADER_BYTES)
@@ -282,7 +288,6 @@ def read_track_table(path: str) -> TrackTable:
     if any(track.number != i + 1 for i, track in enumerate(tracks)):
         raise ChdCueError("CD track numbers must be contiguous starting at 1")
     table = TrackTable(hunk_bytes, logical_bytes, tuple(tracks))
-    # Validate layout and all track geometry before advertising a name.
     table.layout()
     return table
 
@@ -298,6 +303,8 @@ class MemoryFile:
         return self._stream.read(size)
 
     def seek(self, offset: int, whence: int = 0) -> int:
+        if whence not in (0, 1, 2):
+            raise ValueError("invalid whence")
         return self._stream.seek(offset, whence)
 
     def tell(self) -> int:
@@ -311,11 +318,12 @@ class ChdBinFile:
     """Read-only raw 2352-byte sector stream over a CD CHD."""
 
     def __init__(self, path: str, table: TrackTable, layout: Layout,
-                 expected_identity: Optional[Tuple[int, ...]] = None):
+                 cache_size: Optional[int] = None):
         if not _chd.LIBCHDR_AVAILABLE:
             raise ImportError(_chd._libchdr_error)
-        if expected_identity is not None and _identity(path) != expected_identity:
-            raise ChdCueError("CHD changed after its virtual view was prepared")
+        st = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(st.st_mode):
+            raise ChdCueError("CHD source is not a regular file")
 
         self._path = path
         self._layout = layout
@@ -323,6 +331,9 @@ class ChdBinFile:
         self._frames_per_hunk = table.hunk_bytes // CD_FRAME_BYTES
         self._hunk_bytes = table.hunk_bytes
         self._num_hunks = (table.logical_bytes + table.hunk_bytes - 1) // table.hunk_bytes
+        self._cache_size = (
+            DEFAULT_CACHE_BLOCKS if cache_size is None else max(0, int(cache_size))
+        )
         self._lib = _chd._lib
         self._buffer = ctypes.create_string_buffer(self._hunk_bytes)
         self._cache: OrderedDict[int, bytes] = OrderedDict()
@@ -337,35 +348,26 @@ class ChdBinFile:
             self._buffer = None
             raise OSError(f"chd_open failed with error {error}")
         self._handle = handle
-        if expected_identity is not None:
-            try:
-                current_identity = _identity(path)
-            except (OSError, ChdCueError):
-                self._lib.chd_close(handle)
-                self._handle = None
-                self._buffer = None
-                raise
-            if current_identity != expected_identity:
-                self._lib.chd_close(handle)
-                self._handle = None
-                self._buffer = None
-                raise ChdCueError("CHD changed while its decoder was opening")
 
     def _hunk(self, index: int) -> bytes:
         if not 0 <= index < self._num_hunks:
             raise OSError("CHD hunk index is outside the image")
-        cached = self._cache.get(index)
-        if cached is not None:
-            self._cache.move_to_end(index)
-            return cached
+        if self._cache_size > 0:
+            cached = self._cache.get(index)
+            if cached is not None:
+                self._cache.move_to_end(index)
+                return cached
         error = self._lib.chd_read(self._handle, index, self._buffer)
         if error != 0:
             raise OSError(f"chd_read failed for hunk {index} with error {error}")
         decoded = self._buffer.raw
         if len(decoded) != self._hunk_bytes:
             raise OSError("libchdr returned an invalid hunk length")
-        if len(decoded) <= MAX_CACHE_BYTES:
-            while self._cache and self._cache_bytes + len(decoded) > MAX_CACHE_BYTES:
+        if self._cache_size > 0 and len(decoded) <= MAX_CACHE_BYTES:
+            while self._cache and (
+                len(self._cache) >= self._cache_size or
+                self._cache_bytes + len(decoded) > MAX_CACHE_BYTES
+            ):
                 _, evicted = self._cache.popitem(last=False)
                 self._cache_bytes -= len(evicted)
             self._cache[index] = decoded
@@ -417,7 +419,9 @@ class ChdBinFile:
             position = self.uncompressed_size + offset
         else:
             raise ValueError("invalid whence")
-        self._pos = max(0, min(position, self.uncompressed_size))
+        if position < 0:
+            raise ValueError("negative seek")
+        self._pos = position
         return self._pos
 
     def tell(self) -> int:
@@ -439,13 +443,13 @@ def _swap_audio_bytes(sector: bytes) -> bytes:
     return bytes(swapped)
 
 
-def _identity(path: str) -> Tuple[int, ...]:
-    st = os.stat(path, follow_symlinks=False)
-    if not stat.S_ISREG(st.st_mode):
-        raise ChdCueError("CHD source is not a regular file")
-    return (st.st_dev, st.st_ino, st.st_size,
-            getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000)),
-            getattr(st, "st_ctime_ns", int(st.st_ctime * 1_000_000_000)))
+def _stem_key(stem: str) -> str:
+    return stem.casefold() if os.name == "nt" else stem
+
+
+def _name_key(name: str) -> Tuple[str, str]:
+    stem, extension = os.path.splitext(name)
+    return _stem_key(stem), extension.lower()
 
 
 @dataclass(frozen=True)
@@ -455,17 +459,16 @@ class VirtualView:
     chd_path: str
     table: TrackTable
     layout: Layout
-    identity: Tuple[int, ...]
     cue_data: bytes = b""
 
     @property
     def size(self) -> int:
         return len(self.cue_data) if self.kind == "cue" else self.layout.size
 
-    def open(self):
+    def open(self, cache_size: Optional[int] = None):
         if self.kind == "cue":
             return MemoryFile(self.cue_data)
-        return ChdBinFile(self.chd_path, self.table, self.layout, self.identity)
+        return ChdBinFile(self.chd_path, self.table, self.layout, cache_size)
 
 
 def _safe_cue_name(name: str) -> bool:
@@ -478,26 +481,15 @@ def _safe_cue_name(name: str) -> bool:
             all(ord(char) >= 32 and ord(char) != 127 for char in name))
 
 
-def _build_pair(path: str) -> Tuple[TrackTable, Layout, Tuple[int, ...]]:
-    before = _identity(path)
-    table = read_track_table(path)
-    layout = table.layout()
-    after = _identity(path)
-    if before != after:
-        raise ChdCueError("CHD changed while its track table was read")
-    return table, layout, after
-
-
 def _virtual_views(chd_path: str, virtual_stem: str, directory: str,
-                   table: TrackTable, layout: Layout,
-                   identity: Tuple[int, ...]) -> Tuple[VirtualView, VirtualView]:
+                   table: TrackTable, layout: Layout) -> Tuple[VirtualView, VirtualView]:
     bin_name = virtual_stem + ".bin"
     cue_data = layout.cue_sheet(bin_name)
     return (
         VirtualView("cue", os.path.join(directory, virtual_stem + ".cue"),
-                    chd_path, table, layout, identity, cue_data),
+                    chd_path, table, layout, cue_data),
         VirtualView("bin", os.path.join(directory, bin_name),
-                    chd_path, table, layout, identity),
+                    chd_path, table, layout),
     )
 
 
@@ -509,14 +501,14 @@ def list_virtual_entries(directory: str, entries) -> List[Tuple[str, VirtualView
     """
     if not _AVAILABLE:
         return []
-    real_names = {entry.name.casefold() for entry in entries}
+    real_keys = {_name_key(entry.name) for entry in entries}
     sources = {}
     ambiguous = set()
     for entry in entries:
         stem, extension = os.path.splitext(entry.name)
         if extension.lower() != ".chd":
             continue
-        key = stem.casefold()
+        key = _stem_key(stem)
         if key in sources:
             ambiguous.add(key)
         else:
@@ -528,12 +520,12 @@ def list_virtual_entries(directory: str, entries) -> List[Tuple[str, VirtualView
             continue
         stem, _ = os.path.splitext(entry.name)
         cue_name, bin_name = stem + ".cue", stem + ".bin"
-        if (cue_name.casefold() in real_names or bin_name.casefold() in real_names or
+        if ((key, ".cue") in real_keys or (key, ".bin") in real_keys or
                 not _safe_cue_name(cue_name) or not _safe_cue_name(bin_name)):
             continue
         try:
-            table, layout, identity = _build_pair(entry.path)
-            pair = _virtual_views(entry.path, stem, directory, table, layout, identity)
+            table = read_track_table(entry.path)
+            pair = _virtual_views(entry.path, stem, directory, table, table.layout())
         except (ChdCueError, OSError, UnicodeError, struct.error):
             continue
         virtual.extend(((cue_name, pair[0]), (bin_name, pair[1])))
@@ -554,21 +546,17 @@ def find_virtual_view(path: str) -> Optional[VirtualView]:
             entries = list(scan)
     except OSError:
         return None
-    names = {entry.name.casefold() for entry in entries}
-    cue_name = (stem + ".cue").casefold()
-    bin_name = (stem + ".bin").casefold()
-    if cue_name in names or bin_name in names:
+    key = _stem_key(stem)
+    real_keys = {_name_key(entry.name) for entry in entries}
+    if (key, ".cue") in real_keys or (key, ".bin") in real_keys:
         return None
-    candidates = []
-    for entry in entries:
-        candidate_stem, candidate_ext = os.path.splitext(entry.name)
-        if candidate_stem.casefold() == stem.casefold() and candidate_ext.lower() == ".chd":
-            candidates.append(entry)
+    candidates = [entry for entry in entries if _name_key(entry.name) == (key, ".chd")]
     if len(candidates) != 1:
         return None
     try:
-        table, layout, identity = _build_pair(candidates[0].path)
+        table = read_track_table(candidates[0].path)
+        source_stem, _ = os.path.splitext(candidates[0].name)
+        views = _virtual_views(candidates[0].path, source_stem, directory, table, table.layout())
     except (ChdCueError, OSError, UnicodeError, struct.error):
         return None
-    views = _virtual_views(candidates[0].path, stem, directory, table, layout, identity)
     return views[0] if kind == "cue" else views[1]

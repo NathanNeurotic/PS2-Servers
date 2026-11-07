@@ -14,12 +14,14 @@ import (
 	"io"
 	"math"
 	"os"
+	"sync"
 	"unsafe"
 )
 
 const cdBinCacheBytes = 4 << 20
 
 type chdBinReader struct {
+	mu            sync.Mutex
 	handle        *C.chd_file
 	table         cdTrackTable
 	layout        *cdLayout
@@ -30,6 +32,7 @@ type chdBinReader struct {
 	cache         map[int64][]byte
 	cacheOrder    []int64
 	cachedBytes   int64
+	maxCacheBytes int64
 	closed        bool
 }
 
@@ -62,6 +65,10 @@ func openCHDBIN(path string, table cdTrackTable, layout *cdLayout, expected os.F
 	if table.logicalSize%table.hunkBytes != 0 {
 		blocks++
 	}
+	budget := cacheByteBudget()
+	if budget < 0 {
+		budget = 0
+	}
 	reader := &chdBinReader{
 		handle:        handle,
 		table:         table,
@@ -70,11 +77,14 @@ func openCHDBIN(path string, table cdTrackTable, layout *cdLayout, expected os.F
 		hunkBuffer:    make([]byte, table.hunkBytes),
 		blocks:        blocks,
 		cache:         make(map[int64][]byte),
+		maxCacheBytes: budget,
 	}
 	return reader, reader, nil
 }
 
 func (r *chdBinReader) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed {
 		return nil
 	}
@@ -91,6 +101,8 @@ func (r *chdBinReader) Close() error {
 }
 
 func (r *chdBinReader) Seek(offset int64, whence int) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	var base int64
 	switch whence {
 	case io.SeekStart:
@@ -99,20 +111,22 @@ func (r *chdBinReader) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekEnd:
 		base = r.layout.size()
 	default:
-		return r.position, fmt.Errorf("invalid whence")
+		return r.position, os.ErrInvalid
 	}
 	if (offset > 0 && base > math.MaxInt64-offset) || (offset < 0 && base < math.MinInt64-offset) {
-		return r.position, fmt.Errorf("seek offset overflows int64")
+		return r.position, os.ErrInvalid
 	}
 	position := base + offset
 	if position < 0 {
-		return r.position, fmt.Errorf("negative seek")
+		return r.position, os.ErrInvalid
 	}
 	r.position = position
 	return position, nil
 }
 
 func (r *chdBinReader) Read(out []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed || r.handle == nil {
 		return 0, os.ErrClosed
 	}
@@ -188,8 +202,8 @@ func (r *chdBinReader) hunk(index int64) ([]byte, error) {
 	}
 	data := make([]byte, len(r.hunkBuffer))
 	copy(data, r.hunkBuffer)
-	if int64(len(data)) <= cdBinCacheBytes {
-		for r.cachedBytes+int64(len(data)) > cdBinCacheBytes && len(r.cacheOrder) > 0 {
+	if r.maxCacheBytes > 0 && int64(len(data)) <= r.maxCacheBytes {
+		for r.cachedBytes+int64(len(data)) > r.maxCacheBytes && len(r.cacheOrder) > 0 {
 			oldest := r.cacheOrder[0]
 			r.cacheOrder = r.cacheOrder[1:]
 			r.cachedBytes -= int64(len(r.cache[oldest]))

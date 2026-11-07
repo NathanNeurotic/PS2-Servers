@@ -205,6 +205,10 @@ class ChdCueReadTests(_ChdFixtureMixin, unittest.TestCase):
         image.seek(-17, 2)
         self.assertEqual(image.read(40), bytes(expected)[-17:])
         self.assertEqual(image.read(1), b"")
+        with self.assertRaises(ValueError):
+            image.seek(-1, 0)
+        with self.assertRaises(ValueError):
+            image.seek(0, 99)
 
     def test_close_releases_libchdr_handle(self):
         table = cuebin.read_track_table(self.path)
@@ -216,23 +220,18 @@ class ChdCueReadTests(_ChdFixtureMixin, unittest.TestCase):
         with self.assertRaises(ValueError):
             image.read(1)
 
-    def test_source_change_during_decoder_open_closes_handle(self):
+    def test_cache_size_zero_disables_caching_and_bounds_hold(self):
         table = cuebin.read_track_table(self.path)
-        lib = _FakeLibchdr(4)
-        original_open = lib.chd_open
+        layout = table.layout()
+        uncached = cuebin.ChdBinFile(self.path, table, layout, cache_size=0)
+        self.addCleanup(uncached.close)
+        uncached.read(cuebin.CD_SECTOR_BYTES)
+        self.assertEqual(len(uncached._cache), 0)
 
-        def open_then_change(*args):
-            result = original_open(*args)
-            with open(self.path, "ab") as image:
-                image.write(b"changed")
-            return result
-
-        lib.chd_open = open_then_change
-        with mock.patch.object(cuebin._chd, "LIBCHDR_AVAILABLE", True), \
-                mock.patch.object(cuebin._chd, "_lib", lib):
-            with self.assertRaises(cuebin.ChdCueError):
-                cuebin.ChdBinFile(self.path, table, table.layout(), cuebin._identity(self.path))
-        self.assertEqual(lib.closed, 1)
+        bounded = cuebin.ChdBinFile(self.path, table, layout, cache_size=1)
+        self.addCleanup(bounded.close)
+        bounded.read(layout.size)
+        self.assertEqual(len(bounded._cache), 1)
 
     def test_server_bread_74_and_75_sector_requests(self):
         path = os.path.join(self.temp.name, "Large.chd")
@@ -294,14 +293,28 @@ class ChdCueNamespaceTests(_ChdFixtureMixin, unittest.TestCase):
             self.assertIsNone(cuebin.find_virtual_view(os.path.join(self.temp.name, "Game.bin")))
 
     def test_duplicate_chd_stems_and_bad_chd_are_suppressed(self):
-        duplicate = os.path.join(self.temp.name, "game.CHD")
-        _write_chd(duplicate, self.tracks, hunk_frames=4, logical_frames=10)
         invalid = os.path.join(self.temp.name, "bad.chd")
         with open(invalid, "wb") as image:
             image.write(b"not a CHD")
+        entries = self._entries() + [
+            types.SimpleNamespace(name="Game.CHD", path=self.path)
+        ]
         with mock.patch.object(cuebin, "_AVAILABLE", True):
-            entries = cuebin.list_virtual_entries(self.temp.name, self._entries())
-        self.assertEqual(entries, [])
+            listed = cuebin.list_virtual_entries(self.temp.name, entries)
+        self.assertEqual(listed, [])
+
+    def test_case_distinct_stems_are_preserved_on_case_sensitive_filesystems(self):
+        entries = [
+            types.SimpleNamespace(name="Game.chd", path=self.path),
+            types.SimpleNamespace(name="game.chd", path=self.path),
+        ]
+        with mock.patch.object(cuebin, "_AVAILABLE", True), \
+                mock.patch.object(cuebin.os, "name", "posix"):
+            listed = cuebin.list_virtual_entries(self.temp.name, entries)
+        self.assertEqual(
+            [name for name, _ in listed],
+            ["Game.cue", "Game.bin", "game.cue", "game.bin"],
+        )
 
     def test_virtual_pair_is_not_advertised_when_compression_is_disabled(self):
         with mock.patch.object(cuebin, "_AVAILABLE", True):

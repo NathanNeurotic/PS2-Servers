@@ -235,6 +235,10 @@ func (s *Server) resolveVirtualCD(client string) (*compression.VirtualCDFile, er
 	if s.root == nil || !s.compressedSiblingsEnabled() || !compression.CHDAvailable {
 		return nil, nil
 	}
+	ext := strings.ToLower(filepath.Ext(client))
+	if ext != ".cue" && ext != ".bin" {
+		return nil, nil
+	}
 	if _, err := s.root.Resolve(client, false); err == nil {
 		return nil, nil // a real entry always wins
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -729,11 +733,9 @@ func (s *Server) handleDRead(st *session.State, p []byte) {
 		entry := h.Directory[h.Index]
 		h.Index++
 		if entry.VirtualPath != "" {
-			view, err := s.resolveVirtualCD(entry.VirtualPath)
-			if err != nil || view == nil {
+			if _, err := s.root.Resolve(entry.VirtualPath, false); err == nil {
 				continue
 			}
-			entry.Size = uint64(view.Size)
 		}
 		s.sendDRead(st, 1, entry)
 		return
