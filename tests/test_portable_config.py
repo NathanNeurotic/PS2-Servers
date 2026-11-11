@@ -74,6 +74,14 @@ class PortableConfigTest(unittest.TestCase):
         config.reset()
         self.assertEqual(config.load(), {})
 
+    def test_failed_first_save_does_not_hide_legacy_settings(self):
+        with open(os.path.join(self.user, "launcher.json"), "w") as f:
+            f.write('{"old": true}')
+        self._marker()
+        with self.assertRaises(TypeError):
+            config.save({"bad": object()})
+        self.assertEqual(config.load(), {"old": True})
+
     def test_unwritable_data_dir_falls_back_to_user_dir(self):
         self._marker()
         with mock.patch.object(config.tempfile, "TemporaryFile", side_effect=OSError("read-only")):

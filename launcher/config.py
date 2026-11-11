@@ -76,14 +76,17 @@ def _legacy_done_path():
     return os.path.join(config_dir(), ".legacy-imported")
 
 
-def _mark_legacy_done():
+def _mark_legacy_done(directory=None):
     # Once a portable build has saved or reset its settings, the old per-user
     # file must never be imported again (a reset has to stay a reset).
-    if is_portable():
-        try:
-            open(_legacy_done_path(), "a").close()
-        except OSError:
-            pass
+    if directory is None:
+        if not is_portable():
+            return
+        directory = config_dir()
+    try:
+        open(os.path.join(directory, ".legacy-imported"), "a").close()
+    except OSError:
+        pass
 
 
 def load():
@@ -101,10 +104,11 @@ def load():
 
 
 def save(data):
-    directory = config_dir()
+    portable_dir = _portable_dir()
+    # select the directory once: marking and writing must not re-probe
+    directory = portable_dir or _user_config_dir()
     os.makedirs(directory, exist_ok=True)
-    _mark_legacy_done()
-    path = config_path()
+    path = os.path.join(directory, "launcher.json")
     tmp = path + ".tmp"
     # write to a temp file then atomically replace, so a crash mid-write can't
     # leave a truncated/corrupt config behind
@@ -119,6 +123,10 @@ def save(data):
         except OSError:
             pass
         raise
+    if portable_dir is not None:
+        # only after the portable file exists: a failed first save must still
+        # let load() see the per-user settings
+        _mark_legacy_done(directory)
 
 
 def reset():
