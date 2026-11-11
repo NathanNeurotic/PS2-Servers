@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 
-from launcher.config import config_dir
+from launcher.config import config_dir, is_portable
 from launcher.ra_evaluator import library_path
 from launcher.servers import is_frozen
 
@@ -28,7 +28,7 @@ def engine_path():
 
 def profile_dir():
     # Windows local, not roaming; independent xeRAbora/Caduceus are untouched.
-    if os.name == "nt":
+    if os.name == "nt" and not is_portable():
         base = Path(os.environ.get("LOCALAPPDATA", config_dir())) / "PS2-Servers"
     else:
         base = Path(config_dir())
