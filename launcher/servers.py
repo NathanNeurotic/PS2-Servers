@@ -227,7 +227,7 @@ _SMB2_FIELDS = [
                "admin, and is what Windows Explorer needs to connect at all."),
     Field("bind", "Bind address", "text", default="", advanced=True,
           help="Interface to bind (blank = all)."),
-    Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+    Field("verbose", "Verbose logging", "bool", default=True, advanced=True),
     Field("session_summary", "Session summary", "bool", default=False, advanced=True,
           help="Print one SESSION line per console when it goes quiet for a "
                "minute or the server stops: connections, folder lists, opens, "
@@ -403,7 +403,7 @@ SMBV1 = ServerDef(
               help="Bind standard port 445 by pausing Windows file sharing. Needs admin."),
         Field("bind", "Bind address", "text", default="", advanced=True,
               help="Interface to bind (blank = all)."),
-        Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+        Field("verbose", "Verbose logging", "bool", default=True, advanced=True),
         Field("session_summary", "Session summary", "bool", default=False, advanced=True,
               help="Print one SESSION line per console when it goes quiet for a "
                    "minute or the server stops: connections, folder lists, opens, "
@@ -487,7 +487,7 @@ UDPFS = ServerDef(
         Field("peer_timeout", "Idle timeout (seconds)", "text", default="3600",
               advanced=True,
               help="Drop an inactive console and close its handles after 60-86400 seconds."),
-        Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+        Field("verbose", "Verbose logging", "bool", default=True, advanced=True),
         Field("session_summary", "Session summary", "bool", default=False, advanced=True,
               help="Print one SESSION line per console when it goes quiet for a "
                    "minute or the server stops: folder lists, opens, reads, writes "
@@ -583,7 +583,7 @@ HTTP = ServerDef(
                    "game list on a different port than the games."),
         Field("bind", "Bind address", "text", default="", advanced=True,
               help="Interface to bind (blank = all)."),
-        Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+        Field("verbose", "Verbose logging", "bool", default=True, advanced=True),
         Field("session_summary", "Session summary", "bool", default=False, advanced=True,
               help="Print one SESSION line per console when it goes quiet for a "
                    "minute or the server stops: list, open, read and error counts. "
@@ -617,7 +617,7 @@ UDPBD = ServerDef(
         Field("raw_write", "Enable raw writes / VMC", "bool", default=False, advanced=True,
               help="Requires Exclusive raw access. Gives the PS2 write access to all sectors; use only a dedicated game drive on a trusted LAN. Failed writes may be partial."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True),
-        Field("verbose", "Verbose logging", "bool", default=False, advanced=True),
+        Field("verbose", "Verbose logging", "bool", default=True, advanced=True),
         Field("session_summary", "Session summary", "bool", default=False, advanced=True,
               help="Print one SESSION line per console when it goes quiet for a "
                    "minute or the server stops: mounts, reads, writes and errors. "
@@ -680,3 +680,32 @@ RETROACHIEVEMENTS = ServerDef(
 )
 
 REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, HTTP, UDPBD, RETROACHIEVEMENTS)}
+
+# Marks that the one-time "Verbose logging on" migration has run. Verbose became
+# the default so testers' reports carry a useful trace; an install that saved the
+# old default (off) gets switched on once, and after that its choice is respected.
+VERBOSE_MIGRATION_KEY = "verbose_default_on"
+
+
+def migrate_verbose_default(saved):
+    """Turn Verbose logging on once for every server in an existing config.
+
+    A fresh config (nothing saved) only gets the marker: the new field default
+    already applies. Once the marker is present this is a no-op, so a user who
+    later turns verbose off keeps it off.
+    """
+    if saved.get(VERBOSE_MIGRATION_KEY):
+        return saved
+    migrated = dict(saved)
+    migrated[VERBOSE_MIGRATION_KEY] = True
+    cards = saved.get("servers")
+    if isinstance(cards, dict):
+        out = {}
+        for key, values in cards.items():
+            has_verbose = key in REGISTRY and any(
+                f.key == "verbose" for f in REGISTRY[key].fields)
+            if has_verbose and isinstance(values, dict):
+                values = dict(values, verbose=True)
+            out[key] = values
+        migrated["servers"] = out
+    return migrated
