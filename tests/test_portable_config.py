@@ -58,9 +58,25 @@ class PortableConfigTest(unittest.TestCase):
         config.save({"new": True})
         self.assertEqual(config.load(), {"new": True})
 
+    def test_reset_is_not_undone_by_legacy_import(self):
+        with open(os.path.join(self.user, "launcher.json"), "w") as f:
+            f.write('{"old": true}')
+        self._marker()
+        config.save({"new": True})
+        config.reset()
+        self.assertEqual(config.load(), {})
+        self.assertTrue(os.path.exists(os.path.join(self.user, "launcher.json")))
+
+    def test_reset_before_any_save_stays_reset(self):
+        with open(os.path.join(self.user, "launcher.json"), "w") as f:
+            f.write('{"old": true}')
+        self._marker()
+        config.reset()
+        self.assertEqual(config.load(), {})
+
     def test_unwritable_data_dir_falls_back_to_user_dir(self):
         self._marker()
-        with mock.patch.object(config.os, "access", return_value=False):
+        with mock.patch.object(config.tempfile, "TemporaryFile", side_effect=OSError("read-only")):
             self.assertFalse(config.is_portable())
             self.assertEqual(config.config_dir(), self.user)
 

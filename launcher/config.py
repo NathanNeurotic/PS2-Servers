@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import sys
+import tempfile
 
 APP_NAME = "PS2-Servers"
 
@@ -39,7 +40,13 @@ def _portable_dir():
         os.makedirs(directory, exist_ok=True)
     except OSError:
         return None
-    return directory if os.access(directory, os.W_OK) else None
+    try:
+        # os.access lies on read-only mounts and some ACLs: prove it by writing
+        with tempfile.TemporaryFile(dir=directory) as probe:
+            probe.write(b"x")
+    except OSError:
+        return None
+    return directory
 
 
 def _user_config_dir():
@@ -65,9 +72,23 @@ def config_path():
     return os.path.join(config_dir(), "launcher.json")
 
 
+def _legacy_done_path():
+    return os.path.join(config_dir(), ".legacy-imported")
+
+
+def _mark_legacy_done():
+    # Once a portable build has saved or reset its settings, the old per-user
+    # file must never be imported again (a reset has to stay a reset).
+    if is_portable():
+        try:
+            open(_legacy_done_path(), "a").close()
+        except OSError:
+            pass
+
+
 def load():
     path = config_path()
-    if not os.path.exists(path) and is_portable():
+    if not os.path.exists(path) and is_portable() and not os.path.exists(_legacy_done_path()):
         # one-time fallback: settings a portable build saved to the per-user
         # folder before it kept them beside the program
         path = os.path.join(_user_config_dir(), "launcher.json")
@@ -82,6 +103,7 @@ def load():
 def save(data):
     directory = config_dir()
     os.makedirs(directory, exist_ok=True)
+    _mark_legacy_done()
     path = config_path()
     tmp = path + ".tmp"
     # write to a temp file then atomically replace, so a crash mid-write can't
@@ -102,6 +124,7 @@ def save(data):
 def reset():
     """Delete the persisted settings file. A missing file is already 'reset',
     so it is not an error."""
+    _mark_legacy_done()
     try:
         os.remove(config_path())
     except FileNotFoundError:
