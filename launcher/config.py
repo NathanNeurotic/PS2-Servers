@@ -7,11 +7,42 @@ remember what the user picked between runs.
 import json
 import os
 import platform
+import sys
 
 APP_NAME = "PS2-Servers"
 
 
-def config_dir():
+PORTABLE_MARKER = "portable.txt"
+PORTABLE_DATA_DIR = "data"
+
+
+def _app_dir():
+    """Folder holding the program: the executable when frozen, else the repo."""
+    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+        for candidate in (os.environ.get("NUITKA_ONEFILE_BINARY"), sys.argv[0] if sys.argv else None):
+            if candidate:
+                path = os.path.abspath(candidate)
+                if os.path.exists(path):
+                    return os.path.dirname(path)
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _portable_dir():
+    """<app folder>/data when a portable.txt marker sits beside the program and
+    that folder is writable, else None (the per-user location is used)."""
+    root = _app_dir()
+    if not os.path.isfile(os.path.join(root, PORTABLE_MARKER)):
+        return None
+    directory = os.path.join(root, PORTABLE_DATA_DIR)
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except OSError:
+        return None
+    return directory if os.access(directory, os.W_OK) else None
+
+
+def _user_config_dir():
     system = platform.system()
     if system == "Windows":
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
@@ -22,13 +53,26 @@ def config_dir():
     return os.path.join(base, "ps2-servers")
 
 
+def is_portable():
+    return _portable_dir() is not None
+
+
+def config_dir():
+    return _portable_dir() or _user_config_dir()
+
+
 def config_path():
     return os.path.join(config_dir(), "launcher.json")
 
 
 def load():
+    path = config_path()
+    if not os.path.exists(path) and is_portable():
+        # one-time fallback: settings a portable build saved to the per-user
+        # folder before it kept them beside the program
+        path = os.path.join(_user_config_dir(), "launcher.json")
     try:
-        with open(config_path(), "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data if isinstance(data, dict) else {}
     except (FileNotFoundError, ValueError, OSError):

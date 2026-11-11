@@ -241,6 +241,7 @@ jobs:
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -Path "$($dist.FullName)/*" -Destination $packageDir -Recurse -Force
           Copy-Item -Path ANTIVIRUS-NOTICE.md -Destination $packageDir -Force
+          Set-Content -Path "$packageDir/portable.txt" -Value "Portable build: settings are kept in the data folder next to this program. Delete this file to use the per-user settings folder instead."
           if (Test-Path build/native) {
             Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
           }
@@ -254,6 +255,7 @@ jobs:
           dist=$(ls -d dist/*.dist 2>/dev/null | head -1)
           test -n "$dist"
           cp ANTIVIRUS-NOTICE.md "$dist/"
+          echo "Portable build: settings are kept in the data folder next to this program. Delete this file to use the per-user settings folder instead." > "$dist/portable.txt"
           ( cd "$(dirname "$dist")" && tar -czf "$GITHUB_WORKSPACE/out/${{ matrix.portable_asset }}" "$(basename "$dist")" )
 
       # An AppImage wraps the same standalone build so Linux users get desktop /
