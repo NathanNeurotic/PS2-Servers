@@ -13,6 +13,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog, font as tkfont, messagebox, ttk
@@ -942,6 +943,7 @@ class LauncherApp:
         # Offer optional setup only to genuinely new installs; users with
         # existing configurations are not interrupted after an upgrade.
         self._invite_ps2_setup_guide = not bool(self.saved)
+        self.saved = servers.migrate_verbose_default(self.saved)
         # Set by reset_settings once the config file is deleted: _save becomes a
         # no-op so the shutdown path cannot resurrect the old settings.
         self._config_reset = False
@@ -990,6 +992,7 @@ class LauncherApp:
         self._build()
         self._refresh_scroll_body()
         self._restore()
+        self._restore_last_tab()
         self._ip_trace_ready = True   # edits after this are the user's, not ours
 
         # On Windows, run from the system tray: closing or minimizing hides the
@@ -1429,6 +1432,42 @@ class LauncherApp:
         ttk.Button(footer, text="Quit", command=self.exit_app).grid(
             row=0, column=5, sticky="e", padx=(8, 0))
 
+    TAB_KEYS_AFTER_SERVERS = ("library", "terminal", "sessions", "about")
+
+    def _tab_keys(self):
+        """Stable key per notebook tab, in the order the tabs were added."""
+        return list(self.server_tabs) + list(self.TAB_KEYS_AFTER_SERVERS)
+
+    def _current_tab_key(self):
+        try:
+            return self._tab_keys()[self.nb.index("current")]
+        except (tk.TclError, IndexError, AttributeError):
+            return self.saved.get("last_tab", "")
+
+    def _restore_last_tab(self):
+        key = self.saved.get("last_tab")
+        keys = self._tab_keys()
+        if isinstance(key, str) and key in keys:
+            try:
+                self.nb.select(keys.index(key))
+            except tk.TclError:
+                pass
+        self.nb.bind("<<NotebookTabChanged>>", self._on_tab_changed, add="+")
+
+    def _on_tab_changed(self, event=None):
+        if self._shutting_down or getattr(self, "_config_reset", False):
+            return
+        key = self._current_tab_key()
+        if not key or key == self.saved.get("last_tab"):
+            return
+        self.saved["last_tab"] = key
+        try:
+            data = config.load()
+            data["last_tab"] = key
+            config.save(data)
+        except OSError:
+            pass
+
     def _build_about_tab(self):
         about = ttk.Frame(self.nb)
         about.columnconfigure(0, weight=1)
@@ -1492,7 +1531,7 @@ class LauncherApp:
             close_to_tray.grid(row=b_row, column=b_col, sticky="w", padx=(6, 12), pady=6)
             b_col += 1
             minimize_to_tray = ttk.Checkbutton(
-                behavior, text="Minimize to tray", variable=self.minimize_to_tray_var,
+                behavior, text="Minimize to tray (off = taskbar)", variable=self.minimize_to_tray_var,
                 command=self._save_with_feedback, style="Card.TCheckbutton")
             minimize_to_tray.grid(row=b_row, column=b_col, sticky="w", padx=(0, 12), pady=6)
             b_col += 1
@@ -2934,7 +2973,8 @@ class LauncherApp:
         widget.config(state="disabled")
 
     def _terminal_text(self, key, text):
-        prefix = "[{}] ".format(TAB_TITLES.get(key, key.upper()))
+        prefix = "{} [{}] ".format(time.strftime("%H:%M:%S"),
+                                   TAB_TITLES.get(key, key.upper()))
         return "".join(
             prefix + line if line.strip("\r\n") else line
             for line in text.splitlines(True)
@@ -3408,7 +3448,9 @@ class LauncherApp:
                 "discord_show_uptime": bool(self.discord_uptime_var.get()),
                 "discord_share_game": bool(self.discord_share_game_var.get()),
                 "ra_unlock_popups": bool(self.ra_unlock_popups_var.get()),
-                "last_active_servers": active}
+                "last_active_servers": active,
+                servers.VERBOSE_MIGRATION_KEY: True,
+                "last_tab": self._current_tab_key()}
         latest = config.load()
         for key in ("game_library_folder", "library_guide_seen",
                     "game_library_view", "game_library_kind", "game_library_use_index"):
