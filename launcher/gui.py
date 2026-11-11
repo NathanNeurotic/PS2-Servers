@@ -2370,6 +2370,17 @@ class LauncherApp:
                                  "Please set: " + ", ".join(missing))
             return
 
+        # SMBv2/SMBv3 refuse to start with neither a login nor "No password"
+        # ticked, and the card's defaults are exactly that on a fresh install:
+        # without this check Start flips to Running and the server exits at once.
+        if key in ("smbv2", "smbv3") and not values.get("open_share") \
+                and not (values.get("username") and values.get("password")):
+            messagebox.showerror(
+                server.label,
+                "SMBv2/SMBv3 needs a username and password. Set a password, "
+                "or tick \"No password\" to share without a login.")
+            return
+
         if windows_setup.is_windows():
             self._begin_windows_setup_check(key, values)
             return
