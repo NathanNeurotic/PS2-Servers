@@ -71,8 +71,10 @@ class SetupGuide(tk.Toplevel):
                                borderwidth=0, highlightthickness=0)
         self.details.pack(fill="both", expand=True)
         self.details.configure(state="disabled")
-        safe_ip = str(ip).strip() or "Select the PC LAN IP in SETUP"
-        self.ip_hint = ttk.Label(frame, text="PC LAN IP selected: " + safe_ip)
+        safe_ip = str(ip).strip()
+        self.ip_hint = ttk.Label(frame, text=(
+            "PC LAN IP selected: " + safe_ip if safe_ip else
+            "No PC LAN IP was selected when this guide opened. Use the LAN IP box at the top of the window."))
         self.ip_hint.pack(anchor="w", pady=(8, 8))
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x")
