@@ -133,7 +133,7 @@ What it runs
 - SMBv2 / SMBv3 mode: runs a modern SMB server for clients that speak SMB2 or newer -- a PC, a phone, or SMB2-capable homebrew. SMBv3 is the same server negotiating up to SMB 3.0.2; pick it unless a client refuses it and needs SMB2. Modern clients, Windows included, speak these modes natively, with no re-enabling SMB1. There is no guest mode here: set a username and password, or tick "No password" only on a network you trust.
 - UDPFS mode: serves a folder and/or a disk image over UDP for OPL's UDPFS device support, and is recommended for most setups. Its Auto protocol mode detects Standard and Modulo clients at the same time; choose a mode yourself only if a console will not connect on Auto.
 - HTTP mode: serves a games folder over plain HTTP for OPL's HTTP mode, which streams ISOs with Range requests instead of SMB. There are no shares, no logins and no dialects to negotiate; type the same port into OPL that the card shows, because leaving OPL's Port at 0 makes it look for the game list on a different port than the games. CHD and CSO images are decompressed on the fly and offered as .iso, which a stock web server cannot do; ZSO is passed through for the console to decode. HTTP is read-only, so saves still need a memory card. This mode is new and awaits validation on real hardware.
-- NFS mode: serves a games folder over NFS version 4.0 for Neutrino's NFS backing store and the nfs: driver, both built on unfs4. The PS2 side needs only this PC's IP and the export '/'; the port is always TCP 2049. It is read-only unless Allow writes is on, and NFS has no password, so turn writes on only on a network you trust. Games never write over NFS: save to a memory card. This mode is new and awaits validation on real hardware.
+- NFS mode: serves a games folder over NFS version 4.0 for Neutrino's NFS backing store and the nfs: driver, both built on unfs4 by Ronnie Sahlberg. The PS2 side needs only this PC's IP and the export '/'; the port is always TCP 2049. It is read-only unless Allow writes is on, and NFS has no password, so turn writes on only on a network you trust. Games never write over NFS: save to a memory card. This mode is new and awaits validation on real hardware.
 - UDPBD mode: serves a single disk image as a block device over UDP. Largely superseded by UDPFS; kept for compatible clients.
 
 How SMBv1 mode works
@@ -206,6 +206,18 @@ Unsigned Windows network tools can still trigger antivirus heuristics. That does
 """
 
 ABOUT_TEXT += "\nRetroAchievements runs the bundled xeRAbora/rcheevos engine alongside a game server. Select xeRAbora or Caduceus for your achievements-enabled OPL. Sign in through the local account page; passwords are never launcher settings. Softcore only. Caduceus also provides its paired console progress browser.\n"
+
+ABOUT_TEXT += """
+Credits
+
+- Rick Gaiser (rickgaiser): the UDPBD and UDPFS protocols, the original servers, and Neutrino. The UDPFS server here is his.
+- Ronnie Sahlberg (sahlberg): unfs4, the PS2 NFS client the NFS card serves; usmb2, the SMB client in Neutrino's SMB mode, which the SMBv3 card serves; and libsmb2.
+- pcm720: udpfsd, and review of the network-boot docs.
+- El_isra (israpps): udpbd-server, the reference the UDPBD port follows. Alex Parrado: its Windows port.
+- The Open PS2 Loader and ps2homebrew teams, and the testers named in the README.
+
+The full list, with links, is under "Credits & thanks" in the README on GitHub.
+"""
 
 TAB_TITLES = {
     "retroachievements": "RetroAchievements",
