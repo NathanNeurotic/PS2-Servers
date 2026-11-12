@@ -287,5 +287,44 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
             app._shutting_down = True
             root.destroy()
 
+    def test_elevated_firewall_removal_keeps_the_cleanup_marker_and_active_list(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            raise unittest.SkipTest("no tkinter")
+
+        from launcher import config, gui
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            raise unittest.SkipTest("no display")
+
+        try:
+            app = gui.LauncherApp(root)
+            app._invite_ps2_setup_guide = False
+            running = {"udpfs": True}
+            app.procs = {"udpfs": object()}
+            app.is_running = lambda key: running.get(key, False)
+
+            def fake_stop(key, confirm=True):
+                running[key] = False
+                app._save()  # what the real stop_server does after each stop
+            app.stop_server = fake_stop
+            app._stop_direct_responder = lambda: None
+            app._destroy_root = lambda: None
+            written = []
+            config.save = lambda data: written.append(data)
+            with mock.patch.object(gui.windows_setup, "is_windows", return_value=True), \
+                 mock.patch.object(gui.elevate, "is_admin", return_value=False), \
+                 mock.patch.object(gui.elevate, "can_elevate", return_value=True), \
+                 mock.patch.object(gui.elevate, "relaunch_as_admin", return_value=True), \
+                 mock.patch.object(gui.messagebox, "askyesno", lambda *a, **k: True):
+                app._remove_windows_setup(require_confirm=True)
+            self.assertTrue(written[-1].get("pending_cleanup"))
+            self.assertEqual(written[-1]["last_active_servers"], ["udpfs"])
+        finally:
+            app._shutting_down = True
+            root.destroy()
+
 if __name__ == "__main__":
     unittest.main()

@@ -2776,7 +2776,15 @@ class LauncherApp:
 
             self._save(pending_cleanup=True)
             if elevate.relaunch_as_admin():
+                was_running = [k for k in self.procs if self.is_running(k)]
                 self.stop_all()
+                # stop_server saves after each server and drops the marker, so
+                # write it again, keeping the servers that were running.
+                self._active_override = was_running
+                try:
+                    self._save(pending_cleanup=True)
+                finally:
+                    self._active_override = None
                 if self._tray:
                     self._tray.stop()
                 self._destroy_root()
