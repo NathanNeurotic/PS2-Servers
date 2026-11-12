@@ -67,6 +67,38 @@ MAX_COMPONENT = 255
 MAX_PATH_CHARS = 4096
 
 
+def check_component(part):
+    """Refuse one path component that no share serves. Raises PathError.
+
+    Separate from Share.resolve so a server that walks a directory (the NFS
+    server's READDIR) lists only names it would also open, without paying for a
+    realpath per entry.
+    """
+    if len(part) > MAX_COMPONENT:
+        raise PathError("STATUS_OBJECT_NAME_INVALID", "name component too long")
+    if _STREAM_SEPARATOR in part:
+        raise PathError("STATUS_OBJECT_NAME_INVALID",
+                        "alternate data streams are not served")
+    if "\\" in part or any(ch in _ILLEGAL for ch in part):
+        raise PathError("STATUS_OBJECT_NAME_INVALID",
+                        "illegal character in name")
+    # Win32 resolves these names to devices wherever they appear, so
+    # C:\share\NUL is the null device and not a file in the share -- a client
+    # could CREATE one and write into a device, or open a serial port. Windows'
+    # own SMB server refuses them, and this refuses them on every host so a share
+    # does not change meaning depending on which OS is serving it.
+    if part.split(".", 1)[0].upper() in _RESERVED_DEVICE_NAMES:
+        raise PathError("STATUS_OBJECT_NAME_INVALID",
+                        "%r names a device, not a file" % part)
+    # Win32 silently strips a trailing dot or space, so "game.iso." and
+    # "game.iso" would be the same file to a Windows client and two different
+    # ones to this server. Refusing is the only answer that means the same thing
+    # on both.
+    if part[-1] in (".", " "):
+        raise PathError("STATUS_OBJECT_NAME_INVALID",
+                        "name ends in a dot or space")
+
+
 class Share:
     """One shared directory, and the only way a client path becomes a real one."""
 
@@ -118,30 +150,7 @@ class Share:
                 # counting rather than on a rule.
                 raise PathError("STATUS_OBJECT_PATH_SYNTAX_BAD",
                                 "parent traversal is not served")
-            if len(part) > MAX_COMPONENT:
-                raise PathError("STATUS_OBJECT_NAME_INVALID", "name component too long")
-            if _STREAM_SEPARATOR in part:
-                raise PathError("STATUS_OBJECT_NAME_INVALID",
-                                "alternate data streams are not served")
-            if any(ch in _ILLEGAL for ch in part):
-                raise PathError("STATUS_OBJECT_NAME_INVALID",
-                                "illegal character in name")
-            # Win32 resolves these names to devices wherever they appear, so
-            # C:\share\NUL is the null device and not a file in the share --
-            # a client could CREATE one and write into a device, or open a
-            # serial port. Windows' own SMB server refuses them, and this
-            # refuses them on every host so a share does not change meaning
-            # depending on which OS is serving it.
-            if part.split(".", 1)[0].upper() in _RESERVED_DEVICE_NAMES:
-                raise PathError("STATUS_OBJECT_NAME_INVALID",
-                                "%r names a device, not a file" % part)
-            # Win32 silently strips a trailing dot or space, so "game.iso." and
-            # "game.iso" would be the same file to a Windows client and two
-            # different ones to this server. Refusing is the only answer that
-            # means the same thing on both.
-            if part[-1] in (".", " "):
-                raise PathError("STATUS_OBJECT_NAME_INVALID",
-                                "name ends in a dot or space")
+            check_component(part)
             components.append(part)
 
         candidate = os.path.join(self.root, *components) if components else self.root

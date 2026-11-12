@@ -14,7 +14,7 @@ import uuid
 
 DEFAULT_APPLICATION_ID = "1558114313619898409"
 MODE_NAMES = {"smbv1": "SMBv1", "smbv2": "SMBv2", "smbv3": "SMBv3", "udpfs": "UDPFS",
-              "http": "HTTP", "udpbd": "UDPBD", "retroachievements": "RetroAchievements"}
+              "http": "HTTP", "nfs": "NFS", "udpbd": "UDPBD", "retroachievements": "RetroAchievements"}
 
 
 def public_game_title(value):
