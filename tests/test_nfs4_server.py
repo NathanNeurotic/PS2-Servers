@@ -549,6 +549,11 @@ class ReaddirTests(ServerTestBase):
             with self.subTest(maxcount=maxcount):
                 self.assertEqual(self.walk(maxcount), self.names)
 
+    @unittest.skipIf(os.name == "nt", "Windows has no backslash in a name")
+    def test_a_name_with_a_backslash_is_not_listed(self):
+        open(os.path.join(self.root, "DVD", "a" + chr(92) + "b.iso"), "wb").close()  # it could not be opened
+        self.assertEqual(self.walk(65536), self.names)
+
     def test_unfs4_window_is_respected(self):
         # unfs4 sends dircount 1024 and maxcount 1032, and copies everything
         # after the verifier to a 1024-byte buffer: entries plus 8 must fit.
@@ -691,6 +696,19 @@ class WritesOnTests(ServerTestBase):
         self.assertEqual(reply.status, 10032)
         self.assertFalse(os.path.exists(os.path.join(self.root, "DVD", "x.bin")))
 
+    def test_new_entries_are_synced_to_disk(self):
+        synced = []
+        real = nfs._sync_dir
+        nfs._sync_dir = synced.append
+        self.addCleanup(setattr, nfs, "_sync_dir", real)
+        self.assertEqual(self.create("DVD", "save.bin")[0], 0)
+        self.assertEqual(self.call(putrootfh(), mkdir("VMC")).status, 0)
+        self.assertEqual(self.call(putrootfh(), lookup("DVD"), savefh(), putrootfh(),
+                                   rename("save.bin", "moved.bin")).status, 0)
+        dvd, top = os.path.realpath(os.path.join(self.root, "DVD")), os.path.realpath(self.root)
+        self.assertEqual(sorted(os.path.realpath(p) for p in synced), sorted([dvd, top, dvd, top]))
+        real(self.root)  # the real one runs on this host
+
     def test_folders(self):
         self.assertEqual(self.call(putrootfh(), mkdir("VMC")).status, 0)
         self.assertTrue(os.path.isdir(os.path.join(self.root, "VMC")))
@@ -727,7 +745,9 @@ class WritesOnTests(ServerTestBase):
         self.assertEqual(rn("a.bin", "other.iso"), 0)      # file replaces file
         with open(os.path.join(self.root, "other.iso"), "rb") as f:
             self.assertEqual(f.read(), b"A")
+        kept = self.fh("other.iso")
         self.assertEqual(rn("other.iso", "other.iso"), 0)  # onto itself
+        self.assertEqual(self.call(putfh(kept), getattr_([1])).status, 0)  # its handle still works
         self.assertEqual(rn("missing", "x"), 2)
 
     def test_rename_cannot_leave_the_share(self):
@@ -843,6 +863,26 @@ class SocketTests(unittest.TestCase):
             time.sleep(0.05)
         self.assertEqual(conn.files, {}, "an idle read handle must be closed")
         self.assertEqual(self.exchange(sock, call).body(2)["data"], b"0123")
+
+    def test_a_connection_that_cannot_start_leaves_the_server_running(self):
+        real = threading.Thread.start
+        failed = []
+
+        def start(thread):
+            if thread.name.startswith("nfs-") and not failed:
+                failed.append(thread.name)
+                raise RuntimeError("can't start new thread")
+            return real(thread)
+        threading.Thread.start = start
+        self.addCleanup(setattr, threading.Thread, "start", real)
+        first = self.connect()
+        first.settimeout(5)
+        self.assertEqual(first.recv(10), b"")         # that one is dropped ...
+        with self.server.lock:
+            self.assertEqual(len(self.server.connections), 0)
+        call = rpc_call(compound([putrootfh(), lookup("game.iso"), read(0, 4)]))
+        self.assertEqual(self.exchange(self.connect(), call).body(2)["data"], b"0123")  # ... the next is served
+        self.assertEqual(len(failed), 1)
 
     def test_the_quietest_connection_goes_past_the_cap(self):
         socks = [self.connect()]

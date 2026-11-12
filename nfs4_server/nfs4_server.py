@@ -218,6 +218,19 @@ class _Reader(object):
         return {w * 32 + b for w, word in enumerate(words) for b in range(32) if word >> b & 1}
 
 
+def _sync_dir(path):
+    """Make a folder's entries durable (POSIX). WRITE replies FILE_SYNC4, so a file it
+    wrote must not vanish with its folder entry on a power loss. NTFS journals the
+    entry, and Windows cannot open a folder this way."""
+    if os.name == "nt":
+        return
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _status_of(exc):
     if isinstance(exc, FileNotFoundError):
         return NFS4ERR_NOENT
@@ -385,12 +398,20 @@ class Nfs4Server(object):
                 if self.stopping.is_set():
                     break
                 raise
-            sock.settimeout(None)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            conn = _Connection(sock, address)
-            self._admit(conn)
-            threading.Thread(target=self._serve, args=(conn,), daemon=True,
-                             name="nfs-{}:{}".format(*address)).start()
+            conn = None
+            try:
+                sock.settimeout(None)
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                conn = _Connection(sock, address)
+                self._admit(conn)
+                threading.Thread(target=self._serve, args=(conn,), daemon=True,
+                                 name="nfs-{}:{}".format(*address)).start()
+            except (OSError, RuntimeError) as exc:  # the peer has gone already, or no thread to spare
+                self.log("NFS: dropped a connection from {}: {}".format(address[0], exc))
+                if conn is not None:
+                    with self.lock:
+                        self.connections.discard(conn)
+                sock.close()
 
     def stop(self):
         self.stopping.set()
@@ -877,6 +898,7 @@ class Nfs4Server(object):
                 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
                              | getattr(os, "O_BINARY", 0), 0o666)
                 os.close(fd)
+                _sync_dir(parent_real)
                 self.log("NFS: created {}".format("/".join(comps)))
             if "size" in attrs:
                 os.truncate(path, attrs["size"])
@@ -937,6 +959,7 @@ class Nfs4Server(object):
         parent_real, parent_st = self._dir(s.cfh)
         comps, path = self._child(s.cfh, raw)
         os.mkdir(path)
+        _sync_dir(parent_real)
         self.log("NFS: made folder {}".format("/".join(comps)))
         self._changed(comps)
         s.cfh = comps
@@ -986,8 +1009,11 @@ class Nfs4Server(object):
                 os.replace(src, dst)
         else:
             os.rename(src, dst)
+        for folder in {src_real, dst_real}:
+            _sync_dir(folder)
         self.log("NFS: renamed {} to {}".format("/".join(old), "/".join(new)))
-        self.handles.renamed(old, new)
+        if old != new:  # onto itself: nothing moved, every handle stays
+            self.handles.renamed(old, new)
         self._changed(old)
         return (self._cinfo(src_st.st_mtime_ns, src_real)
                 + self._cinfo(dst_st.st_mtime_ns, dst_real))

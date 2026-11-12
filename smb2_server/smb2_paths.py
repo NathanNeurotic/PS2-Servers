@@ -79,7 +79,7 @@ def check_component(part):
     if _STREAM_SEPARATOR in part:
         raise PathError("STATUS_OBJECT_NAME_INVALID",
                         "alternate data streams are not served")
-    if any(ch in _ILLEGAL for ch in part):
+    if "\\" in part or any(ch in _ILLEGAL for ch in part):
         raise PathError("STATUS_OBJECT_NAME_INVALID",
                         "illegal character in name")
     # Win32 resolves these names to devices wherever they appear, so
