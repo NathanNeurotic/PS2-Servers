@@ -221,7 +221,10 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
 
         root, app, writes = self._app_with_fake_servers(tk, gui)
         try:
-            app.stop_all(remember_active=False)
+            # Through the footer's own callback, so a lost remember_active=False
+            # there would fail this test.
+            app.confirm_stop_while_busy = lambda keys: True
+            app.stop_all_confirmed()
             self.assertEqual(writes[-1]["last_active_servers"], [])
             self.assertIsNone(app._active_override)
             app._save()
