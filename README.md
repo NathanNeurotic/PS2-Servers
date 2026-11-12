@@ -509,6 +509,15 @@ PS2 Servers builds on the following projects and contributions:
 - **[Alex Parrado](https://github.com/parrado)** — the Windows port of udpbd-server.
 - **Aerosol** — tested UDPFS across Linux, Windows, and direct connections, identified the
   explicit-bind workaround, and isolated a shared-config line-ending issue affecting VMC paths.
+- **Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg)** — author of
+  **[unfs4](https://github.com/sahlberg/unfs4)**, the PS2 NFS client in Neutrino's NFS
+  mode ([ps2max32/neutrino PR #240](https://github.com/ps2max32/neutrino/pull/240)) and
+  Launchstation's `nfs:` driver, which the **NFS** card serves; of
+  **[usmb2](https://github.com/sahlberg/usmb2)**, the SMB client in Neutrino's SMB mode
+  ([ps2max32/neutrino PR #236](https://github.com/ps2max32/neutrino/pull/236)), which the
+  **SMBv3** card serves; and of **[libsmb2](https://github.com/sahlberg/libsmb2)**. Our
+  NFS and SMB conformance tests build unfs4, usmb2 and libsmb2 and run them against our
+  servers.
 - **[Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)** and the
   **[ps2homebrew](https://github.com/ps2homebrew)** team — the loader everything here
   serves, and the wider toolchain that makes PS2 homebrew possible.
@@ -520,7 +529,7 @@ PS2 Servers builds on the following projects and contributions:
 
 ### What's original here
 
-The **GUI launcher**, the **SMBv1** server, and the **pure‑Python UDPBD port**
-were written for this repo. Everything at the protocol level is the community's —
+The **GUI launcher**, the **SMBv1** server, the **NFS 4.0** server and the
+**pure‑Python UDPBD port** were written for this repo. Everything at the protocol level is the community's —
 we reimplemented from public protocols/source (rather than copying code) where we
 could, and tried to attribute accurately.
