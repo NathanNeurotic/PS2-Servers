@@ -661,21 +661,40 @@ class WritesOnTests(ServerTestBase):
             return out
 
         self.server._one = one
-        got = []
+        got, moved = [], []
         reader = threading.Thread(target=lambda: got.append(Reply(self.server.handle_record(
             rpc_call(compound([putfh(fh), read(0, 4)]))))))
         reader.start()
         self.assertTrue(paused.wait(5))
-        threading.Thread(target=lambda: (self.call(putfh(dvd), savefh(), putfh(dvd),
-                                                   rename("game.iso", "moved.iso")),
-                                         renamed.set()), daemon=True).start()
+        # The reader holds the lock now; note when the RENAME asks for it
+        real_lock, asked = self.server.fs_lock, threading.Event()
+
+        class Noting:
+            def __enter__(_):
+                asked.set()
+                real_lock.acquire()
+
+            def __exit__(_, *exc):
+                real_lock.release()
+
+        def mover():
+            moved.append(self.call(putfh(dvd), savefh(), putfh(dvd),
+                                   rename("game.iso", "moved.iso")))
+            renamed.set()
+
+        self.server.fs_lock = Noting()
+        threading.Thread(target=mover, daemon=True).start()
         try:
+            self.assertTrue(asked.wait(5))
             self.assertFalse(renamed.wait(0.3))
         finally:
+            self.server.fs_lock = real_lock
             go.set()
         reader.join(5)
         self.assertEqual(got[0].body(1)["data"], self.payload[:4])
         self.assertTrue(renamed.wait(5))
+        self.assertEqual(moved[0].status, 0)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "DVD", "moved.iso")))
 
     def create(self, folder, name, how=0):
         """unfs4_open(O_CREAT): SETCLIENTID, then CONFIRM + OPEN, then CLOSE."""
