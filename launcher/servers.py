@@ -169,7 +169,8 @@ def _smbv1_argv(v):
 # One implementation, two modes: SMB3 is the same protocol at a higher dialect,
 # so the ceiling is a flag rather than a second server to keep in step.
 def _smb2_argv(v, smb_version):
-    args = ["--share", "games={}".format(v["games_folder"]),
+    share = (v.get("share_name") or "games").strip() or "games"
+    args = ["--share", "{}={}".format(share, v["games_folder"]),
             "--smb-version", str(smb_version)]
     if v.get("port"):
         args += ["--port", str(v["port"])]
@@ -205,6 +206,9 @@ def _smbv3_argv(v):
 _SMB2_FIELDS = [
     Field("games_folder", "Games folder", "folder", required=True,
           help="Root folder containing OPL structure (DVD/ and CD/ subfolders with your .iso games). Browsable from a modern PC, unlike SMBv1."),
+    Field("share_name", "Share name", "text", default="games",
+          help="The name typed after the IP on a client, and in OPL's "
+               "Share field. 'games' is what the guides assume."),
     Field("port", "Port", "port", default=1445, advanced=False,
           help="TCP port (default 1445). Windows itself and Neutrino's SMB "
                "driver can only connect on 445 -- on Windows use the advanced "
