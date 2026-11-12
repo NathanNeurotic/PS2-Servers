@@ -492,7 +492,7 @@ class Nfs4Server(object):
             if mark is None:
                 return None
             mark = struct.unpack(">I", mark)[0]
-            total += mark & 0x7fffffff
+            total += 4 + (mark & 0x7fffffff)  # the mark too: empty fragments count
             if total > MAX_RECORD:
                 raise ValueError("record too large")
             part = self._recv(conn, mark & 0x7fffffff)

@@ -866,6 +866,14 @@ class SocketTests(unittest.TestCase):
         sock.sendall(p32(0x80000000 | (nfs.MAX_RECORD + 1)))
         self.assertIn(sock.recv(10), (b"",))
 
+    def test_endless_empty_fragments_close_the_connection(self):
+        sock = self.connect()
+        try:
+            sock.sendall(p32(0) * (nfs.MAX_RECORD // 4 + 1))
+        except OSError:
+            pass  # closed while sending: the server has already refused it
+        self.assertIn(sock.recv(10), (b"",))
+
     def test_a_quiet_connection_stays_open_and_drops_its_file(self):
         sock = self.connect()
         call = rpc_call(compound([putrootfh(), lookup("game.iso"), read(0, 4)]))
