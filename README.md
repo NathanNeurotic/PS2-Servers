@@ -376,6 +376,11 @@ Launcher settings are saved per user in `launcher.json`:
 - Linux: `$XDG_CONFIG_HOME/ps2-servers/`, or `~/.config/ps2-servers/`
 - macOS: `~/Library/Application Support/PS2-Servers/`
 
+A portable build (the `-portable` Windows zip or Linux tar.gz) keeps its
+settings, library data and RetroAchievements profile in a `data` folder next
+to the program instead, because of the `portable.txt` file packed beside it.
+Settings an older portable build saved in the per-user folder are read once.
+
 **Auto-start servers on launch** starts saved servers when the app opens; it
 does not install an OS login task. Windows supports a tray icon; Linux tray support
 is experimental and depends on the desktop/backend. macOS has no tray support.
