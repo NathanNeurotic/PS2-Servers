@@ -380,6 +380,9 @@ A portable build (the `-portable` Windows zip or Linux tar.gz) keeps its
 settings, library data and RetroAchievements profile in a `data` folder next
 to the program instead, because of the `portable.txt` file packed beside it.
 Settings an older portable build saved in the per-user folder are read once.
+If the `data` folder cannot be created or written (a read-only drive or folder),
+the build falls back to the per-user folder above, so keep the portable folder
+writable if you move it between PCs.
 
 **Auto-start servers on launch** starts saved servers when the app opens; it
 does not install an OS login task. Windows supports a tray icon; Linux tray support
