@@ -597,6 +597,48 @@ HTTP = ServerDef(
     _build_argv=_http_argv,
 )
 
+
+def _nfs_argv(v):
+    if not v.get("root_dir"):
+        raise ValueError("NFS needs a Games folder.")
+    args = ["--root-dir", v["root_dir"]]
+    if v.get("allow_writes"):
+        args += ["--allow-writes"]
+    if v.get("bind"):
+        args += ["--bind", str(v["bind"])]
+    if v.get("verbose"):
+        args += ["--verbose"]
+    return args
+
+
+NFS = ServerDef(
+    key="nfs",
+    label="NFS server",
+    blurb="Serve a games folder over NFS version 4.0 for Neutrino's NFS mode and "
+          "the nfs: driver. Read-only unless Allow writes is on.",
+    recommendation="Experimental -- needs hardware validation",
+    recommendation_kind="legacy",
+    runtime="python",
+    default_port=2049,
+    share_hint="games",
+    module_file=_repo("nfs4_server", "nfs4_server.py"),
+    module_dir=_repo("nfs4_server"),
+    fields=[
+        Field("root_dir", "Games folder", "folder", required=True,
+              help="Folder shared as export / (DVD/ and CD/ inside it). The port "
+                   "is always 2049, because the PS2 clients cannot use another."),
+        Field("allow_writes", "Allow writes", "bool", default=False,
+              help="Off: consoles can list and read, nothing else. On: they can "
+                   "also create, change, rename and delete files here. NFS has "
+                   "no password, so anything that can reach this PC on port 2049 "
+                   "gets the same rights. Games never write over NFS either way."),
+        Field("bind", "Bind address", "text", default="", advanced=True,
+              help="Interface to bind (blank = all)."),
+        Field("verbose", "Verbose logging", "bool", default=True, advanced=True),
+    ],
+    _build_argv=_nfs_argv,
+)
+
 UDPBD = ServerDef(
     key="udpbd",
     label="UDPBD server",
@@ -683,7 +725,8 @@ RETROACHIEVEMENTS = ServerDef(
     ], _build_argv=_achievements_argv,
 )
 
-REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, HTTP, UDPBD, RETROACHIEVEMENTS)}
+REGISTRY = {s.key: s for s in (SMBV1, SMBV2, SMBV3, UDPFS, HTTP, NFS, UDPBD,
+                                RETROACHIEVEMENTS)}
 
 # Marks that the one-time "Verbose logging on" migration has run. Verbose became
 # the default so testers' reports carry a useful trace; an install that saved the

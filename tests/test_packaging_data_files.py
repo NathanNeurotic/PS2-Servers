@@ -128,7 +128,9 @@ class SiblingImportsAreShippedTests(unittest.TestCase):
                 if os.path.isfile(sibling):
                     continue  # local sibling, not stdlib
                 # Ignore local packages / third-party libs handled via INCLUDE_PACKAGES or sys.path
-                if name in ("compressed_iso", "lz4", "launcher", "udpfs_server", "smb2_server", "smbv1_server", "udpbd_server"):
+                # smb2_paths: nfs4_server.py imports it from smb2_server/, which ships it.
+                if name in ("compressed_iso", "lz4", "launcher", "udpfs_server", "smb2_server",
+                            "smbv1_server", "udpbd_server", "smb2_paths"):
                     continue
                 with self.subTest(source=rel, stdlib_module=name):
                     self.assertIn(

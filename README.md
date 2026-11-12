@@ -25,11 +25,12 @@ does not add that protocol to a PS2 application.
 | SMBv1 | TCP 1025 in Desktop; 1111 in Core/standalone | Guest file sharing for OPL and other SMBv1 clients |
 | SMBv2 / SMBv3 | TCP 1445 | Authenticated file sharing for clients that support these dialects; not a replacement for SMBv1 in an SMBv1-only loader |
 | HTTP | TCP 1100 | Experimental game streaming for compatible OPL HTTP clients, with an opt-in RiptOPL path-aware game list; see [HTTP setup and validation](docs/HTTP.md) |
+| NFS | TCP 2049 (fixed) | Experimental NFS 4.0 game folder for unfs4 clients (Neutrino's NFS mode, Launchstation's `nfs:` driver); read-only unless Allow writes is on; see [NFS setup](docs/NFS.md) |
 | UDPBD | UDP 48573 (`0xBDBD`) | Image, raw drive or virtual exFAT folder served as a block device |
 
-Desktop has six game/file server cards plus [RetroAchievements](docs/RETROACHIEVEMENTS.md)
+Desktop has seven game/file server cards plus [RetroAchievements](docs/RETROACHIEVEMENTS.md)
 with xeRAbora and Caduceus console modes. Edge provides UDPFS, SMBv1, UDPBD, and a separate
-HTTP **management dashboard**; it does not provide the HTTP game server or SMB2/3.
+HTTP **management dashboard**; it does not provide the HTTP game server, NFS or SMB2/3.
 See [editions](docs/EDITIONS.md) and [Edge setup](docs/EDGE.md).
 
 ## Optional desktop game library
@@ -508,6 +509,15 @@ PS2 Servers builds on the following projects and contributions:
 - **[Alex Parrado](https://github.com/parrado)** — the Windows port of udpbd-server.
 - **Aerosol** — tested UDPFS across Linux, Windows, and direct connections, identified the
   explicit-bind workaround, and isolated a shared-config line-ending issue affecting VMC paths.
+- **Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg)** — author of
+  **[unfs4](https://github.com/sahlberg/unfs4)**, the PS2 NFS client in Neutrino's NFS
+  mode ([ps2max32/neutrino PR #240](https://github.com/ps2max32/neutrino/pull/240)) and
+  Launchstation's `nfs:` driver, which the **NFS** card serves; of
+  **[usmb2](https://github.com/sahlberg/usmb2)**, the SMB client in Neutrino's SMB mode
+  ([ps2max32/neutrino PR #236](https://github.com/ps2max32/neutrino/pull/236)), which the
+  **SMBv3** card serves; and of **[libsmb2](https://github.com/sahlberg/libsmb2)**. Our
+  NFS and SMB conformance tests build unfs4, usmb2 and libsmb2 and run them against our
+  servers.
 - **[Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)** and the
   **[ps2homebrew](https://github.com/ps2homebrew)** team — the loader everything here
   serves, and the wider toolchain that makes PS2 homebrew possible.
@@ -519,7 +529,7 @@ PS2 Servers builds on the following projects and contributions:
 
 ### What's original here
 
-The **GUI launcher**, the **SMBv1** server, and the **pure‑Python UDPBD port**
-were written for this repo. Everything at the protocol level is the community's —
+The **GUI launcher**, the **SMBv1** server, the **NFS 4.0** server and the
+**pure‑Python UDPBD port** were written for this repo. Everything at the protocol level is the community's —
 we reimplemented from public protocols/source (rather than copying code) where we
 could, and tried to attribute accurately.
