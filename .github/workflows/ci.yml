@@ -81,7 +81,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check PyYAML Pillow lz4 smbprotocol
 
       - name: Compile Python sources
-        run: python -m compileall -q launcher smbv1_server smb2_server udpbd_server udpfs_server http_server ps2servers.py
+        run: python -m compileall -q launcher smbv1_server smb2_server udpbd_server udpfs_server http_server nfs4_server ps2servers.py
 
       - name: Install independent exFAT validator
         run: sudo apt-get update -qq && sudo apt-get install -y exfatprogs
@@ -115,6 +115,12 @@ jobs:
         # Builds the real client from Neutrino PR #236 and reads a game through
         # smb2_server on loopback. Host protocol check, not PS2 hardware.
         run: python conformance/integration/neutrino_smb/run.py --require-upstream
+
+      - name: Run pinned PS2 NFS client (unfs4) conformance
+        # Builds unfs4 as Neutrino PR 240 builds it and with every feature (as
+        # Launchstation's nfs: driver), and runs upstream's own test program
+        # through nfs4_server with writes on and off. Host check, not PS2 hardware.
+        run: python conformance/integration/neutrino_nfs/run.py --require-upstream
 
       - name: Run pinned libsmb2 clients (RiptOPL and Launchstation smb2man) conformance
         # Builds the libsmb2 versions both PS2 browse drivers use and lists,

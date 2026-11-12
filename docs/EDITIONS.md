@@ -5,7 +5,7 @@ PS2 Servers is one product family with three deployment shapes.
 ## PS2 Servers Desktop
 
 Use Desktop on Windows, macOS, or a normal Linux workstation. It includes the
-GUI launcher, SMBv1, SMB2/3, UDPFS, HTTP, UDPBD, compression support, logging, diagnostics,
+GUI launcher, SMBv1, SMB2/3, UDPFS, HTTP, NFS, UDPBD, compression support, logging, diagnostics,
 Windows Firewall assistance, and the established release packaging. Desktop is
 the most feature-complete edition and retains optional CHD support where the
 required library is available.
@@ -21,6 +21,7 @@ ps2servers serve udpfs --root-dir /games --read-only
 ps2servers serve udpbd /images/ps2.img --read-only
 ps2servers serve smbv1 --share games=/games --read-only
 ps2servers serve http --root-dir /games --port 1100
+ps2servers serve nfs --root-dir /games
 ```
 
 Here `ps2servers` means the packaged executable, optionally installed under that
@@ -49,7 +50,7 @@ Current Edge scope:
 - text or JSON logs
 - generic Linux, systemd, Docker, and OpenWrt deployment foundations
 
-Edge does not implement the HTTP game server or SMB2/3. Its generic static
+Edge does not implement the HTTP game server, NFS or SMB2/3. Its generic static
 binaries also exclude CHD, which needs a native decoder such as `libchdr`.
 Desktop/Core continue to provide CHD where that library is available.
 
@@ -67,4 +68,4 @@ Desktop/Core continue to provide CHD where that library is available.
 | NAS or embedded Linux | Edge |
 | Need CHD now | Desktop/Core |
 | Need UDPBD | Either implementation; validate the chosen build and loader on your console |
-| Need HTTP game serving or SMB2/3 | Desktop/Core |
+| Need HTTP game serving, NFS or SMB2/3 | Desktop/Core |

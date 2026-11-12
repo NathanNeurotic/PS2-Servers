@@ -133,6 +133,7 @@ What it runs
 - SMBv2 / SMBv3 mode: runs a modern SMB server for clients that speak SMB2 or newer -- a PC, a phone, or SMB2-capable homebrew. SMBv3 is the same server negotiating up to SMB 3.0.2; pick it unless a client refuses it and needs SMB2. Modern clients, Windows included, speak these modes natively, with no re-enabling SMB1. There is no guest mode here: set a username and password, or tick "No password" only on a network you trust.
 - UDPFS mode: serves a folder and/or a disk image over UDP for OPL's UDPFS device support, and is recommended for most setups. Its Auto protocol mode detects Standard and Modulo clients at the same time; choose a mode yourself only if a console will not connect on Auto.
 - HTTP mode: serves a games folder over plain HTTP for OPL's HTTP mode, which streams ISOs with Range requests instead of SMB. There are no shares, no logins and no dialects to negotiate; type the same port into OPL that the card shows, because leaving OPL's Port at 0 makes it look for the game list on a different port than the games. CHD and CSO images are decompressed on the fly and offered as .iso, which a stock web server cannot do; ZSO is passed through for the console to decode. HTTP is read-only, so saves still need a memory card. This mode is new and awaits validation on real hardware.
+- NFS mode: serves a games folder over NFS version 4.0 for Neutrino's NFS backing store and the nfs: driver, both built on unfs4. The PS2 side needs only this PC's IP and the export '/'; the port is always TCP 2049. It is read-only unless Allow writes is on, and NFS has no password, so turn writes on only on a network you trust. Games never write over NFS: save to a memory card. This mode is new and awaits validation on real hardware.
 - UDPBD mode: serves a single disk image as a block device over UDP. Largely superseded by UDPFS; kept for compatible clients.
 
 How SMBv1 mode works
@@ -213,6 +214,7 @@ TAB_TITLES = {
     "smbv3": "SMBv3",
     "udpfs": "UDPFS",
     "http": "HTTP",
+    "nfs": "NFS",
     "udpbd": "UDPBD",
     "setup": "SETUP",
     "directlink": "DIRECT",
@@ -343,6 +345,18 @@ def opl_hint(key, ip, values):
         # loads from one port and the game streams from another.
         return ("In OPL → Network:  Protocol 'HTTP'  ·  IP {}  ·  Port {}  "
                 "·  set Port to {}, not 0".format(ip, port, port))
+    if key == "nfs":
+        # The PS2 clients take a server IP and an export, and nothing else: the
+        # port is fixed at 2049 and there is no user or password to type.
+        hint = ("On the PS2:  NFS  ·  Server IP {}  ·  Export '/'  ·  TCP 2049  "
+                "·  {}".format(ip, "Writes ON" if values.get("allow_writes")
+                               else "Read-only"))
+        bind = (values.get("bind") or "").strip()
+        if values.get("allow_writes") and bind in ("", "0.0.0.0"):
+            hint += ("\nWrites on, no password, every interface: anything on any "
+                     "network this PC joins can change this folder. Set Bind "
+                     "address (Advanced) to the LAN the console is on.")
+        return hint
     if key == "udpbd":
         return "In OPL → select UDPBD  ·  auto-discovered (no IP or port needed)"
     return ""
@@ -753,6 +767,7 @@ class ServerCard(ttk.LabelFrame):
                                 parent=self)
             return
         read_only = (self.server.key == "http"
+                     or (self.server.key == "nfs" and not values.get("allow_writes"))
                      or bool(values.get("read_only")))
         results = queue.Queue()
         self.access_btn.config(state="disabled")

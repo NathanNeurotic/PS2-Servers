@@ -164,6 +164,8 @@ def _server_ports(key, values):
         # nothing from the app rule, and on Linux there is no app rule at all,
         # only the hint lines built from this list.
         return [("TCP", _parse_port(values.get("port"), 1100), "HTTP")]
+    if key == "nfs":
+        return [("TCP", 2049, "NFS")]  # fixed: no PS2 client can use another
     if key == "udpbd":
         return [("UDP", UDPBD_PORT, "UDPBD")]
     if key == "directlink":
