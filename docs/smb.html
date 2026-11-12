@@ -130,6 +130,7 @@ In your loader's <b>Network Settings</b>:
       <li><b>Username:</b> Default <code>ps2</code> (configurable).</li>
       <li><b>Password:</b> Configurable private password.</li>
       <li><b>Open Share Mode:</b> Checking <b>No password (anyone on the network can read it)</b> removes password authentication while retaining SMB2/3 packet framing.</li>
+      <li><b>Missing login:</b> without both a username and a password, and with <b>No password</b> unticked, Start refuses and says why, instead of starting a server that exits at once.</li>
     </ul>
   </article>
 </div>
@@ -154,7 +155,7 @@ Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (a
   <li><b>Card:</b> SMBv2 or SMBv3. RiptOPL offers SMB 2.0.2 and 2.1 only, so either card negotiates 2.1; Launchstation negotiates 3.0.2 with the SMBv3 card.</li>
   <li><b>Port:</b> RiptOPL: Network settings, <b>SMB Server</b> section, <b>SMB Version</b> SMB2, <b>Port</b> = the card's port (1445 by default). Launchstation: put the port in the <code>URL</code> of <code>SMB2.CNF</code>, for example <code>smb://192.168.0.10:1445/games</code>; without one it uses 445.</li>
   <li><b>Share:</b> the card's share (<code>games</code>). In RiptOPL you can leave it blank and pick it from the server's share list.</li>
-  <li><b>Login:</b> the card's username and password. With a <b>No password</b> card any user works (a blank one logs on as <code>Guest</code>). Launchstation keeps <code>USERNAME</code> and <code>PASSWORD</code> to 31 characters.</li>
+  <li><b>Login:</b> the card's username and password. With a <b>No password</b> card any user works (a blank one logs on as <code>Guest</code>). In Launchstation, enter them in <b>Settings &gt; Network &gt; SMB shares</b> (saved in <code>LAUNCHSTATION.CNF</code>); it keeps each to 31 characters.</li>
 </ul>
 <p>A CI check builds the two libsmb2 versions those drivers use and lists, stats, reads, writes, truncates and enumerates shares through both cards; RiptOPL's own host harness checks its in-game reader. Both are host checks of the protocol, not tests on a PS2. The server signs: signing is advertised as enabled but not required, so the PS2 clients, which do not sign, are served unsigned as before, while a desktop client that requires signing (Samba's <code>smbclient</code>, Windows 11 24H2 by default) gets signed replies and has its requests verified. SMB 3 signing (AES-CMAC) uses the operating system's crypto library where there is one. Encryption and dialect 3.1.1 are not offered.</p>
 

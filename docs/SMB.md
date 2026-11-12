@@ -34,6 +34,8 @@ Choose a games folder, enter a username (default `ps2`) and a password, then
 start. The advanced **No password (anyone on the network can read it)** option
 explicitly enables an open share. It removes the authentication requirement;
 the separate **Read-only** control determines whether writes are allowed.
+Without both a username and a password, and with **No password** unticked,
+Start refuses and says why, instead of starting a server that exits at once.
 
 Windows Explorer uses TCP 445 rather than a custom SMB port. The optional
 **Take port 445 (admin)** setting temporarily stops Windows File Sharing to
@@ -108,7 +110,7 @@ in-game SMB2 reader.
 | Card | **SMBv2** or **SMBv3**. RiptOPL offers SMB 2.0.2 and 2.1 only, so either card negotiates 2.1. | **SMBv2** or **SMBv3** (it negotiates 3.0.2 with the SMBv3 card). |
 | Port | Network settings, **SMB Server** section, with **SMB Version** set to SMB2: **Port** = the card's port (1445 by default). | In the `URL`: `smb://<PC address>:1445/games`. Without a port it uses 445. |
 | Share | The card's share (`games`), or leave it blank to pick from the server's share list. | The share in the `URL`. |
-| Login | The card's username and password. With a **No password** card, any user (a blank one logs on as `Guest`). | `USERNAME` and `PASSWORD` in `SMB2.CNF` (31 characters at most). |
+| Login | The card's username and password. With a **No password** card, any user (a blank one logs on as `Guest`). | The share's user name and password in Settings > Network > SMB shares, saved in `LAUNCHSTATION.CNF` (31 characters at most). |
 
 The server gives libsmb2 what it asks for: FileIdFullDirectoryInformation
 listings, the attribute-tag query sent with every stat, related
@@ -177,7 +179,9 @@ Operations taking at least 250 ms generate a warning, as do reads shorter than
 the expected bytes before the file's known EOF. Repeated warnings are limited
 to one per five seconds per connection; aggregate counters include all events.
 Normal EOF and the existing SMBv1 read-size cap are not short-read errors.
-Verbose logging remains available for detailed setup/open/browse tracing.
+Verbose logging adds detailed setup/open/browse tracing. Desktop turns it on by
+default since v0.9.2 (once for existing settings too), and Terminal lines carry
+the time.
 
 For delayed loading, capture the terminal around the event and record the exact
 PS2-Servers build, OPL build, game/Game ID, PS2 model, VMC/PADEMU states, host disk

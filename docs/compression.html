@@ -149,6 +149,7 @@ chdman createdvd -i game.iso -o DVD/SLUS_201.74.Game.chd
 
 # For CD games (from CUE/BIN):
 chdman createcd -i game.cue -o CD/SLUS_201.74.Game.chd</code></pre>
+    <p>Over UDPFS, a CD CHD with raw tracks (CHD v5 <code>MODE1_RAW</code>, <code>MODE2_RAW</code> or <code>AUDIO</code>) is also listed as a read-only <code>.cue</code> + <code>.bin</code> pair beside its <code>.iso</code> view, for clients that read BIN/CUE. The BIN holds 2352-byte sectors without subchannel data. Desktop/Core and Edge builds with CHD enabled do this; a pair is hidden if a real file has the same name.</p>
   </article>
 </div>
 
