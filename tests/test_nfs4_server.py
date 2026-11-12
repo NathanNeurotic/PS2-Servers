@@ -947,6 +947,13 @@ class SocketTests(unittest.TestCase):
         server._admit(stranger)
         self.assertTrue(stranger.sock.closed)        # nothing of its own to close
         self.assertFalse(console.sock.closed)
+        # More arrive before any closed worker has gone: each closes one more
+        # of its own, so the cap holds, and none picks one already closing.
+        for i in range(3):
+            server._admit(nfs._Connection(Sock(), ("10.0.0.9", 4000 + i)))
+        self.assertEqual([c.sock.closed for c in others[:5]], [True] * 4 + [False])
+        self.assertEqual(len([c for c in server.connections if not c.sock.closed]),
+                         nfs.MAX_CONNECTIONS)
 
 
 class LauncherTests(unittest.TestCase):

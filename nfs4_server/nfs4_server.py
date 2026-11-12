@@ -321,6 +321,7 @@ class _Connection(object):
         self.sock = sock
         self.address = address
         self.last_active = time.monotonic()
+        self.closing = False  # shut by _admit; its worker has not removed it yet
         self.files = {}  # handle number -> (generation, open file)
 
     def close_files(self):
@@ -437,11 +438,12 @@ class Nfs4Server(object):
         # newcomer with none of its own already open is the one closed.
         with self.lock:
             self.connections.add(conn)
+            live = [c for c in self.connections if not c.closing]
             oldest = None
-            if len(self.connections) > MAX_CONNECTIONS:
-                oldest = min((c for c in self.connections
-                              if c.address[0] == conn.address[0]),
+            if len(live) > MAX_CONNECTIONS:
+                oldest = min((c for c in live if c.address[0] == conn.address[0]),
                              key=lambda c: c.last_active)
+                oldest.closing = True
         if oldest is not None:
             self.log("NFS: {} connections open; closing the quietest from {}".format(
                 MAX_CONNECTIONS + 1, oldest.address[0]))
@@ -567,7 +569,7 @@ class Nfs4Server(object):
             size = 0
             for _ in range(count):
                 op = r.u32()  # a call cut short here is GARBAGE_ARGS
-                if size > MAX_IO:  # one full READ per reply, not 127 of them
+                if size >= MAX_IO:  # one full READ per reply, not 127 of them
                     status, body = NFS4ERR_RESOURCE, b""
                 else:
                     status, body = self._one(op, r, state)
