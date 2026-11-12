@@ -141,7 +141,7 @@ class LibraryWindow(tk.Toplevel):
             try:
                 config.save(settings)
             except OSError:
-                self.status.set("Could not save the games folder; it stays selected for now.")
+                messagebox.showwarning("Game library", "Could not save the games folder; it stays selected for now.", parent=self)
             self.refresh()
 
     def game_folder(self):
