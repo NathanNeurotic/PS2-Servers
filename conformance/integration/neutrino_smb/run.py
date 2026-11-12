@@ -28,13 +28,13 @@ import tempfile
 import threading
 import urllib.request
 
-USMB2_COMMIT = "f10c94bf0c523076cf12dbaed74fc6af673b713e"
+USMB2_COMMIT = "bf61d1d5e9243b1f7bd13f341fd01361cd6c521f"
 USMB2_BASE = ("https://raw.githubusercontent.com/sahlberg/usmb2/"
               + USMB2_COMMIT + "/")
 USMB2_HASHES = {
-    "usmb2.c": "02c848d833a877910eb9023452e96dd8572e89c1b6000b3af490e26d2ac91376",
+    "usmb2.c": "db44440026443d07e58011a4bea69db55dc5211b8d0e8c297b92aa19fc44559b",
     "usmb2.h": "81c6632a885c0225d97f97904fec48fa692ff947b4522da2acc49a9c8e5ddb32",
-    "ntlm.c": "5536eeb263db9e4bc587694217153758b092dc486651429213a7370d2c71ce0f",
+    "ntlm.c": "4a77364e5313930fbe75b77178cf69608f7b602c1ca71699df924dfb0601945a",
     "ntlm.h": "97822c531e8b31b5f5f6cd5569ea204621636c36b2a3fe9220548e77b945b1c9",
     "md4c.c": "44211c046e2a47d907675a25332344848cb491073e41338c24ddc16377bafe9c",
     "md4.h": "bf8b13f1b40b9dc00dc4d85d0b5105713af2f983fe1a46f95b5fe9be8a0cdce8",
@@ -122,16 +122,9 @@ def generate(work):
         "                exit(70);\n"
         "        }\n" % REASSEMBLY_SIZE,
         "usmb2.c")
-    # Everything after the command header lands in usmb2->buf, 512 bytes.
-    src = splice(
-        src,
-        "        read_from_socket(usmb2, &usmb2->buf[commandincount], (int)spl);\n",
-        "        if ((int)spl < 0 || commandincount + (int)spl > USMB2_SIZE) {\n"
-        "                printf(\"BUF_OVERFLOW cmd=%d need=%d\\n\", command, commandincount + (int)spl);\n"
-        "                exit(71);\n"
-        "        }\n"
-        "        read_from_socket(usmb2, &usmb2->buf[commandincount], (int)spl);\n",
-        "usmb2.c")
+    # Since bf61d1d usmb2 reads anything past the command header into usmb2->buf
+    # a buffer at a time, so there is no overflow splice for it any more; the
+    # AddressSanitizer build below still catches a stray write.
     (work / "usmb2.c").write_text(src, encoding="utf-8", newline="\n")
 
     ntlm = splice(
