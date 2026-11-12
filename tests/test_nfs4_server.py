@@ -447,6 +447,20 @@ class ReadTests(ServerTestBase):
         reply = self.call(*self.path_ops("big.bin"), read(0, 0xFFFFFFFF))
         self.assertEqual(len(reply.body(-1)["data"]), nfs.MAX_IO)
 
+    def test_operations_from_two_connections_do_not_overlap(self):
+        # A path is checked and used under one lock, so a RENAME from another
+        # connection cannot land between the two.
+        done = threading.Event()
+        call = rpc_call(compound(self.path_ops("DVD/game.iso") + [read(0, 4)]))
+        self.server.fs_lock.acquire()
+        try:
+            threading.Thread(target=lambda: (self.server.handle_record(call), done.set()),
+                             daemon=True).start()
+            self.assertFalse(done.wait(0.3))
+        finally:
+            self.server.fs_lock.release()
+        self.assertTrue(done.wait(5))
+
     def test_one_reply_holds_one_full_read(self):
         with open(os.path.join(self.root, "big.bin"), "wb") as f:
             f.truncate(nfs.MAX_IO + 4096)
@@ -927,33 +941,50 @@ class SocketTests(unittest.TestCase):
         self.assertEqual(socks[0].recv(10), b"")
         self.exchange(socks[-1], call)
 
-    def test_past_the_cap_a_newcomer_never_closes_another_machines_connection(self):
-        class Sock(object):
-            closed = False
+    class _Sock(object):
+        closed = False
 
-            def shutdown(self, how):
-                self.closed = True
+        def shutdown(self, how):
+            self.closed = True
 
+    def _conn(self, address, port):
+        return nfs._Connection(self._Sock(), (address, port))
+
+    def test_past_the_cap_the_busiest_address_gives_way(self):
         server = nfs.Nfs4Server(self.tmp, log=lambda m: None)
-        console = nfs._Connection(Sock(), ("10.0.0.5", 1000))
+        console = self._conn("10.0.0.5", 1000)
         server._admit(console)
-        others = [nfs._Connection(Sock(), ("10.0.0.9", 2000 + i))
-                  for i in range(nfs.MAX_CONNECTIONS)]
+        others = [self._conn("10.0.0.9", 2000 + i) for i in range(nfs.MAX_CONNECTIONS)]
         for c in others:
             server._admit(c)
         self.assertFalse(console.sock.closed)        # the quietest, but not 10.0.0.9's
         self.assertTrue(others[0].sock.closed)       # 10.0.0.9's own quietest went
-        stranger = nfs._Connection(Sock(), ("10.0.0.7", 3000))
-        server._admit(stranger)
-        self.assertTrue(stranger.sock.closed)        # nothing of its own to close
-        self.assertFalse(console.sock.closed)
+        stranger = self._conn("10.0.0.7", 3000)
+        server._admit(stranger)                      # one address cannot hold every slot
+        self.assertFalse(stranger.sock.closed)
+        self.assertTrue(others[1].sock.closed)
         # More arrive before any closed worker has gone: each closes one more
-        # of its own, so the cap holds, and none picks one already closing.
+        # of 10.0.0.9's, so the cap holds, and none picks one already closing.
         for i in range(3):
-            server._admit(nfs._Connection(Sock(), ("10.0.0.9", 4000 + i)))
-        self.assertEqual([c.sock.closed for c in others[:5]], [True] * 4 + [False])
+            server._admit(self._conn("10.0.0.9", 4000 + i))
+        self.assertEqual([c.sock.closed for c in others[:6]], [True] * 5 + [False])
+        self.assertFalse(console.sock.closed or stranger.sock.closed)
         self.assertEqual(len([c for c in server.connections if not c.sock.closed]),
                          nfs.MAX_CONNECTIONS)
+
+    def test_past_the_cap_one_connection_each_turns_the_newcomer_away(self):
+        server = nfs.Nfs4Server(self.tmp, log=lambda m: None)
+        held = [self._conn("10.0.1.%d" % i, 1000) for i in range(nfs.MAX_CONNECTIONS)]
+        for c in held:
+            server._admit(c)
+        newcomer = self._conn("10.0.2.1", 1000)
+        server._admit(newcomer)
+        self.assertTrue(newcomer.sock.closed)
+        self.assertFalse(any(c.sock.closed for c in held))
+        again = self._conn("10.0.1.0", 1001)         # a console reconnecting
+        server._admit(again)
+        self.assertTrue(held[0].sock.closed)         # its own old connection goes
+        self.assertFalse(again.sock.closed)
 
 
 class LauncherTests(unittest.TestCase):

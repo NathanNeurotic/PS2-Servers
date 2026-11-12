@@ -51,7 +51,7 @@ MAX_RECORD = MAX_IO + 8192
 MAX_OPS = 128
 MAX_READDIR = 64 * 1024
 MAX_FH = 128            # NFS4_FHSIZE
-MAX_CONNECTIONS = 32    # beyond this a machine's quietest connection is closed
+MAX_CONNECTIONS = 32    # beyond this the busiest address's quietest connection is closed
 FILE_IDLE_SECONDS = 1.0  # cached read handles close after this much quiet
 
 # ONC RPC (RFC 5531)
@@ -352,6 +352,10 @@ class Nfs4Server(object):
         self.write_verifier = secrets.token_bytes(8)
         self.stateid_other = secrets.token_bytes(4)
         self.lock = threading.Lock()
+        # One operation at a time across connections, so a path is checked and
+        # used with no RENAME from another connection in between (that could
+        # move a folder holding a link out of the export into the checked path).
+        self.fs_lock = threading.Lock()
         self.generation = 0          # bumped by every change, drops caches
         self.counter = 0
         self.clients = {}            # clientid -> confirm verifier
@@ -433,15 +437,20 @@ class Nfs4Server(object):
     def _admit(self, conn):
         # An IOP reset leaves the old connection half-open, so they pile up
         # slowly. They are never closed for being quiet (Neutrino cannot
-        # reconnect). Past the cap the quietest from the newcomer's own
-        # address goes, so one machine never closes another's connection; a
-        # newcomer with none of its own already open is the one closed.
+        # reconnect). Past the cap the quietest connection of the address
+        # holding the most goes, the newcomer's own on a tie. So one address
+        # cannot hold every slot, and an address with a single connection (a
+        # console) loses it only to its own next connection.
         with self.lock:
             self.connections.add(conn)
             live = [c for c in self.connections if not c.closing]
             oldest = None
             if len(live) > MAX_CONNECTIONS:
-                oldest = min((c for c in live if c.address[0] == conn.address[0]),
+                counts = {}
+                for c in live:
+                    counts[c.address[0]] = counts.get(c.address[0], 0) + 1
+                top = max(counts, key=lambda a: (counts[a], a == conn.address[0]))
+                oldest = min((c for c in live if c.address[0] == top),
                              key=lambda c: c.last_active)
                 oldest.closing = True
         if oldest is not None:
@@ -594,7 +603,8 @@ class Nfs4Server(object):
         if handler is None:
             return NFS4ERR_NOTSUPP, b""
         try:
-            return NFS4_OK, handler(r, state)
+            with self.fs_lock:
+                return NFS4_OK, handler(r, state)
         except XdrError:
             return NFS4ERR_BADXDR, b""
         except Nfs4Error as exc:

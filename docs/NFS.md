@@ -85,9 +85,10 @@ restarts.
 A connection is never closed for being quiet. Neutrino connects once each time
 it loads its NFS modules and cannot reconnect, so a long cutscene must not end
 the game. The IOP reboots a game does leave old connections behind half-open;
-past 32 connections the quietest one from the newcomer's own address is closed,
-so another machine can never close the console's connection. A newcomer with
-none of its own open is turned away instead.
+past 32 connections the quietest one from the address holding the most is
+closed (the newcomer's own on a tie). One machine cannot hold every slot, and a
+console's single connection goes only when that console connects again. When
+every address holds one, a newcomer is turned away.
 
 A file stays open between reads only while reads keep coming. After a second of
 quiet it is closed, so a file the console was reading can be renamed or deleted
