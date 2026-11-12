@@ -2924,7 +2924,7 @@ class LauncherApp:
         self._append_log(key, "[launcher] stopped\n")
         self._save()
 
-    def stop_all(self):
+    def stop_all(self, remember_active=True):
         """Stop every server. Unconditional, and it must stay that way.
 
         Every caller but the footer button is a teardown or an
@@ -2935,22 +2935,33 @@ class LauncherApp:
         The asking belongs at the points where a person actually chose to stop
         something: stop_all_confirmed, stop_server, and _confirm_app_shutdown.
         """
-        # Ask every server first, so they wind down together and the whole
-        # stop costs one grace period rather than one per server.
-        for proc in list(self.procs.values()):
-            try:
-                proc.request_stop()
-            except Exception:
-                pass
-        for key in list(self.procs):
-            self.stop_server(key, confirm=False)
-        self._stop_direct_responder()
+        # stop_server saves after each server it stops, so by the last one the
+        # saved "last active servers" list would be empty and Auto-start on
+        # launch would have nothing to bring back. A teardown is not the user
+        # turning servers off, so remember what was running when it began.
+        # Only the footer's Stop all passes remember_active=False.
+        self._active_override = (
+            [k for k in self.procs if self.is_running(k)]
+            if remember_active else None)
+        try:
+            # Ask every server first, so they wind down together and the whole
+            # stop costs one grace period rather than one per server.
+            for proc in list(self.procs.values()):
+                try:
+                    proc.request_stop()
+                except Exception:
+                    pass
+            for key in list(self.procs):
+                self.stop_server(key, confirm=False)
+            self._stop_direct_responder()
+        finally:
+            self._active_override = None
 
     def stop_all_confirmed(self):
         """The footer's Stop all: the one caller that is a person deciding."""
         if not self.confirm_stop_while_busy(list(self.procs)):
             return
-        self.stop_all()
+        self.stop_all(remember_active=False)
 
     # -- logging (thread-safe) ------------------------------------------- #
     def _on_output(self, key, line):
@@ -3445,7 +3456,9 @@ class LauncherApp:
             # reset_settings deleted the config and owns the restart: nothing
             # (stop_server, _shutdown_app) may write the old state back.
             return True
-        active = [k for k in self.cards if self.is_running(k)]
+        active = getattr(self, "_active_override", None)
+        if active is None:
+            active = [k for k in self.cards if self.is_running(k)]
         data = {"servers": {key: card.values() for key, card in self.cards.items()},
                 "ip": self.ip_var.get(),
                 "firewall_ok": sorted(getattr(self, "_firewall_ok", ())),
