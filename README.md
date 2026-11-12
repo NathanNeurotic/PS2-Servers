@@ -1,6 +1,6 @@
 
-<p align="center"> <img width="1774" height="887" alt="PS2-Servers" src="https://github.com/user-attachments/assets/ffb65171-64ae-42bf-83af-7215aa5f7441" /><br>
-  <img width="400" height="92" alt="AI-Assisted-Software-Development" src="https://github.com/user-attachments/assets/68f0cac3-b256-4117-b344-39cf07f8b5d0" /><br>
+<p align="center"><img width="1672" height="941" alt="BANNER" src="https://github.com/user-attachments/assets/bd70859f-eff6-4e77-98bc-423e67b560ef" />
+
 </p>
 
 # PS2-Servers
