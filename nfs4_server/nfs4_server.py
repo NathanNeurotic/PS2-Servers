@@ -51,7 +51,7 @@ MAX_RECORD = MAX_IO + 8192
 MAX_OPS = 128
 MAX_READDIR = 64 * 1024
 MAX_FH = 128            # NFS4_FHSIZE
-MAX_CONNECTIONS = 32    # beyond this the quietest connection is closed
+MAX_CONNECTIONS = 32    # beyond this a machine's quietest connection is closed
 FILE_IDLE_SECONDS = 1.0  # cached read handles close after this much quiet
 
 # ONC RPC (RFC 5531)
@@ -432,14 +432,18 @@ class Nfs4Server(object):
     def _admit(self, conn):
         # An IOP reset leaves the old connection half-open, so they pile up
         # slowly. They are never closed for being quiet (Neutrino cannot
-        # reconnect); only the quietest goes, and only past the cap.
+        # reconnect). Past the cap the quietest from the newcomer's own
+        # address goes, so one machine never closes another's connection; a
+        # newcomer with none of its own already open is the one closed.
         with self.lock:
             self.connections.add(conn)
             oldest = None
             if len(self.connections) > MAX_CONNECTIONS:
-                oldest = min(self.connections, key=lambda c: c.last_active)
+                oldest = min((c for c in self.connections
+                              if c.address[0] == conn.address[0]),
+                             key=lambda c: c.last_active)
         if oldest is not None:
-            self.log("NFS: closing the quietest of {} connections, from {}".format(
+            self.log("NFS: {} connections open; closing the quietest from {}".format(
                 MAX_CONNECTIONS + 1, oldest.address[0]))
             self._shut(oldest)
 
@@ -560,13 +564,18 @@ class Nfs4Server(object):
             status = NFS4ERR_RESOURCE
         else:
             state = _Compound(conn)
+            size = 0
             for _ in range(count):
                 op = r.u32()  # a call cut short here is GARBAGE_ARGS
-                status, body = self._one(op, r, state)
+                if size > MAX_IO:  # one full READ per reply, not 127 of them
+                    status, body = NFS4ERR_RESOURCE, b""
+                else:
+                    status, body = self._one(op, r, state)
                 if op < _FIRST_OP or op > _LAST_OP:
                     op = OP_ILLEGAL
                 if status == NFS4_OK:
                     results.append(_p32(op) + _p32(NFS4_OK) + body)
+                    size += len(body)
                     continue
                 # SETATTR's result carries its bitmap even when it fails.
                 tail = _EMPTY_BITMAP if op == OP_SETATTR else b""

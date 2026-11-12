@@ -447,6 +447,13 @@ class ReadTests(ServerTestBase):
         reply = self.call(*self.path_ops("big.bin"), read(0, 0xFFFFFFFF))
         self.assertEqual(len(reply.body(-1)["data"]), nfs.MAX_IO)
 
+    def test_one_reply_holds_one_full_read(self):
+        with open(os.path.join(self.root, "big.bin"), "wb") as f:
+            f.truncate(nfs.MAX_IO + 4096)
+        reply = self.call(*self.path_ops("big.bin"), *[read(0, nfs.MAX_IO)] * 126)
+        self.assertEqual(reply.statuses(), [0, 0, 0, 10018])  # NFS4ERR_RESOURCE
+        self.assertLess(len(reply.raw), nfs.MAX_IO + 4096)
+
     def test_a_file_past_4_gib_reads_at_its_tail(self):
         path = os.path.join(self.root, "DVD", "huge.iso")
         size = 5 * 1024 ** 3 + 123
@@ -919,6 +926,27 @@ class SocketTests(unittest.TestCase):
         socks[0].settimeout(5)
         self.assertEqual(socks[0].recv(10), b"")
         self.exchange(socks[-1], call)
+
+    def test_past_the_cap_a_newcomer_never_closes_another_machines_connection(self):
+        class Sock(object):
+            closed = False
+
+            def shutdown(self, how):
+                self.closed = True
+
+        server = nfs.Nfs4Server(self.tmp, log=lambda m: None)
+        console = nfs._Connection(Sock(), ("10.0.0.5", 1000))
+        server._admit(console)
+        others = [nfs._Connection(Sock(), ("10.0.0.9", 2000 + i))
+                  for i in range(nfs.MAX_CONNECTIONS)]
+        for c in others:
+            server._admit(c)
+        self.assertFalse(console.sock.closed)        # the quietest, but not 10.0.0.9's
+        self.assertTrue(others[0].sock.closed)       # 10.0.0.9's own quietest went
+        stranger = nfs._Connection(Sock(), ("10.0.0.7", 3000))
+        server._admit(stranger)
+        self.assertTrue(stranger.sock.closed)        # nothing of its own to close
+        self.assertFalse(console.sock.closed)
 
 
 class LauncherTests(unittest.TestCase):

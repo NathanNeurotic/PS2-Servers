@@ -85,7 +85,9 @@ restarts.
 A connection is never closed for being quiet. Neutrino connects once each time
 it loads its NFS modules and cannot reconnect, so a long cutscene must not end
 the game. The IOP reboots a game does leave old connections behind half-open;
-past 32 connections the quietest is closed.
+past 32 connections the quietest one from the newcomer's own address is closed,
+so another machine can never close the console's connection. A newcomer with
+none of its own open is turned away instead.
 
 A file stays open between reads only while reads keep coming. After a second of
 quiet it is closed, so a file the console was reading can be renamed or deleted
@@ -97,6 +99,8 @@ on the PC (Windows refuses that while a file is open).
   is no version 3, MOUNT protocol or portmapper. `mount -t nfs` from a Linux
   or macOS PC is not a supported client.
 - Credentials are accepted as given (AUTH_SYS or none). There is no Kerberos.
+- A read returns at most 1 MiB, and a request stops at the first operation
+  after 1 MiB of reply.
 - No locks, delegations or exclusive create. Neither PS2 client uses them.
 - The only attributes served are type, size and modification time, which is
   all unfs4 asks for.
