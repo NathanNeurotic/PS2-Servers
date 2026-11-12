@@ -158,6 +158,78 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
             app._shutting_down = True
             root.destroy()
 
+    def _app_with_fake_servers(self, tk, gui):
+        """An app whose udpfs and smbv1 'run' as fakes, and the list of saves."""
+        from launcher import config
+
+        class FakeProc:
+            cooperative_stop = False
+            stop_grace = 0
+            returncode = 0
+
+            def __init__(self):
+                self.alive = True
+
+            def is_running(self):
+                return self.alive
+
+            def request_stop(self):
+                pass
+
+            def stop(self):
+                self.alive = False
+
+        writes = []
+        config.save = lambda data: writes.append(dict(data)) or True
+        root = tk.Tk()
+        app = gui.LauncherApp(root)
+        app._invite_ps2_setup_guide = False
+        app.procs = {"udpfs": FakeProc(), "smbv1": FakeProc()}
+        return root, app, writes
+
+    def test_quit_keeps_running_servers_for_autostart(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            raise unittest.SkipTest("no tkinter")
+        from launcher import gui
+        try:
+            tk.Tk().destroy()
+        except tk.TclError:
+            raise unittest.SkipTest("no display")
+
+        root, app, writes = self._app_with_fake_servers(tk, gui)
+        try:
+            app._shutdown_app()
+        finally:
+            app._shutting_down = True
+        # stop_server saves after each server it stops; the last save on disk
+        # is what the next launch reads, and it must still name both servers.
+        self.assertEqual(sorted(writes[-1]["last_active_servers"]),
+                         ["smbv1", "udpfs"])
+
+    def test_footer_stop_all_still_clears_the_remembered_list(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            raise unittest.SkipTest("no tkinter")
+        from launcher import gui
+        try:
+            tk.Tk().destroy()
+        except tk.TclError:
+            raise unittest.SkipTest("no display")
+
+        root, app, writes = self._app_with_fake_servers(tk, gui)
+        try:
+            app.stop_all(remember_active=False)
+            self.assertEqual(writes[-1]["last_active_servers"], [])
+            self.assertIsNone(app._active_override)
+            app._save()
+            self.assertEqual(writes[-1]["last_active_servers"], [])
+        finally:
+            app._shutting_down = True
+            root.destroy()
+
     def test_cli_flags_precedence(self):
         try:
             import tkinter as tk
