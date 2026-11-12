@@ -447,20 +447,6 @@ class ReadTests(ServerTestBase):
         reply = self.call(*self.path_ops("big.bin"), read(0, 0xFFFFFFFF))
         self.assertEqual(len(reply.body(-1)["data"]), nfs.MAX_IO)
 
-    def test_operations_from_two_connections_do_not_overlap(self):
-        # A path is checked and used under one lock, so a RENAME from another
-        # connection cannot land between the two.
-        done = threading.Event()
-        call = rpc_call(compound(self.path_ops("DVD/game.iso") + [read(0, 4)]))
-        self.server.fs_lock.acquire()
-        try:
-            threading.Thread(target=lambda: (self.server.handle_record(call), done.set()),
-                             daemon=True).start()
-            self.assertFalse(done.wait(0.3))
-        finally:
-            self.server.fs_lock.release()
-        self.assertTrue(done.wait(5))
-
     def test_one_reply_holds_one_full_read(self):
         with open(os.path.join(self.root, "big.bin"), "wb") as f:
             f.truncate(nfs.MAX_IO + 4096)
@@ -659,6 +645,37 @@ class WritesOffTests(ServerTestBase):
 
 class WritesOnTests(ServerTestBase):
     allow_writes = True
+
+    def test_a_rename_waits_for_a_compound_in_progress(self):
+        # The lock covers a whole COMPOUND: a RENAME from another connection
+        # cannot land between this one's PUTFH and its READ.
+        fh, dvd = self.fh("DVD/game.iso"), self.fh("DVD")
+        paused, go, renamed = threading.Event(), threading.Event(), threading.Event()
+        real_one = self.server._one
+
+        def one(op, r, state):
+            out = real_one(op, r, state)
+            if op == nfs.OP_PUTFH and not paused.is_set():
+                paused.set()
+                go.wait(5)
+            return out
+
+        self.server._one = one
+        got = []
+        reader = threading.Thread(target=lambda: got.append(Reply(self.server.handle_record(
+            rpc_call(compound([putfh(fh), read(0, 4)]))))))
+        reader.start()
+        self.assertTrue(paused.wait(5))
+        threading.Thread(target=lambda: (self.call(putfh(dvd), savefh(), putfh(dvd),
+                                                   rename("game.iso", "moved.iso")),
+                                         renamed.set()), daemon=True).start()
+        try:
+            self.assertFalse(renamed.wait(0.3))
+        finally:
+            go.set()
+        reader.join(5)
+        self.assertEqual(got[0].body(1)["data"], self.payload[:4])
+        self.assertTrue(renamed.wait(5))
 
     def create(self, folder, name, how=0):
         """unfs4_open(O_CREAT): SETCLIENTID, then CONFIRM + OPEN, then CLOSE."""

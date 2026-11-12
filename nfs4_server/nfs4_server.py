@@ -352,9 +352,10 @@ class Nfs4Server(object):
         self.write_verifier = secrets.token_bytes(8)
         self.stateid_other = secrets.token_bytes(4)
         self.lock = threading.Lock()
-        # One operation at a time across connections, so a path is checked and
-        # used with no RENAME from another connection in between (that could
-        # move a folder holding a link out of the export into the checked path).
+        # One COMPOUND at a time across connections, so the paths its PUTFH and
+        # SAVEFH took, and the checks on them, still hold when it uses them: no
+        # RENAME or REMOVE from another connection lands in between (that could
+        # point it at a different file, or through a link out of the export).
         self.fs_lock = threading.Lock()
         self.generation = 0          # bumped by every change, drops caches
         self.counter = 0
@@ -574,26 +575,27 @@ class Nfs4Server(object):
         elif count > MAX_OPS:
             status = NFS4ERR_RESOURCE
         else:
-            state = _Compound(conn)
-            size = 0
-            for _ in range(count):
-                op = r.u32()  # a call cut short here is GARBAGE_ARGS
-                if size >= MAX_IO:  # one full READ per reply, not 127 of them
-                    status, body = NFS4ERR_RESOURCE, b""
-                else:
-                    status, body = self._one(op, r, state)
-                if op < _FIRST_OP or op > _LAST_OP:
-                    op = OP_ILLEGAL
-                if status == NFS4_OK:
-                    results.append(_p32(op) + _p32(NFS4_OK) + body)
-                    size += len(body)
-                    continue
-                # SETATTR's result carries its bitmap even when it fails.
-                tail = _EMPTY_BITMAP if op == OP_SETATTR else b""
-                results.append(_p32(op) + _p32(status) + tail)
-                if self.verbose:
-                    self.log("NFS: {} -> error {}".format(_OP_NAMES.get(op, op), status))
-                break
+            with self.fs_lock:
+                state = _Compound(conn)
+                size = 0
+                for _ in range(count):
+                    op = r.u32()  # a call cut short here is GARBAGE_ARGS
+                    if size >= MAX_IO:  # one full READ per reply, not 127 of them
+                        status, body = NFS4ERR_RESOURCE, b""
+                    else:
+                        status, body = self._one(op, r, state)
+                    if op < _FIRST_OP or op > _LAST_OP:
+                        op = OP_ILLEGAL
+                    if status == NFS4_OK:
+                        results.append(_p32(op) + _p32(NFS4_OK) + body)
+                        size += len(body)
+                        continue
+                    # SETATTR's result carries its bitmap even when it fails.
+                    tail = _EMPTY_BITMAP if op == OP_SETATTR else b""
+                    results.append(_p32(op) + _p32(status) + tail)
+                    if self.verbose:
+                        self.log("NFS: {} -> error {}".format(_OP_NAMES.get(op, op), status))
+                    break
         return _p32(status) + _opaque(tag) + _p32(len(results)) + b"".join(results)
 
     def _one(self, op, r, state):
@@ -603,8 +605,7 @@ class Nfs4Server(object):
         if handler is None:
             return NFS4ERR_NOTSUPP, b""
         try:
-            with self.fs_lock:
-                return NFS4_OK, handler(r, state)
+            return NFS4_OK, handler(r, state)
         except XdrError:
             return NFS4ERR_BADXDR, b""
         except Nfs4Error as exc:
