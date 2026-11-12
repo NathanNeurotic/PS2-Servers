@@ -138,7 +138,10 @@ class LibraryWindow(tk.Toplevel):
             self.folder.set(folder)
             settings = config.load()
             settings["game_library_folder"] = folder
-            config.save(settings)
+            try:
+                config.save(settings)
+            except OSError:
+                messagebox.showwarning("Game library", "Could not save the games folder; it stays selected for now.", parent=self)
             self.refresh()
 
     def game_folder(self):
@@ -354,13 +357,22 @@ class LibraryWindow(tk.Toplevel):
         self.run(operation)
 
     def show_cover(self, _event=None):
-        from PIL import Image, ImageTk
         rows = self.selected()
         self.cover.configure(image="", text="")
         self.cover_image = None
         if rows and "id" in rows[0]:
             path = self.library.cover_path(rows[0]["id"])
             if path.is_file():
+                # Pillow is optional on a source run, and on Debian/Ubuntu/Mint
+                # ImageTk ships in a separate package. Import here, where a
+                # missing one can be reported, rather than at the top of every
+                # row selection, where it raised in the Tk callback.
+                try:
+                    from PIL import Image, ImageTk
+                except ImportError:
+                    self.cover.configure(
+                        text="Cover preview needs Pillow with ImageTk")
+                    return
                 try:
                     with Image.open(path) as image:
                         image.thumbnail((100, 100))
