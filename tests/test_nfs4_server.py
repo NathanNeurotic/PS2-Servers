@@ -709,6 +709,21 @@ class WritesOnTests(ServerTestBase):
         self.assertEqual(sorted(os.path.realpath(p) for p in synced), sorted([dvd, top, dvd, top]))
         real(self.root)  # the real one runs on this host
 
+    def test_a_failed_sync_still_moves_the_handles(self):
+        def fail(path):
+            raise OSError(5, "sync failed")  # EIO
+        real = nfs._sync_dir
+        nfs._sync_dir = fail
+        self.addCleanup(setattr, nfs, "_sync_dir", real)
+        with open(os.path.join(self.root, "a.bin"), "wb") as f:
+            f.write(b"A")
+        open(os.path.join(self.root, "b.bin"), "wb").close()
+        moved, replaced = self.fh("a.bin"), self.fh("b.bin")
+        self.assertEqual(self.call(putrootfh(), savefh(), putrootfh(),
+                                   rename("a.bin", "b.bin")).status, 5)  # the failed sync is reported ...
+        self.assertEqual(self.call(putfh(moved), read(0, 1)).body(1)["data"], b"A")  # ... the moved handle follows
+        self.assertEqual(self.call(putfh(replaced), getattr_()).status, 70)  # ... the replaced one is stale
+
     def test_folders(self):
         self.assertEqual(self.call(putrootfh(), mkdir("VMC")).status, 0)
         self.assertTrue(os.path.isdir(os.path.join(self.root, "VMC")))

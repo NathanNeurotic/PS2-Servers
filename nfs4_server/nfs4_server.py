@@ -898,11 +898,12 @@ class Nfs4Server(object):
                 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
                              | getattr(os, "O_BINARY", 0), 0o666)
                 os.close(fd)
-                _sync_dir(parent_real)
                 self.log("NFS: created {}".format("/".join(comps)))
             if "size" in attrs:
                 os.truncate(path, attrs["size"])
             self._changed(comps)
+            if not exists:
+                _sync_dir(parent_real)  # after the bookkeeping: a failed sync must not leave it stale
         st = os.stat(path)
         if stat.S_ISDIR(st.st_mode):
             raise Nfs4Error(NFS4ERR_ISDIR)
@@ -959,9 +960,9 @@ class Nfs4Server(object):
         parent_real, parent_st = self._dir(s.cfh)
         comps, path = self._child(s.cfh, raw)
         os.mkdir(path)
-        _sync_dir(parent_real)
         self.log("NFS: made folder {}".format("/".join(comps)))
         self._changed(comps)
+        _sync_dir(parent_real)
         s.cfh = comps
         return self._cinfo(parent_st.st_mtime_ns, parent_real) + _EMPTY_BITMAP
 
@@ -1009,12 +1010,12 @@ class Nfs4Server(object):
                 os.replace(src, dst)
         else:
             os.rename(src, dst)
-        for folder in {src_real, dst_real}:
-            _sync_dir(folder)
         self.log("NFS: renamed {} to {}".format("/".join(old), "/".join(new)))
         if old != new:  # onto itself: nothing moved, every handle stays
             self.handles.renamed(old, new)
         self._changed(old)
+        for folder in {src_real, dst_real}:  # after the handles: a failed sync must not leave them stale
+            _sync_dir(folder)
         return (self._cinfo(src_st.st_mtime_ns, src_real)
                 + self._cinfo(dst_st.st_mtime_ns, dst_real))
 
