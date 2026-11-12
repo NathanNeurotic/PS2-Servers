@@ -1,7 +1,9 @@
 """Check desktop library preferences without requiring a display."""
 import ast
 from pathlib import Path
+import sys
 from types import SimpleNamespace
+from unittest import mock
 import unittest
 
 
@@ -35,6 +37,27 @@ class LibraryPreferencesTests(unittest.TestCase):
         self.assertTrue(writes[0]["game_library_use_index"])
         self.assertEqual(writes[0]["servers"], original["servers"])
         self.assertEqual(writes[0]["game_library_folder"], "/my/library")
+
+    def test_cover_preview_without_pillow_reports_instead_of_raising(self):
+        tree = ast.parse(LIBRARY_GUI.read_text(encoding="utf-8"))
+        widget = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                      and node.name == "LibraryWindow")
+        method = next(node for node in widget.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "show_cover")
+        context = {}
+        exec(compile(ast.Module(body=[method], type_ignores=[]),
+                     str(LIBRARY_GUI), "exec"), context)
+        shown = {}
+        cover = SimpleNamespace(configure=lambda **kw: shown.update(kw))
+        obj = SimpleNamespace(
+            selected=lambda: [{"id": 1}], cover=cover, cover_image=None,
+            library=SimpleNamespace(
+                cover_path=lambda _id: SimpleNamespace(is_file=lambda: True)))
+        # A None entry in sys.modules makes `from PIL import ...` raise ImportError.
+        with mock.patch.dict(sys.modules, {"PIL": None}):
+            context["show_cover"](obj)
+        self.assertIn("Pillow", shown["text"])
+        self.assertIsNone(obj.cover_image)
 
     def test_main_launcher_preserves_preferences_on_save(self):
         source = MAIN_GUI.read_text(encoding="utf-8")
