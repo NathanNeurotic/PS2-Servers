@@ -213,8 +213,13 @@ class TheBindListenerWaitsForSrvnet(unittest.TestCase):
         holder, port = self._held_port()
         lsock = socket.socket()
         self.addCleanup(lsock.close)
-        self.assertEqual(
-            smb1._bind_listener(lsock, "127.0.0.1", port, take_445=False), port + 1)
+        # Another process can grab port + 1 between the OS handing out `port`
+        # and this bind, so assert the walk moved on, not the exact next port.
+        bound = smb1._bind_listener(lsock, "127.0.0.1", port, take_445=False)
+        self.assertIsNotNone(bound)
+        self.assertGreater(bound, port)
+        self.assertLess(bound, port + 12)
+        self.assertEqual(lsock.getsockname()[1], bound)
 
     def test_445_mode_never_walks_forward(self):
         """Exactly 445 or nothing -- landing on 446 would leave OPL's

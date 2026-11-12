@@ -511,6 +511,12 @@ class LibraryPanel(ttk.Frame):
             self._guide()
 
     def _guide(self):
+        # One guide for the whole app: the integrated desktop's six-step guide.
+        # The five-step window below is only for a standalone panel.
+        opener = getattr(self.app, "_open_ps2_setup_guide", None)
+        if opener is not None:
+            opener()
+            return
         window = tk.Toplevel(self)
         window.title("PS2-Servers: Getting started")
         window.transient(self.winfo_toplevel())

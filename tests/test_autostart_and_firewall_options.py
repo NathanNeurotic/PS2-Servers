@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -258,6 +259,33 @@ class AutostartAndFirewallOptionsTest(unittest.TestCase):
             app._shutting_down = True
             root.destroy()
 
+    def test_firewall_removal_stops_servers_only_after_the_last_confirm(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            raise unittest.SkipTest("no tkinter")
+
+        from launcher import gui
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            raise unittest.SkipTest("no display")
+
+        try:
+            app = gui.LauncherApp(root)
+            app._invite_ps2_setup_guide = False
+            app.procs = {"udpfs": object()}
+            app.is_running = lambda key: True
+            stopped = []
+            app.stop_all = lambda: stopped.append(1)
+            answers = iter([True, False])  # stop-servers prompt yes, remove prompt no
+            with mock.patch.object(gui.windows_setup, "is_windows", return_value=True), \
+                 mock.patch.object(gui.messagebox, "askyesno", lambda *a, **k: next(answers)):
+                app._remove_windows_setup(require_confirm=True)
+            self.assertEqual(stopped, [])
+        finally:
+            app._shutting_down = True
+            root.destroy()
 
 if __name__ == "__main__":
     unittest.main()

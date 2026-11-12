@@ -1260,6 +1260,11 @@ class LauncherApp:
         self.root.bind("<MouseWheel>", on_mousewheel, add="+")
         self.root.bind("<Button-4>", on_scroll_up, add="+")
         self.root.bind("<Button-5>", on_scroll_down, add="+")
+        # A dropdown must not change value when the wheel passes over it. An
+        # empty class binding replaces Tk's, so the event still reaches the
+        # root binding above and scrolls the page.
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.root.bind_class("TCombobox", sequence, lambda _event: None)
 
     def _build(self):
         parent = self.content
@@ -2740,7 +2745,6 @@ class LauncherApp:
                         "Firewall cleanup should be done with PS2 Servers stopped.\n\n"
                         "Stop all running servers and continue?"):
                     return
-            self.stop_all()
 
         if require_confirm:
             message = ("This removes only Windows Firewall rules whose display names "
@@ -2784,6 +2788,9 @@ class LauncherApp:
                     "Could not restart as administrator.")
             return
 
+        # Stop only now: every prompt that could cancel has been answered.
+        if running:
+            self.stop_all()
         self._cleanup_windows_setup_async()
 
     def _detected_ips(self):

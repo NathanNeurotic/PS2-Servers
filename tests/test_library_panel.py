@@ -158,6 +158,11 @@ class LibraryStartupTests(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_setup_guide_button_opens_the_shared_guide_when_integrated(self):
+        opened = []
+        fake = SimpleNamespace(app=SimpleNamespace(_open_ps2_setup_guide=lambda: opened.append(1)))
+        library_panel.LibraryPanel._guide(fake)
+        self.assertEqual(opened, [1])
 
     def test_artwork_identity_is_refreshed_before_it_is_suggested(self):
         tk = library_panel.tk
