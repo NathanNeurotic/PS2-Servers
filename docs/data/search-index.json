@@ -56,7 +56,7 @@
   {
     "title": "PS2 Servers Documentation — PS2 Servers Desktop",
     "cat": "overview",
-    "text": "PS2 Servers Desktop. Target: Windows, macOS, Linux workstations The full graphical application featuring six server cards, integrated Windows Firewall management, live LAN IP selector, automated dependency checks, and persistent configuration saving. Runs self-contained with no Python installation required. Desktop documentation →",
+    "text": "PS2 Servers Desktop. Target: Windows, macOS, Linux workstations The full graphical application featuring seven server cards, integrated Windows Firewall management, live LAN IP selector, automated dependency checks, and persistent configuration saving. Runs self-contained with no Python installation required. Desktop documentation →",
     "url": "index.html"
   },
   {
