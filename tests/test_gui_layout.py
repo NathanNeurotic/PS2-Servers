@@ -210,7 +210,20 @@ class LauncherLayout(unittest.TestCase):
                                 "a narrower window would hide the last tab")
 
     # -- scrollbars -------------------------------------------------------- #
+    def test_the_terminal_fits_the_window_without_a_page_scrollbar(self):
+        # Two scroll bars (the page's and the log's) at once was the complaint:
+        # the log can be any height, so it must fit the window, not the tallest tab.
+        self.app.nb.select(self.app.terminal_tab)
+        self.resize(1024, 560)
+        self.assertFalse(self.app._scrollbar.winfo_ismapped())
+        canvas = self.app._scroll_canvas
+        bottom = (self.app.terminal.winfo_rooty() + self.app.terminal.winfo_height())
+        self.assertLessEqual(bottom, canvas.winfo_rooty() + canvas.winfo_height())
+        self.app.nb.select(0)  # leave a server tab selected for the other tests
+        self._settle()
+
     def test_the_page_scrollbar_is_out_only_when_the_page_overflows(self):
+        self.app.nb.select(0)
         for width, height in ((1024, 460), (1024, 1000), (self.min_width, 700)):
             with self.subTest(size=(width, height)):
                 self.resize(width, height)
@@ -222,6 +235,7 @@ class LauncherLayout(unittest.TestCase):
     def test_the_page_scrollbar_settles_instead_of_flickering(self):
         # Hiding the bar hands the content more width, and more width never makes
         # the page taller -- so the decision must hold, not oscillate.
+        self.app.nb.select(0)
         self.resize(1024, 1000)
         states = []
         for _ in range(6):

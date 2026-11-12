@@ -1158,6 +1158,11 @@ class LauncherApp:
                 width = max(1, canvas.winfo_width())
                 view = max(1, canvas.winfo_height())
                 content = max(1, body.winfo_reqheight())
+                if self._terminal_tab_selected():
+                    # The log pane scrolls itself and can be any height, so
+                    # fit it to the window rather than to the tallest tab.
+                    # Otherwise the page and the log both show a scroll bar.
+                    content = min(content, view)
                 # Hand the body the full viewport, not just what it asked for, so
                 # spare vertical space goes to the notebook (a taller TERMINAL)
                 # instead of sitting as dead grey under the page.
@@ -1202,6 +1207,12 @@ class LauncherApp:
         self._bind_body_mousewheel(canvas)
         self._refresh_scroll_body = refresh_scroll_region
         return body
+
+    def _terminal_tab_selected(self):
+        try:
+            return str(self.nb.select()) == str(self.terminal_tab)
+        except (AttributeError, tk.TclError):
+            return False
 
     def _sync_body_scrollbar(self, content_height, view_height):
         """Show the page scrollbar only when the page genuinely overflows.
@@ -1399,6 +1410,8 @@ class LauncherApp:
         self.terminal.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
         scroll.grid(row=0, column=1, sticky="ns", padx=(0, 8), pady=8)
         self.nb.add(self.terminal_tab, text="TERMINAL")
+        self.nb.bind("<<NotebookTabChanged>>",
+                     lambda _event: self._refresh_scroll_body(), add="+")
 
         # SESSION lines (one per console, from servers with Session summary on)
         # also land in the terminal; this tab shows them as rows.
