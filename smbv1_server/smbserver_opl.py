@@ -276,7 +276,14 @@ class OpenFile:
         self.size = 0 if is_dir else os.path.getsize(path)
         self.fh = None
         if not is_dir:
-            self.fh = open(path, "rb")  # read-only handle; writes are gated separately
+            # Read-only handle; writes go through their own handle in
+            # h_write_andx. Unbuffered on purpose: a buffered reader keeps up
+            # to 8 KiB it read earlier and serves it again after a WRITE_ANDX
+            # (on this or any other connection) has changed those bytes on
+            # disk, so a VMC block read back right after it was written came
+            # back old. READ_ANDX reads are 60 KiB, larger than that buffer,
+            # so it was never saving a system call.
+            self.fh = open(path, "rb", buffering=0)
 
     def close(self):
         if self.fh:
@@ -839,6 +846,13 @@ def h_read_andx(conn, r):
     started = time.monotonic()
     of.fh.seek(offset)
     chunk = of.fh.read(requested)
+    # An unbuffered read may return less than asked before end of file (a
+    # network-mounted share can); only an empty read means end of file.
+    while chunk and len(chunk) < requested:
+        more = of.fh.read(requested - len(chunk))
+        if not more:
+            break
+        chunk += more
     n = len(chunk)
     conn.record_read(fid, of, offset, requested, n, time.monotonic() - started)
     DATA_OFFSET = 59  # == sizeof(ReadAndXResponse_t); data immediately follows ByteCount
