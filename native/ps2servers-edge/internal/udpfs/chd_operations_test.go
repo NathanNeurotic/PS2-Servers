@@ -53,9 +53,6 @@ func TestCHDVirtualAliasAndRawContainer(t *testing.T) {
 	entries := listUDPFSImages(t, c)
 	for _, name := range []string{"test_dvd.chd.iso", "test_cd.chd.iso"} {
 		wantSize := len(want)
-		if name == "test_cd.chd.iso" {
-			wantSize = 1114112
-		}
 		if entries[name] != uint64(wantSize) {
 			t.Errorf("%s advertised size = %d, want %d", name, entries[name], wantSize)
 		}

@@ -89,7 +89,33 @@ func parseCHDHeader(path string) (chdHeader, error) {
 		return h, fmt.Errorf("CD CHD output size overflows int64")
 	}
 	h.size = h.blocks * h.framesPerHunk * 2048
+	if exact := exactCDISOSize(path, h.blocks*h.framesPerHunk); exact > 0 {
+		h.size = exact
+	}
 	return h, nil
+}
+
+// exactCDISOSize is the ISO size with the zero padding after the last CD track
+// left off. chdman rounds a CD up to whole hunks (and each track to 4 frames),
+// so the hunk count overstates the disc; the track table knows where the last
+// track ends. It returns 0 when there is no usable CD track table, and the
+// caller keeps the hunk-rounded size.
+func exactCDISOSize(path string, totalFrames int64) int64 {
+	table, _, err := readCDTrackTableOpt(path, false)
+	if err != nil || len(table.tracks) == 0 {
+		return 0
+	}
+	var frames int64
+	for i, t := range table.tracks {
+		frames += t.frames
+		if i < len(table.tracks)-1 {
+			frames += (4 - t.frames%4) % 4
+		}
+	}
+	if frames <= 0 || frames > totalFrames {
+		return 0
+	}
+	return frames * 2048
 }
 
 func chdExtractUserData(sector []byte) []byte {

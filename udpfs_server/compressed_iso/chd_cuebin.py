@@ -218,8 +218,12 @@ def _parse_track(raw: bytes) -> Track:
     return Track(number, kind, frames, pregap, pregap_kind, postgap)
 
 
-def read_track_table(path: str) -> TrackTable:
-    """Read and validate the bounded CD metadata chain from a CHD v5 file."""
+def read_track_table(path: str, validate: bool = True) -> TrackTable:
+    """Read and validate the bounded CD metadata chain from a CHD v5 file.
+
+    validate=False skips the raw-track-type and layout checks, for callers that
+    only need frame counts (a cooked MODE1 CD has a usable table too).
+    """
     try:
         st = os.stat(path, follow_symlinks=False)
         if not stat.S_ISREG(st.st_mode):
@@ -288,7 +292,8 @@ def read_track_table(path: str) -> TrackTable:
     if any(track.number != i + 1 for i, track in enumerate(tracks)):
         raise ChdCueError("CD track numbers must be contiguous starting at 1")
     table = TrackTable(hunk_bytes, logical_bytes, tuple(tracks))
-    table.layout()
+    if validate:
+        table.layout()
     return table
 
 
