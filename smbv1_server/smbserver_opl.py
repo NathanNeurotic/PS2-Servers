@@ -310,6 +310,9 @@ class Conn:
         self.last_read = None
         self.smb2_requests = self.smb2_errors = 0
         self.smb2_dialect = "SMB2/3"
+        # Set only by a SESSION_SETUP that passed the credential check. Read
+        # only when --user is configured; guest mode never looks at it.
+        self.logged_on = False
 
     def warning(self, message):
         # Bound repeated error/slow-read output; counters still include every event.
@@ -632,10 +635,12 @@ def h_session_setup(conn, r):
         # the password was right through its timing.
         if expected is None or not hmac.compare_digest(password, expected):
             log("session setup refused for account %r" % account)
+            conn.logged_on = False
             return None, None, STATUS_LOGON_FAILURE
         action = 0x0000                               # a real account, not guest
         log("session setup accepted for account %r" % account)
 
+    conn.logged_on = True
     if conn.uid == 0:
         conn.uid = 0x0800
     params = struct.pack("<BBHH", SMB_COM_NONE, 0, 0, action)  # AndX none
@@ -897,6 +902,7 @@ def h_tree_disconnect(conn, r):
 
 
 def h_logoff(conn, r):
+    conn.logged_on = False
     params = struct.pack("<BBH", SMB_COM_NONE, 0, 0)
     return params, b"", STATUS_SUCCESS
 
@@ -1188,6 +1194,18 @@ _SESSION_KINDS = {
 }
 # A path the console looked for and did not find is not an error: OPL probes
 # for optional files (configs, VMCs, art) on every launch.
+# Commands a client may send before it has logged on. With --user set, every
+# other command is refused until SESSION_SETUP succeeds on this connection;
+# without that, a client could skip the login (or ignore its failure) and go
+# straight to TREE_CONNECT and the files. Guest mode is unchanged.
+_PRE_LOGON_COMMANDS = frozenset((SMB_COM_NEGOTIATE, SMB_COM_SESSION_SETUP_ANDX,
+                                 SMB_COM_ECHO, SMB_COM_LOGOFF_ANDX))
+
+
+def _logon_required(conn, cmd):
+    return bool(conn.server.users) and not conn.logged_on and cmd not in _PRE_LOGON_COMMANDS
+
+
 _PROBE_COMMANDS = (SMB_COM_OPEN_ANDX, SMB_COM_NT_CREATE_ANDX, SMB_COM_CHECK_DIRECTORY,
                    SMB_COM_TRANS2)
 
@@ -1248,6 +1266,13 @@ def serve_conn(server, sock, addr):
                 conn.warning(f"unsupported command=0x{r.cmd:02x}")
                 conn.send(pack_header(r.cmd, STATUS_NOT_IMPLEMENTED, r.tid, r.pid, r.uid, r.mid)
                          + build_body(b"", b""))
+                continue
+            if _logon_required(conn, r.cmd):
+                conn.errors += 1
+                _session_record(conn, "errors")
+                conn.warning(f"command=0x{r.cmd:02x} refused: not logged on")
+                conn.send(pack_header(r.cmd, STATUS_ACCESS_DENIED, r.tid, r.pid, r.uid, r.mid)
+                          + build_body(b"", b""))
                 continue
             result = handler(conn, r)
             if result is None:
