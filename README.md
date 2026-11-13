@@ -8,7 +8,7 @@
 *in collaboration with https://github.com/FatBaldDad/PS2-EtherDrive*
 
 📖 **Documentation Site:** [https://nathanneurotic.github.io/PS2-Servers/](https://nathanneurotic.github.io/PS2-Servers/)  
-🎮 **Console Loader Docs:** [RiptOPL Documentation](https://nathanneurotic.github.io/Open-PS2-Loader/)
+🎮 **Console Loader Docs:** [RiptOPL Documentation](https://nathanneurotic.github.io/RiptOPL/)
 
 
 PS2 Servers runs game and file servers for network-capable PlayStation 2
@@ -25,7 +25,7 @@ does not add that protocol to a PS2 application.
 | SMBv1 | TCP 1025 in Desktop; 1111 in Core/standalone | Guest file sharing for OPL and other SMBv1 clients |
 | SMBv2 / SMBv3 | TCP 1445 | Authenticated file sharing for clients that support these dialects; not a replacement for SMBv1 in an SMBv1-only loader |
 | HTTP | TCP 1100 | Experimental game streaming for compatible OPL HTTP clients, with an opt-in RiptOPL path-aware game list; see [HTTP setup and validation](docs/HTTP.md) |
-| NFS | TCP 2049 (fixed) | Experimental NFS 4.0 game folder for unfs4 clients (Neutrino's NFS mode, Launchstation's `nfs:` driver); read-only unless Allow writes is on; see [NFS setup](docs/NFS.md) |
+| NFS | TCP 2049 (fixed) | Experimental NFS 4.0 game folder for unfs4 clients (RiptOPL's NFS protocol, Neutrino's NFS mode, Launchstation's `nfs:` driver); read-only unless Allow writes is on; see [NFS setup](docs/NFS.md) |
 | UDPBD | UDP 48573 (`0xBDBD`) | Image, raw drive or virtual exFAT folder served as a block device |
 
 Desktop has seven game/file server cards plus [RetroAchievements](docs/RETROACHIEVEMENTS.md)
@@ -510,12 +510,14 @@ PS2 Servers builds on the following projects and contributions:
 - **Aerosol** — tested UDPFS across Linux, Windows, and direct connections, identified the
   explicit-bind workaround, and isolated a shared-config line-ending issue affecting VMC paths.
 - **Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg)** — author of
-  **[unfs4](https://github.com/sahlberg/unfs4)**, the PS2 NFS client in Neutrino's NFS
-  mode ([ps2max32/neutrino PR #240](https://github.com/ps2max32/neutrino/pull/240)) and
+  **[unfs4](https://github.com/sahlberg/unfs4)**, the PS2 NFS client in RiptOPL's NFS
+  protocol, Neutrino's NFS mode
+  ([ps2max32/neutrino PR #240](https://github.com/ps2max32/neutrino/pull/240)) and
   Launchstation's `nfs:` driver, which the **NFS** card serves; of
   **[usmb2](https://github.com/sahlberg/usmb2)**, the SMB client in Neutrino's SMB mode
   ([ps2max32/neutrino PR #236](https://github.com/ps2max32/neutrino/pull/236)), which the
-  **SMBv3** card serves; and of **[libsmb2](https://github.com/sahlberg/libsmb2)**. Our
+  **SMBv3** card serves, and in the `smb2man` driver RiptOPL and Launchstation browse
+  SMB2/3 shares with; and of **[libsmb2](https://github.com/sahlberg/libsmb2)**. Our
   NFS and SMB conformance tests build unfs4, usmb2 and libsmb2 and run them against our
   servers.
 - **[Open PS2 Loader](https://github.com/ps2homebrew/Open-PS2-Loader)** and the

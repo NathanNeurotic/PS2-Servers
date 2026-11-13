@@ -8,7 +8,7 @@ HTTP game server, not Edge’s `webui` management port.
 
 The exact client limits below refer to the pinned [Docmine17](https://github.com/Docmine17) revision in the
 conformance harness. Other HTTP loaders have different limits. [RiptOPL](https://github.com/NathanNeurotic/RiptOPL) also
-implements HTTP, but its own [HTTP guide](https://github.com/NathanNeurotic/Open-PS2-Loader/blob/rebuild/main/docs/HTTP.md)
+implements HTTP, but its own [HTTP guide](https://github.com/NathanNeurotic/RiptOPL/blob/rebuild/main/docs/HTTP.md)
 is authoritative for its settings and restrictions: it rejects client-side ZSO
 and uses Network Start Mode plus Network → Protocol. PS2-Servers host conformance
 does not establish RiptOPL gameplay. RiptOPL reads its own four-field list; see

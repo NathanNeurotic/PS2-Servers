@@ -3,13 +3,18 @@
 The **NFS** card shares a games folder over NFS version 4.0 for the PS2 NFS
 clients built on [unfs4](https://github.com/sahlberg/unfs4) by Ronnie Sahlberg:
 
-- Neutrino's NFS backing store (`-bsd=nfs`, `-dvd=nfs:DVD/game.iso`), and
-- Launchstation's `nfs:` file-manager driver.
+- RiptOPL's **NFS** protocol: its game list, the OPL core's in-game reader and
+  Ember PS1 games (RiptOPL pull requests 392 and 400; not in RiptOPLite),
+- Neutrino's NFS backing store (`-bsd=nfs`, `-dvd=nfs:DVD/game.iso`;
+  ps2max32/neutrino pull request 240), and
+- Launchstation's `nfs:` file-manager driver (Launchstation pull request 366).
 
-When this server was added (November 2026) neither client was in a release yet:
-Neutrino's NFS mode was ps2max32/neutrino pull request 240 and Launchstation's
-was pull request 366, both still under review. This mode is new and awaits
-validation on real hardware.
+All three were merged on 2026-11-12. RiptOPL and Launchstation have them in
+their rolling builds. No Neutrino release or development build has its NFS mode
+yet: upstream's latest development build is still v1.8.0-61-g7be8de2 of 2026-08-31 (checked 2026-11-13), so
+RiptOPL runs an NFS game set to Neutrino on its OPL core instead. POPSTARTER
+(`.VCD`) games cannot launch over NFS in RiptOPL; use SMB for them. This mode is
+new and has not been tested on a real PS2.
 
 NFS adds nothing over SMB or UDPFS for a loader that already speaks those. It is
 here for clients that speak NFS.
@@ -27,7 +32,13 @@ so the card has no port field. There is no user name or password.
 
 For Neutrino by hand, that is `srv=<PC IP>` and `export=/` in the module
 arguments of `config/bsd-nfs.toml` (its default export, `/srv/ps2`, is a Linux
-path and does not exist on this server).
+path and does not exist on this server). RiptOPL writes these into that file
+itself.
+
+In RiptOPL, set **Network Connectivity** to Manual or Auto and **Protocol** to
+**NFS** under Settings → Game Sources, then enter the PC's IP and **NFS Export**
+`/` on the Network page. In Launchstation, add a share in Settings > Network >
+SMB shares with **Server type** NFS and the URL `nfs://<PC IP>:2049/`.
 
 Core, from a terminal:
 
@@ -59,8 +70,11 @@ that makes large copies to the PC slower than a copy that is only cached.
 TCP 2049 has the same rights as the PS2. Turn it on only on a network you trust,
 and set **Bind address** (Advanced) to the PC's address on the PS2's network.
 
-Games never write over NFS either way: Neutrino's NFS mode is read-only, so
-saves go to a memory card. Allow writes is for the file manager.
+Neutrino's NFS mode is read-only, so its games save to a memory card. RiptOPL
+writes to the export (VMC saves, game settings, Rename and Delete) only while its
+own **NFS Writes** row is On; with it Off, RiptOPL only reads, and its games save
+to the real memory card. Launchstation writes when you copy, rename or delete in
+its file manager. Each of these writes also needs Allow writes on here.
 
 ## What is shared
 
@@ -102,7 +116,7 @@ on the PC (Windows refuses that while a file is open).
 - Credentials are accepted as given (AUTH_SYS or none). There is no Kerberos.
 - A read returns at most 1 MiB, and a request stops at the first operation
   after 1 MiB of reply.
-- No locks, delegations or exclusive create. Neither PS2 client uses them.
+- No locks, delegations or exclusive create. None of the PS2 clients uses them.
 - The only attributes served are type, size and modification time, which is
   all unfs4 asks for.
 
@@ -142,6 +156,9 @@ with writes on (it must pass and leave the folder as it found it) and with
 writes off (every change must fail and the folder must be untouched). A check
 spliced into the client fails the run if any reply is longer than the client
 asked for, or longer than Neutrino's reassembly buffer.
+
+RiptOPL's own `tests/nfs-live` runs its in-game NFS reader against this server
+(v0.9.3) in RiptOPL's CI, with writes allowed and refused.
 
 What that proves: the real client works against this server on a PC, inside the
 PS2 builds' buffer limits. What it does not prove: anything about the PS2's own

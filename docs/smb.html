@@ -41,6 +41,7 @@
     <h4>Protocols</h4>
     <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
     <a href="smb.html" class="active"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="nfs.html"><span class="icon icon-server"></span>NFS Server</a>
     <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
     <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
 
@@ -61,7 +62,7 @@
 
     <h4>Reference</h4>
     <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
-    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/RiptOPL/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
     <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
   </nav>
   <main class="content">
@@ -120,7 +121,7 @@ In your loader's <b>Network Settings</b>:
 </div>
 
 <h2 id="smb2-smb3">2. SMB2 and SMB3 Authenticated Sharing</h2>
-<p>For modern OPL forks (such as RiptOPL with SMB2 support enabled in Game Sources), PS2 Servers includes authenticated SMB2 (up to dialect 2.1) and SMB3 (up to dialect 3.0.2) server cards.</p>
+<p>For modern OPL forks (such as RiptOPL with <b>SMB Version</b> set to SMB2/3 in its Network settings), PS2 Servers includes authenticated SMB2 (up to dialect 2.1) and SMB3 (up to dialect 3.0.2) server cards.</p>
 
 <div class="cards">
   <article class="card">
@@ -140,7 +141,7 @@ Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (a
 </div>
 
 <h3 id="neutrino-smb">Neutrino SMB</h3>
-<p><a href="https://github.com/ps2max32/neutrino">Neutrino</a>'s SMB driver (<a href="https://github.com/ps2max32/neutrino/pull/236">ps2max32/neutrino PR #236</a>, by Ronnie Sahlberg &mdash; <a href="https://github.com/sahlberg">@sahlberg</a>; merged 2026-10-31; use the latest complete nightly) reads games with <a href="https://github.com/sahlberg/usmb2">usmb2</a>. It needs:</p>
+<p><a href="https://github.com/ps2max32/neutrino">Neutrino</a>'s SMB driver (<a href="https://github.com/ps2max32/neutrino/pull/236">ps2max32/neutrino PR #236</a>, by Ronnie Sahlberg &mdash; <a href="https://github.com/sahlberg">@sahlberg</a>; merged 2026-10-31) reads games with <a href="https://github.com/sahlberg/usmb2">usmb2</a>. It needs a complete Neutrino folder built after that merge: upstream's latest development build is still v1.8.0-61-g7be8de2 of 2026-08-31 (checked 2026-11-13) and has no SMB driver, so the Neutrino in the RiptOPL and Launchstation kits cannot use it yet. With such a Neutrino, it needs:</p>
 <ul>
   <li><b>The SMBv3 card.</b> usmb2 offers only SMB 3.0, so the SMBv2 card refuses it and says so in the log.</li>
   <li><b>Port 445.</b> The driver has no port setting. On Windows, tick <b>Take port 445 (admin)</b> and run as Administrator. On Linux or macOS, set the port to 445 and run with <code>sudo</code> (stop Samba first if it is installed), or on Linux keep 1445 and forward 445 to it: <code>sudo iptables -t nat -A PREROUTING -p tcp --dport 445 -j REDIRECT --to-ports 1445</code>. Stopping the card does not remove that rule; remove it yourself, for example before starting Samba again: <code>sudo iptables -t nat -D PREROUTING -p tcp --dport 445 -j REDIRECT --to-ports 1445</code>.</li>
@@ -150,14 +151,14 @@ Windows File Explorer connects only to TCP 445. The optional <b>Take port 445 (a
 <p>A CI check builds the pinned usmb2 and merged Neutrino SMB sources on the host and reads a game through them. That is a host check of the protocol, not a test on a PS2.</p>
 
 <h3 id="riptopl-launchstation-smb2">RiptOPL and Launchstation (SMB2)</h3>
-<p><a href="https://github.com/NathanNeurotic/RiptOPL">RiptOPL</a>'s SMB2 mode and <a href="https://github.com/NathanNeurotic/Launchstation">Launchstation</a>'s <code>smb:</code> device browse with <code>smb2man.irx</code>, built on <a href="https://github.com/sahlberg/libsmb2">libsmb2</a> by Ronnie Sahlberg &mdash; <a href="https://github.com/sahlberg">@sahlberg</a>. RiptOPL loads games with its own in-game SMB2 reader.</p>
+<p><a href="https://github.com/NathanNeurotic/RiptOPL">RiptOPL</a>'s SMB2/3 mode and <a href="https://github.com/NathanNeurotic/Launchstation">Launchstation</a>'s <code>smb:</code> device browse with the same <code>smb2man.irx</code>, built on <a href="https://github.com/sahlberg/usmb2">usmb2</a> by Ronnie Sahlberg &mdash; <a href="https://github.com/sahlberg">@sahlberg</a> (commit 7171d08, with RiptOPL's patch). It replaced a driver built on his <a href="https://github.com/sahlberg/libsmb2">libsmb2</a>. It offers SMB 2.0.2 and 2.1 first, and 3.0 and 3.0.2 only when a server refuses those, and it has no share list. RiptOPL loads games with its own in-game SMB2 reader, which offers the dialects in the same order.</p>
 <ul>
-  <li><b>Card:</b> SMBv2 or SMBv3. RiptOPL offers SMB 2.0.2 and 2.1 only, so either card negotiates 2.1; Launchstation negotiates 3.0.2 with the SMBv3 card.</li>
-  <li><b>Port:</b> RiptOPL: Network settings, <b>SMB Server</b> section, <b>SMB Version</b> SMB2, <b>Port</b> = the card's port (1445 by default). Launchstation: put the port in the <code>URL</code> of <code>SMB2.CNF</code>, for example <code>smb://192.168.0.10:1445/games</code>; without one it uses 445.</li>
-  <li><b>Share:</b> the card's share (<code>games</code>). In RiptOPL you can leave it blank and pick it from the server's share list.</li>
+  <li><b>Card:</b> SMBv2 or SMBv3. Both clients negotiate 2.1 with either card.</li>
+  <li><b>Port:</b> RiptOPL: Network settings, <b>SMB Server</b> section, <b>SMB Version</b> SMB2/3, <b>Port</b> = the card's port (1445 by default; RiptOPL's own default is 445). Launchstation: put the port in the share's <code>URL</code>, for example <code>smb://192.168.0.10:1445/games</code> or Windows-style <code>\\192.168.0.10:1445\games</code>; without one it uses 445. Use the PC's IPv4 address, not a name.</li>
+  <li><b>Share:</b> the card's share (<code>games</code>), typed in: SMB2/3 has no share list.</li>
   <li><b>Login:</b> the card's username and password. With a <b>No password</b> card any user works (a blank one logs on as <code>Guest</code>). In Launchstation, enter them in <b>Settings &gt; Network &gt; SMB shares</b> (saved in <code>LAUNCHSTATION.CNF</code>); it keeps each to 31 characters.</li>
 </ul>
-<p>A CI check builds the two libsmb2 versions those drivers use and lists, stats, reads, writes, truncates and enumerates shares through both cards; RiptOPL's own host harness checks its in-game reader. Both are host checks of the protocol, not tests on a PS2. The server signs: signing is advertised as enabled but not required, so the PS2 clients, which do not sign, are served unsigned as before, while a desktop client that requires signing (Samba's <code>smbclient</code>, Windows 11 24H2 by default) gets signed replies and has its requests verified. SMB 3 signing (AES-CMAC) uses the operating system's crypto library where there is one. Encryption and dialect 3.1.1 are not offered.</p>
+<p>A CI check builds the two libsmb2 versions those drivers used before and lists, stats, reads, writes, truncates and enumerates shares through both cards. Today's usmb2-based driver is checked by RiptOPL's and Launchstation's own host tests against Samba, and RiptOPL's in-game reader was checked by its host harness against both cards. All are host checks of the protocol, not tests on a PS2. The server signs: signing is advertised as enabled but not required, so the PS2 clients, which do not sign, are served unsigned as before, while a desktop client that requires signing (Samba's <code>smbclient</code>, Windows 11 24H2 by default) gets signed replies and has its requests verified. SMB 3 signing (AES-CMAC) uses the operating system's crypto library where there is one. Encryption and dialect 3.1.1 are not offered.</p>
 
 <h2 id="vmc-writes">3. Writes &amp; Virtual Memory Cards (VMC)</h2>
 <p>Both SMBv1 and SMB2/3 in PS2 Servers allow write access by default:</p>
@@ -180,7 +181,7 @@ Never forward SMB ports (1025, 1111, 1445, or 445) across your internet router. 
   In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
   See <a href="credits.html">Credits &amp; Sources</a>.</p>
   <p class="prov-inline">Sister documentation projects:
-  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/RiptOPL/">RiptOPL Docs</a> &middot;
   <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
 </footer>
 <script src="assets/app.js"></script>
