@@ -133,7 +133,26 @@ def load_compression():
     exts = tuple(e for e in COMPRESSED_EXTENSIONS if e not in _NATIVE_ON_CONSOLE)
     if not exts:
         return None, "no decodable format is available on this PC"
-    return (exts, get_compressed_info, open_compressed), ""
+    return (exts, get_compressed_info, _bounded_opener(open_compressed)), ""
+
+
+# Decoded blocks are kept per open handle, so a header claiming huge blocks
+# would make every open hold that much memory, and on a writable share any
+# client can upload such a header. Real images use small blocks (CSO 2-16 KiB,
+# chdman's default hunks are under 20 KiB), so anything above 1 MiB is refused.
+_MAX_IMAGE_BLOCK = 1024 * 1024
+_IMAGE_CACHE_BLOCKS = 8
+
+
+def _bounded_opener(open_compressed):
+    def open_image(path):
+        image = open_compressed(path, _IMAGE_CACHE_BLOCKS)
+        if image is not None and not 0 < image.block_size <= _MAX_IMAGE_BLOCK:
+            image.close()
+            raise ValueError("block size %d is above the %d-byte limit"
+                             % (image.block_size, _MAX_IMAGE_BLOCK))
+        return image
+    return open_image
 
 
 def log(*a):

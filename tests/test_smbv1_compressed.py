@@ -197,9 +197,37 @@ class CompressedOverSmb1(unittest.TestCase):
         conn = self._conn()
         self.assertEqual(self._create(conn, "\\DVD\\LINK.iso")[0], smb.STATUS_OBJECT_NAME_NOT_FOUND)
 
-    def test_traversal_still_refused(self):
+    def test_traversal_to_a_real_image_outside_the_share_is_refused(self):
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        with open(os.path.join(outside.name, "GAME.cso"), "wb") as f:
+            f.write(self.cso_bytes)
+        sibling = os.path.basename(outside.name)
+        self.assertEqual(os.path.dirname(outside.name), os.path.dirname(self.root))
         conn = self._conn()
-        self.assertNotEqual(self._create(conn, "\\..\\..\\GAME.iso")[0], smb.STATUS_SUCCESS)
+        self.assertNotEqual(self._create(conn, "\\..\\%s\\GAME.iso" % sibling)[0],
+                            smb.STATUS_SUCCESS)
+
+    def test_huge_block_header_is_refused(self):
+        # 34 bytes claiming 256 MiB blocks: opening must not decode a block.
+        bomb = struct.pack("<4sIQIBBH", b"CISO", 24, 0x10000000, 0x10000000, 1, 0, 0)
+        bomb += struct.pack("<II", 32, 34) + b"\x03\x00"
+        with open(os.path.join(self.dvd, "BOMB.cso"), "wb") as f:
+            f.write(bomb)
+        conn = self._conn()
+        self.assertNotEqual(self._create(conn, "\\DVD\\BOMB.iso")[0], smb.STATUS_SUCCESS)
+
+    def test_inflate_never_exceeds_one_block(self):
+        packer = zlib.compressobj(level=9, wbits=-15)
+        packed = packer.compress(b"\x00" * (8 * 1024 * 1024)) + packer.flush()
+        header = struct.pack("<4sIQIBBH", b"CISO", 24, 17 * SECTOR, SECTOR, 1, 0, 0)
+        index = [24 + 18 * 4] + [24 + 18 * 4 + len(packed)] * 17
+        path = os.path.join(self.dvd, "DEEP.cso")
+        with open(path, "wb") as f:
+            f.write(header + struct.pack("<18I", *index) + packed)
+        image = self.compression[2](path)
+        self.addCleanup(image.close)
+        self.assertEqual(len(image._decompress_block(0)), SECTOR)
 
     def test_real_chd_fixture(self):
         if ".chd" not in self.compression[0]:
