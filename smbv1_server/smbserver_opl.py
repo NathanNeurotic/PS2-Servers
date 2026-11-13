@@ -128,12 +128,40 @@ def load_compression():
         if os.path.isdir(udpfs_dir) and udpfs_dir not in sys.path:
             sys.path.insert(0, udpfs_dir)
         from udpfs_server import COMPRESSED_EXTENSIONS, get_compressed_info, open_compressed
+        from compressed_iso.chd import exact_cd_iso_size
     except Exception as exc:  # a broken tree or a missing module
         return None, "the UDPFS decoders could not be loaded (%s: %s)" % (type(exc).__name__, exc)
     exts = tuple(e for e in COMPRESSED_EXTENSIONS if e not in _NATIVE_ON_CONSOLE)
     if not exts:
         return None, "no decodable format is available on this PC"
-    return (exts, get_compressed_info, _bounded_opener(open_compressed)), ""
+    return (exts, _exact_cd_info(get_compressed_info, exact_cd_iso_size),
+            _exact_cd_opener(_bounded_opener(open_compressed), exact_cd_iso_size)), ""
+
+
+# A CD CHD is padded by chdman to whole hunks, and the UDPFS decoder reports that
+# padded length (it matches udpfsd). Over SMB the game's own length is shown, so a
+# decoded CD matches the ISO it was made from. A CHD with no usable CD track table
+# keeps the decoder's size. The listing and the open must agree, so both use this.
+def _exact_cd_info(get_info, exact_size):
+    def info(path):
+        found = get_info(path)
+        if found and found[1] == "CHD":
+            exact = exact_size(path)
+            if exact:
+                return (exact, found[1])
+        return found
+    return info
+
+
+def _exact_cd_opener(open_image, exact_size):
+    def opener(path):
+        image = open_image(path)
+        if image is not None and getattr(image, "_is_cd_format", False):
+            exact = exact_size(path)
+            if exact and exact <= image.uncompressed_size:
+                image.uncompressed_size = exact
+        return image
+    return opener
 
 
 # Decoded blocks are kept per open handle, so a header claiming huge blocks

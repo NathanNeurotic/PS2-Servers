@@ -207,6 +207,32 @@ def _extract_user_data(sector: bytes) -> bytes:
     return bytes(sector[offset:end])
 
 
+def exact_cd_iso_size(file_path: str):
+    """ISO size of a raw-sector CD CHD with the hunk padding left off, or None.
+
+    ChdFileWrapper reports the hunk-rounded size on purpose, to match udpfsd.
+    chdman rounds a CD up to whole hunks (and each track to 4 frames), so that
+    size ends in up to a hunk of zero sectors. The track table knows where the
+    last track really ends. A caller that wants the disc's own length asks here;
+    None means "no usable CD track table, use the wrapper's size". Only
+    MODE1_RAW, MODE2_RAW and AUDIO track tables are understood.
+    """
+    try:
+        from .chd_cuebin import _PADDING_FRAMES, read_track_table
+        table = read_track_table(file_path)
+        frames = 0
+        for track in table.tracks[:-1]:
+            frames += track.frames + (-track.frames) % _PADDING_FRAMES
+        frames += table.tracks[-1].frames
+        hunk_frames = table.hunk_bytes // _CD_FRAME_SIZE
+        hunks = -(-table.logical_bytes // table.hunk_bytes)
+        if 0 < frames <= hunks * hunk_frames:
+            return frames * _USER_DATA
+    except (ImportError, ValueError, OSError):
+        pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # ChdFileWrapper
 # ---------------------------------------------------------------------------
