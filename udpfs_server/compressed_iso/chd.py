@@ -217,7 +217,9 @@ def exact_cd_iso_size(file_path: str):
     """
     try:
         from .chd_cuebin import _PADDING_FRAMES, read_track_table
-        table = read_track_table(file_path, validate=False)
+        # The table reader refuses symlinks, but get_compressed_info and the
+        # open both follow them, so size the file they actually read.
+        table = read_track_table(os.path.realpath(file_path), validate=False)
         frames = 0
         for track in table.tracks[:-1]:
             frames += track.frames + (-track.frames) % _PADDING_FRAMES

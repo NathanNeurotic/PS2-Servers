@@ -37,6 +37,15 @@ class CdChdSizeTest(unittest.TestCase):
                 finally:
                     wrapper.close()
 
+    @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+    def test_a_symlinked_image_is_sized_like_its_target(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            link = os.path.join(tmp, "LINK.chd")
+            os.symlink(RAW, link)
+            self.assertEqual(exact_cd_iso_size(link), SECTORS * 2048)
+            self.assertEqual(get_compressed_info(link), (SECTORS * 2048, "CHD"))
+
     def test_dvd_and_missing_files_are_left_alone(self):
         self.assertIsNone(exact_cd_iso_size(DVD))
         self.assertIsNone(exact_cd_iso_size(RAW + ".missing"))
