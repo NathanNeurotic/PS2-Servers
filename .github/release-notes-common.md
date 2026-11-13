@@ -5,6 +5,13 @@ changelog and a download table, not another copy of the operator manual.
 
 ## Changelog
 
+- SMBv1 security fix: when a password is set, shares are refused until a login succeeds. Before, a client could skip the login and reach the shares. SMBv2/SMBv3 already checked it. Servers started without a password behave as before.
+- SMBv1: a read right after a write now sees the new bytes (it could return the old ones), which matters for memory-card images and other files the console writes then reads back.
+- SMBv1: optional "Decompress CHD/CSO" serves Game.chd and Game.cso as Game.iso, read-only, using the UDPFS decoders. Off by default; not yet tested on a console. Idea and first version by [snapsapnap2](https://github.com/snapsapnap2) (#308).
+- CD CHD images now report their true disc length instead of a hunk-padded size (for example 1003 sectors, not 1008) on UDPFS, HTTP, SMBv1 and Edge. DVD CHDs are unchanged.
+
+### Earlier, in v0.9.3
+
 - NFS: a new NFS card serves a games folder over NFS 4.0 (TCP 2049) for Neutrino's NFS backing store and the nfs: driver, both built on [Ronnie Sahlberg](https://github.com/sahlberg)'s unfs4. Writes are off unless "Allow writes" is on. See docs/NFS.md.
 - NFS testing: checked against unfs4 (the client Neutrino uses) in CI only. Not yet run with a real PS2.
 - SMBv2/SMBv3: the cards take a Share name like the SMBv1 card, so the console can open a share not called "games". A blank name still means "games".
@@ -14,7 +21,6 @@ changelog and a download table, not another copy of the operator manual.
 - Desktop: firewall removal stops servers only after the last confirm; the Library tab opens the shared setup guide and reports a missing Pillow instead of failing; dropdowns ignore the mouse wheel; the Terminal tab fits the window with one scroll bar.
 - Conformance: the Neutrino SMB check runs against usmb2 bf61d1d.
 - Credits: Ronnie Sahlberg for unfs4, usmb2 and libsmb2.
-- SMBv1: optional "Decompress CHD/CSO" serves Game.chd and Game.cso as Game.iso, read-only, using the UDPFS decoders. Off by default; not yet tested on a console. Idea and first version by [snapsapnap2](https://github.com/snapsapnap2) (#308).
 
 ### Earlier, in v0.9.2
 
