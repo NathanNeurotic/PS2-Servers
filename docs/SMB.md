@@ -68,8 +68,10 @@ bug reports. Authentication is not a reason to expose the server to the internet
 
 [Neutrino](https://github.com/ps2max32/neutrino)'s SMB driver
 ([ps2max32/neutrino PR #236](https://github.com/ps2max32/neutrino/pull/236), by
-Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg); merged 2026-10-31; use the latest complete nightly)
-reads games with [usmb2](https://github.com/sahlberg/usmb2). It needs:
+Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg); merged 2026-10-31)
+reads games with [usmb2](https://github.com/sahlberg/usmb2). It needs a complete
+Neutrino folder built after that merge: upstream's latest development build is still v1.8.0-61-g7be8de2 of 2026-08-31 (checked 2026-11-13) and has no SMB driver, so the Neutrino in the RiptOPL and
+Launchstation kits cannot use it yet. With such a Neutrino, it needs:
 
 | Setting | Value |
 |---|---|
@@ -98,32 +100,38 @@ test on a PS2.
 
 ## RiptOPL and Launchstation (SMB2)
 
-[RiptOPL](https://github.com/NathanNeurotic/RiptOPL)'s SMB2 mode and
+[RiptOPL](https://github.com/NathanNeurotic/RiptOPL)'s SMB2/3 mode and
 [Launchstation](https://github.com/NathanNeurotic/Launchstation)'s `smb:` device
-browse with `smb2man.irx`, which is built on
-[libsmb2](https://github.com/sahlberg/libsmb2) by Ronnie Sahlberg
-([@sahlberg](https://github.com/sahlberg)). RiptOPL loads games with its own
-in-game SMB2 reader.
+browse with the same `smb2man.irx`, built on
+[usmb2](https://github.com/sahlberg/usmb2) by Ronnie Sahlberg
+([@sahlberg](https://github.com/sahlberg)) at commit 7171d08 with RiptOPL's patch.
+It replaced a driver built on his [libsmb2](https://github.com/sahlberg/libsmb2).
+It offers SMB 2.0.2 and 2.1 first, and 3.0 and 3.0.2 only when a server refuses
+those, and it has no share list. RiptOPL loads games with its own in-game SMB2
+reader, which offers the dialects in the same order.
 
 | Setting | RiptOPL | Launchstation |
 |---|---|---|
-| Card | **SMBv2** or **SMBv3**. RiptOPL offers SMB 2.0.2 and 2.1 only, so either card negotiates 2.1. | **SMBv2** or **SMBv3** (it negotiates 3.0.2 with the SMBv3 card). |
-| Port | Network settings, **SMB Server** section, with **SMB Version** set to SMB2: **Port** = the card's port (1445 by default). | In the `URL`: `smb://<PC address>:1445/games`. Without a port it uses 445. |
-| Share | The card's share (`games`), or leave it blank to pick from the server's share list. | The share in the `URL`. |
+| Card | **SMBv2** or **SMBv3**; either negotiates 2.1. | **SMBv2** or **SMBv3**; either negotiates 2.1. |
+| Port | Network settings, **SMB Server** section, with **SMB Version** set to SMB2/3: **Port** = the card's port (1445 by default; RiptOPL's own default is 445). | In the `URL`: `smb://<PC address>:1445/games`, or Windows-style `\\<PC address>:1445\games`. Without a port it uses 445. Use the PC's IPv4 address, not a name. |
+| Share | The card's share (`games`), typed in: SMB2/3 has no share list. | The share in the `URL`. |
 | Login | The card's username and password. With a **No password** card, any user (a blank one logs on as `Guest`). | The share's user name and password in Settings > Network > SMB shares, saved in `LAUNCHSTATION.CNF` (31 characters at most). |
 
-The server gives libsmb2 what it asks for: FileIdFullDirectoryInformation
+The server also gives libsmb2, which both drivers were built on until November
+2026, what it asks for: FileIdFullDirectoryInformation
 listings, the attribute-tag query sent with every stat, related
 CREATE + QUERY_INFO + CLOSE compounds (with enough credits for libsmb2 to send
 them), and the share list over `IPC$` (`\PIPE\srvsvc`, NetrShareEnum levels 0-2).
 Before these were added, listing, stat, truncate and the share picker all failed.
 
 `conformance/integration/libsmb2/run.py` builds the two libsmb2 versions those
-drivers use (RiptOPL's vendored c6e4997 and Launchstation's d61b781) on the host
+drivers used (RiptOPL's vendored c6e4997 and Launchstation's d61b781) on the host
 and lists, stats, reads byte for byte, writes, truncates and enumerates shares
-against both cards; it runs in CI. RiptOPL's in-game reader is checked by
-RiptOPL's own `tests/smb2-live` harness, which passes against both cards. Both
-are host checks of the protocol, not tests on a PS2.
+against both cards; it runs in CI. It does not build today's usmb2-based
+`smb2man.irx`: RiptOPL's `tests/smb2-live` and Launchstation's
+`tests/smb2man_live` check that driver on the host against Samba. RiptOPL's
+in-game reader was checked with its `tests/smb2-live` harness against both
+cards. All of these are host checks of the protocol, not tests on a PS2.
 
 The server signs. Signing is advertised as enabled but not required, so the PS2
 clients above, which do not sign, are served unsigned as before; a desktop

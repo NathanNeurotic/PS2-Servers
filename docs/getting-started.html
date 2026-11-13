@@ -41,6 +41,7 @@
     <h4>Protocols</h4>
     <a href="udpfs.html"><span class="icon icon-netboot"></span>UDPFS Server</a>
     <a href="smb.html"><span class="icon icon-smb"></span>SMB (v1 / v2 / v3)</a>
+    <a href="nfs.html"><span class="icon icon-server"></span>NFS Server</a>
     <a href="udpbd.html"><span class="icon icon-hdd"></span>UDPBD Server</a>
     <a href="http.html"><span class="icon icon-http"></span>HTTP Game Streaming</a>
 
@@ -61,7 +62,7 @@
 
     <h4>Reference</h4>
     <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Sources</a>
-    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/RiptOPL/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
     <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
   </nav>
   <main class="content">
@@ -81,6 +82,7 @@ You need a PlayStation 2 with an Ethernet network interface (a Fat console with 
 <tr><td><a href="smb.html"><b>SMBv1</b></a></td><td>Shared library <b>folder</b></td><td>SMBv1/ETH-enabled loader and matching host IP, share, and TCP port</td></tr>
 <tr><td><a href="smb.html#smb2-smb3"><b>SMB2 / SMB3</b></a></td><td>Shared library <b>folder</b></td><td>Loader explicitly supporting SMB2/3; SMBv1-only clients cannot use it</td></tr>
 <tr><td><a href="http.html"><b>HTTP</b></a></td><td>Library <b>folder</b></td><td>Compatible HTTP game loader, with exactly matching TCP port</td></tr>
+<tr><td><a href="nfs.html"><b>NFS</b></a></td><td>Library <b>folder</b> (shared as export <code>/</code>)</td><td>NFS 4.0 client built on unfs4, such as RiptOPL's NFS protocol, Neutrino's NFS mode or Launchstation's <code>nfs:</code>; TCP 2049</td></tr>
 <tr><td><a href="udpbd.html"><b>UDPBD</b></a></td><td><b>One block-image file</b>, e.g. <code>game.iso</code> or <code>disk.img</code>; <b>not a folder</b></td><td>UDPBD driver that understands the file's block layout</td></tr>
 </tbody></table>
 <div class="callout warn"><div class="h">Want a Folder of Games? Do Not Select UDPBD</div>
@@ -258,7 +260,7 @@ UDPBD clients normally discover the server by broadcast on <b>UDP 48573</b>. The
   In collaboration with <a href="https://github.com/FatBaldDad/PS2-EtherDrive">PS2-EtherDrive</a>.
   See <a href="credits.html">Credits &amp; Sources</a>.</p>
   <p class="prov-inline">Sister documentation projects:
-  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/RiptOPL/">RiptOPL Docs</a> &middot;
   <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
 </footer>
 <script src="assets/app.js"></script>

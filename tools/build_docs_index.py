@@ -20,6 +20,7 @@ PAGE_CATEGORIES = {
     "releases.html": "start",
     "udpfs.html": "protocols",
     "smb.html": "protocols",
+    "nfs.html": "protocols",
     "udpbd.html": "protocols",
     "http.html": "protocols",
     "edge.html": "edge",
