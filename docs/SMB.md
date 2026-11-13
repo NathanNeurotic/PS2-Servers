@@ -24,6 +24,14 @@ server may move forward to a free port when the requested port is occupied;
 use the port it actually prints. Two servers cannot share the same listening
 address/port. See [the standalone guide](../smbv1_server/README.md).
 
+**CHD and CSO (opt-in, Desktop/Core SMBv1 only).** Tick **Decompress CHD/CSO**
+on the SMBv1 card, or pass `--enable-compression` to the script, and
+`Game.chd` / `Game.cso` are listed as `Game.iso` and decompressed as the console
+reads them. They are always read-only. A real `Game.iso` beside them wins. ZSO is
+sent unchanged, because OPL decodes ZSO itself. The decoders are the same ones
+UDPFS and HTTP use. Off by default; not yet tested on a console. The SMBv2/SMBv3
+server and Edge do not decompress over SMB.
+
 ## SMB2 and SMB3
 
 Use these cards only for a compatible client. SMBv2 negotiates up to SMB 2.1;

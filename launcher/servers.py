@@ -158,7 +158,12 @@ def _smb_argv(v, smb_version="1"):
 
 
 def _smbv1_argv(v):
-    return _smb_argv(v, "1")
+    args = _smb_argv(v, "1")
+    # Off by default: unticked, the command line is exactly what it was before
+    # the option existed.
+    if v.get("enable_compression"):
+        args.append("--enable-compression")
+    return args
 
 
 # SMBv2 and SMBv3 run smb2_server/, not the SMBv1 server with a flag. They were
@@ -402,6 +407,11 @@ SMBV1 = ServerDef(
               help="TCP port (default 1025). Ports below 1025 require Administrator."),
         Field("read_only", "Read-only", "bool", default=False, advanced=True,
               help="No saves / no VMC writes."),
+        Field("enable_compression", "Decompress CHD/CSO", "bool", default=False,
+              help="Off by default. Lists Game.chd and Game.cso as Game.iso and "
+                   "decompresses them as the console reads; they stay read-only. "
+                   "ZSO is sent as-is because OPL decodes it itself. Not yet "
+                   "tested on a console."),
         Field("take_445", "Take port 445 (admin)", "bool", default=False,
               advanced=True, windows_only=True,
               help="Bind standard port 445 by pausing Windows file sharing. Needs admin."),

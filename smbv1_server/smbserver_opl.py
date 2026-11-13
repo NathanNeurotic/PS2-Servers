@@ -13,6 +13,10 @@
 #   then in OPL: SMB IP = this PC's LAN IP, SMB Port = 1111 (the printed port), Share = games,
 #   User = guest, Password = blank. Writable by default (OPL saves + VMC-on-SMB); pass --read-only to lock.
 #
+#   Optional: --enable-compression serves Game.chd / Game.cso as a read-only Game.iso, decoded by
+#   the UDPFS server's compressed_iso package (imported only when the option is given, so a
+#   default run stays standard-library only). Idea and first version: snapsapnap2 (PR #308).
+#
 # License: same as the surrounding PS2 Servers project.
 
 import argparse
@@ -102,6 +106,53 @@ SMB_QUERY_FILE_BASIC_INFO = 0x0101
 SMB_QUERY_FILE_STANDARD_INFO = 0x0102
 
 VERBOSE = False
+
+# --------------------------------------------------------------------------------------------
+# Optional: CHD/CSO served as plain .iso (--enable-compression, off by default)
+# --------------------------------------------------------------------------------------------
+# Reuses the UDPFS server's decoders and extension table, exactly as the HTTP
+# server does, so there is one implementation of each format and one place that
+# decides which formats this PC can decode. Nothing is imported unless the
+# option is given: the default run stays standard-library only and sends the
+# same bytes it always has. ZSO is never decoded here, because OPL decodes ZSO
+# itself above the device layer, so it already works over SMB untouched.
+_NATIVE_ON_CONSOLE = (".zso", ".ziso")
+
+
+def load_compression():
+    """(extensions, get_info, open_image) for the formats this PC can decode,
+    or None with the reason. Never raises."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    udpfs_dir = os.path.join(os.path.dirname(here), "udpfs_server")
+    try:
+        if os.path.isdir(udpfs_dir) and udpfs_dir not in sys.path:
+            sys.path.insert(0, udpfs_dir)
+        from udpfs_server import COMPRESSED_EXTENSIONS, get_compressed_info, open_compressed
+    except Exception as exc:  # a broken tree or a missing module
+        return None, "the UDPFS decoders could not be loaded (%s: %s)" % (type(exc).__name__, exc)
+    exts = tuple(e for e in COMPRESSED_EXTENSIONS if e not in _NATIVE_ON_CONSOLE)
+    if not exts:
+        return None, "no decodable format is available on this PC"
+    return (exts, get_compressed_info, _bounded_opener(open_compressed)), ""
+
+
+# Decoded blocks are kept per open handle, so a header claiming huge blocks
+# would make every open hold that much memory, and on a writable share any
+# client can upload such a header. Real images use small blocks (CSO 2-16 KiB,
+# chdman's default hunks are under 20 KiB), so anything above 1 MiB is refused.
+_MAX_IMAGE_BLOCK = 1024 * 1024
+_IMAGE_CACHE_BLOCKS = 8
+
+
+def _bounded_opener(open_compressed):
+    def open_image(path):
+        image = open_compressed(path, _IMAGE_CACHE_BLOCKS)
+        if image is not None and not 0 < image.block_size <= _MAX_IMAGE_BLOCK:
+            image.close()
+            raise ValueError("block size %d is above the %d-byte limit"
+                             % (image.block_size, _MAX_IMAGE_BLOCK))
+        return image
+    return open_image
 
 
 def log(*a):
@@ -249,6 +300,35 @@ class Share:
             return full
         return None
 
+    def compressed_source(self, local, exts):
+        """For a resolved 'X.iso' that does not exist, the real path of an
+        'X.chd' / 'X.cso' beside it (first in `exts` order), else None.
+
+        Matched by listing the folder, so it finds whatever spelling of the
+        extension the listing advertised, also on a case-sensitive disk. The
+        match is re-resolved and re-checked against the share root, so a
+        symlinked image cannot hand out a file from outside the share.
+        """
+        folder, base = os.path.split(local)
+        if not exts or not base.lower().endswith(".iso") or len(base) <= 4:
+            return None
+        stem = base[:-4]
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            return None
+        by_ext = {}
+        for n in names:
+            n_stem, n_ext = os.path.splitext(n)
+            if n_stem == stem and n_ext.lower() in exts:
+                by_ext.setdefault(n_ext.lower(), n)
+        for ext in exts:
+            if ext in by_ext:
+                real = os.path.realpath(os.path.join(folder, by_ext[ext]))
+                if self._inside(real) and os.path.isfile(real):
+                    return real
+        return None
+
     def _inside(self, real):
         """True if a resolved path is the share root or beneath it.
 
@@ -267,14 +347,23 @@ class Share:
 
 
 class OpenFile:
-    __slots__ = ("path", "fh", "is_dir", "size", "diagnostic_reported")
+    __slots__ = ("path", "fh", "is_dir", "size", "diagnostic_reported", "compressed")
 
-    def __init__(self, path, is_dir):
+    def __init__(self, path, is_dir, open_image=None):
         self.path = path
         self.diagnostic_reported = False
         self.is_dir = is_dir
-        self.size = 0 if is_dir else os.path.getsize(path)
+        self.compressed = open_image is not None
         self.fh = None
+        if self.compressed:
+            # path is the .chd/.cso itself. The decoder is per open, so
+            # connections never share decoder state; it is read-only.
+            self.fh = open_image(path)
+            if self.fh is None:
+                raise OSError("no decoder for %r" % path)
+            self.size = self.fh.uncompressed_size
+            return
+        self.size = 0 if is_dir else os.path.getsize(path)
         if not is_dir:
             # Read-only handle; writes go through their own handle in
             # h_write_andx. Unbuffered on purpose: a buffered reader keeps up
@@ -292,6 +381,20 @@ class OpenFile:
             except OSError:
                 pass
             self.fh = None
+
+
+def _compressed_exts(conn):
+    c = conn.server.compression
+    return c[0] if c else ()
+
+
+def _open_compressed_file(conn, src, name):
+    """OpenFile for a .chd/.cso served as .iso, or None after a warning."""
+    try:
+        return OpenFile(src, is_dir=False, open_image=conn.server.compression[2])
+    except Exception as exc:  # corrupt header, decoder missing, unreadable file
+        conn.warning("compressed open failed for %r: %s: %s" % (name, type(exc).__name__, exc))
+        return None
 
 
 class Conn:
@@ -708,10 +811,18 @@ def h_open_andx(conn, r):
     if sh is None:
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
     local = sh.resolve(name)
-    if local is None or not os.path.isfile(local):
+    src = None
+    if local is not None and not os.path.exists(local):
+        src = sh.compressed_source(local, _compressed_exts(conn))
+    if src is not None:
+        of = _open_compressed_file(conn, src, name)
+        if of is None:
+            return None, None, STATUS_ACCESS_DENIED
+    elif local is None or not os.path.isfile(local):
         log("open MISS", name)
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
-    of = OpenFile(local, is_dir=False)
+    else:
+        of = OpenFile(local, is_dir=False)
     fid = conn.alloc_fid()
     conn.files[fid] = of
     log("open", name, "fid", fid, "size", of.size)
@@ -762,7 +873,24 @@ def h_nt_create_andx(conn, r):
     requested_dir = bool(create_options & FILE_DIRECTORY_FILE)
     action = FILE_OPENED
 
-    if exists:
+    # A missing X.iso may be an X.chd/X.cso served decompressed. To the client
+    # that is an existing, read-only file: it opens, and nothing creates,
+    # truncates or replaces it.
+    src = None if exists else sh.compressed_source(local, _compressed_exts(conn))
+    if src is not None:
+        if disposition == FILE_CREATE:
+            return None, None, STATUS_OBJECT_NAME_COLLISION
+        if requested_dir or disposition in (FILE_SUPERSEDE, FILE_OVERWRITE, FILE_OVERWRITE_IF):
+            return None, None, STATUS_ACCESS_DENIED
+        of = _open_compressed_file(conn, src, name)
+        if of is None:
+            return None, None, STATUS_ACCESS_DENIED
+        try:
+            mtime = to_filetime(os.path.getmtime(src))
+        except OSError:
+            mtime = 0
+        is_dir = False
+    elif exists:
         is_dir = os.path.isdir(local)
         if disposition == FILE_CREATE:
             return None, None, STATUS_OBJECT_NAME_COLLISION
@@ -799,12 +927,13 @@ def h_nt_create_andx(conn, r):
             return None, None, STATUS_ACCESS_DENIED
         action = FILE_CREATED
 
-    is_dir = os.path.isdir(local)
-    try:
-        of = OpenFile(local, is_dir=is_dir)
-        mtime = to_filetime(os.path.getmtime(local))
-    except OSError:
-        return None, None, STATUS_ACCESS_DENIED
+    if src is None:
+        is_dir = os.path.isdir(local)
+        try:
+            of = OpenFile(local, is_dir=is_dir)
+            mtime = to_filetime(os.path.getmtime(local))
+        except OSError:
+            return None, None, STATUS_ACCESS_DENIED
     fid = conn.alloc_fid()
     conn.files[fid] = of
     size = of.size
@@ -844,11 +973,21 @@ def h_read_andx(conn, r):
     if of is None or of.fh is None:
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
     started = time.monotonic()
-    of.fh.seek(offset)
-    chunk = of.fh.read(requested)
+    if of.compressed:
+        try:
+            of.fh.seek(offset)
+            chunk = of.fh.read(requested)
+        except Exception as exc:  # corrupt block, decoder failure
+            conn.warning("compressed read failed %r: %s: %s"
+                         % (conn.last_read, type(exc).__name__, exc))
+            return None, None, STATUS_ACCESS_DENIED
+    else:
+        of.fh.seek(offset)
+        chunk = of.fh.read(requested)
     # An unbuffered read may return less than asked before end of file (a
     # network-mounted share can); only an empty read means end of file.
-    while chunk and len(chunk) < requested:
+    # (A decoder already returns everything up to the image's end.)
+    while not of.compressed and chunk and len(chunk) < requested:
         more = of.fh.read(requested - len(chunk))
         if not more:
             break
@@ -882,7 +1021,8 @@ def h_write_andx(conn, r):
     off_high = struct.unpack_from("<I", p, 24)[0] if len(p) >= 28 else 0
     n = dlen_low | (dlen_high << 16)
     of = conn.files.get(fid)
-    if of is None:
+    if of is None or of.compressed:
+        # of.path of a decoded image is the .chd/.cso: writing would corrupt it.
         return None, None, STATUS_ACCESS_DENIED
     payload = r.msg[data_off : data_off + n]
     try:
@@ -1013,12 +1153,52 @@ def _build_trans2_reply(conn, r, status, t_params, t_data):
     return params, body_data, STATUS_SUCCESS
 
 
-def _dir_entry_104(name, local_path):
+def _list_dir(conn, local):
+    """(name, local_path, size_override) for a FIND_FIRST2 listing, '.' and '..' first.
+
+    With --enable-compression, a decodable X.chd / X.cso is listed as X.iso with
+    its decompressed size. A real X.iso beside it wins and the image keeps its
+    own name; of two images with one stem, the first in the extension order is
+    advertised (the same one an open of X.iso gets). An image whose header
+    cannot be read keeps its real name rather than being offered as a game.
+    """
+    names = sorted(os.listdir(local))
+    head = [(".", local, None), ("..", local, None)]
+    exts = _compressed_exts(conn)
+    if not exts:
+        return head + [(n, os.path.join(local, n), None) for n in names]
+    get_info = conn.server.compression[1]
+    taken = {n.lower() for n in names if n.lower().endswith(".iso")}
+    chosen = {}
+    for n in names:
+        stem, ext = os.path.splitext(n)
+        ext = ext.lower()
+        if ext in exts and (stem + ".iso").lower() not in taken:
+            best = chosen.get(stem)
+            if best is None or exts.index(ext) < exts.index(os.path.splitext(best)[1].lower()):
+                chosen[stem] = n
+    body = []
+    for n in names:
+        path = os.path.join(local, n)
+        stem = os.path.splitext(n)[0]
+        if chosen.get(stem) == n:
+            info = get_info(path)
+            if info:
+                body.append((stem + ".iso", path, info[0]))
+                continue
+        body.append((n, path, None))
+    body.sort(key=lambda e: e[0])
+    return head + body
+
+
+def _dir_entry_104(name, local_path, size_override=None):
     """One SMB_FIND_FILE_BOTH_DIRECTORY_INFO (level 0x104) record (NextEntryOffset=0)."""
     try:
         st = os.stat(local_path)
         is_dir = os.path.isdir(local_path)
         size = 0 if is_dir else st.st_size
+        if size_override is not None and not is_dir:
+            size = size_override
         ft = to_filetime(st.st_mtime)
     except OSError:
         is_dir = name in (".", "..")
@@ -1062,17 +1242,16 @@ def h_trans2_find_first2(conn, r, t_params, t_data):
         log("findfirst MISS", repr(pattern))
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
     try:
-        names = [".", ".."] + sorted(os.listdir(local))
+        entries = _list_dir(conn, local)
     except OSError:
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
-    entries = [(n, os.path.join(local, n) if n not in (".", "..") else local) for n in names]
     sid = conn.alloc_sid()
-    name, lp = entries[0]
+    name, lp, sz = entries[0]
     eos = 1 if len(entries) == 1 else 0
     conn.searches[sid] = (entries, 1)
     log("findfirst", repr(dirpath), "sid", sid, "entries", len(entries))
     rp = struct.pack("<HHHHH", sid, 1, eos, 0, 0)  # SID,SearchCount,EndOfSearch,EAErrOff,LastNameOff
-    rd = _dir_entry_104(name, lp)
+    rd = _dir_entry_104(name, lp, sz)
     return _build_trans2_reply(conn, r, STATUS_SUCCESS, rp, rd)
 
 
@@ -1087,11 +1266,11 @@ def h_trans2_find_next2(conn, r, t_params, t_data):
         conn.searches.pop(sid, None)
         rp = struct.pack("<HHHH", 0, 1, 0, 0)
         return _build_trans2_reply(conn, r, STATUS_SUCCESS, rp, b"")
-    name, lp = entries[cursor]
+    name, lp, sz = entries[cursor]
     eos = 1 if cursor == len(entries) - 1 else 0
     conn.searches[sid] = (entries, cursor + 1)
     rp = struct.pack("<HHHH", 1, eos, 0, 0)  # NEXT2: no leading SID (8 bytes)
-    rd = _dir_entry_104(name, lp)
+    rd = _dir_entry_104(name, lp, sz)
     return _build_trans2_reply(conn, r, STATUS_SUCCESS, rp, rd)
 
 
@@ -1104,12 +1283,21 @@ def h_trans2_query_path(conn, r, t_params, t_data):
     if sh is None:
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
     local = sh.resolve(name or "\\")
+    decoded_size = None
+    if local is not None and not os.path.exists(local):
+        src = sh.compressed_source(local, _compressed_exts(conn))
+        if src is not None:
+            info = conn.server.compression[1](src)
+            if info:
+                local, decoded_size = src, info[0]
     if local is None or not os.path.exists(local):
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
     is_dir = os.path.isdir(local)
     try:
         st = os.stat(local)
         size = 0 if is_dir else st.st_size
+        if decoded_size is not None:
+            size = decoded_size
         ft = to_filetime(st.st_mtime)
     except OSError:
         size, ft = 0, 0
@@ -1327,8 +1515,11 @@ def serve_conn(server, sock, addr):
 class SmbServer:
     session_stats = None  # launcher.session_stats.SessionStats with --session-summary
 
-    def __init__(self, shares, read_only, smb_version=1, users=None):
+    def __init__(self, shares, read_only, smb_version=1, users=None, compression=None):
         self.shares = shares
+        # (extensions, get_info, open_image) from load_compression(), or None:
+        # off, and every handler behaves exactly as it did before the option.
+        self.compression = compression
         self.read_only = read_only
         self.smb_version = int(smb_version)
         # Empty means the guest behaviour this server has always had: every
@@ -1501,6 +1692,11 @@ def main(argv=None):
     ap.add_argument("--smb-version", type=int, choices=[1, 2, 3], default=1,
                     help="SMB protocol version (1=SMBv1; 2 and 3 are INCOMPLETE "
                          "-- they negotiate and connect but serve no files)")
+    ap.add_argument("--enable-compression", action="store_true",
+                    help="serve CHD and CSO images as plain .iso files, decompressed as "
+                         "the console reads them (read-only). Off by default. CHD needs "
+                         "libchdr, which PS2 Servers releases bundle. ZSO is always served "
+                         "as-is: OPL decodes it itself.")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--session-summary", action="store_true",
                     help="print one SESSION line per console when it goes quiet "
@@ -1540,8 +1736,15 @@ def main(argv=None):
             ap.error("--user needs a name: %r" % spec)
         users[name] = password
 
+    compression = None
+    if args.enable_compression:
+        compression, why = load_compression()
+        if compression is None:
+            # Keep serving plain files, but say plainly that images stay hidden.
+            print("WARNING: --enable-compression: %s. CHD/CSO images will be listed "
+                  "under their own names, not as .iso." % why, file=sys.stderr)
     server = SmbServer(shares, read_only=args.read_only,
-                       smb_version=args.smb_version, users=users)
+                       smb_version=args.smb_version, users=users, compression=compression)
     if args.session_summary:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if os.path.isdir(os.path.join(root, "launcher")) and root not in sys.path:
@@ -1607,6 +1810,9 @@ def main(argv=None):
         for name in shares:
             print("              Share: %s   ->   %s%s" % (name, shares[name].root,
                   "   (read-only)" if server.read_only else "   (writable)"))
+        if server.compression:
+            print(" (compressed images -- %s listed as .iso and decompressed on the fly, read-only)"
+                  % "/".join(e.lstrip(".").upper() for e in server.compression[0]))
         if server.read_only:
             print(" (read-only -- OPL cannot save per-game settings or VMCs to this share)")
         else:

@@ -89,6 +89,10 @@ Get-NetFirewallRule -DisplayName 'RiptOPL SMB Server' | Remove-NetFirewallRule
 --read-only         serve the share read-only (no saves / no VMC writes); default is writable
 --take-445          bind the *standard* port 445 instead, by pausing Windows' LanmanServer
                     (admin; reversible — see below)
+--enable-compression  list Game.chd / Game.cso as Game.iso and decompress them as OPL
+                    reads them (read-only; off by default). Uses the UDPFS decoders in
+                    ../udpfs_server, so run it from the full PS2 Servers tree. CHD needs
+                    libchdr. ZSO is always sent unchanged: OPL decodes it itself.
 -v                  verbose protocol logging
 ```
 

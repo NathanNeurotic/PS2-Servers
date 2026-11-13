@@ -132,12 +132,16 @@ class CsoFileWrapper(CompressedFileWrapper):
         else:
             # Try raw deflate first (wbits=-15), then standard zlib
             # Some CSO files use raw deflate without zlib headers
+            # Never inflate past one block: a valid block decodes to at most
+            # block_size bytes, and an unbounded inflate lets a tiny crafted
+            # block expand to gigabytes.
             try:
                 decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
-                decompressed = decompressor.decompress(compressed_data)
+                decompressed = decompressor.decompress(compressed_data, self.block_size)
             except zlib.error:
                 try:
-                    decompressed = zlib.decompress(compressed_data)
+                    decompressed = zlib.decompressobj(zlib.MAX_WBITS).decompress(
+                        compressed_data, self.block_size)
                 except zlib.error as e:
                     raise ValueError(f"zlib decompression failed for block {block_idx}: {e}")
         
