@@ -123,6 +123,38 @@ class LogonRequired(unittest.TestCase):
         self.assertEqual(c.logoff(), smb.STATUS_SUCCESS)
         self.assertEqual(c.open("\\SECRET.BIN"), smb.STATUS_ACCESS_DENIED)
 
+    def test_no_password_any_login_works(self):
+        # No --user: whatever a console or PC sends at SESSION_SETUP is accepted,
+        # including OPL's and RiptOPL's default of a blank user and password.
+        for user, password in (("", ""), ("guest", ""), ("GUEST", ""), ("bob", "anything")):
+            with self.subTest(user=user, password=password):
+                c = self._serve({})
+                self.assertEqual(c.session_setup(user, password), smb.STATUS_SUCCESS)
+                self.assertEqual(c.tree_connect("games"), smb.STATUS_SUCCESS)
+                self.assertEqual(c.open("\\SECRET.BIN"), smb.STATUS_SUCCESS)
+
+    def test_password_set_refuses_blank_and_guest_logins(self):
+        for user, password in (("", ""), ("guest", ""), ("alice", "")):
+            with self.subTest(user=user, password=password):
+                c = self._serve({"alice": "secret"})
+                self.assertEqual(c.session_setup(user, password), smb.STATUS_LOGON_FAILURE)
+                self.assertEqual(c.tree_connect("games"), smb.STATUS_ACCESS_DENIED)
+
+    def test_launcher_passes_no_user_without_a_password(self):
+        # The app only adds --user when both a username and a password are set,
+        # so a card left as guest/blank (or a username with no password) still
+        # runs the guest path above.
+        sys.path.insert(0, _ROOT)
+        from launcher import servers
+        for values, expect_user in (({"username": "guest", "password": ""}, False),
+                                    ({"username": "alice", "password": ""}, False),
+                                    ({"username": "", "password": "x"}, False),
+                                    ({"username": "alice", "password": "x"}, True)):
+            with self.subTest(values=values):
+                base = {"games_folder": tempfile.gettempdir(), "share_name": "games", "port": 1025}
+                args = servers.SMBV1.build_argv(dict(base, **values))
+                self.assertEqual("--user" in args, expect_user, args)
+
     def test_guest_mode_is_unchanged(self):
         # No --user: the console path. No SESSION_SETUP is needed, as before.
         c = self._serve({})
