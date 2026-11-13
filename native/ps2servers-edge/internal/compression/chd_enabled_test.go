@@ -30,10 +30,9 @@ func TestCHDReadSeekEOFAndSize(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Both end where the reference ISO ends: the CD's two hunk-padding
+			// sectors are dropped using its track table.
 			wantSize := len(want)
-			if name == "test_cd.chd" {
-				wantSize = 1114112
-			}
 			if img.Size() != int64(wantSize) {
 				t.Fatalf("Size = %d, want %d", img.Size(), wantSize)
 			}
@@ -43,9 +42,6 @@ func TestCHDReadSeekEOFAndSize(t *testing.T) {
 			got, err := io.ReadAll(img)
 			if err != nil || len(got) != wantSize || !bytes.Equal(got[:len(want)], want) {
 				t.Fatalf("full decode differs: len=%d, err=%v", len(got), err)
-			}
-			if name == "test_cd.chd" && !bytes.Equal(got[len(want):], make([]byte, wantSize-len(want))) {
-				t.Fatal("CD hunk-padding sectors are not the expected zero bytes")
 			}
 			if _, err := img.Seek(0, io.SeekEnd); err != nil {
 				t.Fatal(err)

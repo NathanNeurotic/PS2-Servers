@@ -175,6 +175,13 @@ func (table *cdTrackTable) layout() (*cdLayout, error) {
 }
 
 func readCDTrackTable(path string) (cdTrackTable, os.FileInfo, error) {
+	return readCDTrackTableOpt(path, true)
+}
+
+// readCDTrackTableOpt with validate=false skips the raw-track-type and layout
+// checks, for callers that only need frame counts (a cooked MODE1 CD has a
+// usable table too).
+func readCDTrackTableOpt(path string, validate bool) (cdTrackTable, os.FileInfo, error) {
 	var table cdTrackTable
 	before, err := os.Lstat(path)
 	if err != nil {
@@ -276,8 +283,10 @@ func readCDTrackTable(path string) (cdTrackTable, os.FileInfo, error) {
 			return table, nil, fmt.Errorf("CD track numbers must be contiguous: %w", errUnsupportedCDCHD)
 		}
 	}
-	if _, err := table.layout(); err != nil {
-		return table, nil, err
+	if validate {
+		if _, err := table.layout(); err != nil {
+			return table, nil, err
+		}
 	}
 	after, err := os.Lstat(path)
 	if err != nil {

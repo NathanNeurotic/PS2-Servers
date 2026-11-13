@@ -49,6 +49,7 @@ from typing import Dict, List, Optional, Tuple
 
 # Compressed ISO support
 from compressed_iso import CompressedFileWrapper, ZsoFileWrapper, CsoFileWrapper, ChdFileWrapper, LIBCHDR_AVAILABLE
+from compressed_iso.chd import exact_cd_iso_size
 from compressed_iso.chd_cuebin import find_virtual_view, list_virtual_entries
 
 # Router status protocol. Encoding only -- see docs/ROUTER-STATUS.md.
@@ -432,6 +433,10 @@ def get_compressed_info(file_path: str) -> Optional[Tuple[int, str]]:
                     frames_per_hunk = hunk_size // _CD_FRAME_SIZE
                     total_hunks = (uncompressed_size + hunk_size - 1) // hunk_size
                     uncompressed_size = total_hunks * frames_per_hunk * 2048
+                    # Drop the zero padding chdman adds after the last track.
+                    exact = exact_cd_iso_size(file_path)
+                    if exact:
+                        uncompressed_size = exact
 
                 return (uncompressed_size, 'CHD')
             

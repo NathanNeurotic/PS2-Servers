@@ -249,13 +249,15 @@ class CompressedOverSmb1(unittest.TestCase):
         # 1003 MODE1_RAW sectors; chdman pads it to 1004 frames and 1008 in hunks.
         sectors = 1003
         expected = b"".join(i.to_bytes(4, "little") * 512 for i in range(sectors))
-        shutil.copy(os.path.join(_ROOT, "tests", "fixtures", "cd_chd", "synthetic-cd-1003.chd"),
-                    os.path.join(self.dvd, "CDGAME.chd"))
+        for fixture, name in (("synthetic-cd-1003.chd", "CDGAME"), ("synthetic-cd-cooked-1003.chd", "COOKED")):
+            shutil.copy(os.path.join(_ROOT, "tests", "fixtures", "cd_chd", fixture),
+                        os.path.join(self.dvd, name + ".chd"))
         conn = self._conn()
-        self.assertEqual(self._list(conn).get("CDGAME.iso"), len(expected))
-        status, fid = self._create(conn, "\\DVD\\CDGAME.iso")
-        self.assertEqual(status, smb.STATUS_SUCCESS)
-        self.assertEqual(self._read_all(conn, fid, len(expected) + 4096), expected)
+        for name in ("CDGAME", "COOKED"):
+            self.assertEqual(self._list(conn).get(name + ".iso"), len(expected))
+            status, fid = self._create(conn, "\\DVD\\" + name + ".iso")
+            self.assertEqual(status, smb.STATUS_SUCCESS)
+            self.assertEqual(self._read_all(conn, fid, len(expected) + 4096), expected)
 
 
 if __name__ == "__main__":
