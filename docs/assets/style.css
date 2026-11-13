@@ -1376,7 +1376,7 @@ dl.credits { margin: 0 0 8px; }
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 1px;
-  color: var(--ps-cyan);
+  color: #96d7e6;
   border: 1px solid rgba(83, 152, 181, 0.4);
   box-shadow: inset 0 0 8px rgba(83, 164, 181, 0.2);
 }
