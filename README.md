@@ -507,6 +507,10 @@ PS2 Servers builds on the following projects and contributions:
   **[udpbd-server](https://github.com/israpps/udpbd-server)** on GitHub (Rick's code,
   with CI), which is the reference we ported from.
 - **[Alex Parrado](https://github.com/parrado)** — the Windows port of udpbd-server.
+- **snapsapnap2 — [@snapsapnap2](https://github.com/snapsapnap2)** — proposed CHD over
+  SMBv1 and wrote the first version
+  ([#308](https://github.com/NathanNeurotic/PS2-Servers/pull/308)), which the opt-in
+  SMBv1 **Decompress CHD/CSO** option grew from.
 - **Aerosol** — tested UDPFS across Linux, Windows, and direct connections, identified the
   explicit-bind workaround, and isolated a shared-config line-ending issue affecting VMC paths.
 - **Ronnie Sahlberg — [@sahlberg](https://github.com/sahlberg)** — author of

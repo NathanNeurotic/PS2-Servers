@@ -14,6 +14,7 @@ changelog and a download table, not another copy of the operator manual.
 - Desktop: firewall removal stops servers only after the last confirm; the Library tab opens the shared setup guide and reports a missing Pillow instead of failing; dropdowns ignore the mouse wheel; the Terminal tab fits the window with one scroll bar.
 - Conformance: the Neutrino SMB check runs against usmb2 bf61d1d.
 - Credits: Ronnie Sahlberg for unfs4, usmb2 and libsmb2.
+- SMBv1: optional "Decompress CHD/CSO" serves Game.chd and Game.cso as Game.iso, read-only, using the UDPFS decoders. Off by default; not yet tested on a console. Idea and first version by [snapsapnap2](https://github.com/snapsapnap2) (#308).
 
 ### Earlier, in v0.9.2
 

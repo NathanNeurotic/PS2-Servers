@@ -120,6 +120,10 @@ In your loader's <b>Network Settings</b>:
 </ul>
 </div>
 
+<div class="callout info"><div class="h">CHD and CSO over SMBv1 (opt-in)</div>
+Tick <b>Decompress CHD/CSO</b> on the Desktop SMBv1 card, or pass <code>--enable-compression</code> to the Core script, and <code>Game.chd</code> / <code>Game.cso</code> are listed as <code>Game.iso</code> and decompressed as the console reads them. They are always read-only, and a real <code>Game.iso</code> beside them wins. ZSO is sent unchanged because OPL decodes it itself. The decoders are the same ones UDPFS and HTTP use. Off by default and not yet tested on a console. The SMBv2/SMBv3 server and Edge do not decompress over SMB.
+</div>
+
 <h2 id="smb2-smb3">2. SMB2 and SMB3 Authenticated Sharing</h2>
 <p>For modern OPL forks (such as RiptOPL with <b>SMB Version</b> set to SMB2/3 in its Network settings), PS2 Servers includes authenticated SMB2 (up to dialect 2.1) and SMB3 (up to dialect 3.0.2) server cards.</p>
 
