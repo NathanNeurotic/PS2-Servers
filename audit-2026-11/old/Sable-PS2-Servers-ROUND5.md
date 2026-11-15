@@ -1,0 +1,108 @@
+# Sable Audit — PS2-Servers — ROUND 5
+
+**Repo:** NathanNeurotic/PS2-Servers
+**Pin:** `c5f021c4d38698860f56b03498adc261dbb8d8dd` — **unchanged.** Live head re-verified this round: local HEAD == `git ls-remote` HEAD == refs/heads/main == the round-2/3/4 pin. No delta, no revalidations owed. Clone `git status` clean at start and at end of round.
+**Mode:** READ ONLY, per the standing audit rules. All builds/tests ran against a copy under `/tmp`; the clone was never written to.
+**Scope this round:** Round 4 §7's still-unread list, executed as assigned — (1) Go Edge internals below the surface reads of rounds 2–3, (2) Python remainders, (3) a complete per-area coverage accounting with the remaining first-party source read in size order, (4) a formal exhaustion verdict.
+**Result:** **2 new findings (PS2SERVERS-068, -069), 0 revisions.** Repo total now **69 findings (PS2SERVERS-001…069)**. Both new findings are in `internal/webui`; both were **executed** against the repo's own code (see §1). Everything else read this round was clean, including several candidate defects that dissolved under checking — those are recorded in §4 so they are not re-raised.
+
+**Executed vs READ tally, round 5:** 2 executed claim-groups (068 in full, including the systemd contrast case; 069 on the helper side — the Load switch side is definitional READ, see the finding). All other claims this round are READ. Nothing in this round is INFERRED except one explicitly-labelled non-finding in §4.
+
+---
+
+## 1. New findings
+
+### PS2SERVERS-068 / OpenWrt service-log snapshot ignores the line bound the package documents and the systemd path honours
+
+- **Category:** 4 (size / memory)
+- **Locations:** `native/ps2servers-edge/internal/webui/service.go:181-185` (`openwrtManager.ServiceLogs`); the contract it breaks at `service.go:58-78` (the `ServiceManager.ServiceLogs` doc and `maxServiceLogLines`); the honouring implementation at `service.go:206-211` (`systemdManager.ServiceLogs` via `clampLogLines`); the configured count originates at `cmd/ps2servers-edge/main.go` (`--log-lines`, default 1000) and reaches the manager through `internal/webui/api.go` (`HandleLogs`).
+- **Problem:** `openwrtManager.ServiceLogs(lines int)` never uses `lines`. It runs `logread -e ps2servers-edge` with no limit and returns every matching line in the router's ring buffer. The package states the opposite contract in its own comments: a snapshot rather than a follow, and "`maxServiceLogLines` bounds one snapshot, and therefore the memory a request can make this process hold" (500). The systemd implementation enforces exactly that via `clampLogLines`. So on OpenWrt — the memory-constrained platform the bound exists for — the bound does not apply: one dashboard request makes the process hold the entire filtered log history, however large the ring buffer is configured to be, and the operator's `--log-lines` setting is silently ignored in the direction of *more* memory.
+- **Evidence (EXECUTED):** the Edge module was copied to `/tmp` untouched and tested with a fake `logread` on `PATH` emitting 2,000 lines. `openwrtManager.ServiceLogs(5)` returned **2,000 lines**. Under the identical rig, `systemdManager.ServiceLogs(5)` returned exactly **5** (fake `journalctl` honouring `-n`), proving the rig is sound and the difference is the missing limit on the OpenWrt path.
+- **Fix (in words):** Pass the clamped count to `logread` (it accepts a line-limit argument), reusing the existing `clampLogLines` — the same single call the systemd path already makes. Nothing new is introduced.
+- **Benefit:** The documented per-request memory bound becomes true on the platform it was written for; snapshot size becomes operator-controllable as the `--log-lines` flag promises.
+- **Effort:** S · **Risk:** Low · **Confidence:** High (EXECUTED)
+
+### PS2SERVERS-069 / UCI boolean parsing is split in one Load function — sixteen keys misread the UCI vocabulary, including all three `read_only` keys (fail-open)
+
+- **Category:** 6 (bug; security-relevant direction on `read_only`)
+- **Locations:** `native/ps2servers-edge/internal/webui/config_uci.go` — the full-vocabulary helper `uciBool` at :12-19, used exactly once (`main.udp_batch`, :95); the narrow expression `val == "1" || val == "true"` used for the other sixteen boolean keys in the same `Load` switch, including `main.read_only` (:84), `smb.read_only` (:138), `udpbd.read_only` (:192), and the four `enabled` keys (`main`, `smb`, `udpbd`, `webui` sections). Cross-component counterpart: `packaging/openwrt/files/ps2servers-edge.init`, where **every** boolean is read through OpenWrt's `config_get_bool`, which accepts the full UCI vocabulary.
+- **Problem:** One file format, two parsers, in one function. UCI's boolean vocabulary — the one `config_get_bool` implements and `uci set` happily stores — is `1/on/true/yes/enabled` (and their negatives). The binary's own `Save` writes only `1`/`0`, so the divergence is invisible until a config is hand-edited or generated by provisioning tooling (the schema in `internal/webui/schema.go` exists precisely so tooling can generate this config). Then the two consumers of the same file disagree: the init script starts the services honouring `option read_only 'on'`, while the dashboard's `Load` reads the same value as **false** — case-sensitively, so even `TRUE` fails — displays the share as writable, and the next dashboard Save writes `read_only '0'`, silently stripping a protection the running service was honouring, with no operator action that mentions read-only at all. The same misread hits the four `enabled` keys in the opposite direction (dashboard shows a service disabled while procd runs it). The one key that uses `uciBool` round-trips correctly, which is the proof the helper exists for exactly this purpose and the split is an oversight, not a policy.
+- **Evidence (EXECUTED + READ):** EXECUTED — `uciBool` was run against `1/on/true/yes/enabled/ON/True` and accepts all of them; the narrow expression was run against the same set and maps `on/yes/enabled/TRUE` to false (`read_only=on → false`, fail-open). READ — the sixteen narrow expressions and the single `uciBool` use are the `Load` switch itself; `Load` cannot be executed here because it shells to `/sbin/uci`, which does not exist in this environment (carried in §5 as un-executable-here). The claim about the switch is definitional from the expressions in the file.
+- **Fix (in words):** Use the existing `uciBool` for every boolean key in the `Load` switch and delete the sixteen repeated narrow expressions. The file shrinks; no new helper, no new behaviour beyond agreeing with the init script and with the one key that already parses correctly.
+- **Benefit:** Dashboard and init script can no longer disagree about the config they share; a read-only setting can no longer be silently removed by an unrelated dashboard save.
+- **Effort:** S · **Risk:** Low · **Confidence:** High (EXECUTED + READ)
+
+---
+
+## 2. Task 1 — Go Edge internals (implementations, not surfaces)
+
+Read in full this round: `internal/udpfs/transfer.go` (251) and `metrics.go` (205) — the window/ACK machinery mirrors the Python posture with no divergence found; the metrics counters are atomic with coherent last-receive publication. The whole non-test `internal/webui` package (webui.go 298, api.go 461, config.go 264, config_json.go 53, config_uci.go 323, schema.go 194, service.go 350, logbuffer.go 97, embed.go 6) — heavily hardened (constant-time auth comparison, generated password on insecure bind, CSRF content-type / Sec-Fetch-Site guards, 64 KiB body cap, symlink-resolving browse containment, UCI values passed as argv never as a batch stream, failed-save revert); the only defects are -068/-069. `internal/smb` (server.go 745, wire.go 263, handlers.go 902) — 128 KiB message cap, 16-connection cap, per-connection caps with evict-oldest (searches 16, open files 64, trees 16). `internal/udpbd` (server.go 555, protocol.go 104). `internal/sessionstats/sessionstats.go` (266) and `internal/statuslistener/listener.go` (108) — see §4 for the nil-receiver questions these settle. `internal/logging/logging.go` (79) and `internal/memory/budget.go` (135) — clean. `cmd/ps2servers-edge/main.go` (548) read end-to-end for flag wiring: every flag is validated at the boundary it can hurt (sector size multiple-of-512 and bounded, compression cache bounded against `MaxCacheBlocks`, peer-timeout 1m–24h, tx-delay NaN/Inf/negative rejected rather than ignored, `--metrics-period` parsed only when metrics are on and the schema says so via `applies_when`); env fallbacks scrub NaN/Inf/negatives. No wiring defect found — no flag is accepted by `cmd/` and dropped or reinterpreted by its consumer.
+
+## 3. Task 2 — Python remainders
+
+- **`udpfs_server/udpfs_server.py` stall/metrics machinery** (`_sweep_idle_sessions`, `_report_stall` :984-1015, `_emit_metrics` :1016-1033, `console_answers_arp` :585-618): read in full. The stall latch is per-episode and resets on the next request (:1702); the ARP probe runs on a daemon thread, discards its verdict if the session resumed meanwhile, and swallows thread-exhaustion. The IP interpolated into the Windows neighbour query comes from the kernel-formatted datagram source address, not from payload text. The `(?<!UN)REACHABLE` lookbehind correctly keeps `UNREACHABLE` from matching as reachable. `_emit_metrics` is period-gated and trivial. **No finding.**
+- **`launcher/session_stats.py`** (131): read in full. Field-for-field the same contract as the Go `internal/sessionstats` (identical `KINDS` order, max 64 clients, 60 s idle, LRU eviction, `ended=idle|evicted|stopped`), matching the byte-identical SESSION line documented in the Go package header. **No finding.**
+- **`smb2_server/smb2_auth.py`** (324): read in full, beyond the Authenticator contract region read in round 4 — the in-repo MD4 (RFC 1320 rounds, correct padding), `ntowfv2` (uppercased user, domain as-given, per MS-NLMP), proof/LMv2/session-base-key derivations, fail-closed construction (`open()` is the only no-password path; an empty user dict raises), unknown-user work equalisation, `compare_digest` throughout, CSPRNG challenges, client timestamp deliberately unenforced (battery-less console clocks) with the reasoning recorded. Round 3 already executed the published NT-hash vector against this code. **No finding.**
+
+## 4. Examined and cleared this round (do not re-raise)
+
+- **Nil-receiver calls in `internal/smb` / `internal/udpbd`:** `s.sessions.RunExpiry/Stop` and `s.status.Close()` are called unconditionally; both target packages are explicitly nil-safe by design (sessionstats' package doc states "A nil *Stats is safe to call" and every method guards; `statuslistener.Listener.Close` is documented "Safe on a nil receiver"). Not a defect.
+- **`genericManager.Restart` calls `m.log.Info` unguarded** (service.go:236), unlike `openwrtManager`'s guarded call: dropped as a finding — the only in-repo constructor path (`cmd/` → `webui.New` → `DetectServiceManager`) always passes a real logger, so there is no reachable trigger; a consistency nit, not a concrete problem.
+- **`HandleLogs` writes live SSE lines unsanitised** while backlog lines go through `sanitizeSSE`: dissolved — `logbuffer.Write` splits on `\n`, so a channel line can never contain `\n`; the residual bare-`\r` case can only truncate a displayed log line under SSE parsing, never inject an event. Cosmetic at worst; not filed.
+- **UDPBD write path:** dispatch is single-threaded from the serve loop, so the write-state snapshot pattern is safe; RDMA write sizes are bounded by the receive buffer and clamped to the declared remainder; the read-only silent no-op at the storage layer is coherent (completion reports −1). Not defects.
+- **SMB `writeAndX` re-opens by path** instead of using the handle's file object, and tree-connect evicts before share validation: both examined; directory handles fail safely at open with AccessDenied, and eviction is scoped to the caller's own connection. Not defects.
+- **`native/ra_watch_probe.c` `compile_node` recursion** (read in full this round, 373 lines): recursion depth follows modified-memref chains with no explicit depth cap, but the memref graph is built by rcheevos' own linear parser, whose parents are always previously-created operands — a cycle has no producer path. INFERRED safe; not filed. The function's explicit bounds (4,096 watches, 128 nodes, capacity checked before serialisation, address range validated) are all present.
+- **`conformance/ra_dependency/progress_dates.c`** contains an obvious synthetic fixture credential for its offline HTTP stub. It is a test double in a conformance harness, not a secret; not reported as one.
+
+---
+
+## 5. Task 3 — Complete per-area coverage table (rounds 1–5)
+
+First-party source totals ≈ 53,094 lines of Python + Go (non-test, non-vendor, measured this round), plus 373 lines of first-party C and the packaging shell.
+
+| Area | Coverage | Round(s) |
+|---|---|---|
+| Python servers — `udpfs_server/` (incl. `ps2servers_core.py`, `compressed_iso/`, `router_status.py`) | **Line-read in full**, incl. the stall/metrics machinery this round; UDPFS/UDPBD per-opcode wire tables closed in round 3; send/window paths in round 4 | R1–R5 |
+| Python servers — `smbv1_server/smbserver_opl.py` | Line-read in full (round 1 + round 2 :179-1550) | R1, R2 |
+| Python servers — `smb2_server/` (server, wire, crypto, spnego, srvsvc, paths, auth) | Line-read in full; auth completed this round; crypto in round 4 | R1–R5 |
+| Python servers — `nfs4_server/`, `http_server/`, `udpbd_server/`, `ps2servers.py` | Line-read in full | R1, R2 |
+| Launcher — all modules except `gui.py` | Line-read in full across rounds (`main.py`, `servers.py`, `serve.py`, `config.py`, `netinfo.py`, `single_instance.py`, `session_stats.py` this round, library/RA modules R1–R2, `raw_storage.py` + `virtual_exfat.py` R4) | R1–R5 |
+| Launcher — `gui.py` (3,786) | **Line-read in full as of this round.** R1: class/method map, log/status pumps, direct-link family (:1794-2395), `_append_log`. R2: startup path (:950-1416), pumps (:3025-3115), all subprocess/threading call sites by grep + targeted reads. R5: the remainder — :1-414 (helpers, hints), :415-949 (`ServerCard`), :1417-1793 (tabs/About/IP), :2396-3024 (server start + Windows setup flows), :3116-3786 (settings, config save/restore, shutdown, tray) | R1, R2, R5 |
+| Launcher — `directlink.py` (1,927) | **Line-read in full as of this round** (R1: :1-613 method map + OS enumeration; R5: :614-1927 — subnet planning, rehome, elevated adapter configure/restore, DHCP responder). No finding: the responder's containment (single-MAC tripwire, reply token bucket, silence-instead-of-NAK, wildcard-mode subnet broadcast) is the most carefully argued code in the repo | R1, R5 |
+| Go Edge — `internal/udpfs`, `internal/protocol`, `internal/filesystem`, `internal/session` | Handler-level full read for the round-3 opcode tables; `transfer.go`/`metrics.go`/`status.go` in full R4–R5; `session.go` in full R4 | R3, R4, R5 |
+| Go Edge — `internal/webui`, `internal/smb`, `internal/udpbd`, `internal/sessionstats`, `internal/statuslistener`, `internal/logging`, `internal/memory`, `internal/compression` | **Implementations line-read in full** (surfaces/tables were R2–R3; compression in full R4; the rest R5) | R2–R5 |
+| Go Edge — `cmd/ps2servers-edge/main.go` | Line-read in full, flag wiring end-to-end | R5 |
+| First-party C — `native/ra_watch_probe.c` | Line-read in full | R5 |
+| Conformance — probes (`*.c.in` ×4, `neutrino_nfs/probe.c`, `ra_dependency/*.c` ×3, `ra_dependency/*.py` ×2, fixtures, READMEs) | **Line-read in full this round** (698 lines of C + 82 of Python checks). They are hash-verified-upstream injection harnesses; no finding | R5 |
+| Conformance — Python runners (`udpfs_parity.py` 743, `integration/*/run.py` ×5 ≈ 1,200, `*_probe.py` ×3 ≈ 576) | Sampled (R1); not line-read. Test-harness code | R1 |
+| Packaging — OpenWrt init (265) + shipped config (92), Makefile, systemd units/env, Docker, OpenRC | Init + config line-read this round (they are the second consumer of the UCI config; see -069); units/env inventoried R1–R2 | R1, R2, R5 |
+| `tools/` (8 files ≈ 1,166 lines) + `build/` (4 files ≈ 596 lines) | **Line-read in full this round.** No finding (the Zig toolchain download in `build_achievements.py` is SHA-256-verified before extraction; `build_libchdr.py` pins its commit explicitly) | R5 |
+| `.github/` (11 files ≈ 2,087 lines) | Inventoried; release workflows read where findings touched them (R1) and via `tools/check_release_compliance.py`'s enforced requirements (R5). Not exhaustively line-read | R1, R5 |
+| Tests — `tests/` (128 files; Python ≈ 27,441 lines) + Edge Go tests (≈ 9,564 lines) | Sampled in every round and **executed** (suites run R1/R2/R4; Edge package tests R2/R4; the R5 execution rig ran the webui package from a copy). Not exhaustively line-read — test code, audited by running | R1–R5 |
+| `vendor/retroachievements/` (115 files, ≈ 52,963 lines C) | Inventoried only. Pinned third-party (rcheevos + xerabora client); correctness is covered by the repo's own byte-parity conformance checks against pinned baselines, not by line-reading upstream | R1 |
+| `docs/` (65 files) | Inventoried; key documents read (editions, protocol docs where findings touched them). Prose not line-read | R1–R4 |
+
+## 6. Task 4 — Formal verdict
+
+**PS2-Servers is EXHAUSTED at first-party source level in this environment.**
+
+Every first-party source file — the five Python server packages, the whole launcher including the two files that survived four rounds partially read (`gui.py`, `directlink.py`), every Go Edge package including `cmd/`, the one first-party C file, the conformance probes, and the `tools/` + `build/` scripts — has now been line-read at the round-5 pin, and the per-opcode, per-handler and per-flag wiring passes are closed. The two findings this round are both one-argument/one-helper fixes in a single file pair; nothing found in rounds 4–5 suggests an unread pocket of first-party source remains.
+
+The residue is exact, and it is not source:
+
+- **Not line-read, by class (not by oversight):** the test suites (≈ 37,000 lines — sampled and executed instead, which is the stronger check for test code); the conformance Python runners (≈ 2,519 lines of harness — sampled); `vendor/retroachievements` (≈ 52,963 lines of pinned third-party C — inventoried; byte-parity-checked by the repo's own conformance gates); `docs/` prose (65 files — inventoried); `.github` workflows beyond the release pair (inventoried).
+- **Un-executable here, not unread:** live UDP wire interop (this sandbox blocks UDP `sendto`; the repo's designed substitute, `tools/replay_neutrino_udpfs.py`, compiles the real Neutrino client C and drives the real Python worker in-process, and runs in CI — it was read this round, not run); CHD execution (no libchdr in this VM — `build/build_libchdr.py` builds it from a pinned commit in CI; carried as un-auditable-here since round 1); the OpenWrt UCI backend's `Load`/`Save` execution (`/sbin/uci` does not exist here — code read, helper semantics executed, see -069); Windows-only execution paths (PowerShell adapter/DHCP machinery in `directlink.py`, elevation in `windows_setup.py` — read in full, runnable only on Windows); Tk GUI runtime behaviour (no display/Tk in this VM — `gui.py` read in full; the repo carries layout tests under `tests/`).
+- **Hardware/console behaviour:** nothing in any of the five rounds is verified on a PS2 or a router. Wire-level claims rest on source reading, the repo's conformance fixtures, and in-process execution; whether a console or an OpenWrt board behaves as the code intends remains, as in every prior round, a hardware question.
+
+A round 6 for this repo would be productive only after the pin moves, or if the user wants the ledgered non-source classes (tests, runners, workflows) line-read for completeness — the expected yield is low and this report does not recommend it on LESS-NOT-MORE grounds.
+
+## 7. Files not read (final ledger)
+
+- `tests/**` — 128 files, ≈ 27,441 lines Python + ≈ 9,564 lines Go tests: sampled and executed, not line-read.
+- `conformance/integration/udpfs_parity.py` (743), `conformance/integration/*/run.py` (5 files, ≈ 1,200), `conformance/integration/http_probe.py` (219), `udpbd_probe.py` (181), `udpfs_probe.py` (176): sampled, not line-read.
+- `vendor/retroachievements/**` — 115 files, ≈ 52,963 lines: inventoried only (pinned third-party).
+- `docs/**` — 65 files: inventoried; key documents read; prose not line-read.
+- `.github/**` beyond the release workflows — inventoried, not line-read.
+- Binary/image assets (icons, banner PNG, theme assets): inventoried, not applicable to a source audit.
+
+*End of Round 5 report. Auditor: Sable. Repo left untouched; `git status` clean at `c5f021c4d38698860f56b03498adc261dbb8d8dd`.*
