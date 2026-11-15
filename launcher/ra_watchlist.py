@@ -20,16 +20,17 @@ class WatchList:
     count: int
     direct_bytes: int
     nodes: int
+    node_stride: int = 8
 
     @property
     def snapshot_sizes(self):
-        """Allow older direct-only consoles and consoles with chain support."""
-        return frozenset((self.direct_bytes, self.direct_bytes + self.nodes * 8))
+        """Required chain values cannot be replaced by a direct-only prefix."""
+        return frozenset((self.direct_bytes + self.nodes * 8,))
 
 
 def validate_watchlist(data):
-    """Validate a complete locally generated RAWL file and optional RANL tail."""
-    if not isinstance(data, bytes) or not 20 <= len(data) <= 17432:
+    """Validate RAWL with an exact RANL or RAN2 tail; never a partial plan."""
+    if not isinstance(data, bytes) or not 20 <= len(data) <= 17944:
         raise ValueError("Invalid watch-list length or type")
     magic, version, count, direct_bytes = struct.unpack_from("<4I", data)
     if magic != 0x4C574152 or version != 1 or not 1 <= count <= 4096:
@@ -41,20 +42,25 @@ def validate_watchlist(data):
     if any(size not in (1, 2, 4) for size in sizes) or sum(sizes) != direct_bytes:
         raise ValueError("Invalid direct-value dimensions")
     nodes = 0
+    stride = 8
     if end != len(data):
         if len(data) - end < 8:
             raise ValueError("Truncated pointer-tail header")
         node_magic, nodes = struct.unpack_from("<2I", data, end)
-        if node_magic != 0x4C4E4152 or not 1 <= nodes <= 128 or end + 8 + nodes * 8 != len(data):
+        stride = 12 if node_magic == 0x324E4152 else 8
+        if (node_magic not in (0x4C4E4152, 0x324E4152) or not 1 <= nodes <= 128
+                or end + 8 + nodes * stride != len(data)):
             raise ValueError("Invalid pointer-tail dimensions")
         for index in range(nodes):
-            word, _ = struct.unpack_from("<2I", data, end + 8 + index * 8)
+            word, = struct.unpack_from("<I", data, end + 8 + index * stride)
             parent, from_node, size = word & 0xFFF, (word >> 12) & 1, (word >> 13) & 7
-            if size not in (1, 2, 4) or parent >= (index if from_node else count):
+            allowed = 0x07FFFFFF if stride == 12 else 0xFFFF
+            if (word & ~allowed or ((word >> 21) & 63) > 32
+                    or size not in (1, 2, 4) or parent >= (index if from_node else count)):
                 raise ValueError("Invalid pointer dependency or read size")
     if not 1 <= direct_bytes <= direct_bytes + nodes * 8 <= MAX_VALUES:
         raise ValueError("Snapshot exceeds protocol capacity")
-    return WatchList(data, count, direct_bytes, nodes)
+    return WatchList(data, count, direct_bytes, nodes, stride)
 
 
 def validate_orbit_watchlist(data):

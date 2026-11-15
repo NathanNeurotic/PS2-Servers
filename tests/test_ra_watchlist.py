@@ -26,7 +26,7 @@ class WatchValidationTests(unittest.TestCase):
                          (2, 6, frozenset({6})))
         nodes = [(4 << 13, 0xFFFFFFFF), ((2 << 13) | (1 << 12), 4)]
         chained = validate_watchlist(watch_file(entries, nodes))
-        self.assertEqual((chained.nodes, chained.snapshot_sizes), (2, frozenset({6, 22})))
+        self.assertEqual((chained.nodes, chained.snapshot_sizes), (2, frozenset({22})))
         # Console returns zero outside RAM; do not reject an otherwise valid list.
         self.assertEqual(validate_watchlist(watch_file([0x10000000])).direct_bytes, 1)
 
@@ -41,6 +41,22 @@ class WatchValidationTests(unittest.TestCase):
         for data in invalid:
             with self.subTest(length=len(data)), self.assertRaises(ValueError):
                 validate_watchlist(data)
+
+    def test_ran2_stride_dimensions_and_missing_node_region(self):
+        def encoded(word=(1 << 13) | (4 << 16) | (4 << 21), count=1):
+            return (watch_file([0x10080000]) + struct.pack("<2I", 0x324E4152, count)
+                    + struct.pack("<3I", word, 0x100000, 4))
+        valid = encoded()
+        watch = validate_watchlist(valid)
+        self.assertEqual((watch.node_stride, watch.nodes, watch.snapshot_sizes), (12, 1, frozenset({9})))
+        for invalid in (valid[:-1], valid + b"x", encoded(count=2),
+                        encoded(word=1 << 27 | 1 << 13), encoded(word=33 << 21 | 1 << 13),
+                        encoded(word=1 << 12 | 1 << 13), encoded(word=3 << 13)):
+            with self.subTest(data=invalid.hex()), self.assertRaises(ValueError):
+                validate_watchlist(invalid)
+        session = WatchSession()
+        session.install("a" * 32, "SLUS_210.65", valid)
+        self.assertIsNone(session.feed(packet(b"\x00", count=1)))
 
     def test_invalid_pointer_graphs_and_snapshot_capacity(self):
         """Forward/self references and oversized snapshots cannot be served."""

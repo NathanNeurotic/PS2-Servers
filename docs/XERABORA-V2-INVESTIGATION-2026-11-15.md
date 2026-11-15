@@ -1,8 +1,49 @@
 # xeRAbora 2.0.0 compatibility investigation
 
 Investigation date: 2026-11-15. Implementation handoff: Monday, 2026-11-16.
-This PR records findings and acceptance criteria; it does not update runtime
-code, dependency pins or exported console loaders.
+This document retains the original findings and records the first implementation
+checkpoint below. Dependency pins and exported console loaders are unchanged.
+
+## First implementation checkpoint
+
+The owned-runtime path now has explicit `opl-v2` plan derivation, 12-byte RAN2
+validation/evaluation, enlarged file/IPC limits, and required complete node
+snapshot regions. The native compiler adapts the tagged upstream expression
+compiler while preserving our whole-set RAM and expression qualification.
+Its existing export continues producing RANL for exactly representable nodes;
+indexed plans are refused by that legacy export instead of silently truncated.
+
+Select **Use PS2-Servers native runtime** and **Console read support: xeRAbora 2 /
+updated RiptOPL**, or invoke the achievement service with
+`--owned-runtime --mode xerabora --watch-format ran2`. Rebuild the owned library
+first. Update the console ELF and re-run every played game's support check.
+Defaults retain RANL. Caduceus and ORBIT remain constrained to their existing
+profiles, and the bundled managed xeRAbora service has not been migrated.
+
+The six legacy native/owned conformance vectors still match byte-for-byte.
+New offline fixtures cover tagged-v2 byte/nibble/bit-index plans, constant-base
+reads, multi-node evaluation, malformed tails, missing node regions and invalid
+profile selection. Upstream MIT notices and adapted-compiler provenance are
+included with the owned library. See the PR description for final check results.
+
+Still open: bundled managed-engine migration, v2 artifact export/pairing,
+cache-generation UX, diagnostics/test-mode/Discord parity, cross-platform package
+acceptance and physical-console testing. This is an opt-in implementation
+checkpoint, not a claim that all published PS2-Servers paths support v2.
+
+### Checkpoint validation
+
+- The 201-test `test_ra_*.py` host group passed with three skips. Native
+  evaluator and supervisor focused tests also passed after final serialization
+  and profile-selection edits. Tests use synthetic accounts and mocked network
+  responses; they do not submit real awards.
+- The legacy conformance command still matches all six managed and owned
+  wire vectors byte-for-byte. New tests cover v2 indexed/constant/nested plans,
+  whole-set rejection and the legacy ABI's exact output capacity.
+- The final owned Windows library built with GCC; its license and provenance
+  artifacts were staged. This is not a frozen application/package acceptance.
+- `git diff --check` and Python syntax checks passed. Console/gameplay,
+  cross-platform packaging and live-account acceptance remain untested.
 
 ## Decision
 
@@ -210,9 +251,10 @@ source provenance before changing the export pin.
   loss/reconnect/game switch, with matching refreshed plans. Record exact
   binaries and evidence; emulation/host fixtures are separate.
 
-No target build, emulator run, physical-console run, live login, award or loader
-download was performed here. Implementation and hardware acceptance remain
-open. Cross-repository coordination: [RiptOPL investigation](https://github.com/NathanNeurotic/RiptOPL/blob/docs/xerabora-v2-investigation-20261115/docs/XERABORA-V2-INVESTIGATION-2026-11-15.md).
+The original investigation performed no target build, emulator run,
+physical-console run, live login, award or loader download. The implementation
+checkpoint above adds host validation; hardware acceptance remains open.
+Cross-repository coordination: [RiptOPL PR #430](https://github.com/NathanNeurotic/RiptOPL/pull/430).
 
 The checked-in offline probe was run successfully against the exact source
 revisions above and reproduced the table and validator rejection.

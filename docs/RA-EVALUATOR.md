@@ -11,7 +11,8 @@ desktop application for this path. This is an intermediate implementation for
 `librcheevos-owned.dylib` or `librcheevos-owned.so`. It shares the existing
 pinned native toolchain selection and target architecture. Sources are only
 rcheevos runtime, utility/compatibility and MD5 files plus our small public-API
-watch probe in `native/ra_watch_probe.c`. The build preserves the
+watch probe in `native/ra_watch_probe.c`. Its indexed-node compiler adapts
+xeRAbora v2.0.0 and uses the pinned rcheevos memref structures. The build preserves both upstream
 MIT license and records the exact dependency pin in
 `OWNED-EVALUATOR-SOURCES.json`. Normal package builds stage this library.
 The provenance file also records the watch probe's source hash.
@@ -28,7 +29,8 @@ pinned `rc_runtime.h`; native fixtures exercise the actual callback ABI.
   instance after account, game or watch-list replacement. Explicit `close()`
   or context-manager exit releases its native runtime.
 - Direct values and pointer `(address, value)` pairs are decoded from validated
-  RAWL/RANL data. Reads must fit inside one watched entry; direct reads take
+  RAWL/RANL or RAWL/RAN2 data. Required node regions must be present; direct-only
+  snapshots cannot substitute for a pointer-bearing plan. Reads must fit inside one watched entry; direct reads take
   precedence over pointer pairs. A zero pointer-pair address is absent memory.
 - Missing reads reject the entire frame, suppress its events and rebuild the
   runtime. This conservative behavior may defer otherwise valid achievements;

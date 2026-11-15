@@ -155,13 +155,16 @@ def derive_direct_watch(library, qualified, *, profile="opl"):
     """
     if not isinstance(qualified, QualifiedSet) or not qualified.remaining:
         raise ValueError("No remaining achievement definitions")
-    if profile not in ("opl", "orbit-v1.0.2", "caduceus"):
+    if profile not in ("opl", "opl-v2", "orbit-v1.0.2", "caduceus"):
         raise ValueError("Invalid watch profile")
     lib = ctypes.CDLL(str(library))
     memory_limit = 2 * 1024 * 1024 if qualified.context.console_id == 12 else 32 * 1024 * 1024
     memory_low = 0 if qualified.context.console_id == 12 else 0x80000
 
-    builder = getattr(lib, "ps2servers_build_watchlist", None)
+    builder = getattr(lib, "ps2servers_build_watchlist_v2" if profile == "opl-v2"
+                      else "ps2servers_build_watchlist", None)
+    if profile == "opl-v2" and builder is None:
+        raise ValueError("RAN2 profile requires a rebuilt owned evaluator library")
     if builder is not None:
         expressions = [expression.encode("ascii") for _, expression in qualified.definitions]
         array_type = ctypes.c_char_p * len(expressions)

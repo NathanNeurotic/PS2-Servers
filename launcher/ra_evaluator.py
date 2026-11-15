@@ -149,7 +149,7 @@ class Evaluator:
         if len(values) > self.watch.direct_bytes:
             start = 16 + 4 * self.watch.count + 8
             for index in range(self.watch.nodes):
-                word, = struct.unpack_from("<I", self.watch.data, start + 8 * index)
+                word, = struct.unpack_from("<I", self.watch.data, start + self.watch.node_stride * index)
                 address, = struct.unpack_from("<I", values, offset)
                 size = (word >> 13) & 7
                 if address:

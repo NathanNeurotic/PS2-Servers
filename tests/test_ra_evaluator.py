@@ -211,10 +211,38 @@ class EvaluatorTests(unittest.TestCase):
     def test_missing_pointer_values_never_trigger_zero_condition(self):
         watch = watch_file([0x40001000], [(1 << 13, 0x4)])
         runtime = self.evaluator("I:0xX001000_0xH000004=0", watch)
-        missing = self.frame(runtime, struct.pack("<I", 0x2000), 0)
-        self.assertFalse(missing.accepted)
-        self.assertIn((0x2004, 1), missing.missing)
-        self.assertFalse(missing.triggered)
+        with self.assertRaises(ValueError):
+            self.frame(runtime, struct.pack("<I", 0x2000), 0)
+
+    def test_v2_indexed_plan_and_multinode_evaluation(self):
+        # Matches the tagged upstream compiler, including high-nibble selection.
+        for operand, word in (("H", 0x2000), ("U", 0x842000), ("M", 0x202000)):
+            expression = "I:0x{}080000*4_0xH080000=1".format(operand)
+            qualified = self.qualified([expression])
+            data = derive_direct_watch(self.library, qualified, profile="opl-v2")
+            self.assertEqual(data, struct.pack("<10I", 0x4C574152, 1, 1, 1,
+                                              0x10080000, 0x324E4152, 1, word, 0x80000, 4))
+            with self.assertRaises(ValueError):
+                derive_direct_watch(self.library, qualified)
+
+        expression = "I:0xX080000_I:0xX000004_0xH000008=1"
+        data = derive_direct_watch(self.library, self.qualified([expression]), profile="opl-v2")
+        runtime = Evaluator(self.library, {10: expression}, data, 1)
+        self.addCleanup(runtime.close)
+        def values(value):
+            return struct.pack("<5I", 0x81000, 0x81004, 0x82000, 0x82008, value)
+        self.assertFalse(runtime.evaluate(values(0), generation=1, sequence=0).triggered)
+        self.assertEqual(runtime.evaluate(values(1), generation=1, sequence=1).triggered, (10,))
+        with self.assertRaises(ValueError):
+            runtime.evaluate(struct.pack("<I", 0x81000), generation=1, sequence=2)
+
+    def test_v2_constant_base_and_unsupported_expressions(self):
+        data = derive_direct_watch(self.library, self.qualified(["I:4_0xH080000=1"]), profile="opl-v2")
+        self.assertEqual(data, struct.pack("<5I", 0x4C574152, 1, 1, 1, 0x10080004))
+        for expression in ("I:d0xX080000_0xH000004=1", "I:0xX080000/3_0xH000004=1",
+                           "I:0xX080000&5_0xH000004=1", "I:4_0xH07FFF8=1"):
+            with self.subTest(expression=expression), self.assertRaises(ValueError):
+                derive_direct_watch(self.library, self.qualified([expression]), profile="opl-v2")
 
     def test_sequence_wrap_and_invalid_input_leave_runtime_usable(self):
         runtime = self.evaluator()
@@ -291,6 +319,18 @@ class EvaluatorTests(unittest.TestCase):
         node_w, node_off = struct.unpack_from("<2I", data_single, 28)
         self.assertEqual((node_w, node_off), (0x2000, 4))
         self.assertEqual(len(data_single), 36)
+
+        # Preserve the legacy ABI's output capacity, without an intermediate larger file.
+        lib = ctypes.CDLL(str(self.library))
+        legacy = lib.ps2servers_build_watchlist
+        legacy.argtypes = [ctypes.POINTER(ctypes.c_char_p), ctypes.c_uint32,
+                           ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32]
+        legacy.restype = ctypes.c_int
+        definitions = (ctypes.c_char_p * 1)(b"I:0xX080000_0xH000004=1")
+        output = ctypes.create_string_buffer(b"z" * 40, 40)
+        self.assertEqual(legacy(definitions, 1, 0x80000, 0x2000000, output, 36), 36)
+        self.assertEqual(output.raw[:36], data_single)
+        self.assertEqual(output.raw[36:], b"z" * 4)
 
         # Full evaluator trigger test with pointer pair
         evaluator = Evaluator(self.library, {10: "I:0xX080000_0xH000004=1"}, data_single, 1)

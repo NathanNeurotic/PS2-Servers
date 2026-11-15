@@ -149,7 +149,8 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
             close_owner()
             return 1
 
-    profile_mode = "caduceus" if args.mode == "caduceus" else "opl"
+    profile_mode = "caduceus" if args.mode == "caduceus" else (
+        "opl-v2" if args.watch_format == "ran2" else "opl")
     worker = AccountWorker(str(profile))
     active_context = None
     context_lock = threading.Lock()
@@ -338,11 +339,15 @@ def main(argv=None):
     parser.add_argument("--lan-viewer", action="store_true")
     parser.add_argument("--owned-runtime", action="store_true",
                         help="Run the PS2-Servers native runtime (Issue #223 preview)")
+    parser.add_argument("--watch-format", choices=("ranl", "ran2"), default="ranl",
+                        help="RAN2 requires --owned-runtime, a v2-capable console and refreshed game checks")
     parser.add_argument("--login", type=str, metavar="USERNAME",
                         help="Sign in with RetroAchievements username and password prompt")
     parser.add_argument("--import-credentials", action="store_true",
                         help="Import credentials from existing managed profile with explicit consent")
     args = parser.parse_args(argv)
+    if args.watch_format == "ran2" and (not args.owned_runtime or args.mode != "xerabora"):
+        parser.error("RAN2 currently requires --owned-runtime --mode xerabora; Caduceus retains its pinned format")
     if args.owned_runtime:
         lib = library_path()
         if not lib.is_file():

@@ -131,6 +131,17 @@ class SupervisorTests(unittest.TestCase):
         self.assertIn("--mode", args_caduceus)
         self.assertIn("caduceus", args_caduceus)
 
+        self.assertEqual(_achievements_argv({"mode": "xerabora", "owned_runtime": True,
+                                             "watch_format": "ran2"}),
+                         ["--mode", "xerabora", "--owned-runtime", "--watch-format", "ran2"])
+        self.assertIn("ran2", _achievements_argv({"owned_runtime": True,
+                                                "watch_format": "xeRAbora 2 / updated RiptOPL"}))
+        for values in ({"watch_format": "ran2"}, {"watch_format": "bad"},
+                       {"mode": "caduceus", "games_folder": str(self.profile),
+                        "owned_runtime": True, "watch_format": "ran2"}):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                _achievements_argv(values)
+
     def test_retroachievements_field_registry(self):
         owned_field = next((f for f in RETROACHIEVEMENTS.fields if f.key == "owned_runtime"), None)
         self.assertIsNotNone(owned_field)

@@ -21,12 +21,12 @@ def valid_identification_result(result):
     from launcher.ra_sets import QualifiedSet, SetContext
     if not isinstance(result, IdentificationResult):
         return False
-    if not ((result.watch_file is None or (type(result.watch_file) is bytes and len(result.watch_file) <= 17432)) and
+    if not ((result.watch_file is None or (type(result.watch_file) is bytes and len(result.watch_file) <= 17944)) and
             type(result.title) is str and len(result.title) <= 4096 and
             (result.serial is None or (type(result.serial) is str and len(result.serial) <= 64)) and
             type(result.achievements) is int and 0 <= result.achievements <= 10000000 and
             type(result.unsupported) is bool and
-            type(result.profile) is str and result.profile in ("opl", "orbit-v1.0.2")):
+            type(result.profile) is str and result.profile in ("opl", "opl-v2", "orbit-v1.0.2", "caduceus")):
         return False
     if result.qualified is not None:
         if (result.watch_file is not None or result.unsupported or result.definitions is not None or

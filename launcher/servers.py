@@ -684,6 +684,7 @@ UDPBD = ServerDef(
 )
 
 RA_MODE_CHOICES = (("xeRAbora", "xerabora"), ("Caduceus", "caduceus"))
+RA_WATCH_FORMAT_CHOICES = (("Legacy loader", "ranl"), ("xeRAbora 2 / updated RiptOPL", "ran2"))
 
 
 def _achievements_argv(values):
@@ -706,6 +707,14 @@ def _achievements_argv(values):
         args.append("--lan-viewer")
     if values.get("owned_runtime"):
         args.append("--owned-runtime")
+    watch_format = values.get("watch_format") or "ranl"
+    watch_format = dict(RA_WATCH_FORMAT_CHOICES).get(watch_format, watch_format)
+    if watch_format not in ("ranl", "ran2"):
+        raise ValueError("Select a supported console read format.")
+    if watch_format == "ran2":
+        if not values.get("owned_runtime") or mode != "xerabora":
+            raise ValueError("xeRAbora 2 indexed reads require the native runtime and xeRAbora mode.")
+        args += ["--watch-format", "ran2"]
     return args
 
 
@@ -732,6 +741,9 @@ RETROACHIEVEMENTS = ServerDef(
               help="Shares a read-only page on port 18199. Devices on your trusted LAN can see your profile and progress. Account controls stay on this PC."),
         Field("owned_runtime", "Use PS2-Servers native runtime (Issue #223 preview)", "bool", default=False, advanced=True,
               help="Run the experimental PS2-Servers owned RetroAchievements runtime instead of the bundled xeRAbora engine."),
+        Field("watch_format", "Console read support", "choice", default="ranl", advanced=True,
+              choices=RA_WATCH_FORMAT_CHOICES,
+              help="Indexed reads require the native runtime, a compatible updated console ELF, and a fresh game support check. Caduceus keeps its existing format."),
     ], _build_argv=_achievements_argv,
 )
 

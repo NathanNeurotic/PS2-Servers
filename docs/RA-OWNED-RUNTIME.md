@@ -30,7 +30,8 @@ Implemented behavior:
   sequence wrap semantics from the sender's decimal formatter, and recover
   from an idle console restart. Duplicate replay does not extend the timeout.
 - Validate immutable RAWL v1 files and RANL tails: read sizes, entry totals,
-  node dependencies, exact lengths and snapshot capacity. Preserve legal
+  node dependencies, exact lengths and snapshot capacity. The v2 follow-up also
+  accepts RAN2 with 12-byte nodes and requires the complete node snapshot region. Preserve legal
   out-of-RAM addresses, which the console reads as zero.
 - Bind validated lists to image hash/serial generations with `WatchSession`;
   reinstalling a list always resets assembly, and explicit clearing revokes
