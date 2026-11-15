@@ -237,6 +237,15 @@ class EvaluatorTests(unittest.TestCase):
             runtime.evaluate(struct.pack("<I", 0x81000), generation=1, sequence=2)
 
     def test_v2_constant_base_and_unsupported_expressions(self):
+        # A byte-sized base with unit scale needs no new node fields and is
+        # exactly representable by RANL; bit/nibble selection still is not.
+        unit = self.qualified(["I:0xH080000*1_0xH080000=1"])
+        legacy = derive_direct_watch(self.library, unit)
+        self.assertEqual(struct.unpack_from("<2I", legacy, 20), (0x4C4E4152, 1))
+        for operand in ("U", "M"):
+            with self.subTest(operand=operand), self.assertRaises(ValueError):
+                derive_direct_watch(self.library, self.qualified([
+                    "I:0x{}080000*1_0xH080000=1".format(operand)]))
         data = derive_direct_watch(self.library, self.qualified(["I:4_0xH080000=1"]), profile="opl-v2")
         self.assertEqual(data, struct.pack("<5I", 0x4C574152, 1, 1, 1, 0x10080004))
         for expression in ("I:d0xX080000_0xH000004=1", "I:0xX080000/3_0xH000004=1",

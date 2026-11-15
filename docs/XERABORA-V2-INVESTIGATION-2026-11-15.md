@@ -10,8 +10,11 @@ The owned-runtime path now has explicit `opl-v2` plan derivation, 12-byte RAN2
 validation/evaluation, enlarged file/IPC limits, and required complete node
 snapshot regions. The native compiler adapts the tagged upstream expression
 compiler while preserving our whole-set RAM and expression qualification.
-Its existing export continues producing RANL for exactly representable nodes;
-indexed plans are refused by that legacy export instead of silently truncated.
+Its existing export continues producing RANL for exactly representable nodes.
+Nodes requiring bit selection (`w >> 16` nonzero) or scale other than 1 are
+refused by that legacy export instead of silently truncated. A byte-sized base
+with scale 1 can remain exactly representable; not every indexed expression
+necessarily requires new serialized fields.
 
 Select **Use PS2-Servers native runtime** and **Console read support: xeRAbora 2 /
 updated RiptOPL**, or invoke the achievement service with
