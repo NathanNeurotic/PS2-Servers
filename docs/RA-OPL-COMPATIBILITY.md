@@ -2,12 +2,12 @@
 
 ## xeRAbora 2 implementation preview, 2026-11-15
 
-The explicit owned-runtime `opl-v2` profile now derives/consumes RAN2 indexed
-plans. Select the native runtime and **Console read support: xeRAbora 2 /
+Both the bundled managed engine and explicit owned-runtime `opl-v2` profile now
+derive/consume RAN2 indexed plans. Select **Console read support: xeRAbora 2 /
 updated RiptOPL**, then update the console ELF and recheck game support.
 Legacy/default profiles continue using RANL; Caduceus and ORBIT have not been
-migrated. The bundled managed desktop engine and exported loader pins below
-are unchanged. Host fixtures and target builds are not console certification.
+migrated. A separate explicit v2 loader export has been added; the legacy export
+pins below are unchanged. Host fixtures and target builds are not console certification.
 See [the investigation and current checkpoint](XERABORA-V2-INVESTIGATION-2026-11-15.md).
 
 Audit baseline: PS2-Servers `9bd458ab5e715e0e4102666ec50081af036eddae`,

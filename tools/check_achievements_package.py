@@ -47,7 +47,7 @@ def temporary_profile():
 
 
 def check(command):
-    for mode in ("xerabora", "caduceus"):
+    for mode, watch_format in (("xerabora", "ranl"), ("xerabora", "ran2"), ("caduceus", "ranl")):
         with temporary_profile() as temporary:
             root = Path(temporary)
             folder = root / "games"
@@ -56,6 +56,8 @@ def check(command):
                        XDG_CONFIG_HOME=temporary, HOME=temporary, PS2SERVERS_RA_NO_BROWSER="1")
             env.pop("PYTHONPATH", None)
             args = command + ["--serve", "retroachievements", "--mode", mode, "--no-sound"]
+            if watch_format == "ran2":
+                args += ["--watch-format", "ran2"]
             if mode == "caduceus":
                 args += ["--games-folder", str(folder)]
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -116,7 +118,7 @@ def check(command):
                         if time.monotonic() > deadline:
                             raise RuntimeError("Supervisor retained its profile lock")
                         time.sleep(0.1)
-            print(mode + ": packaged startup, discovery, pairing, duplicate rejection and shutdown passed")
+            print(mode + "/" + watch_format + ": packaged startup, discovery, pairing, duplicate rejection and shutdown passed")
 
 
 if __name__ == "__main__":

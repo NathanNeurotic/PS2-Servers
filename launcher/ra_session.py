@@ -54,6 +54,10 @@ class SessionTracker:
                 # An engine restart resets the counter; wait for new packets.
                 self.last_advance = None
             self.last_packets = packets
+        if console.get("status") == "stale":
+            self.active_identity = None
+            return {"state": "needs-recheck",
+                    "text": "PS2 read plan mismatch · Update host/console and run RA: check game support"}
         if (packets is not None and self.last_advance is not None and
                 now - self.last_advance >= self.stale_seconds):
             self.active_identity = None

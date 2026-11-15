@@ -13,6 +13,8 @@
 /* Builds the list from the memrefs of the game loaded in rc_client.
    Returns 1 on success. */
 int watchlist_build(rc_client_t *client);
+/* Select before loading a set: 0 retains RANL, 1 emits RAN2. */
+void watchlist_set_format(int ran2);
 
 int watchlist_count(void);
 /* Achievements reading through a pointer chain the console cannot be

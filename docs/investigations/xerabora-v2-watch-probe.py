@@ -1,4 +1,4 @@
-"""Offline comparison of pinned/v2 production watch compilers; no account or sockets."""
+"""Offline comparison of current managed-legacy/upstream-v2 compilers; no account or sockets."""
 import argparse
 from pathlib import Path
 import struct
@@ -19,6 +19,11 @@ def main():
     start = source.index("    if(i==0) {")
     end = source.index("    size=watchlist_serialize", start)
     source = source[:start] + source[end:]
+    # The upstream parser deliberately accepts direct-only pointer snapshots;
+    # its historical behavior is not our stricter production receiver contract.
+    start = source.index("    if(i==4 || i==5) {")
+    end = source.index('    printf("%u %d %d %d ', start)
+    source = source[:start] + source[end:]
     source = source.replace(
         "if(!watchlist_build(&client)) return 3;",
         'if(!watchlist_build(&client)) {printf("%u BUILD-REFUSED\\n",i); '
@@ -38,7 +43,7 @@ def main():
         temp = Path(directory)
         probe = temp / "probe.c"
         probe.write_text(source, encoding="utf-8")
-        for name, base in (("pinned", root / "vendor/retroachievements/xerabora"),
+        for name, base in (("managed-legacy", root / "vendor/retroachievements/xerabora"),
                            ("v2", upstream)):
             client = base / "client/src"
             command = ["gcc", "-O1", "-std=gnu99"]

@@ -1,8 +1,8 @@
 # xeRAbora 2.0.0 compatibility investigation
 
 Investigation date: 2026-11-15. Implementation handoff: Monday, 2026-11-16.
-This document retains the original findings and records the first implementation
-checkpoint below. Dependency pins and exported console loaders are unchanged.
+This document retains the original findings and records the implementation
+checkpoints below. Legacy dependency/export defaults are preserved.
 
 ## First implementation checkpoint
 
@@ -31,6 +31,52 @@ cache-generation UX, diagnostics/test-mode/Discord parity, cross-platform packag
 acceptance and physical-console testing. This is an opt-in implementation
 checkpoint, not a claim that all published PS2-Servers paths support v2.
 
+## Second implementation checkpoint: managed engine and artifact pairing
+
+Both runtime paths now support the explicit v2 read setting. The bundled
+engine adapts the tagged v2 indexed compiler while preserving its managed
+profile, protected secrets, loopback UI, process supervision and Caduceus
+notification ownership. It emits RANL by default and RAN2 with `--watch-format
+ran2`. Legacy indexed sets that cannot be represented fail with an upgrade/
+recheck message. Required pointer snapshots are complete in either format.
+
+The launcher now permits `--mode xerabora --watch-format ran2` with its default
+managed runtime as well as the owned runtime. Caduceus still rejects that
+selection. Native conformance retains six legacy goldens and adds ten fixed
+v2 goldens captured from the tagged upstream compiler. Both managed and owned
+implementations match those bytes; managed snapshot/read fixtures verify
+indexed/nested lookups and reject missing node regions before and after a
+valid frame.
+
+The explicit loader export now accepts `watch_format="ran2"`, or service flag
+`--export-loader EXISTING_DIRECTORY` with the v2 read setting. It uses separate
+`OPL-RA-xerabora-v2` output names and retains the original export defaults.
+The v2 ELF was downloaded to an investigation directory and independently
+checked: 1397508 bytes, ELF32 little-endian MIPS, SHA256
+`6725bc9597696a8c51a7ebd32c605fed4715277f1863ae09657233547708d7d1`, matching both
+the release asset pin and SHA256SUMS. The AFL license blob matches
+`62b2577d2067081dd3b8549b53d4862e60205951` at the pinned OPL submodule revision.
+This verifies artifact identity, not reproducible source-to-binary provenance
+or console behavior. No ELF was deployed.
+
+Remaining: cache-generation UX, diagnostics/test-mode/Discord parity,
+cross-platform frozen-package acceptance and physical-console testing.
+
+The desktop now turns a managed-engine stale-plan status into an actionable
+update/recheck message and suppresses “Now playing”/shared title state until
+fresh valid telemetry resumes. The managed status clears when a valid complete
+snapshot arrives. This catches observable count/node-region mismatches; the
+upstream wire does not carry a plan fingerprint, so equal-sized semantic changes
+still require the documented manual support recheck.
+
+Second-checkpoint validation: 201 RA tests passed with three skips; the
+managed/dependency/supervisor/export group passed 47 tests with two skips.
+Sixteen focused session/dependency/export checks passed after the final indexed
+snapshot fixtures and stale-status changes. The source-process smoke gate
+passed legacy xeRAbora, RAN2 xeRAbora and Caduceus startup/discovery, duplicate
+instance rejection, pairing and shutdown. This gate used the rebuilt native
+engine with the source launcher; it was not a frozen desktop-package test.
+
 ### Checkpoint validation
 
 - The 201-test `test_ra_*.py` host group passed with three skips. Native
@@ -45,10 +91,10 @@ checkpoint, not a claim that all published PS2-Servers paths support v2.
 - `git diff --check` and Python syntax checks passed. Console/gameplay,
   cross-platform packaging and live-account acceptance remain untested.
 
-## Decision
+## Original investigation decision
 
 Treat xeRAbora 2.0.0 as a coordinated host/console migration. The bundled
-engine and owned runtime still generate the old pointer plan. Updating only
+engine and owned runtime at the audit baseline generated the old pointer plan. Updating only
 the loader download, version label, Python validator or vendored header is
 insufficient. Keep existing supported pairings available until the new pairing
 passes conformance and console acceptance. Do not advertise general v2 support

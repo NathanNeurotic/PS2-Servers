@@ -611,7 +611,7 @@ class ServerCard(ttk.LabelFrame):
         message = snapshot.get("text", "RA status unavailable")
         if self._last_ra_session != message:
             self.ra_session_status.configure(text=message,
-                foreground=COLOR_ERROR if snapshot.get("state") in ("stalled", "unreachable") else COLOR_RUNNING
+                foreground=COLOR_ERROR if snapshot.get("state") in ("stalled", "unreachable", "needs-recheck") else COLOR_RUNNING
                 if snapshot.get("state") == "playing" else COLOR_STOPPED)
             self._last_ra_session = message
 

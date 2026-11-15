@@ -253,6 +253,12 @@ class WireTests(unittest.TestCase):
 
 @unittest.skipUnless(engine_path().is_file(), "build the native achievement engine first")
 class NativeEngineTests(unittest.TestCase):
+    def test_invalid_watch_formats_fail_before_service_start(self):
+        for suffix in (("--watch-format",), ("--watch-format", "invalid")):
+            result = subprocess.run([str(engine_path()), *suffix], capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(b"--watch-format requires ranl or ran2", result.stderr)
+
     def test_supervisor_restart_and_mode_switch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -261,12 +267,14 @@ class NativeEngineTests(unittest.TestCase):
             env = dict(os.environ, LOCALAPPDATA=directory, APPDATA=directory,
                        XDG_CONFIG_HOME=directory, HOME=directory, PS2SERVERS_RA_NO_BROWSER="1")
             entry = Path(__file__).resolve().parents[1] / "ps2servers.py"
-            for mode in ("xerabora", "caduceus"):
+            for mode, watch_format in (("xerabora", "ranl"), ("xerabora", "ran2"), ("caduceus", "ranl")):
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as console, open(root / "run.log", "w+b") as log:
                     console.bind(("127.0.0.1", 0))
                     console.settimeout(0.2)
                     command = [sys.executable, str(entry), "--serve", "retroachievements",
                                "--mode", mode, "--no-sound", "--games-folder", str(games)]
+                    if watch_format == "ran2":
+                        command += ["--watch-format", "ran2"]
                     proc = subprocess.Popen(command, env=env, stdout=log, stderr=log)
                     try:
                         deadline = time.monotonic() + 10

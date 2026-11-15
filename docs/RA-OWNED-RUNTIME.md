@@ -26,7 +26,8 @@ Implemented behavior:
   accept reordered fragments, suppress repeated completed frames, reject
   conflicting duplicates and inconsistent dimensions, and discard delayed
   older frames without replacing a newer in-flight frame.
-- Accept configured direct-only or pointer-tail value sizes, use six-digit
+- Accept the exact direct-only or node-bearing size required by the installed
+  plan, use six-digit
   sequence wrap semantics from the sender's decimal formatter, and recover
   from an idle console restart. Duplicate replay does not extend the timeout.
 - Validate immutable RAWL v1 files and RANL tails: read sizes, entry totals,

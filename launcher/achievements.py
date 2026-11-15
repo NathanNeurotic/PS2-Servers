@@ -340,14 +340,23 @@ def main(argv=None):
     parser.add_argument("--owned-runtime", action="store_true",
                         help="Run the PS2-Servers native runtime (Issue #223 preview)")
     parser.add_argument("--watch-format", choices=("ranl", "ran2"), default="ranl",
-                        help="RAN2 requires --owned-runtime, a v2-capable console and refreshed game checks")
+                        help="RAN2 requires a v2-capable console and refreshed game checks")
+    parser.add_argument("--export-loader", type=Path, metavar="DIRECTORY",
+                        help="Export the pinned loader, license and provenance to an existing directory, then exit")
     parser.add_argument("--login", type=str, metavar="USERNAME",
                         help="Sign in with RetroAchievements username and password prompt")
     parser.add_argument("--import-credentials", action="store_true",
                         help="Import credentials from existing managed profile with explicit consent")
     args = parser.parse_args(argv)
-    if args.watch_format == "ran2" and (not args.owned_runtime or args.mode != "xerabora"):
-        parser.error("RAN2 currently requires --owned-runtime --mode xerabora; Caduceus retains its pinned format")
+    if args.watch_format == "ran2" and args.mode != "xerabora":
+        parser.error("RAN2 requires xeRAbora mode; Caduceus retains its pinned format")
+    if args.export_loader is not None:
+        from launcher.achievement_loader import export_loader
+        try:
+            print(export_loader(args.mode, args.export_loader, watch_format=args.watch_format), flush=True)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        return 0
     if args.owned_runtime:
         lib = library_path()
         if not lib.is_file():
@@ -372,6 +381,8 @@ def main(argv=None):
     env = engine_environment(profile, args.mode)
     ui_port = available_account_port()
     command = [str(binary), "--port", "18194", "--ui-port", str(ui_port)]
+    if args.watch_format == "ran2":
+        command += ["--watch-format", "ran2"]
     if args.no_sound:
         command.append("--no-sound")
     if args.obs_folder:

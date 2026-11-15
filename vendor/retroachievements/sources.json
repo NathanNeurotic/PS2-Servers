@@ -3,6 +3,10 @@
     "repository": "https://github.com/hacan359/xerabora",
     "commit": "357d00e930c7921984f69650706bea69d56f32ef"
   },
+  "xerabora-watch-compiler": {
+    "repository": "https://github.com/hacan359/xerabora",
+    "commit": "98949c0efba151f16b234ba5b392b5241791f40e"
+  },
   "rcheevos": {
     "repository": "https://github.com/RetroAchievements/rcheevos",
     "commit": "1433173220a7eaede6a9ed7a18e94117be1821e0"

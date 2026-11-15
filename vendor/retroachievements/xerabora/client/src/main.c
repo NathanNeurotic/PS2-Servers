@@ -710,6 +710,12 @@ int main(int argc, char **argv)
             arg_user = argv[++i];
         } else if (strcmp(argv[i], "--password") == 0 && i + 1 < argc) {
             arg_password = argv[++i];
+        } else if (strcmp(argv[i], "--watch-format") == 0) {
+            if (i + 1 >= argc || (strcmp(argv[i + 1], "ranl") != 0 && strcmp(argv[i + 1], "ran2") != 0)) {
+                fprintf(stderr, "--watch-format requires ranl or ran2\n");
+                return 2;
+            }
+            watchlist_set_format(strcmp(argv[++i], "ran2") == 0);
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--game") == 0 && i + 1 < argc) {
@@ -1259,6 +1265,10 @@ int main(int argc, char **argv)
             continue;
         }
 
+        if (said_stale) {
+            said_stale = 0;
+            webui_set_status("active");
+        }
         if (!said_first) {
             const struct snapshot_stats *st = snapshot_stats();
 

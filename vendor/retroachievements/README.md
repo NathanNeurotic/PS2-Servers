@@ -12,11 +12,17 @@ included. No Caduceus Electron source or binaries are copied.
 
 The rcheevos pin is now `1433173220a7eaede6a9ed7a18e94117be1821e0`
 (source version 12.5.0), including upstream API bounds and constant-recall
-evaluator fixes. The xeRAbora client, loader export baseline and console wire
-profiles retain their existing revisions. See `docs/RA-UPSTREAM-AUDIT.md`
+evaluator fixes. The desktop base remains pinned while its indexed watch compiler
+and protocol adapt xeRAbora v2.0.0 at the separately recorded
+`xerabora-watch-compiler` revision. Legacy RANL remains the default; explicit RAN2
+selection is available in both desktop runtimes. See `docs/RA-UPSTREAM-AUDIT.md`
 for dependency validation and remaining console acceptance boundaries.
 
 Local xeRAbora changes:
+
+- Selectable RANL/RAN2 watch serialization with the v2 indexed/constant-base
+  compiler, while retaining the legacy wire vectors. Required pointer pairs
+  cannot be replaced by direct-only snapshots.
 
 - Read the Web API hardcore earned date independently of the softcore date,
   adapting the alpha.18 correction while preserving the existing row layout.
@@ -39,7 +45,7 @@ Local xeRAbora changes:
 - In Caduceus mode, let the companion send the enriched unlock notice first,
   so the console's duplicate-ID filter does not discard its achievement title.
 
-The build identifies the engine as `0.1.0-alpha.16+ps2servers`, preserving its
+The build identifies the engine as `0.1.0-alpha.16+ps2servers.ran2`, preserving its
 upstream provenance. `launcher/caduceus.py` supplies the additional Caduceus
 UDP protocols without altering rcheevos evaluation or enabling hardcore mode.
 

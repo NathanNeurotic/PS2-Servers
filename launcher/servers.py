@@ -712,8 +712,8 @@ def _achievements_argv(values):
     if watch_format not in ("ranl", "ran2"):
         raise ValueError("Select a supported console read format.")
     if watch_format == "ran2":
-        if not values.get("owned_runtime") or mode != "xerabora":
-            raise ValueError("xeRAbora 2 indexed reads require the native runtime and xeRAbora mode.")
+        if mode != "xerabora":
+            raise ValueError("xeRAbora 2 indexed reads require xeRAbora mode.")
         args += ["--watch-format", "ran2"]
     return args
 
@@ -743,7 +743,7 @@ RETROACHIEVEMENTS = ServerDef(
               help="Run the experimental PS2-Servers owned RetroAchievements runtime instead of the bundled xeRAbora engine."),
         Field("watch_format", "Console read support", "choice", default="ranl", advanced=True,
               choices=RA_WATCH_FORMAT_CHOICES,
-              help="Indexed reads require the native runtime, a compatible updated console ELF, and a fresh game support check. Caduceus keeps its existing format."),
+              help="Indexed reads require a compatible updated console ELF and a fresh game support check. Both desktop runtimes support this option. Caduceus keeps its existing format."),
     ], _build_argv=_achievements_argv,
 )
 

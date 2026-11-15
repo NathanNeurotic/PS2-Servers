@@ -136,7 +136,9 @@ class SupervisorTests(unittest.TestCase):
                          ["--mode", "xerabora", "--owned-runtime", "--watch-format", "ran2"])
         self.assertIn("ran2", _achievements_argv({"owned_runtime": True,
                                                 "watch_format": "xeRAbora 2 / updated RiptOPL"}))
-        for values in ({"watch_format": "ran2"}, {"watch_format": "bad"},
+        self.assertEqual(_achievements_argv({"watch_format": "ran2"}),
+                         ["--mode", "xerabora", "--watch-format", "ran2"])
+        for values in ({"watch_format": "bad"},
                        {"mode": "caduceus", "games_folder": str(self.profile),
                         "owned_runtime": True, "watch_format": "ran2"}):
             with self.subTest(values=values), self.assertRaises(ValueError):
