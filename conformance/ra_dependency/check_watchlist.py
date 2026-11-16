@@ -53,6 +53,27 @@ def check():
         raise AssertionError("Owned watch-list bytes differ from the pinned baseline:\n" + actual_owned)
     print("Six owned watch-list cases match the pre-upgrade baseline byte-for-byte")
 
+    with tempfile.TemporaryDirectory(prefix="ra-watchlist-limits-") as temporary:
+        binary = Path(temporary) / ("limits.exe" if os.name == "nt" else "limits")
+        sources_limits = sources_ref[:-1] + [HERE / "watchlist_limits.c"]
+        subprocess.run(command_ref + list(map(str, sources_limits)) + ["-o", str(binary), "-lm"], check=True)
+        subprocess.run([str(binary)], check=True)
+
+    # Captured from tagged xeRAbora v2.0.0 using the same rcheevos revision.
+    # Keep legacy goldens separately: matching the two current compilers alone
+    # would not detect a shared regression.
+    expected_v2 = (HERE / "watchlist-v2-baseline.txt").read_text().splitlines()
+    with tempfile.TemporaryDirectory(prefix="ra-watchlist-v2-") as temporary:
+        for name, command, sources in (("managed", command_ref, sources_ref),
+                                        ("owned", command_owned, sources_owned)):
+            binary = Path(temporary) / (name + (".exe" if os.name == "nt" else ""))
+            subprocess.run(command + ["-DV2_WATCHLIST"] + list(map(str, sources))
+                           + ["-o", str(binary), "-lm"], check=True)
+            actual = subprocess.check_output([str(binary)], text=True)
+            if actual.splitlines() != expected_v2:
+                raise AssertionError(name + " v2 watch-list bytes differ from tagged baseline:\n" + actual)
+    print("Ten managed and owned v2 cases match tagged upstream plans byte-for-byte")
+
 
 if __name__ == "__main__":
     check()

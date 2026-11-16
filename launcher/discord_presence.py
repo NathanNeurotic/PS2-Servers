@@ -29,6 +29,13 @@ def public_game_title(value):
     return title
 
 
+def public_image(value):
+    if not isinstance(value, str):
+        return ""
+    match = re.fullmatch(r"(?:(?:https?://)(?:media\.)?retroachievements\.org)?(/Images/[0-9]{1,10}\.png)", value)
+    return "https://media.retroachievements.org" + match[1] if match else ""
+
+
 class DesktopActivity:
     """Allowlisted server activity; title sharing requires explicit consent."""
     def __init__(self, show_uptime=False):
@@ -39,8 +46,12 @@ class DesktopActivity:
         self.game = ""
         self.game_identity = None
         self.game_started = None
+        self.extra = {}
+        self.unlock_key = None
+        self.unlock_until = 0
+        self.unlock_asset = {}
 
-    def update(self, modes, show_uptime=False, game=None, show_game=False):
+    def update(self, modes, show_uptime=False, game=None, show_game=False, show_details=False):
         names = tuple(sorted({key for key in modes if key in MODE_NAMES}))
         verified = (show_game and "retroachievements" in names
                     and isinstance(game, dict) and game.get("state") == "playing"
@@ -52,10 +63,40 @@ class DesktopActivity:
         with self.lock:
             self.modes = names
             self.show_uptime = bool(show_uptime)
-            if identity != self.game_identity:
+            changed = identity != self.game_identity
+            if changed:
                 self.game_identity = identity
                 self.game = title
                 self.game_started = int(time.time()) if title else None
+            self.extra = {}
+            presence = game.get("presence") if title and show_details else None
+            if not isinstance(presence, dict):
+                self.unlock_key, self.unlock_until, self.unlock_asset = None, 0, {}
+                return
+            icon = public_image(presence.get("icon"))
+            message = public_game_title(presence.get("message"))
+            user = presence.get("user")
+            if message:
+                self.extra["state"] = message
+            if icon:
+                self.extra["assets"] = {"large_image": icon, "large_text": title}
+            if isinstance(user, str) and re.fullmatch(r"[A-Za-z0-9_]{1,64}", user):
+                self.extra["buttons"] = [{"label": "RetroAchievements profile",
+                                          "url": "https://retroachievements.org/user/" + user}]
+            unlock = presence.get("unlock")
+            key = unlock.get("id") if isinstance(unlock, dict) else None
+            if changed:
+                # Baseline the engine ring: never replay an old game's unlock.
+                self.unlock_key, self.unlock_until, self.unlock_asset = key, 0, {}
+            elif type(key) is int and key > 0 and key != self.unlock_key:
+                self.unlock_key, self.unlock_until, self.unlock_asset = key, 0, {}
+                ago, badge = unlock.get("ago"), unlock.get("badge")
+                caption = public_game_title(unlock.get("title"))
+                if (type(ago) in (int, float) and 0 <= ago < 60 and isinstance(badge, str)
+                        and re.fullmatch(r"[0-9]{1,10}", badge) and caption):
+                    self.unlock_until = time.monotonic() + 60 - ago
+                    self.unlock_asset = {"small_image": "https://media.retroachievements.org/Badge/" + badge + ".png",
+                                         "small_text": caption}
 
     def snapshot(self):
         with self.lock:
@@ -65,6 +106,10 @@ class DesktopActivity:
             if self.game:
                 result["details"] = self.game
                 result["state"] = "Playing on PlayStation 2"
+                for key, value in self.extra.items():
+                    result[key] = dict(value) if isinstance(value, dict) else value
+                if self.unlock_asset and time.monotonic() < self.unlock_until:
+                    result.setdefault("assets", {}).update(self.unlock_asset)
                 if self.show_uptime:
                     result["timestamps"] = {"start": self.game_started}
             elif self.show_uptime:

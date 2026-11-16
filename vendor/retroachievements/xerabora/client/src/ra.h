@@ -8,6 +8,8 @@
 
 #include "rc_client.h"
 
+void ra_set_test_mode(int on);
+int ra_test_mode(void);
 rc_client_t *ra_create(void);
 void ra_destroy(rc_client_t *client);
 

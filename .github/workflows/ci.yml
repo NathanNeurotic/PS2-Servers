@@ -35,6 +35,11 @@ jobs:
           WINDOWS_TARGET_ARCH: ${{ matrix.win_arch }}
           MACOS_TARGET_ARCH: ${{ matrix.mac_arch }}
         run: python build/build_achievements.py
+      - name: Build pinned owned evaluator
+        env:
+          WINDOWS_TARGET_ARCH: ${{ matrix.win_arch }}
+          MACOS_TARGET_ARCH: ${{ matrix.mac_arch }}
+        run: python build/build_ra_evaluator.py
       - name: Exercise native discovery, credential protection and companion wire protocols
         run: python -m unittest tests.test_retroachievements tests.test_game_library tests.test_achievement_viewer tests.test_achievement_loader tests.test_discord_presence -v
 

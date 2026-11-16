@@ -6,6 +6,25 @@ is required. This is experimental, softcore-only support for a real PS2 running
 an achievements-enabled OPL fork. Ordinary OPL builds do not send the required
 memory snapshots.
 
+## xeRAbora 2 indexed reads
+
+In advanced settings, choose **Console read support → xeRAbora 2 / updated
+RiptOPL** to use RAN2. Both the default bundled engine and the optional owned
+runtime support this selection. Update the console ELF too, then run **RA:
+check game support** again for every game you play. Earlier cached watch files
+do not gain the newly required reads automatically. Legacy RANL remains the
+default; Caduceus and ORBIT keep their existing constraints.
+Stop RetroAchievements before changing the console read setting, then restart it.
+
+Source users can run the achievement service with `--mode xerabora --watch-format
+ran2`. Add `--owned-runtime` only to select the owned implementation. To export
+the separately pinned upstream v2 loader without starting an engine or account
+session, use `python -m launcher.achievements --mode xerabora --watch-format ran2
+--export-loader EXISTING_DIRECTORY`. It writes an ELF, license and provenance
+file with a distinct `OPL-RA-xerabora-v2` name and refuses existing outputs.
+Copying it to a console is a separate user action. Artifact verification and
+host tests do not certify physical-console/gameplay behavior.
+
 ## What the mode selector actually does
 
 **Console mode is not a desktop engine selector.** Both xeRAbora and Caduceus

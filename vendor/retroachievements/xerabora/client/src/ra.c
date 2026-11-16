@@ -15,8 +15,27 @@
 #include "watchlist.h"
 
 static char g_user_agent[96];
+static int g_test_mode;
+void ra_set_test_mode(int on) { g_test_mode = on != 0; }
+int ra_test_mode(void) { return g_test_mode; }
 
 /* ---- Server transport ---------------------------------------------- */
+
+static int blocks_submission(const char *post)
+{
+    const char *field = post;
+    while (field != NULL && *field != '\0') {
+        const char *end = strchr(field, '&');
+        size_t length = end != NULL ? (size_t)(end - field) : strlen(field);
+        if ((length == 18 && memcmp(field, "r=awardachievement", length) == 0) ||
+            (length == 15 && memcmp(field, "r=submitlbentry", length) == 0) ||
+            (length == 14 && memcmp(field, "r=startsession", length) == 0) ||
+            (length == 6 && memcmp(field, "r=ping", length) == 0))
+            return 1;
+        field = end != NULL ? end + 1 : NULL;
+    }
+    return 0;
+}
 
 static void server_call(const rc_api_request_t *request, rc_client_server_callback_t callback,
                         void *callback_data, rc_client_t *client)
@@ -26,6 +45,15 @@ static void server_call(const rc_api_request_t *request, rc_client_server_callba
 
     (void)client;
     memset(&resp, 0, sizeof(resp));
+    /* Final transport boundary: spectator/encore must never send an award,
+       leaderboard result, session or heartbeat even if a caller schedules one. */
+    if (g_test_mode && blocks_submission(request->post_data)) {
+        resp.http_status_code = 403;
+        resp.body = "";
+        resp.body_length = 0;
+        callback(&resp, callback_data);
+        return;
+    }
 
     if (log_trace_enabled()) {
         /* The post body carries the token; only the request type is shown. */
@@ -139,6 +167,8 @@ rc_client_t *ra_create(void)
     /* Softcore. The console side can write to game memory (cheat
        engine), so claiming hardcore would be dishonest. */
     rc_client_set_hardcore_enabled(client, 0);
+    rc_client_set_spectator_mode_enabled(client, g_test_mode);
+    rc_client_set_encore_mode_enabled(client, g_test_mode);
     /* Softcore normally deactivates leaderboards. Keep them running for
        the live trackers; rc_client still refuses to submit entries in
        softcore, so nothing reaches the site. No public setter in v12.4. */

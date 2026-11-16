@@ -33,6 +33,7 @@ int snapshot_feed(const char *pkt, size_t len);
 /* 1 when the console's list (entry count or size) differs from the
    watch list built here; such packets are dropped. */
 int snapshot_stale(void);
+unsigned int snapshot_seq(void);
 
 const struct snapshot_stats *snapshot_stats(void);
 

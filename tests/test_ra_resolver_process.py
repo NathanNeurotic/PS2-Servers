@@ -26,7 +26,7 @@ def crash(job, cancel):
 
 
 def oversized(job, cancel):
-    return IdentificationResult(watch_file=b"x" * 17433)
+    return IdentificationResult(watch_file=b"x" * 17945)
 
 
 def partial_write(job, cancel):

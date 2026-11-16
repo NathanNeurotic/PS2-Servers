@@ -40,6 +40,7 @@ class Evaluation:
     events: tuple = ()
     reset: bool = False
     missing: tuple = ()
+    rich_presence: str = ""
 
     @property
     def triggered(self):
@@ -56,10 +57,10 @@ class Evaluator:
     the entire frame and resets conditions, rather than treating it as zero.
     """
 
-    def __init__(self, library, definitions, watch_file, generation):
+    def __init__(self, library, definitions, watch_file, generation, rich_presence=""):
         if type(generation) is not int or generation < 1:
             raise ValueError("Invalid evaluator generation")
-        if not isinstance(definitions, dict) or not 1 <= len(definitions) <= 4096:
+        if not isinstance(definitions, dict) or len(definitions) > 4096 or (not definitions and not rich_presence):
             raise ValueError("Invalid achievement definitions")
         encoded = []
         for achievement_id, definition in definitions.items():
@@ -70,8 +71,13 @@ class Evaluator:
             encoded.append((achievement_id, definition.encode("ascii")))
         if sum(len(data) for _, data in encoded) > 4 * 1024 * 1024:
             raise ValueError("Achievement set exceeds evaluator limit")
+        if (type(rich_presence) is not str or len(rich_presence) > 65536 or "\0" in rich_presence):
+            raise ValueError("Invalid rich presence definition")
+        self._rich_presence = rich_presence.encode("utf-8")
         self.watch = validate_watchlist(watch_file)
         self.generation = generation
+        from launcher.ra_diagnostics import Recording
+        self.recording = Recording(self.watch, generation)
         self._sequence = None
         self._triggered = set()
         self._definitions = encoded
@@ -90,6 +96,11 @@ class Evaluator:
         lib.rc_runtime_do_frame.argtypes = [ctypes.c_void_p, _EVENT_CALLBACK,
                                            _PEEK_CALLBACK, ctypes.c_void_p, ctypes.c_void_p]
         lib.rc_runtime_do_frame.restype = None
+        lib.rc_runtime_activate_richpresence.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_int]
+        lib.rc_runtime_activate_richpresence.restype = ctypes.c_int
+        lib.rc_runtime_get_richpresence.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t,
+                                                  _PEEK_CALLBACK, ctypes.c_void_p, ctypes.c_void_p]
+        lib.rc_runtime_get_richpresence.restype = ctypes.c_int
         self._runtime = self._allocate()
 
     def _allocate(self):
@@ -106,6 +117,8 @@ class Evaluator:
                                                            expression, None, 0)
                 if code != 0:
                     raise ValueError(f"Invalid achievement {achievement_id}: rcheevos error {code}")
+            if self._rich_presence and lib.rc_runtime_activate_richpresence(runtime, self._rich_presence, None, 0) != 0:
+                raise ValueError("Invalid rich presence definition")
         except BaseException:
             lib.rc_runtime_destroy(runtime)
             raise
@@ -149,7 +162,7 @@ class Evaluator:
         if len(values) > self.watch.direct_bytes:
             start = 16 + 4 * self.watch.count + 8
             for index in range(self.watch.nodes):
-                word, = struct.unpack_from("<I", self.watch.data, start + 8 * index)
+                word, = struct.unpack_from("<I", self.watch.data, start + self.watch.node_stride * index)
                 address, = struct.unpack_from("<I", values, offset)
                 size = (word >> 13) & 7
                 if address:
@@ -171,6 +184,7 @@ class Evaluator:
             delta = ((sequence - self._sequence) % 1000000
                      if self._sequence is not None else 1)
             if delta == 0 or delta >= 500000:
+                self.recording.replays += 1
                 return Evaluation(False)
             reset = delta != 1
             if reset:
@@ -188,6 +202,10 @@ class Evaluator:
                 value = pointer.contents
                 events.append((value.type, value.id, value.value))
             self._library.rc_runtime_do_frame(self._runtime, event, peek, None, None)
+            message = ctypes.create_string_buffer(512)
+            if self._rich_presence:
+                self._library.rc_runtime_get_richpresence(self._runtime, message, len(message), peek, None, None)
+            self.recording.record(sequence, values)
             self._sequence = sequence
             if missing:
                 self._reset()
@@ -195,7 +213,24 @@ class Evaluator:
             events = [item for item in events
                       if item[0] != TRIGGERED or item[1] not in self._triggered]
             self._triggered.update(item[1] for item in events if item[0] == TRIGGERED)
-            return Evaluation(True, tuple(events), reset)
+            return Evaluation(True, tuple(events), reset, rich_presence=message.value.decode("utf-8", "replace"))
+
+    def diagnostics(self, *, profile="opl", game_id=0, image_hash="", test_mode=False):
+        with self._lock:
+            if not self._runtime:
+                raise RuntimeError("Evaluator is closed")
+            describe = self._library.ps2servers_runtime_diagnostics
+            describe.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+            describe.restype = ctypes.c_int
+            buffer = ctypes.create_string_buffer(1024 * 1024)
+            size = describe(self._runtime, buffer, len(buffer))
+            if size < 0 or size >= len(buffer):
+                raise ValueError("Runtime diagnostics unavailable")
+            source_id = self._library.ps2servers_runtime_source_id
+            source_id.argtypes = []
+            source_id.restype = ctypes.c_char_p
+            return self.recording.report(source_id=source_id().decode("ascii"), profile=profile, game_id=game_id, image_hash=image_hash,
+                test_mode=test_mode, conditions=buffer.raw[:size].decode("ascii"))
 
     def evaluate_frame(self, frame):
         """Consume a complete ReceiverOutput, preserving generation and sequence."""

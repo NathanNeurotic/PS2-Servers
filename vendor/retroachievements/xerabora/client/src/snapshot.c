@@ -9,6 +9,7 @@ static struct snapshot_stats g_stats;
 
 static unsigned int g_last_sq = 0;
 static int g_have_last = 0;
+unsigned int snapshot_seq(void) { return g_last_sq; }
 
 /* Reassembly of the snapshot in progress. */
 static unsigned int g_asm_sq = 0;
@@ -173,19 +174,15 @@ int snapshot_feed(const char *pkt, size_t len)
     if (g_asm_seen != g_asm_full)
         return 0;
 
-    /* Two sizes are right: direct values only, from a console that does
-       not follow pointers, and direct values plus one pair per chain
-       from one that does. The size says which, so no handshake is
-       needed; the two are equal when the set has no chains. */
-    if ((int)g_asm_bytes == watchlist_bytes()) {
-        watchlist_set_have_nodes(0);
-    } else if ((int)g_asm_bytes == watchlist_snapshot_bytes()) {
-        watchlist_set_have_nodes(1);
-    } else {
+    /* A plan's required nodes must be present. Old consoles may silently
+       ignore an unknown tail: direct-only values are not a usable snapshot. */
+    if ((int)g_asm_bytes != watchlist_snapshot_bytes()) {
         g_stale = 1;
         g_asm_seen = 0;
+        watchlist_set_have_values(0);
         return 0;
     }
+    watchlist_set_have_nodes(watchlist_node_count() != 0);
 
     if (g_have_last && sq > g_last_sq + 1)
         g_stats.gaps += sq - g_last_sq - 1;

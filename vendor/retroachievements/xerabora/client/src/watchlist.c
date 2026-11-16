@@ -22,6 +22,16 @@ static int g_bytes = 0;
 static unsigned char g_values[RA_SNAP_MAX_BYTES];
 static int g_have_values = 0;
 static int g_have_nodes = 0;
+/* Selected once at startup; existing exported loaders keep their RANL pairing. */
+static int g_ran2 = 0;
+static unsigned int g_generation;
+unsigned int watchlist_generation(void) { return g_generation; }
+
+void watchlist_set_format(int ran2)
+{
+    g_ran2 = ran2 != 0;
+}
+
 
 /* The memref behind each entry, so a pointer chain can name its parent
    by index instead of matching addresses a second time. */
@@ -113,46 +123,183 @@ static int direct_index(const rc_memref_t *m)
 }
 
 /* PS2 sets often write a pointer step as `I:0xX... & 0x01FFFFFF`,
-   cutting the kseg bits off the pointer, and rcheevos keeps that as an
-   AND memref over the read. The console masks every chain address with
-   0x1FFFFFFF and never reads past 32 MB, so for any address the game can
-   hold both sides land on the same place: the mask can be stepped over,
-   as long as it keeps every bit of the 32 MB range. A shorter mask
-   would change the address and is left alone. */
+   cutting the kseg bits off the pointer. The console masks every chain
+   address with 0x1FFFFFFF and never reads past 32 MB, so a mask that
+   keeps every bit of the 32 MB range changes nothing and is stepped
+   over. */
 #define RA_PS2_RAM_MASK 0x01FFFFFFu
 
-static const rc_memref_t *unwrap_mask(const rc_memref_t *m)
-{
-    while (m != NULL && m->value.memref_type == RC_MEMREF_TYPE_MODIFIED_MEMREF) {
-        const rc_modified_memref_t *mm = (const rc_modified_memref_t *)m;
+/* What the base of a chain step is made of: a constant, or some bits of
+   an entry or of an earlier node, times a scale, plus a constant. */
+#define TERM_CONST  0
+#define TERM_DIRECT 1
+#define TERM_NODE   2
 
-        if (mm->modifier_type != RC_OPERATOR_AND || mm->modifier.type != RC_OPERAND_CONST)
-            break;
-        if ((mm->modifier.value.num & RA_PS2_RAM_MASK) != RA_PS2_RAM_MASK)
-            break;
-        if (!rc_operand_is_memref(&mm->parent) || mm->parent.type != RC_OPERAND_ADDRESS)
-            break;
-        m = mm->parent.value.memref;
+struct term
+{
+    int kind;
+    int index;      /* entry or node the bits come from */
+    int stored;     /* bytes the console reads there */
+    unsigned shift; /* first bit used */
+    unsigned width; /* bits used, 0 for all of them */
+    uint32_t scale;
+    uint32_t add;
+};
+
+static int compile_node(const rc_memref_t *m);
+
+/* Which bits of the stored value an operand of this size uses. */
+static int term_cut(struct term *t, uint8_t size)
+{
+    unsigned shift = 0, width;
+
+    switch (size) {
+        case RC_MEMSIZE_8_BITS:  width = 8; break;
+        case RC_MEMSIZE_16_BITS: width = 16; break;
+        case RC_MEMSIZE_24_BITS: width = 24; break;
+        case RC_MEMSIZE_32_BITS: width = 32; break;
+        case RC_MEMSIZE_LOW:     width = 4; break;
+        case RC_MEMSIZE_HIGH:    shift = 4; width = 4; break;
+        case RC_MEMSIZE_BIT_0:   shift = 0; width = 1; break;
+        case RC_MEMSIZE_BIT_1:   shift = 1; width = 1; break;
+        case RC_MEMSIZE_BIT_2:   shift = 2; width = 1; break;
+        case RC_MEMSIZE_BIT_3:   shift = 3; width = 1; break;
+        case RC_MEMSIZE_BIT_4:   shift = 4; width = 1; break;
+        case RC_MEMSIZE_BIT_5:   shift = 5; width = 1; break;
+        case RC_MEMSIZE_BIT_6:   shift = 6; width = 1; break;
+        case RC_MEMSIZE_BIT_7:   shift = 7; width = 1; break;
+        default:
+            return 0; /* bit counts, big-endian and float reads */
     }
 
-    return m;
+    t->shift = shift;
+    t->width = (shift == 0 && width >= (unsigned)t->stored * 8) ? 0 : width;
+    return 1;
 }
 
-/* Compiles one pointer chain into a node, its parent first, and returns
-   the node index. -1 means the console cannot be asked to follow it.
+/* Describes the operand a chain step hangs off. Returns 0 for what the
+   console cannot compute: a delta or prior read,
+   two memory values combined, division, a mask with holes. */
+static int resolve_operand(const rc_operand_t *op, struct term *t)
+{
+    const rc_memref_t *m;
+    const rc_modified_memref_t *mm;
+    struct term a, b;
 
-   Recursion ends because a chain is built from the outside in: a
-   parent is always an older memref than the child, so no cycle exists.
+    memset(t, 0, sizeof(*t));
+    t->scale = 1;
 
-   What is turned down, and why: a non-constant offset (the console
-   computes address = parent + offset and nothing else); a parent read
-   as delta or prior (the console keeps no history of past frames); a
-   parent that is arithmetic rather than a pointer read. */
+    if (op->type == RC_OPERAND_CONST) {
+        t->kind = TERM_CONST;
+        t->add = op->value.num;
+        return 1;
+    }
+
+    if (!rc_operand_is_memref(op) || op->type != RC_OPERAND_ADDRESS)
+        return 0;
+
+    m = op->value.memref;
+    if (m == NULL)
+        return 0;
+
+    /* A plain address, or a chain off a constant that went into the
+       list as an entry. */
+    if (m->value.memref_type != RC_MEMREF_TYPE_MODIFIED_MEMREF || direct_index(m) >= 0) {
+        t->kind = TERM_DIRECT;
+        t->index = direct_index(m);
+        if (t->index < 0)
+            return 0;
+        t->stored = (int)RA_WATCH_SIZE(g_watch[t->index]);
+        return term_cut(t, op->size);
+    }
+
+    mm = (const rc_modified_memref_t *)m;
+
+    if (mm->modifier_type == RC_OPERATOR_INDIRECT_READ) {
+        t->kind = TERM_NODE;
+        t->index = compile_node(m);
+        if (t->index < 0)
+            return 0;
+        t->stored = (int)RA_NODE_SIZE(g_nodes[t->index].w);
+        return term_cut(t, op->size);
+    }
+
+    /* Arithmetic on the way to the address. */
+    if (mm->memref.value.size != RC_MEMSIZE_32_BITS)
+        return 0;
+    if (!resolve_operand(&mm->parent, &a) || !resolve_operand(&mm->modifier, &b))
+        return 0;
+    if (a.kind != TERM_CONST && b.kind != TERM_CONST)
+        return 0;
+
+    switch (mm->modifier_type) {
+        case RC_OPERATOR_MULT:
+            if (b.kind != TERM_CONST) {
+                struct term c = a;
+
+                a = b;
+                b = c;
+            }
+            a.scale *= b.add;
+            a.add *= b.add;
+            break;
+
+        case RC_OPERATOR_ADD:
+            if (b.kind != TERM_CONST) {
+                struct term c = a;
+
+                a = b;
+                b = c;
+            }
+            a.add += b.add;
+            break;
+
+        case RC_OPERATOR_SUB:
+            if (b.kind == TERM_CONST) {
+                a.add -= b.add;
+            } else {
+                b.scale = 0u - b.scale;
+                b.add = a.add - b.add;
+                a = b;
+            }
+            break;
+
+        case RC_OPERATOR_AND: {
+            uint32_t mask = b.add;
+            unsigned bits = 0, have;
+
+            if (b.kind != TERM_CONST || a.kind == TERM_CONST || a.scale != 1 || a.add != 0)
+                return 0;
+            if ((mask & RA_PS2_RAM_MASK) == RA_PS2_RAM_MASK)
+                break;
+            if (mask == 0 || (mask & (mask + 1)) != 0)
+                return 0;
+            while (mask != 0) {
+                bits++;
+                mask >>= 1;
+            }
+            have = a.width != 0 ? a.width : (unsigned)a.stored * 8 - a.shift;
+            if (bits < have)
+                a.width = bits;
+            break;
+        }
+
+        default:
+            return 0;
+    }
+
+    *t = a;
+    return 1;
+}
+
+/* Compiles one chain step into a node, whatever it hangs off first, and
+   returns the node index. -1 means the console cannot be asked to
+   follow it. */
 static int compile_node(const rc_memref_t *m)
 {
     const rc_modified_memref_t *mm;
-    const rc_memref_t *pm;
-    int parent, from_node, size, at;
+    struct term t;
+    int size, at;
 
     if (m == NULL || m->value.memref_type != RC_MEMREF_TYPE_MODIFIED_MEMREF)
         return -1;
@@ -166,40 +313,38 @@ static int compile_node(const rc_memref_t *m)
         return -1;
     if (mm->modifier.type != RC_OPERAND_CONST)
         return -1;
-    if (!rc_operand_is_memref(&mm->parent) || mm->parent.type != RC_OPERAND_ADDRESS)
+
+    /* A constant base is a fixed address: an entry, not a node. */
+    if (!resolve_operand(&mm->parent, &t) || t.kind == TERM_CONST)
         return -1;
-
-    pm = unwrap_mask(mm->parent.value.memref);
-    if (pm != NULL && pm->value.memref_type == RC_MEMREF_TYPE_MODIFIED_MEMREF) {
-        parent = compile_node(pm);
-        from_node = 1;
-    } else {
-        parent = direct_index(pm);
-        from_node = 0;
-    }
-
-    if (parent < 0 || parent > 0x0FFF)
+    if (t.index > 0x0FFF)
+        return -1;
+    /* RANL carries no shift, width or scale: leave such a chain
+       uncompiled so only its achievements are unsupported. */
+    if (!g_ran2 && (t.scale != 1 || t.shift != 0 || t.width != 0))
         return -1;
 
     if (g_node_count >= RA_NODE_MAX) {
         /* Once, not once per chain: a big set has hundreds. */
         if (!g_node_full) {
             g_node_full = 1;
-            log_warn("more than %d pointer chains in this set; the rest stay unsupported", RA_NODE_MAX);
+            log_warn("more than %d pointer chains in this set; refusing incomplete plan", RA_NODE_MAX);
         }
         return -1;
     }
 
     size = memsize_bytes(rc_memref_shared_size(mm->memref.value.size));
     at = g_node_count++;
-    g_nodes[at].w = RA_NODE_PACK((unsigned int)parent, (unsigned int)from_node, (unsigned int)size);
-    g_nodes[at].offset = mm->modifier.value.num;
+    g_nodes[at].w = RA_NODE_PACK((unsigned int)t.index, t.kind == TERM_NODE ? 1u : 0u,
+                                 (unsigned int)size, t.shift, t.width);
+    g_nodes[at].offset = t.add + mm->modifier.value.num;
+    g_nodes[at].scale = t.scale;
     g_node_of[at] = m;
     return at;
 }
 
 /* Every pointer chain in the set, in dependency order. */
-static void build_nodes(rc_client_t *client)
+static int build_nodes(rc_client_t *client)
 {
     rc_memrefs_t *pool = client->game->runtime.memrefs;
     rc_modified_memref_list_t *ml;
@@ -214,18 +359,19 @@ static void build_nodes(rc_client_t *client)
             compile_node(&ml->items[k].memref);
     }
 
-    /* Each node costs eight bytes in every snapshot. Over the ceiling
-       the whole set would be refused, which would cost the game its
-       telemetry as well, so the chains go and the direct reads stay. */
+    /* Every required node must fit; never advertise a partial plan. */
+    if (g_node_full)
+        return 0;
     if (g_bytes + g_node_count * RA_NODE_PAIR_BYTES > RA_SNAP_MAX_BYTES) {
-        log_warn("%d pointer chains do not fit in a snapshot with %d bytes of direct reads; dropping them",
+        log_warn("%d pointer chains do not fit in a snapshot with %d bytes of direct reads; refusing incomplete plan",
                  g_node_count, g_bytes);
-        g_node_count = 0;
+        return 0;
     }
 
     if (g_node_count > 0)
         log_info("%d pointer chain%s the console resolves every frame",
                  g_node_count, g_node_count == 1 ? "" : "s");
+    return 1;
 }
 
 /* An achievement is unsupported when it reads through a chain that did
@@ -239,7 +385,7 @@ static int memref_unsupported(const rc_memref_t *m)
 
     mm = (const rc_modified_memref_t *)m;
     if (mm->modifier_type == RC_OPERATOR_INDIRECT_READ)
-        return node_index(m) < 0;
+        return node_index(m) < 0 && direct_index(m) < 0;
 
     if (rc_operand_is_memref(&mm->parent) && memref_unsupported(mm->parent.value.memref))
         return 1;
@@ -314,20 +460,7 @@ static void count_indirect(rc_client_t *client)
    level. */
 static int chain_compilable(const rc_memref_t *m)
 {
-    const rc_modified_memref_t *mm;
-
-    if (m == NULL || m->value.memref_type != RC_MEMREF_TYPE_MODIFIED_MEMREF)
-        return 1;
-
-    mm = (const rc_modified_memref_t *)m;
-    if (mm->modifier_type != RC_OPERATOR_INDIRECT_READ)
-        return 0;
-    if (mm->modifier.type != RC_OPERAND_CONST)
-        return 0;
-    if (!rc_operand_is_memref(&mm->parent) || mm->parent.type != RC_OPERAND_ADDRESS)
-        return 0;
-
-    return chain_compilable(unwrap_mask(mm->parent.value.memref));
+    return node_index(m) >= 0 || direct_index(m) >= 0;
 }
 
 /* Memrefs that locked achievements and leaderboards read, as a flat
@@ -542,6 +675,7 @@ int watchlist_build(rc_client_t *client)
     rc_memref_list_t *ml;
     int off = 0, n = 0;
 
+    g_generation++;
     g_count = 0;
     g_bytes = 0;
     g_have_values = 0;
@@ -597,6 +731,39 @@ int watchlist_build(rc_client_t *client)
         }
     }
 
+    /* A chain off a constant is a direct entry. Refuse an incomplete
+       plan if those additional reads exceed the limits. */
+    {
+        rc_modified_memref_list_t *mml;
+
+        for (mml = &pool->modified_memrefs; mml != NULL; mml = mml->next) {
+            uint16_t k;
+
+            for (k = 0; k < mml->count; k++) {
+                const rc_modified_memref_t *mm = &mml->items[k];
+                uint32_t addr;
+                int b;
+
+                if (mm->modifier_type != RC_OPERATOR_INDIRECT_READ ||
+                    mm->parent.type != RC_OPERAND_CONST || mm->modifier.type != RC_OPERAND_CONST)
+                    continue;
+
+                addr = mm->parent.value.num + mm->modifier.value.num;
+                b = memsize_bytes(rc_memref_shared_size(mm->memref.value.size));
+                if (addr > 0x0FFFFFFFu || n >= RA_WATCH_MAX || off + b > RA_SNAP_MAX_BYTES) {
+                    snprintf(g_build_error, sizeof(g_build_error), "Constant-based reads exceed watch limits");
+                    return 0;
+                }
+
+                g_watch[n] = RA_WATCH_PACK(addr, (unsigned int)b);
+                g_offset[n] = (unsigned int)off;
+                g_direct_of[n] = &mm->memref;
+                off += b;
+                n++;
+            }
+        }
+    }
+
     if (n == 0) {
         log_warn("the achievement set has no direct memory reads");
         snprintf(g_build_error, sizeof(g_build_error), "The set has no direct memory reads");
@@ -607,8 +774,25 @@ int watchlist_build(rc_client_t *client)
     g_bytes = off;
     log_info("watch list: %d addresses, %d bytes per snapshot", n, off);
 
-    build_nodes(client);
+    if (!build_nodes(client)) {
+        if (g_node_full)
+            snprintf(g_build_error, sizeof(g_build_error), "Set too big: more than %d pointer chains", RA_NODE_MAX);
+        else
+            snprintf(g_build_error, sizeof(g_build_error), "Set too big: complete snapshot exceeds %d bytes", RA_SNAP_MAX_BYTES);
+        g_count = g_bytes = g_node_count = g_indirect = 0;
+        return 0;
+    }
     count_indirect(client);
+    if (!g_ran2) {
+        int i;
+        for (i = 0; i < g_node_count; i++) {
+            if ((g_nodes[i].w >> 16) != 0 || g_nodes[i].scale != 1) {
+                snprintf(g_build_error, sizeof(g_build_error), "Indexed reads require RAN2: update both host and console, then recheck support");
+                g_count = g_bytes = g_node_count = g_indirect = 0;
+                return 0;
+            }
+        }
+    }
     return 1;
 }
 
@@ -638,10 +822,11 @@ int watchlist_serialize(unsigned char *out, size_t cap)
     struct ra_node_file nhdr;
     size_t need = sizeof(hdr) + (size_t)g_count * sizeof(unsigned int);
     size_t at;
+    size_t stride = g_ran2 ? sizeof(struct ra_node) : 8;
     int i;
 
     if (g_node_count > 0)
-        need += sizeof(nhdr) + (size_t)g_node_count * sizeof(struct ra_node);
+        need += sizeof(nhdr) + (size_t)g_node_count * stride;
 
     if (g_count == 0 || need > cap)
         return 0;
@@ -659,13 +844,13 @@ int watchlist_serialize(unsigned char *out, size_t cap)
         memcpy(out + at, &g_watch[i], sizeof(unsigned int));
 
     if (g_node_count > 0) {
-        nhdr.magic = RA_NODE_MAGIC;
+        nhdr.magic = g_ran2 ? RA_NODE_MAGIC : RA_NODE_LEGACY_MAGIC;
         nhdr.count = (unsigned int)g_node_count;
         memcpy(out + at, &nhdr, sizeof(nhdr));
         at += sizeof(nhdr);
 
-        for (i = 0; i < g_node_count; i++, at += sizeof(struct ra_node))
-            memcpy(out + at, &g_nodes[i], sizeof(struct ra_node));
+        for (i = 0; i < g_node_count; i++, at += stride)
+            memcpy(out + at, &g_nodes[i], stride);
     }
 
     return (int)need;
@@ -753,4 +938,28 @@ uint32_t watchlist_read_memory(uint32_t address, uint8_t *buffer, uint32_t num_b
     }
 
     return 0;
+}
+
+int watchlist_locate(const rc_memref_t *m, int *is_node)
+{
+    int at = direct_index(m);
+
+    *is_node = 0;
+    if (at < 0) {
+        at = node_index(m);
+        *is_node = 1;
+    }
+    return at;
+}
+
+void watchlist_entry_info(int i, unsigned int *address, unsigned int *size, unsigned int *offset)
+{
+    *address = RA_WATCH_ADDR(g_watch[i]);
+    *size = RA_WATCH_SIZE(g_watch[i]);
+    *offset = g_offset[i];
+}
+
+int watchlist_have_nodes(void)
+{
+    return g_have_nodes;
 }

@@ -13,6 +13,23 @@ def payload(packets, title="Test Game", connected=True, signed_in=True):
 
 
 class SessionTests(unittest.TestCase):
+    def test_stale_plan_is_actionable_and_does_not_publish_now_playing(self):
+        tracker = SessionTracker()
+        tracker.observe(payload(10), now=10)
+        old = tracker.observe(payload(11), now=11)
+        stale = payload(12)
+        stale["console"]["status"] = "stale"
+        result = tracker.observe(stale, now=12)
+        self.assertEqual(result["state"], "needs-recheck")
+        self.assertIn("RA: check game support", result["text"])
+        self.assertNotIn("title", result)
+        stale["console"]["status"] = "active"
+        self.assertEqual(tracker.observe(stale, now=13)["state"], "connected")
+        stale["console"]["packets"] = 13
+        recovered = tracker.observe(stale, now=14)
+        self.assertEqual(recovered["state"], "playing")
+        self.assertGreater(recovered["session"], old["session"])
+
     def test_connected_does_not_mean_playing_without_advancing_packets(self):
         session = SessionTracker(stale_seconds=15)
         self.assertEqual(session.observe(payload(9), now=100)["state"], "connected")

@@ -20,14 +20,14 @@ class SupervisorTests(unittest.TestCase):
         self.profile = Path(self.temp_dir.name) / "profile"
         self.profile.mkdir(parents=True, exist_ok=True)
 
-    def resolve_fixture(self, mapping, response, *, cancel=None, state=None):
+    def resolve_fixture(self, mapping, response, *, cancel=None, state=None, test_mode=False):
         """Exercise the actual supervisor resolver with all account I/O stubbed."""
         import json
         cancel = cancel or threading.Event()
         job = IdentificationJob(1, "a" * 32, "SLUS_000.01")
         captured, calls = [], []
         args = mock.Mock(mode="xerabora", login=None, import_credentials=False,
-                         lan_viewer=False, games_folder=None)
+                         lan_viewer=False, games_folder=None, test_mode=test_mode)
         library = self.profile / "fixture.dll"
         library.write_bytes(b"fixture")
 
@@ -53,6 +53,17 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(run_owned_runtime(args, self.profile, mock.Mock(), threading.Event(),
                                                lambda: False, mock.Mock()), 0)
         return captured[0], calls
+
+    def test_test_mode_lookup_rearms_without_starting_a_remote_session(self):
+        def reply(task, cancel, options):
+            self.assertEqual(task.operation, "set")
+            self.assertTrue(task.test_mode)
+            qualified = QualifiedSet(task.context, "Fixture", ((1, "0xH080000=1"),),
+                                     (1,), (), (1,), encore=True)
+            return AccountResult(task.task_id, task.epoch, "ok", qualified=qualified)
+        result, calls = self.resolve_fixture(123, reply, test_mode=True)
+        self.assertTrue(result.qualified.encore)
+        self.assertEqual([task.operation for task, _ in calls], ["set"])
 
     def test_console_fallback_and_session_are_not_dropped_by_worker_cooldown(self):
         def reply(task, cancel, options):
@@ -130,6 +141,19 @@ class SupervisorTests(unittest.TestCase):
         self.assertIn("--owned-runtime", args_caduceus)
         self.assertIn("--mode", args_caduceus)
         self.assertIn("caduceus", args_caduceus)
+
+        self.assertEqual(_achievements_argv({"mode": "xerabora", "owned_runtime": True,
+                                             "watch_format": "ran2"}),
+                         ["--mode", "xerabora", "--owned-runtime", "--watch-format", "ran2"])
+        self.assertIn("ran2", _achievements_argv({"owned_runtime": True,
+                                                "watch_format": "xeRAbora 2 / updated RiptOPL"}))
+        self.assertEqual(_achievements_argv({"watch_format": "ran2"}),
+                         ["--mode", "xerabora", "--watch-format", "ran2"])
+        for values in ({"watch_format": "bad"},
+                       {"mode": "caduceus", "games_folder": str(self.profile),
+                        "owned_runtime": True, "watch_format": "ran2"}):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                _achievements_argv(values)
 
     def test_retroachievements_field_registry(self):
         owned_field = next((f for f in RETROACHIEVEMENTS.fields if f.key == "owned_runtime"), None)

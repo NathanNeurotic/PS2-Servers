@@ -72,6 +72,10 @@ class QualifiedSet:
     unofficial_ids: tuple
     prior_unlocks: tuple
     metadata: tuple = ()
+    encore: bool = False
+    rich_presence: str = ""
+    icon: str = ""
+    badges: tuple = ()
 
     @property
     def remaining(self):
@@ -79,14 +83,15 @@ class QualifiedSet:
         return len(self.definitions)
 
 
-def qualify_set(context, patch_response, unlock_response, *, include_unofficial=False):
+def qualify_set(context, patch_response, unlock_response, *, include_unofficial=False, encore=False):
     """Select softcore eligibility only after both account requests succeed.
 
     The transport must request these responses for the captured context. The
     API's unlock response need not echo a user or game, so this function cannot
     authenticate arbitrary caller-supplied JSON on its own.
     """
-    if not isinstance(context, SetContext) or type(include_unofficial) is not bool:
+    if (not isinstance(context, SetContext) or type(include_unofficial) is not bool
+            or type(encore) is not bool):
         raise ValueError("Invalid set context or selection")
     patch = decode_response(patch_response).get("PatchData")
     unlocks = decode_response(unlock_response)
@@ -108,6 +113,12 @@ def qualify_set(context, patch_response, unlock_response, *, include_unofficial=
     if type(unlocked) is not list or len(unlocked) > 100000:
         raise ValueError("Invalid prior unlock collection")
     prior = {_uint(value, "prior unlock ID") for value in unlocked}
+    rich_presence = patch.get("RichPresencePatch", "") or ""
+    if (type(rich_presence) is not str or len(rich_presence) > 65536 or "\0" in rich_presence):
+        raise ValueError("Invalid rich presence definition")
+    icon = patch.get("ImageIcon", "")
+    icon = icon if type(icon) is str and len(icon) <= 512 else ""
+    badges = []
     definitions, selected, unofficial, seen = [], [], [], set()
     metadata = []
     total_bytes = 0
@@ -131,7 +142,10 @@ def qualify_set(context, patch_response, unlock_response, *, include_unofficial=
         pts_val = pts if type(pts) is int and 0 <= pts <= 999999 else 0
         atitle_val = str(atitle) if type(atitle) is str else ""
         metadata.append((achievement_id, pts_val, atitle_val))
-        if achievement_id in prior:
+        badge = achievement.get("BadgeName", "")
+        if type(badge) is str and re.fullmatch(r"[0-9]{1,10}", badge):
+            badges.append((achievement_id, badge))
+        if achievement_id in prior and not encore:
             continue
         expression = achievement.get("MemAddr")
         if type(expression) is not str or not 1 <= len(expression) <= 16384 or "\0" in expression:
@@ -144,7 +158,7 @@ def qualify_set(context, patch_response, unlock_response, *, include_unofficial=
             raise ValueError("Achievement definitions exceed limit")
         definitions.append((achievement_id, expression))
     return QualifiedSet(context, title, tuple(definitions), tuple(selected),
-                        tuple(unofficial), tuple(sorted(prior)), tuple(metadata))
+                        tuple(unofficial), tuple(sorted(prior)), tuple(metadata), encore, rich_presence, icon, tuple(badges))
 
 
 def derive_direct_watch(library, qualified, *, profile="opl"):
@@ -153,15 +167,18 @@ def derive_direct_watch(library, qualified, *, profile="opl"):
     Direct reads and pointer chains are derived in dependency order.
     ORBIT v1.0.2 additionally enforces its 1216-byte snapshot ceiling and rejects pointer chains.
     """
-    if not isinstance(qualified, QualifiedSet) or not qualified.remaining:
+    if not isinstance(qualified, QualifiedSet) or not (qualified.remaining or qualified.rich_presence):
         raise ValueError("No remaining achievement definitions")
-    if profile not in ("opl", "orbit-v1.0.2", "caduceus"):
+    if profile not in ("opl", "opl-v2", "orbit-v1.0.2", "caduceus"):
         raise ValueError("Invalid watch profile")
     lib = ctypes.CDLL(str(library))
     memory_limit = 2 * 1024 * 1024 if qualified.context.console_id == 12 else 32 * 1024 * 1024
     memory_low = 0 if qualified.context.console_id == 12 else 0x80000
 
-    builder = getattr(lib, "ps2servers_build_watchlist", None)
+    builder = getattr(lib, "ps2servers_build_watchlist_v2" if profile == "opl-v2"
+                      else "ps2servers_build_watchlist", None)
+    if profile == "opl-v2" and builder is None:
+        raise ValueError("RAN2 profile requires a rebuilt owned evaluator library")
     if builder is not None:
         expressions = [expression.encode("ascii") for _, expression in qualified.definitions]
         array_type = ctypes.c_char_p * len(expressions)
@@ -170,8 +187,14 @@ def derive_direct_watch(library, qualified, *, profile="opl"):
         builder.argtypes = [array_type, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
                             ctypes.c_char_p, ctypes.c_uint32]
         builder.restype = ctypes.c_int
-        size = builder(definitions_array, len(expressions), memory_low, memory_limit,
-                       output, len(output))
+        arguments = [definitions_array, len(expressions), memory_low, memory_limit, output, len(output)]
+        if qualified.rich_presence:
+            builder = lib.ps2servers_build_watchlist_presence
+            builder.argtypes = [array_type, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
+                                ctypes.c_char_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_char_p]
+            builder.restype = ctypes.c_int
+            arguments.extend([int(profile != "opl-v2"), qualified.rich_presence.encode("utf-8")])
+        size = builder(*arguments)
         if size < 0:
             raise ValueError("Native watch derivation rejected the complete set (code {})".format(size))
         data = output.raw[:size]

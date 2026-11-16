@@ -9,12 +9,19 @@
 #include <stdint.h>
 
 #include "rc_client.h"
+#include "rc_runtime_types.h"
 
 /* Builds the list from the memrefs of the game loaded in rc_client.
    Returns 1 on success. */
 int watchlist_build(rc_client_t *client);
+/* Select before loading a set: 0 retains RANL, 1 emits RAN2. */
+void watchlist_set_format(int ran2);
 
+unsigned int watchlist_generation(void);
 int watchlist_count(void);
+int watchlist_locate(const rc_memref_t *m, int *is_node);
+void watchlist_entry_info(int i, unsigned int *address, unsigned int *size, unsigned int *offset);
+int watchlist_have_nodes(void);
 /* Achievements reading through a pointer chain the console cannot be
    asked to follow: active, but they cannot unlock. Reported as
    "unsupported". Chains that compiled into nodes are not counted. */

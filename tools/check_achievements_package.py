@@ -1,5 +1,6 @@
-﻿"""Smoke-test actual desktop packages without an RA account or game image."""
+"""Smoke-test actual desktop packages without an RA account or game image."""
 import json
+import itertools
 from contextlib import contextmanager
 import os
 from pathlib import Path
@@ -47,7 +48,10 @@ def temporary_profile():
 
 
 def check(command):
-    for mode in ("xerabora", "caduceus"):
+    for flag in ("--selfcheck-ra-resolver", "--selfcheck-ra-evaluator", "--selfcheck-ra-account"):
+        subprocess.run(command + [flag], check=True, timeout=60)
+    profiles = (("xerabora", "ranl"), ("xerabora", "ran2"), ("caduceus", "ranl"))
+    for (mode, watch_format), owned, test_mode in itertools.product(profiles, (False, True), (False, True)):
         with temporary_profile() as temporary:
             root = Path(temporary)
             folder = root / "games"
@@ -56,6 +60,12 @@ def check(command):
                        XDG_CONFIG_HOME=temporary, HOME=temporary, PS2SERVERS_RA_NO_BROWSER="1")
             env.pop("PYTHONPATH", None)
             args = command + ["--serve", "retroachievements", "--mode", mode, "--no-sound"]
+            if owned:
+                args += ["--owned-runtime"]
+            if test_mode:
+                args += ["--test-mode"]
+            if watch_format == "ran2":
+                args += ["--watch-format", "ran2"]
             if mode == "caduceus":
                 args += ["--games-folder", str(folder)]
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -84,7 +94,15 @@ def check(command):
                     account_port = int(port_file.read_text("ascii"))
                     with urllib.request.urlopen("http://127.0.0.1:{}/state".format(account_port), timeout=3) as response:
                         state = json.load(response)
-                    assert not state["login"]["ok"] and not state["lan"]["on"]
+                    assert not state["login"]["ok"] and not state.get("lan", {}).get("on", False)
+                    assert state["test_mode"] is test_mode
+                    # No set loaded: neither runtime may fabricate a report.
+                    try:
+                        urllib.request.urlopen("http://127.0.0.1:{}/diagnostics".format(account_port), timeout=3)
+                    except urllib.error.HTTPError as error:
+                        assert error.code == 503, error.code
+                    else:
+                        raise AssertionError("Diagnostics must require an active set")
                     duplicate = subprocess.run(args, env=env, cwd=temporary, capture_output=True,
                                                timeout=30, creationflags=flags)
                     assert duplicate.returncode and b"already running" in duplicate.stderr, duplicate.stderr
@@ -116,7 +134,8 @@ def check(command):
                         if time.monotonic() > deadline:
                             raise RuntimeError("Supervisor retained its profile lock")
                         time.sleep(0.1)
-            print(mode + ": packaged startup, discovery, pairing, duplicate rejection and shutdown passed")
+            print("{}/{}/{}{}: startup, discovery, pairing, duplicate rejection, diagnostics and shutdown passed".format(
+                mode, watch_format, "owned" if owned else "managed", "/test" if test_mode else ""), flush=True)
 
 
 if __name__ == "__main__":

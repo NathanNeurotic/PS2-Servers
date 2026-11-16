@@ -26,11 +26,13 @@ Implemented behavior:
   accept reordered fragments, suppress repeated completed frames, reject
   conflicting duplicates and inconsistent dimensions, and discard delayed
   older frames without replacing a newer in-flight frame.
-- Accept configured direct-only or pointer-tail value sizes, use six-digit
+- Accept the exact direct-only or node-bearing size required by the installed
+  plan, use six-digit
   sequence wrap semantics from the sender's decimal formatter, and recover
   from an idle console restart. Duplicate replay does not extend the timeout.
 - Validate immutable RAWL v1 files and RANL tails: read sizes, entry totals,
-  node dependencies, exact lengths and snapshot capacity. Preserve legal
+  node dependencies, exact lengths and snapshot capacity. The v2 follow-up also
+  accepts RAN2 with 12-byte nodes and requires the complete node snapshot region. Preserve legal
   out-of-RAM addresses, which the console reads as zero.
 - Bind validated lists to image hash/serial generations with `WatchSession`;
   reinstalling a list always resets assembly, and explicit clearing revokes

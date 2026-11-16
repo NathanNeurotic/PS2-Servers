@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#ifdef V2_WATCHLIST
+#define ps2servers_build_watchlist ps2servers_build_watchlist_v2
+#endif
 
 int ps2servers_build_watchlist(const char *const *definitions, uint32_t num_definitions,
                                uint32_t memory_low, uint32_t memory_high,
@@ -14,6 +17,12 @@ int main(void) {
     "A:0xH001000_A:0xH001001_0xH001002=3",
     "I:0xX001000_0xH000004=1",
     "I:0xX001000_I:0xX000004_0xH000008=1"
+#ifdef V2_WATCHLIST
+    , "I:0xH001000*4_0xH080000=1"
+    , "I:0xU001000*4_0xH080000=1"
+    , "I:0xM001000*4_0xH080000=1"
+    , "I:4_0xH080000=1"
+#endif
   };
   unsigned i, j;
   for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

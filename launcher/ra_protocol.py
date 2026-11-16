@@ -132,7 +132,7 @@ def watch_chunk(watch_file, index):
     This transfer codec does not derive or authorize addresses. The runtime
     must bind the file to its identified image/hash and achievement set.
     """
-    if (not isinstance(watch_file, bytes) or not 1 <= len(watch_file) <= 17432
+    if (not isinstance(watch_file, bytes) or not 1 <= len(watch_file) <= 17944
             or type(index) is not int or not 0 <= index < (len(watch_file) + 895) // 896):
         raise ValueError("Invalid watch file or chunk index")
     data = watch_file[index * 896:(index + 1) * 896]

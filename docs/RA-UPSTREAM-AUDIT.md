@@ -1,5 +1,8 @@
 # Upstream RA audit, 2026-10-11
 
+> Newer investigation: [xeRAbora 2.0.0 migration, 2026-11-15](XERABORA-V2-INVESTIGATION-2026-11-15.md).
+> The historical results below do not establish compatibility with its RAN2 plans.
+
 ## Refresh, 2026-10-15
 
 Verified default-branch heads and published release metadata directly against

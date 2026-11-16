@@ -149,12 +149,15 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
             close_owner()
             return 1
 
-    profile_mode = "caduceus" if args.mode == "caduceus" else "opl"
+    profile_mode = "caduceus" if args.mode == "caduceus" else (
+        "opl-v2" if args.watch_format == "ran2" else "opl")
+    test_mode = getattr(args, "test_mode", False) is True
     worker = AccountWorker(str(profile))
     active_context = None
     context_lock = threading.Lock()
     account_cancel = threading.Event()
     state = RAState()
+    state.test_mode = test_mode
 
     def resolve_job(job, cancel):
         nonlocal active_context
@@ -181,14 +184,15 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                 return IdentificationResult()
             try:
                 ctx = SetContext(creds.username, 1, job.image_hash, game_id, console_id)
-                task = AccountTask(1, 1, "set", credentials=creds, context=ctx)
+                task = AccountTask(1, 1, "set", credentials=creds, context=ctx, test_mode=test_mode)
                 res = worker(task, cancel, wait=True)
                 if cancel.is_set():
                     return IdentificationResult()
                 if res and res.status == "ok" and res.qualified:
                     try:
                         sess_task = AccountTask(2, 1, "start_session", credentials=creds, context=ctx)
-                        worker(sess_task, cancel, wait=True)
+                        if not test_mode:
+                            worker(sess_task, cancel, wait=True)
                     except Exception:
                         pass
                     if cancel.is_set():
@@ -199,13 +203,15 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                         active_context = ctx
                         achievements_data = []
                         prior_set = set(res.qualified.prior_unlocks)
+                        badges = dict(res.qualified.badges)
                         for aid, pts, title in res.qualified.metadata:
                             achievements_data.append({
                                 "id": aid,
                                 "title": title,
                                 "description": "",
+                                "badge": badges.get(aid, ""),
                                 "points": pts,
-                                "unlocked": aid in prior_set,
+                                "unlocked": aid in prior_set and not test_mode,
                             })
                         state.set_game(
                             game_id=res.qualified.context.game_id,
@@ -213,6 +219,7 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                             serial=job.serial,
                             image_hash=job.image_hash,
                             achievements=achievements_data,
+                            icon=res.qualified.icon,
                         )
                         state.update_console(connected=True, status="playing")
                     return IdentificationResult(qualified=res.qualified, profile=profile_mode)
@@ -237,12 +244,14 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
         print("RetroAchievements: signed out (owned runtime). Run with --import-credentials or --login.", flush=True)
     print(f"RetroAchievements: {args.mode} console compatibility; softcore only (owned runtime).", flush=True)
     print("Desktop engine: PS2-Servers native runtime (Issue #223).", flush=True)
+    if test_mode:
+        print("RetroAchievements: TEST MODE — local triggers only; no sessions, awards or pings. Restart to change mode.", flush=True)
 
     bridge = None
     viewer = None
     web_server = None
     ui_port = available_account_port()
-    submissions = Submissions(profile, account_cancel)
+    submissions = Submissions(profile, account_cancel, test_mode=test_mode)
     submission_id = 0
     def logout():
         nonlocal active_context
@@ -257,7 +266,9 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
 
     try:
         (profile / "account-port").write_text(str(ui_port), encoding="ascii")
-        web_server = RAWebServer(ui_port, state, logout=logout)
+        web_server = RAWebServer(ui_port, state, logout=logout,
+            diagnostics=lambda: service.run_account(
+                lambda session: session.receiver.diagnostics(test_mode=test_mode), timeout=10))
         web_server.start()
         print(f"Account, achievements and leaderboards: http://127.0.0.1:{ui_port}/", flush=True)
         if getattr(args, "lan_viewer", False):
@@ -282,6 +293,10 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                         packets=state.packets + 1,
                         frames=state.frames + 1,
                     )
+                with context_lock:
+                    if (not account_cancel.is_set() and evaluated.evaluation
+                            and evaluated.context == active_context):
+                        state.set_presence(evaluated.evaluation.rich_presence if evaluated.evaluation.accepted else "")
                 if evaluated.evaluation and evaluated.evaluation.triggered:
                     for aid in evaluated.evaluation.triggered:
                         with context_lock:
@@ -292,7 +307,7 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                         print(f"RetroAchievements: achievement {aid} triggered on console!", flush=True)
                         current_creds = store.load()
                         ctx = evaluated.context
-                        if (current_creds and ctx and ctx.account == current_creds.username
+                        if (not test_mode and current_creds and ctx and ctx.account == current_creds.username
                                 and not account_cancel.is_set()):
                             submission_id += 1
                             task = AccountTask(submission_id, ctx.epoch, "award",
@@ -306,7 +321,7 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
                 with context_lock:
                     ctx = active_context
                 current_creds = store.load()
-                if current_creds and ctx and not account_cancel.is_set():
+                if not test_mode and current_creds and ctx and not account_cancel.is_set():
                     submission_id += 1
                     task = AccountTask(submission_id, ctx.epoch, "ping", credentials=current_creds, context=ctx)
                     if not submissions.offer(task):
@@ -338,11 +353,26 @@ def main(argv=None):
     parser.add_argument("--lan-viewer", action="store_true")
     parser.add_argument("--owned-runtime", action="store_true",
                         help="Run the PS2-Servers native runtime (Issue #223 preview)")
+    parser.add_argument("--watch-format", choices=("ranl", "ran2"), default="ranl",
+                        help="RAN2 requires a v2-capable console and refreshed game checks")
+    parser.add_argument("--export-loader", type=Path, metavar="DIRECTORY",
+                        help="Export the pinned loader, license and provenance to an existing directory, then exit")
     parser.add_argument("--login", type=str, metavar="USERNAME",
                         help="Sign in with RetroAchievements username and password prompt")
     parser.add_argument("--import-credentials", action="store_true",
                         help="Import credentials from existing managed profile with explicit consent")
+    parser.add_argument("--test-mode", action="store_true",
+                        help="Rearm achievements locally without submitting unlocks or play activity; restart to change modes")
     args = parser.parse_args(argv)
+    if args.watch_format == "ran2" and args.mode != "xerabora":
+        parser.error("RAN2 requires xeRAbora mode; Caduceus retains its pinned format")
+    if args.export_loader is not None:
+        from launcher.achievement_loader import export_loader
+        try:
+            print(export_loader(args.mode, args.export_loader, watch_format=args.watch_format), flush=True)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        return 0
     if args.owned_runtime:
         lib = library_path()
         if not lib.is_file():
@@ -367,6 +397,10 @@ def main(argv=None):
     env = engine_environment(profile, args.mode)
     ui_port = available_account_port()
     command = [str(binary), "--port", "18194", "--ui-port", str(ui_port)]
+    if args.test_mode:
+        command.append("--test-mode")
+    if args.watch_format == "ran2":
+        command += ["--watch-format", "ran2"]
     if args.no_sound:
         command.append("--no-sound")
     if args.obs_folder:

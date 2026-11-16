@@ -84,12 +84,18 @@ struct ra_watch_file
    same frame: reading the pointer on the PC and asking for the target
    next frame would give a value from a frame that no longer exists.
 
+   A set can also index a table: the address is an index times the
+   element size plus the table's base, and the index can be one bit or
+   one nibble of a byte. One node covers both:
+
+   address = ((parent >> shift) & mask(width)) * scale + offset
+
+   in 32-bit arithmetic, so a negative scale wraps. width 0 keeps the
+   whole parent value; a plain pointer step is shift 0, width 0, scale 1.
+
    The chains travel as an optional tail after the entries. A build that
-   does not know about them stops at count entries and never sees it,
-   which is why the version stays 1: an old console keeps working on a
-   list from a new client, it just cannot follow pointers, exactly as
-   before. The same holds the other way: a new console on a list without
-   the tail reads nodes as zero.
+   does not know the tail's magic stops at count entries and sends
+   direct values only, which the client sees in the snapshot size.
 
    struct ra_watch_file
    unsigned int entries[count]      direct addresses
@@ -113,9 +119,10 @@ struct ra_watch_file
    so the client can tell from the first snapshot whether it is talking
    to a console that follows pointers. */
 
-#define RA_NODE_MAGIC 0x4C4E4152 /* "RANL" in little-endian */
+#define RA_NODE_LEGACY_MAGIC 0x4C4E4152 /* "RANL" */
+#define RA_NODE_MAGIC 0x324E4152 /* "RAN2" in little-endian */
 
-/* Node ceiling. Nodes travel with the list into module storage, 16
+/* Node ceiling. Nodes travel with the list into module storage, 20
    bytes each there (the node, then two scratch words per frame). The
    largest set counted so far has 57. The snapshot ceiling binds next,
    at 8 bytes per node. */
@@ -130,21 +137,26 @@ struct ra_node_file
     unsigned int count; /* nodes that follow */
 };
 
-/* One node: parent + offset -> read size bytes.
+/* One node: some bits of the parent, scaled, plus offset -> read size
+   bytes.
 
    parent is an index, into the entry list when from_node is 0 and into
-   the node list when it is 1. offset is added to the value read there;
-   it is the static part of the address and can be any 32-bit value. */
+   the node list when it is 1. offset is the static part of the address
+   and can be any 32-bit value. */
 struct ra_node
 {
-    unsigned int w;      /* parent index, from_node flag, read size */
-    unsigned int offset; /* added to the parent value */
+    unsigned int w;      /* parent index, from_node flag, read size, shift, width */
+    unsigned int offset; /* added after scaling */
+    unsigned int scale;  /* multiplies the bits taken from the parent */
 };
 
 #define RA_NODE_PARENT(w)    ((w)&0x0FFF)
 #define RA_NODE_FROM_NODE(w) (((w) >> 12) & 1)
 #define RA_NODE_SIZE(w)      (((w) >> 13) & 7)
-#define RA_NODE_PACK(parent, from_node, size) \
-    (((unsigned int)(size) << 13) | ((unsigned int)(from_node) << 12) | ((parent)&0x0FFF))
+#define RA_NODE_SHIFT(w)     (((w) >> 16) & 31)
+#define RA_NODE_WIDTH(w)     (((w) >> 21) & 63)
+#define RA_NODE_PACK(parent, from_node, size, shift, width)                                         \
+    (((unsigned int)(width) << 21) | ((unsigned int)(shift) << 16) | ((unsigned int)(size) << 13) | \
+     ((unsigned int)(from_node) << 12) | ((parent)&0x0FFF))
 
 #endif /* __RA_WATCH_H__ */

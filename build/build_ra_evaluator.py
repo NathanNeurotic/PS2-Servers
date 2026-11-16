@@ -40,15 +40,26 @@ def build(output=None):
     sources = sorted((rc / "src/rcheevos").glob("*.c"))
     sources += [rc / "src/rc_util.c", rc / "src/rc_compat.c", rc / "src/rhash/md5.c"]
     sources += [ROOT / "native/ra_watch_probe.c"]
+    digest = hashlib.sha256()
+    for source in sorted(sources + list((rc / "include").glob("*.h"))):
+        digest.update(str(source.relative_to(ROOT)).encode("utf-8"))
+        digest.update(source.read_bytes())
+    command += ['-DPS2SERVERS_SOURCE_ID="' + digest.hexdigest() + '"']
     subprocess.run(command + list(map(str, sources)) + ["-o", str(target), "-lm"],
                    check=True, timeout=180)
     shutil.copy2(rc / "LICENSE", target.parent / "LICENSE-rcheevos.txt")
+    shutil.copy2(ROOT / "vendor/retroachievements/xerabora/client/LICENSE",
+                 target.parent / "LICENSE-xerabora.txt")
     provenance = json.loads((ROOT / "vendor/retroachievements/sources.json").read_text())
     (target.parent / "OWNED-EVALUATOR-SOURCES.json").write_text(
         json.dumps({"rcheevos": provenance["rcheevos"],
                     "owned_sources": {"native/ra_watch_probe.c": hashlib.sha256(
                         (ROOT / "native/ra_watch_probe.c").read_bytes()).hexdigest()},
-                    "interface": "public rc_runtime API; no xeRAbora desktop sources"},
+                    "watch_compiler_reference": {
+                        "repository": "https://github.com/hacan359/xerabora",
+                        "commit": "98949c0efba151f16b234ba5b392b5241791f40e",
+                        "path": "client/src/watchlist.c"},
+                    "interface": "rc_runtime API with adapted xeRAbora v2 watch compiler; no desktop service"},
                    indent=2) + "\n", encoding="utf-8")
     return target
 

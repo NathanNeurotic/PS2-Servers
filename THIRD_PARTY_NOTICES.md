@@ -1,5 +1,13 @@
 # Third-party notices
 
+## xeRAbora indexed watch compiler
+
+`native/ra_watch_probe.c` adapts indexed expression compilation from
+[hacan359/xerabora v2.0.0](https://github.com/hacan359/xerabora/blob/98949c0efba151f16b234ba5b392b5241791f40e/client/src/watchlist.c).
+Copyright (c) 2026 xerabora contributors, MIT licensed. The full notice is
+retained in that source file and `vendor/retroachievements/xerabora/client/LICENSE`.
+The owned evaluator build stages `LICENSE-xerabora.txt` alongside its binary.
+
 ## Okeanos86/neutrino (behavioral reference)
 
 The virtual CD CHD layout and interoperability behavior were informed by the

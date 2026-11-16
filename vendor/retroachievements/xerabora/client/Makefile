@@ -50,7 +50,7 @@ RC_SRC := \
 	$(RC)/src/rc_util.c \
 	$(RC)/src/rc_version.c
 
-SRC := src/main.c src/badge_data.c src/config.c src/console.c src/discord.c src/follow.c src/log.c \
+SRC := src/diag.c src/main.c src/badge_data.c src/config.c src/console.c src/discord.c src/follow.c src/log.c \
        src/platform.c src/ra.c src/raweb.c src/snapshot.c src/sound.c src/sounds_data.c \
        src/ui_page.c src/watchlist.c src/webui.c
 

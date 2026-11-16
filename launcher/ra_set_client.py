@@ -32,11 +32,11 @@ class RASetClient:
             fields["h"] = 0  # only softcore is supported by our console engine
         return self._transport.post(fields, cancel=cancel)
 
-    def fetch(self, context, *, include_unofficial=False, cancel=None):
+    def fetch(self, context, *, include_unofficial=False, encore=False, cancel=None):
         """Return only a fully qualified pair of successful account responses."""
         if not isinstance(context, SetContext) or context.account != self.username:
             raise ValueError("Account context mismatch")
-        if type(include_unofficial) is not bool:
+        if type(include_unofficial) is not bool or type(encore) is not bool:
             raise ValueError("Invalid achievement selection")
         def check_cancelled():
             if cancel is not None and cancel.is_set():
@@ -50,4 +50,4 @@ class RASetClient:
         check_cancelled()
         unlocks = self._request("unlocks", context.game_id, cancel=cancel)
         check_cancelled()
-        return qualify_set(context, patch, unlocks, include_unofficial=include_unofficial)
+        return qualify_set(context, patch, unlocks, include_unofficial=include_unofficial, encore=encore)

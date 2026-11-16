@@ -79,7 +79,7 @@ class EvaluatedReceiver:
         metadata_map = {aid: (pts, title) for aid, pts, title in qualified.metadata}
         accepted = self.complete(job, watch, dict(qualified.definitions),
                              title=qualified.title, achievements=len(qualified.selected_ids),
-                             profile=profile, achievement_metadata=metadata_map)
+                             profile=profile, achievement_metadata=metadata_map, rich_presence=qualified.rich_presence)
         if accepted:
             self._context = context
         return accepted
@@ -125,10 +125,11 @@ class EvaluatedReceiver:
             accepted = receiver.complete(job, **metadata)
             self._reconcile()
             return accepted
+        rich_presence = metadata.pop("rich_presence", "")
         candidate = None
         try:
             candidate = Evaluator(self._library, definitions, watch_file,
-                                  receiver.session.generation + 1)
+                                  receiver.session.generation + 1, rich_presence=rich_presence)
             accepted = receiver.complete(job, watch_file, **metadata)
         except Exception:
             if candidate is not None:
@@ -170,6 +171,15 @@ class EvaluatedReceiver:
                 notices = tuple(formatted)
         return EvaluatedOutput(output, evaluation, notices,
                                self._context if evaluation is not None else None)
+
+    def diagnostics(self, test_mode=False):
+        self.tick()
+        if self._evaluator is None:
+            raise ValueError("No active read plan or complete snapshots")
+        context = self._context
+        return self._evaluator.diagnostics(profile=self._profile,
+            game_id=context.game_id if context else 0,
+            image_hash=context.image_hash if context else "", test_mode=test_mode)
 
     def reset(self):
         """Revoke account/game jobs, wire ownership and native history together."""

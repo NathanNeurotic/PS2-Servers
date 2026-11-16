@@ -202,3 +202,55 @@ class ActivityTests(unittest.TestCase):
             worker.join(timeout=3)
         self.assertFalse(worker.is_alive())
         self.assertEqual(result, [(0, {"v": 1, "client_id": "12345678901234567"})])
+
+
+class DetailActivityTests(unittest.TestCase):
+    def game(self, **overrides):
+        value = {"state": "playing", "session": 1, "title": "Fixture Game", "presence": {
+            "message": "Level 3", "icon": "/Images/123.png", "user": "FixtureUser",
+            "unlock": {"id": 1, "title": "First win", "badge": "42", "ago": 0}}}
+        value.update(overrides)
+        return value
+
+    def test_detail_consent_is_separate_and_revocation_clears_every_asset(self):
+        tracker = DesktopActivity()
+        game = self.game()
+        tracker.update(["retroachievements"], game=game, show_game=True)
+        self.assertNotIn("FixtureUser", json.dumps(tracker.snapshot()))
+        self.assertNotIn("assets", tracker.snapshot())
+        tracker.update(["retroachievements"], game=game, show_game=True, show_details=True)
+        actual = tracker.snapshot()
+        self.assertEqual(actual["state"], "Level 3")
+        self.assertEqual(actual["assets"]["large_image"], "https://media.retroachievements.org/Images/123.png")
+        self.assertTrue(actual["buttons"][0]["url"].endswith("/FixtureUser"))
+        for game, share in ((self.game(state="stalled"), True), (self.game(state="testing"), True),
+                            (self.game(), False), (self.game(session=2), True)):
+            tracker.update(["retroachievements"], game=game, show_game=share, show_details=False)
+            actual = tracker.snapshot()
+            self.assertNotIn("assets", actual)
+            self.assertNotIn("buttons", actual)
+
+    def test_unlock_badge_expires_without_new_packets_and_is_not_replayed(self):
+        tracker = DesktopActivity()
+        game = self.game()
+        tracker.update(["retroachievements"], game=game, show_game=True, show_details=True)
+        self.assertNotIn("small_image", tracker.snapshot()["assets"])
+        game["presence"]["unlock"] = {"id": 2, "title": "Second win", "badge": "43", "ago": 5}
+        with mock.patch("launcher.discord_presence.time.monotonic", return_value=100):
+            tracker.update(["retroachievements"], game=game, show_game=True, show_details=True)
+            self.assertIn("small_image", tracker.snapshot()["assets"])
+        with mock.patch("launcher.discord_presence.time.monotonic", return_value=156):
+            tracker.update(["retroachievements"], game=game, show_game=True, show_details=True)
+            self.assertNotIn("small_image", tracker.snapshot()["assets"])
+        tracker.update(["retroachievements"], game=self.game(session=2), show_game=True, show_details=True)
+        self.assertNotIn("small_image", tracker.snapshot()["assets"])
+
+    def test_arbitrary_links_paths_or_credentials_cannot_enter_presence(self):
+        tracker = DesktopActivity()
+        game = self.game()
+        game["presence"] = {"message": "http://private.invalid/token", "icon": "https://evil.invalid/Images/123.png",
+                            "user": "bad/user?token=secret"}
+        tracker.update(["retroachievements"], game=game, show_game=True, show_details=True)
+        actual = json.dumps(tracker.snapshot())
+        for private in ("private.invalid", "evil.invalid", "secret", "buttons", "assets"):
+            self.assertNotIn(private, actual)
