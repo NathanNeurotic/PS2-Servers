@@ -149,6 +149,24 @@ class DiagnosticTests(unittest.TestCase):
             subprocess.run(command + list(map(str, sources)) + ["-o", str(binary), "-lm"], check=True)
             subprocess.run([str(binary)], check=True, timeout=15)
 
+    def test_alternative_only_conditions_and_truncation_are_visible(self):
+        watch = struct.pack("<5I", 0x4c574152, 1, 1, 1, 0x10080000)
+        with Evaluator(self.library, {7: "S0xH080000=1"}, watch, 1) as runtime:
+            runtime.evaluate(b"\0", generation=1, sequence=1)
+            self.assertIn(b"alt type=", runtime.diagnostics())
+            import ctypes
+            describe = runtime._library.ps2servers_runtime_diagnostics
+            describe.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+            describe.restype = ctypes.c_int
+            buffer = ctypes.create_string_buffer(256)
+            size = describe(runtime._runtime, buffer, len(buffer))
+            self.assertLess(size, len(buffer))
+        with Evaluator(self.library, {7: "_".join(["0xH080000=1"] * 10)}, watch, 1) as runtime:
+            buffer = ctypes.create_string_buffer(256)
+            size = describe(runtime._runtime, buffer, len(buffer))
+            self.assertLess(size, len(buffer))
+            self.assertIn(b"truncated", buffer.raw[:size])
+
     def test_real_rich_presence_reads_and_conditions_use_the_same_snapshot(self):
         context = SetContext("Synthetic", 1, "a" * 32, 42, 21)
         patch, prior = responses([{"ID": 7, "Flags": 3, "MemAddr": "0xH080000=1"}], [7])

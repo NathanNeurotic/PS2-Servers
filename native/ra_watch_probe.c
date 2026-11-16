@@ -611,18 +611,24 @@ RC_EXPORT int RC_CCONV ps2servers_runtime_diagnostics(const rc_runtime_t *runtim
 {
     uint32_t i, used = 0;
     if (!runtime || !out || cap < 256) return -1;
+    cap -= 64; /* reserve room for an explicit truncation marker */
     out[0] = '\0';
     for (i = 0; i < runtime->trigger_count; i++) {
         const rc_runtime_trigger_t *entry = &runtime->triggers[i];
         const rc_trigger_t *trigger = entry->trigger;
         const rc_condset_t *set;
-        int alt = 0, n;
+        int alt, n;
         if (!trigger) continue;
+        alt = trigger->requirement == NULL;
         n = snprintf(out + used, cap - used, "achievement %u state=%u measured=%u/%u\n",
             entry->id, trigger->state, trigger->measured_value, trigger->measured_target);
-        if (n < 0 || (uint32_t)n >= cap-used) return (int)used;
+        if (n < 0 || (uint32_t)n >= cap-used) {
+            const char marker[] = "[condition state truncated at buffer limit]\n";
+            memcpy(out + used, marker, sizeof(marker));
+            return (int)(used + sizeof(marker) - 1);
+        }
         used += (uint32_t)n;
-        for (set = trigger->requirement; set != NULL; set = alt ? set->next : trigger->alternative, alt = 1) {
+        for (set = alt ? trigger->alternative : trigger->requirement; set != NULL; set = alt ? set->next : trigger->alternative, alt = 1) {
             const rc_condition_t *condition;
             for (condition = set->conditions; condition; condition = condition->next) {
                 const rc_operand_t *a = &condition->operand1, *b = &condition->operand2;
@@ -632,7 +638,11 @@ RC_EXPORT int RC_CCONV ps2servers_runtime_diagnostics(const rc_runtime_t *runtim
                     "  %s type=%u op=%u hits=%u/%u lhs(type=%u,size=%u,raw=%u) rhs(type=%u,size=%u,raw=%u)\n",
                     alt ? "alt" : "core", condition->type, condition->oper,
                     condition->current_hits, condition->required_hits, a->type, a->size, av, b->type, b->size, bv);
-                if (n < 0 || (uint32_t)n >= cap-used) return (int)used;
+                if (n < 0 || (uint32_t)n >= cap-used) {
+                    const char marker[] = "[condition state truncated at buffer limit]\n";
+                    memcpy(out + used, marker, sizeof(marker));
+                    return (int)(used + sizeof(marker) - 1);
+                }
                 used += (uint32_t)n;
             }
         }
