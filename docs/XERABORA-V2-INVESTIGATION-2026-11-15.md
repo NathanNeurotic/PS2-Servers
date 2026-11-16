@@ -42,6 +42,14 @@ Both managed and owned runtimes now provide:
   mode clear shared activity. Engine unlock rings are baselined on each game
   session, so old events are not replayed.
 
+Review follow-up: diagnostic downloads require an allowed loopback Host and
+same-origin browser context before recording/export work starts. Managed plans
+that exceed 128 pointer nodes or the complete-snapshot byte ceiling now fail
+with a build error and no serializable partial plan, including in legacy mode.
+Boundary-sized plans remain supported. Native CI builds use separate required
+steps so Windows cannot hide the first command's failure. Pure recording tests
+run independently of native compiler availability.
+
 Offline acceptance includes rejecting transports at the native and owned
 submission boundaries, real local encore triggers and rich-presence evaluation,
 bounded condition/history reports, equal-sized plan resets, consent/expiry and

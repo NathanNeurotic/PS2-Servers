@@ -1,6 +1,8 @@
 """Offline submission-boundary, bounded diagnostic and presence acceptance."""
 import dataclasses
 import json
+import os
+import shlex
 from pathlib import Path
 import shutil
 import struct
@@ -129,10 +131,19 @@ class DiagnosticTests(unittest.TestCase):
         self.assertLessEqual(len(bounded), 1024)
         self.assertIn(b"truncated", bounded)
 
+
+class NativeDiagnosticTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        compiler = os.environ.get("RA_CC") or ("gcc" if os.name == "nt" else "cc")
+        command = shlex.split(compiler)
+        if not command or not shutil.which(command[0]):
+            if os.environ.get("GITHUB_ACTIONS") == "true" and sys.platform.startswith("linux"):
+                raise AssertionError("Linux CI requires a native C compiler for diagnostic coverage")
+            raise unittest.SkipTest("C compiler required for native diagnostic evaluation")
         from build.build_ra_evaluator import build
-        cls.library = build()
+        with mock.patch.dict(os.environ, {"RA_CC": compiler}):
+            cls.library = build()
 
     @unittest.skipUnless(shutil.which("cc"), "Native C compiler required")
     def test_managed_diagnostics_conditions_budget_and_equal_size_plan_reset(self):
@@ -192,6 +203,43 @@ class DiagnosticTests(unittest.TestCase):
 
 
 class ExportBoundaryTests(unittest.TestCase):
+    def test_diagnostic_host_and_origin_are_validated_before_recording(self):
+        import http.client
+        from launcher.ra_web import RAState, RAWebServer
+        callback = mock.Mock(return_value=b"local game memory")
+        server = RAWebServer(0, RAState(), diagnostics=callback)
+        server.start()
+        port = server.server_port
+        try:
+            cases = [({}, 403), ({"Host": "rebound.example"}, 403),
+                     ({"Host": f"127.0.0.1:{port + 1}"}, 403),
+                     ({"Host": f"127.0.0.1:{port}", "Origin": "https://other.example"}, 403),
+                     ({"Host": f"127.0.0.1:{port}", "Sec-Fetch-Site": "cross-site"}, 403),
+                     ({"Host": f"127.0.0.1:{port}"}, 200),
+                     ({"Host": f"localhost:{port}", "Origin": f"http://localhost:{port}"}, 200)]
+            accepted = 0
+            for headers, expected in cases:
+                with self.subTest(headers=headers):
+                    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+                    try:
+                        conn.putrequest("GET", "/diagnostics", skip_host=True)
+                        for key, value in headers.items():
+                            conn.putheader(key, value)
+                        conn.endheaders()
+                        response = conn.getresponse()
+                        body = response.read()
+                        self.assertEqual(response.status, expected)
+                        accepted += expected == 200
+                        self.assertEqual(callback.call_count, accepted)
+                        if expected == 200:
+                            self.assertEqual(body, b"local game memory")
+                        else:
+                            self.assertNotIn(b"local game memory", body)
+                    finally:
+                        conn.close()
+        finally:
+            server.close()
+
     def test_explicit_local_report_is_never_proxied_to_the_lan_viewer(self):
         import urllib.request
         import urllib.error

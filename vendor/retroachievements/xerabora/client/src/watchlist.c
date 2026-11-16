@@ -324,7 +324,7 @@ static int compile_node(const rc_memref_t *m)
         /* Once, not once per chain: a big set has hundreds. */
         if (!g_node_full) {
             g_node_full = 1;
-            log_warn("more than %d pointer chains in this set; the rest stay unsupported", RA_NODE_MAX);
+            log_warn("more than %d pointer chains in this set; refusing incomplete plan", RA_NODE_MAX);
         }
         return -1;
     }
@@ -340,7 +340,7 @@ static int compile_node(const rc_memref_t *m)
 }
 
 /* Every pointer chain in the set, in dependency order. */
-static void build_nodes(rc_client_t *client)
+static int build_nodes(rc_client_t *client)
 {
     rc_memrefs_t *pool = client->game->runtime.memrefs;
     rc_modified_memref_list_t *ml;
@@ -355,18 +355,19 @@ static void build_nodes(rc_client_t *client)
             compile_node(&ml->items[k].memref);
     }
 
-    /* Each node costs eight bytes in every snapshot. Over the ceiling
-       the whole set would be refused, which would cost the game its
-       telemetry as well, so the chains go and the direct reads stay. */
+    /* Every required node must fit; never advertise a partial plan. */
+    if (g_node_full)
+        return 0;
     if (g_bytes + g_node_count * RA_NODE_PAIR_BYTES > RA_SNAP_MAX_BYTES) {
-        log_warn("%d pointer chains do not fit in a snapshot with %d bytes of direct reads; dropping them",
+        log_warn("%d pointer chains do not fit in a snapshot with %d bytes of direct reads; refusing incomplete plan",
                  g_node_count, g_bytes);
-        g_node_count = 0;
+        return 0;
     }
 
     if (g_node_count > 0)
         log_info("%d pointer chain%s the console resolves every frame",
                  g_node_count, g_node_count == 1 ? "" : "s");
+    return 1;
 }
 
 /* An achievement is unsupported when it reads through a chain that did
@@ -769,7 +770,14 @@ int watchlist_build(rc_client_t *client)
     g_bytes = off;
     log_info("watch list: %d addresses, %d bytes per snapshot", n, off);
 
-    build_nodes(client);
+    if (!build_nodes(client)) {
+        if (g_node_full)
+            snprintf(g_build_error, sizeof(g_build_error), "Set too big: more than %d pointer chains", RA_NODE_MAX);
+        else
+            snprintf(g_build_error, sizeof(g_build_error), "Set too big: complete snapshot exceeds %d bytes", RA_SNAP_MAX_BYTES);
+        g_count = g_bytes = g_node_count = g_indirect = 0;
+        return 0;
+    }
     count_indirect(client);
     if (!g_ran2) {
         int i;

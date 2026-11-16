@@ -499,7 +499,13 @@ class RAWebServer:
                     self.end_headers()
                     self.wfile.write(body)
                 elif path == "/diagnostics":
-                    if self.client_address[0] != "127.0.0.1" or diagnostics is None:
+                    host_header = self.headers.get("Host")
+                    origin = self.headers.get("Origin")
+                    if (self.client_address[0] != "127.0.0.1" or diagnostics is None
+                            or host_header not in (f"127.0.0.1:{owner.server_port}",
+                                                   f"localhost:{owner.server_port}")
+                            or (origin and origin != f"http://{host_header}")
+                            or self.headers.get("Sec-Fetch-Site") == "cross-site"):
                         self.send_error(403, "Diagnostics are local only")
                         return
                     try:

@@ -53,6 +53,12 @@ def check():
         raise AssertionError("Owned watch-list bytes differ from the pinned baseline:\n" + actual_owned)
     print("Six owned watch-list cases match the pre-upgrade baseline byte-for-byte")
 
+    with tempfile.TemporaryDirectory(prefix="ra-watchlist-limits-") as temporary:
+        binary = Path(temporary) / ("limits.exe" if os.name == "nt" else "limits")
+        sources_limits = sources_ref[:-1] + [HERE / "watchlist_limits.c"]
+        subprocess.run(command_ref + list(map(str, sources_limits)) + ["-o", str(binary), "-lm"], check=True)
+        subprocess.run([str(binary)], check=True)
+
     # Captured from tagged xeRAbora v2.0.0 using the same rcheevos revision.
     # Keep legacy goldens separately: matching the two current compilers alone
     # would not detect a shared regression.
