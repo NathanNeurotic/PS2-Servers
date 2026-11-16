@@ -319,6 +319,10 @@ static int compile_node(const rc_memref_t *m)
         return -1;
     if (t.index > 0x0FFF)
         return -1;
+    /* RANL carries no shift, width or scale: leave such a chain
+       uncompiled so only its achievements are unsupported. */
+    if (!g_ran2 && (t.scale != 1 || t.shift != 0 || t.width != 0))
+        return -1;
 
     if (g_node_count >= RA_NODE_MAX) {
         /* Once, not once per chain: a big set has hundreds. */
@@ -784,6 +788,7 @@ int watchlist_build(rc_client_t *client)
         for (i = 0; i < g_node_count; i++) {
             if ((g_nodes[i].w >> 16) != 0 || g_nodes[i].scale != 1) {
                 snprintf(g_build_error, sizeof(g_build_error), "Indexed reads require RAN2: update both host and console, then recheck support");
+                g_count = g_bytes = g_node_count = g_indirect = 0;
                 return 0;
             }
         }

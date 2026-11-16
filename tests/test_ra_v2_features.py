@@ -145,14 +145,14 @@ class NativeDiagnosticTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"RA_CC": compiler}):
             cls.library = build()
 
-    @unittest.skipUnless(shutil.which("cc"), "Native C compiler required")
     def test_managed_diagnostics_conditions_budget_and_equal_size_plan_reset(self):
         rc = ROOT / "vendor/retroachievements/rcheevos"
         client = ROOT / "vendor/retroachievements/xerabora/client/src"
         sources = sorted((rc / "src/rcheevos").glob("*.c"))
         sources += [rc / "src/rc_util.c", rc / "src/rc_compat.c", rc / "src/rhash/md5.c",
                     client / "watchlist.c", client / "snapshot.c", ROOT / "conformance/ra_dependency/diagnostics.c"]
-        command = ["cc", "-O1", "-std=gnu99"]
+        compiler = os.environ.get("RA_CC") or ("gcc" if os.name == "nt" else "cc")
+        command = shlex.split(compiler) + ["-O1", "-std=gnu99"]
         for directory in (rc / "include", rc / "src", rc / "src/rcheevos", client, client.parent.parent / "protocol"):
             command.extend(["-I", str(directory)])
         with tempfile.TemporaryDirectory() as tmp:

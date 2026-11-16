@@ -20,6 +20,8 @@
 #ifdef _WIN32
 #include <shellapi.h>
 #include <windows.h>
+#else
+#include <sys/time.h>
 #endif
 
 /* Session state the page renders. Written by the client as things
@@ -1363,6 +1365,14 @@ void webui_serve(sock_t listener, rc_client_t *client)
             if (body != NULL) {
                 rewind(report);
                 if (fread(body, 1, (size_t)size, report) == (size_t)size) {
+                    /* Up to 8 MB on the telemetry thread: a reader that
+                       stops reading must not stall it. */
+#ifdef _WIN32
+                    DWORD tmo = 5000;
+#else
+                    struct timeval tmo = {5, 0};
+#endif
+                    setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tmo, sizeof(tmo));
                     respond(c, "text/plain; charset=utf-8", body, (int)size);
                     sent = 1;
                 }
