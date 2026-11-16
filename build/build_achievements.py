@@ -55,7 +55,11 @@ def build():
     sources += [client / "src" / ("http_winhttp.c" if system == "Windows" else "http_curl.c")]
     target = ROOT / "build" / "native" / ("ps2ra.exe" if system == "Windows" else "ps2ra")
     target.parent.mkdir(parents=True, exist_ok=True)
-    cmd = cc + ["-O2", "-std=gnu99", "-DXERABORA_VERSION=\"0.1.0-alpha.16+ps2servers.ran2\""]
+    digest = hashlib.sha256()
+    for source in sorted(set(sources) | set(client.glob("src/*.h")) | set((VENDOR / "xerabora/protocol").glob("*.h"))):
+        digest.update(str(source.relative_to(VENDOR)).encode("utf-8"))
+        digest.update(source.read_bytes())
+    cmd = cc + ['-DPS2SERVERS_SOURCE_ID="' + digest.hexdigest() + '"', "-O2", "-std=gnu99", "-DXERABORA_VERSION=\"0.1.0-alpha.16+ps2servers.ran2\""]
     for include in [rc / "include", rc / "src", rc / "src/rcheevos", rc / "src/rapi", VENDOR / "xerabora/protocol"]:
         cmd += ["-I", str(include)]
     arch = os.environ.get("MACOS_TARGET_ARCH")

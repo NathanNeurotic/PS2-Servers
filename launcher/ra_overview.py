@@ -7,7 +7,7 @@ import json
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import urllib.error
 import urllib.request
 import webbrowser
@@ -62,6 +62,8 @@ def view_model(state, verified=None):
     playing = bool(isinstance(verified, dict)
                    and verified.get("state") == "playing"
                    and serial and title and verified.get("title") == title)
+    if state.get("test_mode") is True:
+        account += " · TEST MODE (local only; no submissions)"
     summary = (("Playing on PS2: " if playing else "Loaded set (not verified playing): ")
                + title if title else "No achievement set loaded")
     achievements = game.get("achievements") if isinstance(game.get("achievements"), list) else []
@@ -118,6 +120,8 @@ class OverviewWindow(tk.Toplevel):
         self.account = tk.StringVar(value="Loading local achievement status…")
         self.connection = tk.StringVar(value="")
         self.game = tk.StringVar(value="")
+        self._exports = queue.Queue(1)
+        self._exporting = False
         self._build()
         self.protocol("WM_DELETE_WINDOW", self.close)
         self._worker = threading.Thread(target=self._run, daemon=True,
@@ -135,6 +139,8 @@ class OverviewWindow(tk.Toplevel):
         bar.pack(fill="x")
         ttk.Button(bar, text="Open full account and leaderboards",
                    command=self._open_account).pack(side="left")
+        ttk.Button(bar, text="Export diagnostics", command=self._export_diagnostics).pack(side="left", padx=8)
+        ttk.Button(bar, text="Update / recheck guide", command=self._recheck_guide).pack(side="left")
         ttk.Label(bar, text="Read-only live view · no credentials exposed",
                   padding=(16, 0)).pack(side="left")
         notebook = ttk.Notebook(self)
@@ -173,6 +179,44 @@ class OverviewWindow(tk.Toplevel):
             label.pack(fill="both", expand=True)
             setattr(self, attr + "_view", label)
 
+    def _recheck_guide(self):
+        messagebox.showinfo("Update console read plans",
+            "1. Stop RetroAchievements before changing read support or test mode.\n"
+            "2. Update the host and every console ELF/device copy. RAN2 needs xeRAbora 2 or updated RiptOPL.\n"
+            "3. Restart the service, then run RA: check game support for each played game on every relevant device/share.\n"
+            "4. Regenerate RA/<startup>.wl files through that support check. Renaming or relabeling old plans cannot add indexed reads.\n"
+            "Neutrino/ORBIT remains direct-only. Test and normal modes may need different plans.\n"
+            "A same-sized stale plan cannot be detected from telemetry alone; recheck after an update even if no mismatch is shown.", parent=self)
+
+    def _export_diagnostics(self):
+        if self._exporting or not self.app.is_running("retroachievements"):
+            return
+        path = filedialog.asksaveasfilename(parent=self, title="Export local RA diagnostics",
+            initialfile="PS2-Servers-RA-diagnostics.txt", defaultextension=".txt",
+            filetypes=(("Diagnostic report", "*.txt"),))
+        if not path:
+            return
+        from .achievements import account_url
+        url = account_url() + "diagnostics"
+        self._exporting = True
+        def export():
+            try:
+                with urllib.request.urlopen(url, timeout=15) as response:
+                    body = response.read(8 * 1024 * 1024 + 1)
+                if not body or len(body) > 8 * 1024 * 1024:
+                    raise ValueError("Invalid diagnostic report size")
+                # Exclusive creation preserves an existing report, including if
+                # it appeared after the file picker. No automatic uploads.
+                with open(path, "xb") as target:
+                    target.write(body)
+                result = (True, "Diagnostic report saved. Review game-memory contents before sharing.")
+            except FileExistsError:
+                result = (False, "That file already exists. Choose a new report name.")
+            except (OSError, ValueError):
+                result = (False, "Diagnostics could not be exported. Load a tracked game and try again.")
+            self._exports.put(result)
+        threading.Thread(target=export, daemon=True, name="RA diagnostic export").start()
+
     def _run(self):
         while not self._stop.is_set():
             try:
@@ -190,6 +234,13 @@ class OverviewWindow(tk.Toplevel):
     def _drain(self):
         if self._stop.is_set():
             return
+        try:
+            ok, message = self._exports.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            self._exporting = False
+            (messagebox.showinfo if ok else messagebox.showerror)("RA diagnostics", message, parent=self)
         latest = None
         received = False
         try:

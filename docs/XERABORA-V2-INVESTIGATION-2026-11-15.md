@@ -4,6 +4,59 @@ Investigation date: 2026-11-15. Implementation handoff: Monday, 2026-11-16.
 This document retains the original findings and records the implementation
 checkpoints below. Legacy dependency/export defaults are preserved.
 
+## Completed host follow-up
+
+Both managed and owned runtimes now provide:
+
+- **Test mode:** stop the service, enable **Test achievements without submitting
+  unlocks**, and restart. It rearms previously unlocked achievements for local
+  evaluation. Native spectator/encore settings and an independent transport
+  guard block awards, leaderboard submissions, session starts and pings. The
+  owned account worker and bounded submission consumer enforce the same rule.
+  Restarting to enter or leave test mode destroys pending callbacks, queued
+  work, condition state and diagnostic history. Recheck the game's support in
+  each mode because encore eligibility can change the read plan. Local triggers
+  are not server-accepted unlocks and are never replayed after returning to normal.
+- **Explicit diagnostics:** Live RetroAchievements → **Export diagnostics**
+  saves a new local text file. Each recording retains at most 3600 snapshots and
+  16 MiB of value data; exports stop at 8 MiB. Reports include active conditions,
+  cached operands, per-address and pointer-node history, host source SHA256,
+  pinned rcheevos revision, profile, serialized plan, game/hash, generation and
+  available sequence-loss counters. Equal-sized plan changes also reset the
+  recording. The wire does not identify the console ELF revision; reports say
+  so instead of assuming the bundled loader ran. Credentials, account names,
+  network addresses and filesystem paths are excluded. Reports contain watched
+  game memory: review before sharing. No automatic files or uploads are added,
+  existing reports are not overwritten, and the LAN viewer cannot proxy them.
+- **Update/recheck guidance:** the live overview explains the host/ELF pairing,
+  every-device/share `RA/<startup>.wl` regeneration and same-sized stale-plan
+  limitation. Existing legacy defaults and constrained ORBIT/Caduceus profiles
+  remain available. Never relabel old plans as RAN2.
+- **Discord details:** a separate, off-by-default option permits the game's
+  evaluated rich presence, allowlisted RA game icon, a new unlock's badge for
+  at most 60 seconds, and a public profile link disclosing the RA username.
+  Existing title-sharing consent alone does not share these details. Owned
+  plans include rich-presence memory dependencies and evaluate them from the
+  same complete snapshot. The launcher remains the sole Discord publisher;
+  logout, stale/disconnected telemetry, game changes, disabling consent and test
+  mode clear shared activity. Engine unlock rings are baselined on each game
+  session, so old events are not replayed.
+
+Offline acceptance includes rejecting transports at the native and owned
+submission boundaries, real local encore triggers and rich-presence evaluation,
+bounded condition/history reports, equal-sized plan resets, consent/expiry and
+LAN-export isolation. The package smoke gate now checks managed/owned ×
+legacy xeRAbora/RAN2/Caduceus × normal/test startup, discovery, pairing, duplicate
+rejection, unavailable-report handling and shutdown, plus frozen private-account,
+resolver and evaluator self-checks. Release workflows run that gate before
+staging supported packages; native CI builds both libraries on all five targets.
+Local validation results are recorded in the PR. Physical-console and live-account
+acceptance remain separate; Linux packaging does not establish Windows/macOS
+package acceptance.
+
+The checkpoints below are historical. Their "remaining" lists describe their
+then-current state; the host follow-up above supersedes them.
+
 ## First implementation checkpoint
 
 The owned-runtime path now has explicit `opl-v2` plan derivation, 12-byte RAN2
@@ -279,13 +332,13 @@ source provenance before changing the export pin.
 
 ## Monday acceptance checklist
 
-- [ ] Commit old/new direct, simple/nested pointer, bit/nibble-index,
+- [x] Commit old/new direct, simple/nested pointer, bit/nibble-index,
   negative-scale/wrap and constant-base golden plans. Compare managed and
   owned output with the pinned v2 compiler; retain separate legacy goldens.
-- [ ] Cover malformed/truncated RAN2 tails, parent ordering, invalid size,
+- [x] Cover malformed/truncated RAN2 tails, parent ordering, invalid size,
   reserved/width bits, count/capacity ceilings, equal-size stale generations,
   missing node regions, zero-address pairs and multiple nodes in `_reads`.
-- [ ] Re-run `python conformance/ra_dependency/check_watchlist.py` after
+- [x] Re-run `python conformance/ra_dependency/check_watchlist.py` after
   extending it: today's six-case RANL baseline must not simply be overwritten
   without keeping the intended legacy contract and adding indexed cases.
 - [ ] Run relevant `tests/test_ra_*`, frozen resolver/supervisor smoke checks,
@@ -293,7 +346,7 @@ source provenance before changing the export pin.
 - [ ] Run a cross-repo matrix: v2 host + v2-capable RiptOPL, old/new mismatches,
   old/new cached `.wl`, PS2 native/Mode 6, POPS and explicitly constrained
   ORBIT/Neutrino. Unknown capability must produce an actionable state.
-- [ ] Verify no requests to award APIs in test mode, including preexisting
+- [x] Verify no requests to award APIs in test mode, including preexisting
   queued submissions and toggling mode while a resolver is running.
 - [ ] Separately authorized real-console acceptance: direct control title,
   previously failing indexed-pointer title, stable telemetry, notices/IGR,

@@ -1,3 +1,4 @@
+#include "diag.h"
 #include "webui.h"
 
 #include <ctype.h>
@@ -425,6 +426,7 @@ static int build_state(char *buf, size_t size, rc_client_t *client)
     p += snprintf(p, (size_t)(end - p), "{");
 
     p += snprintf(p, (size_t)(end - p), "\"version\":\"%s\",", XERABORA_VERSION);
+    p += snprintf(p, (size_t)(end - p), "\"test_mode\":%s,", ra_test_mode() ? "true" : "false");
 
     p += snprintf(p, (size_t)(end - p), "\"login\":{\"ok\":%s,\"webapi\":%s,",
                   g.logged_in ? "true" : "false", g.has_webapi ? "true" : "false");
@@ -539,6 +541,15 @@ static int build_state(char *buf, size_t size, rc_client_t *client)
         p += snprintf(p, (size_t)(end - p), ",");
         json_field(&p, end, "title",
                    info != NULL && info->title[0] != '\0' ? info->title : g.title);
+        {
+            char icon[512] = "", presence[512] = "";
+            if (info != NULL) rc_client_game_get_image_url(info, icon, sizeof(icon));
+            if (client != NULL && running) rc_client_get_rich_presence_message(client, presence, sizeof(presence));
+            p += snprintf(p, (size_t)(end - p), ",");
+            json_field(&p, end, "icon", icon);
+            p += snprintf(p, (size_t)(end - p), ",");
+            json_field(&p, end, "rich_presence", presence);
+        }
         p += snprintf(p, (size_t)(end - p), ",\"checked_only\":%d",
                       (info != NULL && !running) ? 1 : 0);
     }
@@ -1342,6 +1353,26 @@ void webui_serve(sock_t listener, rc_client_t *client)
 
             respond(c, "application/json; charset=utf-8", body, len);
             free(body);
+        }
+    } else if (strncmp(req, "GET /diagnostics ", 17) == 0) {
+        FILE *report = from.sin_addr.s_addr == htonl(INADDR_LOOPBACK) ? tmpfile() : NULL;
+        int sent = 0;
+        if (report != NULL && diag_write(client, report) == 0) {
+            long size = ftell(report);
+            char *body = size > 0 && size <= 8 * 1024 * 1024 ? malloc((size_t)size) : NULL;
+            if (body != NULL) {
+                rewind(report);
+                if (fread(body, 1, (size_t)size, report) == (size_t)size) {
+                    respond(c, "text/plain; charset=utf-8", body, (int)size);
+                    sent = 1;
+                }
+                free(body);
+            }
+        }
+        if (report != NULL) fclose(report);
+        if (!sent) {
+            const char unavailable[] = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+            send_all(c, unavailable, sizeof(unavailable)-1);
         }
     } else if (strncmp(req, "GET /state", 10) == 0) {
         char *body = malloc(256 * 1024);

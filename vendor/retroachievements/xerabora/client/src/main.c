@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include "badge_data.h"
+#include "diag.h"
 #include "config.h"
 #include "console.h"
 #include "discord.h"
@@ -710,6 +711,8 @@ int main(int argc, char **argv)
             arg_user = argv[++i];
         } else if (strcmp(argv[i], "--password") == 0 && i + 1 < argc) {
             arg_password = argv[++i];
+        } else if (strcmp(argv[i], "--test-mode") == 0) {
+            ra_set_test_mode(1);
         } else if (strcmp(argv[i], "--watch-format") == 0) {
             if (i + 1 >= argc || (strcmp(argv[i + 1], "ranl") != 0 && strcmp(argv[i + 1], "ran2") != 0)) {
                 fprintf(stderr, "--watch-format requires ranl or ran2\n");
@@ -1084,6 +1087,7 @@ int main(int argc, char **argv)
                     webui_set_status(ok ? "active" : "telemetry-only");
                     if (ok) {
                         snapshot_reset();
+                        diag_reset();
                         said_first = 0;
                         said_stale = 0;
                     } else {
@@ -1101,6 +1105,7 @@ int main(int argc, char **argv)
                 if (reset_pending && game_up) {
                     rc_client_reset(client);
                     snapshot_reset();
+                    diag_reset();
                     said_first = 0;
                 }
                 reset_pending = 0;
@@ -1164,6 +1169,7 @@ int main(int argc, char **argv)
             else if (game_up) {
                 rc_client_reset(client);
                 snapshot_reset();
+                diag_reset();
                 said_first = 0;
             }
         }
@@ -1211,6 +1217,7 @@ int main(int argc, char **argv)
             discord_set(serial, "on a real PlayStation 2", NULL);
             webui_write_obs(client);
             snapshot_reset();
+            diag_reset();
             said_first = 0;
             said_stale = 0;
             game_up = 0;
@@ -1294,6 +1301,7 @@ int main(int argc, char **argv)
             }
         }
 
+        diag_record(snapshot_seq(), snapshot_stats()->bytes);
         rc_client_do_frame(client);
 
         {

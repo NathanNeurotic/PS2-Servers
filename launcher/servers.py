@@ -705,6 +705,8 @@ def _achievements_argv(values):
         args += ["--obs-folder", obs]
     if values.get("lan_viewer"):
         args.append("--lan-viewer")
+    if values.get("test_mode"):
+        args.append("--test-mode")
     if values.get("owned_runtime"):
         args.append("--owned-runtime")
     watch_format = values.get("watch_format") or "ranl"
@@ -734,6 +736,8 @@ RETROACHIEVEMENTS = ServerDef(
         Field("games_folder", "OPL games folder (Caduceus)", "folder",
               help="The folder already shared with OPL. Caduceus writes ART/CADUCEUS.KEY "
                    "and small achievement icons here. Other modes do not need this folder."),
+        Field("test_mode", "Test achievements without submitting unlocks", "bool", default=False,
+              help="Rearms previously unlocked achievements for local testing. No unlocks or play activity are submitted. Stop and restart RetroAchievements when changing this setting, then recheck game support."),
         Field("no_sound", "Mute achievement sounds", "bool", default=False),
         Field("obs_folder", "OBS export folder (optional)", "folder",
               help="Writes live game, progress and unlock text files plus data.json for streaming overlays."),

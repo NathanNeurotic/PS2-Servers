@@ -24,6 +24,8 @@ static int g_have_values = 0;
 static int g_have_nodes = 0;
 /* Selected once at startup; existing exported loaders keep their RANL pairing. */
 static int g_ran2 = 0;
+static unsigned int g_generation;
+unsigned int watchlist_generation(void) { return g_generation; }
 
 void watchlist_set_format(int ran2)
 {
@@ -668,6 +670,7 @@ int watchlist_build(rc_client_t *client)
     rc_memref_list_t *ml;
     int off = 0, n = 0;
 
+    g_generation++;
     g_count = 0;
     g_bytes = 0;
     g_have_values = 0;
@@ -922,4 +925,28 @@ uint32_t watchlist_read_memory(uint32_t address, uint8_t *buffer, uint32_t num_b
     }
 
     return 0;
+}
+
+int watchlist_locate(const rc_memref_t *m, int *is_node)
+{
+    int at = direct_index(m);
+
+    *is_node = 0;
+    if (at < 0) {
+        at = node_index(m);
+        *is_node = 1;
+    }
+    return at;
+}
+
+void watchlist_entry_info(int i, unsigned int *address, unsigned int *size, unsigned int *offset)
+{
+    *address = RA_WATCH_ADDR(g_watch[i]);
+    *size = RA_WATCH_SIZE(g_watch[i]);
+    *offset = g_offset[i];
+}
+
+int watchlist_have_nodes(void)
+{
+    return g_have_nodes;
 }

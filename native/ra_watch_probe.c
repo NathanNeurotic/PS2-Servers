@@ -334,7 +334,7 @@ static int build_watchlist(
     uint32_t memory_low,
     uint32_t memory_high,
     uint8_t *output,
-    uint32_t capacity, int legacy)
+    uint32_t capacity, int legacy, const char *rich_presence)
 {
     rc_runtime_t *runtime;
     rc_memrefs_t *pool;
@@ -343,7 +343,7 @@ static int build_watchlist(
     watchlist_builder_t b;
     uint32_t i, wire_size, off;
 
-    if (!definitions || num_definitions == 0 || !output || capacity < 20)
+    if (!definitions || (num_definitions == 0 && (!rich_presence || !*rich_presence)) || !output || capacity < 20)
         return -1;
 
     runtime = rc_runtime_alloc();
@@ -361,6 +361,11 @@ static int build_watchlist(
         }
     }
 
+    if (rich_presence && *rich_presence &&
+        rc_runtime_activate_richpresence(runtime, rich_presence, NULL, 0) != RC_OK) {
+        rc_runtime_destroy(runtime);
+        return -1;
+    }
     pool = runtime->memrefs;
     if (!pool) {
         rc_runtime_destroy(runtime);
@@ -513,14 +518,14 @@ RC_EXPORT int RC_CCONV ps2servers_build_watchlist(
     const char *const *definitions, uint32_t num_definitions,
     uint32_t memory_low, uint32_t memory_high, uint8_t *output, uint32_t capacity)
 {
-    return build_watchlist(definitions, num_definitions, memory_low, memory_high, output, capacity, 1);
+    return build_watchlist(definitions, num_definitions, memory_low, memory_high, output, capacity, 1, NULL);
 }
 
 RC_EXPORT int RC_CCONV ps2servers_build_watchlist_v2(
     const char *const *definitions, uint32_t num_definitions,
     uint32_t memory_low, uint32_t memory_high, uint8_t *output, uint32_t capacity)
 {
-    return build_watchlist(definitions, num_definitions, memory_low, memory_high, output, capacity, 0);
+    return build_watchlist(definitions, num_definitions, memory_low, memory_high, output, capacity, 0, NULL);
 }
 
 typedef struct {
@@ -598,3 +603,53 @@ RC_EXPORT int RC_CCONV ps2servers_probe_watch(const char *definition,
     rc_runtime_destroy(runtime);
     return result;
 }
+
+/* Read-only diagnostics for the owned runtime. No account data or process
+ * pointers cross this boundary. Bounded output may stop between conditions. */
+#include <stdio.h>
+RC_EXPORT int RC_CCONV ps2servers_runtime_diagnostics(const rc_runtime_t *runtime, char *out, uint32_t cap)
+{
+    uint32_t i, used = 0;
+    if (!runtime || !out || cap < 256) return -1;
+    out[0] = '\0';
+    for (i = 0; i < runtime->trigger_count; i++) {
+        const rc_runtime_trigger_t *entry = &runtime->triggers[i];
+        const rc_trigger_t *trigger = entry->trigger;
+        const rc_condset_t *set;
+        int alt = 0, n;
+        if (!trigger) continue;
+        n = snprintf(out + used, cap - used, "achievement %u state=%u measured=%u/%u\n",
+            entry->id, trigger->state, trigger->measured_value, trigger->measured_target);
+        if (n < 0 || (uint32_t)n >= cap-used) return (int)used;
+        used += (uint32_t)n;
+        for (set = trigger->requirement; set != NULL; set = alt ? set->next : trigger->alternative, alt = 1) {
+            const rc_condition_t *condition;
+            for (condition = set->conditions; condition; condition = condition->next) {
+                const rc_operand_t *a = &condition->operand1, *b = &condition->operand2;
+                uint32_t av = rc_operand_is_memref(a) ? a->value.memref->value.value : a->value.num;
+                uint32_t bv = rc_operand_is_memref(b) ? b->value.memref->value.value : b->value.num;
+                n = snprintf(out + used, cap-used,
+                    "  %s type=%u op=%u hits=%u/%u lhs(type=%u,size=%u,raw=%u) rhs(type=%u,size=%u,raw=%u)\n",
+                    alt ? "alt" : "core", condition->type, condition->oper,
+                    condition->current_hits, condition->required_hits, a->type, a->size, av, b->type, b->size, bv);
+                if (n < 0 || (uint32_t)n >= cap-used) return (int)used;
+                used += (uint32_t)n;
+            }
+        }
+    }
+    return (int)used;
+}
+
+RC_EXPORT int RC_CCONV ps2servers_build_watchlist_presence(
+    const char *const *definitions, uint32_t num_definitions,
+    uint32_t memory_low, uint32_t memory_high, uint8_t *output,
+    uint32_t capacity, int legacy, const char *rich_presence)
+{
+    return build_watchlist(definitions, num_definitions, memory_low, memory_high,
+                           output, capacity, legacy, rich_presence);
+}
+
+#ifndef PS2SERVERS_SOURCE_ID
+#define PS2SERVERS_SOURCE_ID "unrecorded"
+#endif
+RC_EXPORT const char * RC_CCONV ps2servers_runtime_source_id(void) { return PS2SERVERS_SOURCE_ID; }

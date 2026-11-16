@@ -9,6 +9,7 @@ static struct snapshot_stats g_stats;
 
 static unsigned int g_last_sq = 0;
 static int g_have_last = 0;
+unsigned int snapshot_seq(void) { return g_last_sq; }
 
 /* Reassembly of the snapshot in progress. */
 static unsigned int g_asm_sq = 0;

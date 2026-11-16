@@ -10,6 +10,12 @@ migrated. A separate explicit v2 loader export has been added; the legacy export
 pins below are unchanged. Host fixtures and target builds are not console certification.
 See [the investigation and current checkpoint](XERABORA-V2-INVESTIGATION-2026-11-15.md).
 
+Both runtimes also provide explicit local diagnostic exports, a restart-bound
+non-submitting test mode, and separate opt-in Discord details. Use the live
+overview's update/recheck guide after host, loader, read-support or test-mode
+changes. See [the host follow-up](XERABORA-V2-INVESTIGATION-2026-11-15.md#completed-host-follow-up)
+for limits and acceptance evidence.
+
 Audit baseline: PS2-Servers `9bd458ab5e715e0e4102666ec50081af036eddae`,
 2026-10-11. This is a source and artifact inventory, not console certification.
 The objective and completion criteria remain in [the handoff](RA-COMPATIBILITY-HANDOFF.md).

@@ -1007,6 +1007,7 @@ class LauncherApp:
         self.discord_app_id_var = tk.StringVar(value=self.saved.get("discord_application_id") or DEFAULT_APPLICATION_ID)
         self.discord_uptime_var = tk.BooleanVar(value=self._saved_bool("discord_show_uptime", False))
         self.discord_share_game_var = tk.BooleanVar(value=self._saved_bool("discord_share_game", False))
+        self.discord_share_details_var = tk.BooleanVar(value=self._saved_bool("discord_share_details", False))
         self.ra_unlock_popups_var = tk.BooleanVar(value=self._saved_bool("ra_unlock_popups", False))
         self._ra_toast = None
         self.discord_status_var = tk.StringVar(value="Disabled")
@@ -3169,11 +3170,14 @@ class LauncherApp:
         ttk.Checkbutton(frame, text="Share game title during verified RetroAchievements sessions (opt in)",
                         variable=self.discord_share_game_var).grid(
             row=3, column=0, columnspan=2, sticky="w", pady=4)
-        ttk.Label(frame, text="Default: server modes only. With game sharing enabled, only a live, verified RA game title is public; no paths, network addresses or RA account data are sent. Stop tracking to clear the title.",
-                  wraplength=420).grid(row=4, column=0, columnspan=2, sticky="w", pady=8)
-        ttk.Label(frame, textvariable=self.discord_status_var, wraplength=420).grid(row=5, column=0, columnspan=2, sticky="w", pady=4)
-        ttk.Button(frame, text="Use official Application ID", command=lambda: self.discord_app_id_var.set(DEFAULT_APPLICATION_ID)).grid(row=6, column=0, sticky="w", pady=8)
-        ttk.Button(frame, text="Apply and save", command=lambda: self._apply_discord_settings(save=True)).grid(row=6, column=1, sticky="e", pady=8)
+        ttk.Checkbutton(frame, text="Also share RA presence, game icon, unlock badge and public profile link",
+                        variable=self.discord_share_details_var).grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Label(frame, text="Both sharing options are off by default. Details require title sharing and fresh console telemetry. Profile links disclose your RA username. Unlock badges expire after 60 seconds.",
+                  wraplength=420).grid(row=5, column=0, columnspan=2, sticky="w", pady=8)
+        ttk.Label(frame, textvariable=self.discord_status_var, wraplength=420).grid(row=6, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Button(frame, text="Use official Application ID", command=lambda: self.discord_app_id_var.set(DEFAULT_APPLICATION_ID)).grid(row=7, column=0, sticky="w", pady=8)
+        ttk.Button(frame, text="Apply and save", command=lambda: self._apply_discord_settings(save=True)).grid(row=7, column=1, sticky="e", pady=8)
         ra_frame = ttk.LabelFrame(window, text=" Native RetroAchievements notifications ", padding=12)
         ra_frame.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
         ttk.Checkbutton(ra_frame, text="Show non-modal achievement unlock popups (off by default)",
@@ -3282,7 +3286,8 @@ class LauncherApp:
         game = monitor.snapshot() if share_game and monitor is not None else None
         self._discord_activity.update(
             [key for key, process in self.procs.items() if process.is_running()],
-            self.discord_uptime_var.get(), game=game, show_game=share_game)
+            self.discord_uptime_var.get(), game=game, show_game=share_game,
+            show_details=bool(self.discord_share_details_var.get()))
         message = presence.message
         if self.discord_status_var.get() != message:
             self.discord_status_var.set(message)
@@ -3526,6 +3531,7 @@ class LauncherApp:
                 "discord_application_id": self.discord_app_id_var.get(),
                 "discord_show_uptime": bool(self.discord_uptime_var.get()),
                 "discord_share_game": bool(self.discord_share_game_var.get()),
+                "discord_share_details": bool(self.discord_share_details_var.get()),
                 "ra_unlock_popups": bool(self.ra_unlock_popups_var.get()),
                 "last_active_servers": active,
                 servers.VERBOSE_MIGRATION_KEY: True,

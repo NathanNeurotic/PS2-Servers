@@ -33,6 +33,7 @@ class AccountTask:
     consent: bool = False
     achievement_id: int = 0
     rich_presence: str = ""
+    test_mode: bool = False
 
     def __post_init__(self):
         for value in (self.task_id, self.epoch):
@@ -43,7 +44,8 @@ class AccountTask:
             raise ValueError("Invalid account operation")
         if (type(self.username) is not str or len(self.username) > 64 or
                 any(c in self.username for c in "\0\r\n") or
-                type(self.include_unofficial) is not bool or type(self.consent) is not bool):
+                type(self.include_unofficial) is not bool or type(self.consent) is not bool
+                or type(self.test_mode) is not bool):
             raise ValueError("Invalid account task options")
         if self.operation == "login":
             if (not self.username or type(self.password) is not str or
@@ -136,6 +138,16 @@ def valid_account_result(result):
     if (type(qualified.title) is not str or len(qualified.title) > 4096 or
             type(qualified.definitions) is not tuple or len(qualified.definitions) > 4096):
         return False
+    if (type(qualified.encore) is not bool or type(qualified.rich_presence) is not str
+            or len(qualified.rich_presence) > 65536 or "\0" in qualified.rich_presence
+            or type(qualified.icon) is not str or len(qualified.icon) > 512
+            or type(qualified.badges) is not tuple or len(qualified.badges) > 4096):
+        return False
+    for badge in qualified.badges:
+        if (type(badge) is not tuple or len(badge) != 2 or type(badge[0]) is not int
+                or not 1 <= badge[0] <= 0xffffffff or type(badge[1]) is not str
+                or not badge[1].isascii() or not badge[1].isdigit() or len(badge[1]) > 10):
+            return False
     total = 0
     seen = set()
     for pair in qualified.definitions:
@@ -166,7 +178,7 @@ def valid_account_result(result):
                 type(atitle) is not str or len(atitle) > 4096):
             return False
     return (total <= 4 * 1024 * 1024 and seen <= set(qualified.selected_ids) and
-            not seen.intersection(qualified.prior_unlocks) and
+            (qualified.encore or not seen.intersection(qualified.prior_unlocks)) and
             set(qualified.unofficial_ids) <= set(qualified.selected_ids))
 
 
@@ -176,12 +188,14 @@ class _Lookup:
 
     def __call__(self, job, cancel):
         try:
+            if job.test_mode and job.operation in ("start_session", "award", "ping"):
+                raise ValueError("Test mode does not submit account activity")
             store = CredentialStore(self.profile)
             if job.operation == "set":
                 if type(job.credentials) is not Credentials or job.context.epoch != job.epoch:
                     raise ValueError("Invalid set job")
                 qualified = RASetClient(job.credentials.username, job.credentials.token).fetch(
-                    job.context, include_unofficial=job.include_unofficial, cancel=cancel)
+                    job.context, include_unofficial=job.include_unofficial, encore=job.test_mode, cancel=cancel)
                 return AccountResult(job.task_id, job.epoch, "ok", qualified=qualified)
             if job.operation == "start_session":
                 if type(job.credentials) is not Credentials or job.context.epoch != job.epoch:
@@ -260,6 +274,9 @@ class AccountWorker:
             result = self._resolver(job, cancel)
             self._not_before = time.monotonic() + self.minimum_interval
             if result is None or result.task_id != job.task_id or result.epoch != job.epoch:
+                return None
+            if result.qualified is not None and (job.operation != "set" or
+                    result.qualified.context != job.context or result.qualified.encore != job.test_mode):
                 return None
             if result.status == "rate_limited":
                 self._not_before = max(self._not_before, time.monotonic() + result.retry_after)

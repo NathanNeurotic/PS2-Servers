@@ -36,6 +36,12 @@ class SessionTracker:
         login = state.get("login") if isinstance(state.get("login"), dict) else {}
         console = state.get("console") if isinstance(state.get("console"), dict) else {}
         game = state.get("game") if isinstance(state.get("game"), dict) else {}
+        if state.get("test_mode") is True:
+            self.reset()
+            return {"state": "testing", "text": "Test mode · local triggers only; no submissions"}
+        if login.get("ok") is False:
+            self.reset()
+            return {"state": "listening", "text": "RA sign-in required · Waiting for PS2"}
         connected = console.get("connected") is True
         packets = console.get("packets")
         if not isinstance(packets, int) or isinstance(packets, bool) or packets < 0:
@@ -92,6 +98,10 @@ class SessionTracker:
             self.active_identity = identity
         return {"state": "playing", "title": title, "packets": packets,
                 "session": self.session_number,
+                "presence": {"icon": game.get("icon"), "message": game.get("rich_presence"),
+                             "user": login.get("user") if login.get("ok") is True else "",
+                             "unlock": (state["unlocks"][0] if isinstance(state.get("unlocks"), list)
+                                        and state["unlocks"] else None)},
                 "text": "Now playing: {} · {} packets".format(title, packets)}
 
 

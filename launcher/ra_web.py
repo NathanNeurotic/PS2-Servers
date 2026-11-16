@@ -17,6 +17,7 @@ class RAState:
 
     def __init__(self, version="PS2-Servers-native"):
         self.version = version
+        self.test_mode = False
         self._lock = threading.Lock()
         self._dirty = threading.Event()
         self.user = ""
@@ -32,6 +33,7 @@ class RAState:
         self.game_title = ""
         self.game_serial = ""
         self.game_hash = ""
+        self.game_icon = self.rich_presence = ""
         self.achievements = []
         self.unlocks = []
 
@@ -47,6 +49,7 @@ class RAState:
             self.game_id, self.game_title = 0, ""
             self.game_serial, self.game_hash = "", ""
             self.achievements, self.unlocks = [], []
+            self.game_icon = self.rich_presence = ""
             self.console_status = "signed out"
             self._dirty.set()
 
@@ -69,14 +72,22 @@ class RAState:
                 self.watch_addresses = int(watch_addresses)
             self._dirty.set()
 
-    def set_game(self, game_id, title, serial="", image_hash="", achievements=None):
+    def set_game(self, game_id, title, serial="", image_hash="", achievements=None, icon=""):
         with self._lock:
+            if (self.game_id, self.game_hash) != (int(game_id), image_hash):
+                self.unlocks = []
+            self.game_icon, self.rich_presence = str(icon), ""
             self.game_id = int(game_id)
             self.game_title = str(title) if title else ""
             self.game_serial = str(serial) if serial else ""
             self.game_hash = str(image_hash) if image_hash else ""
             if achievements is not None:
                 self.achievements = list(achievements)
+            self._dirty.set()
+
+    def set_presence(self, message):
+        with self._lock:
+            self.rich_presence = str(message)[:512]
             self._dirty.set()
 
     def note_unlock(self, achievement_id, title="", points=0, badge=""):
@@ -88,6 +99,8 @@ class RAState:
                     item["unlocked"] = True
                     if not title and item.get("title"):
                         title = item["title"]
+                    if not badge:
+                        badge = item.get("badge", "")
                     if not points and item.get("points"):
                         points = item["points"]
                     break
@@ -108,6 +121,7 @@ class RAState:
             seconds = int(time.time() - self.started_at) if self.console_connected and self.started_at > 0 else 0
             return {
                 "version": self.version,
+                "test_mode": self.test_mode,
                 "login": {
                     "ok": self.logged_in,
                     "webapi": self.logged_in,
@@ -134,9 +148,11 @@ class RAState:
                     "title": self.game_title,
                     "serial": self.game_serial,
                     "hash": self.game_hash,
+                    "icon": self.game_icon,
+                    "rich_presence": self.rich_presence,
                     "achievements": [dict(a) for a in self.achievements],
                 },
-                "unlocks": [dict(u) for u in self.unlocks],
+                "unlocks": [dict(u, ago=max(0, int(time.time()) - u["at"])) for u in self.unlocks],
             }
 
     def wait_dirty(self, timeout=1.0):
@@ -264,6 +280,7 @@ h1 { font-size: 1.5rem; color: var(--text-bright); display: flex; align-items: c
 </style>
 </head>
 <body>
+<p><a href="/diagnostics" download="PS2-Servers-RA-diagnostics.txt">Export local diagnostics</a> · Reports contain watched game memory.</p>
 <div class="container">
   <header>
     <h1>
@@ -436,7 +453,7 @@ initSSE();
 class RAWebServer:
     """Loopback HTTP server for RetroAchievements status and Server-Sent Events."""
 
-    def __init__(self, port, state, host="127.0.0.1", *, logout=None):
+    def __init__(self, port, state, host="127.0.0.1", *, logout=None, diagnostics=None):
         self.port = port
         self.state = state
         self.host = host
@@ -476,6 +493,24 @@ class RAWebServer:
                     body = NATIVE_UI_HTML.encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif path == "/diagnostics":
+                    if self.client_address[0] != "127.0.0.1" or diagnostics is None:
+                        self.send_error(403, "Diagnostics are local only")
+                        return
+                    try:
+                        body = diagnostics()
+                        if type(body) is not bytes or not 0 < len(body) <= 8 * 1024 * 1024:
+                            raise ValueError("Invalid diagnostic report")
+                    except (RuntimeError, ValueError, TimeoutError):
+                        self.send_error(503, "Diagnostics unavailable")
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
                     self.send_header("Content-Length", str(len(body)))
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Connection", "close")

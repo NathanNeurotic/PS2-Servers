@@ -97,8 +97,8 @@ class EvaluatorTests(unittest.TestCase):
             def __str__(self):
                 raise ValueError("Invalid title")
         allocated = []
-        def allocate(*args):
-            runtime = Evaluator(*args)
+        def allocate(*args, **kwargs):
+            runtime = Evaluator(*args, **kwargs)
             allocated.append(runtime)
             return runtime
         with mock.patch("launcher.ra_evaluated_receiver.Evaluator", side_effect=allocate):

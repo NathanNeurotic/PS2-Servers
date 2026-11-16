@@ -7,9 +7,12 @@ from launcher.ra_account_worker import AccountTask, AccountWorker
 
 class Submissions:
     """Submit each admitted task once; never retry an ambiguous remote award."""
-    def __init__(self, profile, cancel, *, capacity=64, worker=None):
+    def __init__(self, profile, cancel, *, capacity=64, worker=None, test_mode=False):
         if type(capacity) is not int or not 1 <= capacity <= 1024:
             raise ValueError("Invalid submission capacity")
+        if type(test_mode) is not bool:
+            raise ValueError("Invalid test mode")
+        self._test_mode = test_mode
         self._cancel = cancel
         self._queue = queue.Queue(capacity)
         self._lock = threading.Lock()
@@ -22,7 +25,7 @@ class Submissions:
             raise ValueError("Invalid submission task")
         task.__post_init__()
         with self._lock:
-            if self._cancel.is_set():
+            if self._test_mode or task.test_mode or self._cancel.is_set():
                 return False
             try:
                 self._queue.put_nowait(task)
@@ -37,6 +40,8 @@ class Submissions:
             except queue.Empty:
                 continue
             try:
+                if self._test_mode or task.test_mode or self._cancel.is_set():
+                    continue
                 result = self._worker(task, self._cancel, wait=True)
                 if not self._cancel.is_set() and (result is None or result.status != "ok"):
                     print(f"RetroAchievements: {task.operation} request did not complete; not retried.", flush=True)

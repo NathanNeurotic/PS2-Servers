@@ -18,5 +18,11 @@
   "caduceus-opl": {
     "repository": "https://github.com/Rian6/caduceus-opl",
     "commit": "cc1713a893a976c9b26ae1dd9975c200a461edfe"
+  },
+  "xerabora-diagnostics": {
+    "repository": "https://github.com/hacan359/xerabora",
+    "commit": "98949c0efba151f16b234ba5b392b5241791f40e",
+    "path": "client/src/diag.c",
+    "adaptations": "bounded explicit loopback export; generation reset; no automatic files or uploads"
   }
 }
