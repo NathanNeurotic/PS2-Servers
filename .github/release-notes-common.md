@@ -5,6 +5,16 @@ changelog and a download table, not another copy of the operator manual.
 
 ## Changelog
 
+- RetroAchievements: caught up with xeRAbora 2.1 and 2.2. When RiptOPL says which game is running, the PC loads its set by itself, even if you never ran "check game support" on that PC.
+- RetroAchievements: achievements that read memory through Remember/Recall now work, and big sets can use up to 512 pointer chains (256 for PS1) in RAN2 mode. RANL mode keeps its 128.
+- RetroAchievements: the first check of a new game no longer times out while the console downloads its list.
+- RetroAchievements: optional RAN2 watch lists (xeRAbora v2). RANL stays the default.
+- RetroAchievements: test mode, where nothing is sent to RetroAchievements (no unlocks, leaderboards or sessions), and a local diagnostics export for bug reports.
+- Discord: optional game details and RetroAchievements profile link.
+- macOS: the release no longer hangs on the RetroAchievements check (the account page did a slow network name lookup at startup).
+
+### Earlier, in v0.9.4
+
 - SMBv1 security fix: when a password is set, shares are refused until a login succeeds. Before, a client could skip the login and reach the shares. SMBv2/SMBv3 already checked it. Servers started without a password behave as before.
 - SMBv1: a read right after a write now sees the new bytes (it could return the old ones), which matters for memory-card images and other files the console writes then reads back.
 - SMBv1: optional "Decompress CHD/CSO" serves Game.chd and Game.cso as Game.iso, read-only, using the UDPFS decoders. Off by default; not yet tested on a console. Idea and first version by [snapsapnap2](https://github.com/snapsapnap2) (#308).

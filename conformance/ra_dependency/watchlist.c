@@ -63,7 +63,7 @@ int main(void) {
       if(watchlist_read_memory(0x1004,readback,4,&client)!=4 || memcmp(readback,values+3,4)) return 7;
       if(snapshot_feed(packet,header+sizeof(values)) || snapshot_stats()->dupes!=1) return 8;
     }
-    size=watchlist_serialize(wire,sizeof(wire)); if(!size) return 4;
+    size=watchlist_serialize(wire,sizeof(wire),NULL); if(!size) return 4;
     if(i==4 || i==5) {
       const unsigned char values[]={0x00,0x20,0,0, 0x04,0x20,0,0, 0x00,0x30,0,0,
                                    0x08,0x30,0,0, 1,0,0,0};

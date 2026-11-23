@@ -502,7 +502,7 @@ int diag_write(rc_client_t *client, FILE *f)
     g_written = 0; g_truncated = 0;
     print_head(f, client, "explicit local diagnostic export; no account credentials or filesystem paths");
     fprintf(f, "profile: %s\nsource: xeRAbora v2 compiler 98949c0efba151f16b234ba5b392b5241791f40e; PS2-Servers managed adaptations\n", getenv("PS2SERVERS_RA_MODE") != NULL && strcmp(getenv("PS2SERVERS_RA_MODE"), "caduceus") == 0 ? "caduceus" : "xerabora");
-    bytes = watchlist_serialize(plan, sizeof(plan));
+    bytes = watchlist_serialize(plan, sizeof(plan), NULL);
     fprintf(f, "plan generation: %u\nserialized read plan: ", watchlist_generation());
     for (i = 0; i < bytes; i++) fprintf(f, "%02x", plan[i]);
     fprintf(f, "\n\n");

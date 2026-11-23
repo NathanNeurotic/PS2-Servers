@@ -57,7 +57,7 @@ void watchlist_log_survey(rc_client_t *client);
 
 /* Serialises the list in the on-wire/file format the console expects.
    Returns the number of bytes written, 0 if it does not fit. */
-int watchlist_serialize(unsigned char *out, size_t cap);
+int watchlist_serialize(unsigned char *out, size_t cap, const char *hash);
 
 /* Snapshot values, in list order. */
 unsigned char *watchlist_values(void);

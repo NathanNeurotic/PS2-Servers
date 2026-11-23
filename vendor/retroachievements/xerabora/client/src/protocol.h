@@ -8,6 +8,7 @@
     RAQ1 <hash> <serial> <ip> <port>  "do you know this image?", from the menu
     RAG1 <hash> <index> <ip> <port>   "send chunk <index> of the watch list"
     RA15 ... <values>                 telemetry: one snapshot part per packet
+    RAI1 <serial> <hash>              the running game and its image, once a second
 
   PC -> console, to the address given in the request:
 

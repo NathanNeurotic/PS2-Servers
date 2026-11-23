@@ -11,6 +11,7 @@
    only place that knows which addresses the achievement set reads, and
    rcheevos has no public accessor for it. */
 #include "rc_client_internal.h"
+#include "rc_consoles.h"
 #include "rc_internal.h"
 #include "rc_runtime_types.h"
 
@@ -43,6 +44,8 @@ static struct ra_node g_nodes[RA_NODE_MAX];
 static const rc_memref_t *g_node_of[RA_NODE_MAX];
 static int g_node_count = 0;
 static int g_node_full = 0;
+static int g_node_cap = RA_NODE_MAX;
+static int g_with_recall = 0;
 
 /* Snapshot values are little-endian on the wire, whatever this PC is. */
 static unsigned int load_le32(const unsigned char *p)
@@ -148,6 +151,15 @@ struct term
 
 static int compile_node(const rc_memref_t *m);
 
+/* The memref a {recall} operand reads. NULL for a remembered constant,
+   a delta or prior read, or a recall with nothing remembered. */
+static const rc_memref_t *recall_memref(const rc_operand_t *op)
+{
+    if (op->type != RC_OPERAND_RECALL || op->memref_access_type != RC_OPERAND_ADDRESS)
+        return NULL;
+    return op->value.memref;
+}
+
 /* Which bits of the stored value an operand of this size uses. */
 static int term_cut(struct term *t, uint8_t size)
 {
@@ -189,16 +201,22 @@ static int resolve_operand(const rc_operand_t *op, struct term *t)
     memset(t, 0, sizeof(*t));
     t->scale = 1;
 
-    if (op->type == RC_OPERAND_CONST) {
+    if (op->type == RC_OPERAND_RECALL && !g_with_recall)
+        return 0;
+
+    if (op->type == RC_OPERAND_CONST ||
+        (op->type == RC_OPERAND_RECALL && op->memref_access_type == RC_OPERAND_CONST)) {
         t->kind = TERM_CONST;
         t->add = op->value.num;
         return 1;
     }
 
-    if (!rc_operand_is_memref(op) || op->type != RC_OPERAND_ADDRESS)
+    if (op->type == RC_OPERAND_RECALL)
+        m = recall_memref(op);
+    else if (op->type == RC_OPERAND_ADDRESS)
+        m = op->value.memref;
+    else
         return 0;
-
-    m = op->value.memref;
     if (m == NULL)
         return 0;
 
@@ -245,6 +263,7 @@ static int resolve_operand(const rc_operand_t *op, struct term *t)
             break;
 
         case RC_OPERATOR_ADD:
+        case RC_OPERATOR_ADD_ACCUMULATOR:
             if (b.kind != TERM_CONST) {
                 struct term c = a;
 
@@ -254,7 +273,16 @@ static int resolve_operand(const rc_operand_t *op, struct term *t)
             a.add += b.add;
             break;
 
+        case RC_OPERATOR_SUB_PARENT: {
+            /* Swaps the operands: the value is modifier minus parent. */
+            struct term c = a;
+
+            a = b;
+            b = c;
+        }
+            /* fallthrough */
         case RC_OPERATOR_SUB:
+        case RC_OPERATOR_SUB_ACCUMULATOR:
             if (b.kind == TERM_CONST) {
                 a.add -= b.add;
             } else {
@@ -324,11 +352,11 @@ static int compile_node(const rc_memref_t *m)
     if (!g_ran2 && (t.scale != 1 || t.shift != 0 || t.width != 0))
         return -1;
 
-    if (g_node_count >= RA_NODE_MAX) {
+    if (g_node_count >= g_node_cap) {
         /* Once, not once per chain: a big set has hundreds. */
         if (!g_node_full) {
             g_node_full = 1;
-            log_warn("more than %d pointer chains in this set; refusing incomplete plan", RA_NODE_MAX);
+            log_warn("more than %d pointer chains in this set; refusing incomplete plan", g_node_cap);
         }
         return -1;
     }
@@ -343,21 +371,35 @@ static int compile_node(const rc_memref_t *m)
     return at;
 }
 
-/* Every pointer chain in the set, in dependency order. */
+/* Every pointer chain in the set, in dependency order: the chains
+   without {recall} first, then the chains through it. */
 static int build_nodes(rc_client_t *client)
 {
     rc_memrefs_t *pool = client->game->runtime.memrefs;
     rc_modified_memref_list_t *ml;
+    int pass;
 
     g_node_count = 0;
     g_node_full = 0;
+    /* xeRAbora 2.2 consoles take 512 RAN2 nodes for a PS2 game and 256
+       for a PS1 game. A RANL console takes the old 128. */
+    if (!g_ran2)
+        g_node_cap = RA_NODE_MAX_LEGACY;
+    else if (client->game->public_.console_id == RC_CONSOLE_PLAYSTATION)
+        g_node_cap = RA_NODE_MAX_PS1;
+    else
+        g_node_cap = RA_NODE_MAX;
 
-    for (ml = &pool->modified_memrefs; ml != NULL; ml = ml->next) {
-        uint16_t k;
+    for (pass = 0; pass < 2; pass++) {
+        g_with_recall = pass;
+        for (ml = &pool->modified_memrefs; ml != NULL; ml = ml->next) {
+            uint16_t k;
 
-        for (k = 0; k < ml->count; k++)
-            compile_node(&ml->items[k].memref);
+            for (k = 0; k < ml->count; k++)
+                compile_node(&ml->items[k].memref);
+        }
     }
+    g_with_recall = 0;
 
     /* Every required node must fit; never advertise a partial plan. */
     if (g_node_full)
@@ -374,22 +416,69 @@ static int build_nodes(rc_client_t *client)
     return 1;
 }
 
+/* Answers of memref_unsupported for the current build. A {recall} can
+   name the same memref from both operands, and a chain of such
+   Remember/Recall steps would otherwise be walked 2^depth times. */
+#define UNSUPPORTED_MEMO 4096
+static const rc_memref_t *g_memo_key[UNSUPPORTED_MEMO];
+static unsigned char g_memo_val[UNSUPPORTED_MEMO];
+
+static void memo_reset(void)
+{
+    memset(g_memo_key, 0, sizeof(g_memo_key));
+}
+
+static int memo_slot(const rc_memref_t *m)
+{
+    size_t h = ((size_t)m >> 4) & (UNSUPPORTED_MEMO - 1);
+    int i;
+
+    for (i = 0; i < UNSUPPORTED_MEMO; i++, h = (h + 1) & (UNSUPPORTED_MEMO - 1)) {
+        if (g_memo_key[h] == m || g_memo_key[h] == NULL)
+            return (int)h;
+    }
+    return -1; /* full: answer without the memo */
+}
+
+static int memref_unsupported_walk(const rc_memref_t *m);
+
 /* An achievement is unsupported when it reads through a chain that did
    not compile. A chain that did is served like any other address. */
 static int memref_unsupported(const rc_memref_t *m)
 {
-    const rc_modified_memref_t *mm;
+    int slot, bad;
 
     if (m == NULL || m->value.memref_type != RC_MEMREF_TYPE_MODIFIED_MEMREF)
         return 0;
 
-    mm = (const rc_modified_memref_t *)m;
+    slot = memo_slot(m);
+    if (slot >= 0 && g_memo_key[slot] == m)
+        return g_memo_val[slot];
+
+    bad = memref_unsupported_walk(m);
+
+    slot = memo_slot(m);
+    if (slot >= 0) {
+        g_memo_key[slot] = m;
+        g_memo_val[slot] = (unsigned char)bad;
+    }
+    return bad;
+}
+
+static int memref_unsupported_walk(const rc_memref_t *m)
+{
+    const rc_modified_memref_t *mm = (const rc_modified_memref_t *)m;
+
     if (mm->modifier_type == RC_OPERATOR_INDIRECT_READ)
         return node_index(m) < 0 && direct_index(m) < 0;
 
     if (rc_operand_is_memref(&mm->parent) && memref_unsupported(mm->parent.value.memref))
         return 1;
     if (rc_operand_is_memref(&mm->modifier) && memref_unsupported(mm->modifier.value.memref))
+        return 1;
+    if (memref_unsupported(recall_memref(&mm->parent)))
+        return 1;
+    if (memref_unsupported(recall_memref(&mm->modifier)))
         return 1;
 
     return 0;
@@ -402,6 +491,7 @@ static void count_indirect(rc_client_t *client)
     int chained = 0;
 
     g_indirect = 0;
+    memo_reset();
 
     for (subset = game->subsets; subset != NULL; subset = subset->next) {
         rc_client_achievement_info_t *a = subset->achievements;
@@ -776,7 +866,7 @@ int watchlist_build(rc_client_t *client)
 
     if (!build_nodes(client)) {
         if (g_node_full)
-            snprintf(g_build_error, sizeof(g_build_error), "Set too big: more than %d pointer chains", RA_NODE_MAX);
+            snprintf(g_build_error, sizeof(g_build_error), "Set too big: more than %d pointer chains", g_node_cap);
         else
             snprintf(g_build_error, sizeof(g_build_error), "Set too big: complete snapshot exceeds %d bytes", RA_SNAP_MAX_BYTES);
         g_count = g_bytes = g_node_count = g_indirect = 0;
@@ -816,10 +906,12 @@ int watchlist_snapshot_bytes(void)
     return g_bytes + g_node_count * RA_NODE_PAIR_BYTES;
 }
 
-int watchlist_serialize(unsigned char *out, size_t cap)
+int watchlist_serialize(unsigned char *out, size_t cap, const char *hash)
 {
     struct ra_watch_file hdr;
     struct ra_node_file nhdr;
+    struct ra_hash_file hhdr;
+    int with_hash = hash != NULL && strlen(hash) == RA_HASH_LEN;
     size_t need = sizeof(hdr) + (size_t)g_count * sizeof(unsigned int);
     size_t at;
     size_t stride = g_ran2 ? sizeof(struct ra_node) : 8;
@@ -827,6 +919,8 @@ int watchlist_serialize(unsigned char *out, size_t cap)
 
     if (g_node_count > 0)
         need += sizeof(nhdr) + (size_t)g_node_count * stride;
+    if (with_hash)
+        need += sizeof(hhdr);
 
     if (g_count == 0 || need > cap)
         return 0;
@@ -851,6 +945,15 @@ int watchlist_serialize(unsigned char *out, size_t cap)
 
         for (i = 0; i < g_node_count; i++, at += stride)
             memcpy(out + at, &g_nodes[i], stride);
+    }
+
+    /* The image hash closes the file (xeRAbora 2.1): the console names
+       it in RAI1 while the game runs. Older consoles stop reading after
+       the entries and nodes. */
+    if (with_hash) {
+        hhdr.magic = RA_HASH_MAGIC;
+        memcpy(hhdr.hash, hash, RA_HASH_LEN);
+        memcpy(out + at, &hhdr, sizeof(hhdr));
     }
 
     return (int)need;
