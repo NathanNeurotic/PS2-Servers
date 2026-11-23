@@ -7,6 +7,7 @@ the legacy xeRAbora desktop client page.
 import http.server
 import json
 import socket
+import socketserver
 import threading
 import time
 import urllib.parse
@@ -594,7 +595,12 @@ class RAWebServer:
             def server_bind(self):
                 if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
                     self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-                super().server_bind()
+                # Not http.server.HTTPServer.server_bind: it calls
+                # socket.getfqdn(), a reverse DNS lookup that can block for
+                # many seconds on macOS. The main thread cannot run its stop
+                # handler while it is blocked, and nothing listens yet.
+                socketserver.TCPServer.server_bind(self)
+                self.server_name, self.server_port = self.server_address[:2]
 
         self.server = Server((host, port), Handler)
         self.server_port = self.server.server_address[1]
