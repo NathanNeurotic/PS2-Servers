@@ -694,6 +694,8 @@ int main(int argc, char **argv)
     char cur_serial[16] = "";
     int game_up = 0, seen_pkts = 0, said_first = 0, said_stale = 0, named = 0;
     time_t nohash_at = 0;
+    /* The hash the page was last given for cur_serial. */
+    char named_hash[40] = "";
     /* A discovery arrived while a set was loading: the reset it calls
        for runs once the worker is collected. */
     int reset_pending = 0;
@@ -1229,13 +1231,15 @@ int main(int argc, char **argv)
             game_up = 0;
 
             named = hash != NULL;
+            snprintf(named_hash, sizeof(named_hash), "%s", hash != NULL ? hash : "");
             nohash_at = hash == NULL ? time(NULL) : 0;
         }
 
         /* The console names the image within a second of its first
-           packet; the warning waits for that. */
-        if (hash != NULL && !named) {
+           packet, and names another one if the game's image changes. */
+        if (hash != NULL && (!named || strcmp(hash, named_hash) != 0)) {
             named = 1;
+            snprintf(named_hash, sizeof(named_hash), "%s", hash);
             nohash_at = 0;
             log_info("the console named the image of %s: %s", serial, hash);
             webui_set_game(serial, hash, NULL);

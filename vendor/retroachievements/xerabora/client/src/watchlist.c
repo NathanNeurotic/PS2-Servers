@@ -416,16 +416,59 @@ static int build_nodes(rc_client_t *client)
     return 1;
 }
 
+/* Answers of memref_unsupported for the current build. A {recall} can
+   name the same memref from both operands, and a chain of such
+   Remember/Recall steps would otherwise be walked 2^depth times. */
+#define UNSUPPORTED_MEMO 4096
+static const rc_memref_t *g_memo_key[UNSUPPORTED_MEMO];
+static unsigned char g_memo_val[UNSUPPORTED_MEMO];
+
+static void memo_reset(void)
+{
+    memset(g_memo_key, 0, sizeof(g_memo_key));
+}
+
+static int memo_slot(const rc_memref_t *m)
+{
+    size_t h = ((size_t)m >> 4) & (UNSUPPORTED_MEMO - 1);
+    int i;
+
+    for (i = 0; i < UNSUPPORTED_MEMO; i++, h = (h + 1) & (UNSUPPORTED_MEMO - 1)) {
+        if (g_memo_key[h] == m || g_memo_key[h] == NULL)
+            return (int)h;
+    }
+    return -1; /* full: answer without the memo */
+}
+
+static int memref_unsupported_walk(const rc_memref_t *m);
+
 /* An achievement is unsupported when it reads through a chain that did
    not compile. A chain that did is served like any other address. */
 static int memref_unsupported(const rc_memref_t *m)
 {
-    const rc_modified_memref_t *mm;
+    int slot, bad;
 
     if (m == NULL || m->value.memref_type != RC_MEMREF_TYPE_MODIFIED_MEMREF)
         return 0;
 
-    mm = (const rc_modified_memref_t *)m;
+    slot = memo_slot(m);
+    if (slot >= 0 && g_memo_key[slot] == m)
+        return g_memo_val[slot];
+
+    bad = memref_unsupported_walk(m);
+
+    slot = memo_slot(m);
+    if (slot >= 0) {
+        g_memo_key[slot] = m;
+        g_memo_val[slot] = (unsigned char)bad;
+    }
+    return bad;
+}
+
+static int memref_unsupported_walk(const rc_memref_t *m)
+{
+    const rc_modified_memref_t *mm = (const rc_modified_memref_t *)m;
+
     if (mm->modifier_type == RC_OPERATOR_INDIRECT_READ)
         return node_index(m) < 0 && direct_index(m) < 0;
 
@@ -448,6 +491,7 @@ static void count_indirect(rc_client_t *client)
     int chained = 0;
 
     g_indirect = 0;
+    memo_reset();
 
     for (subset = game->subsets; subset != NULL; subset = subset->next) {
         rc_client_achievement_info_t *a = subset->achievements;
