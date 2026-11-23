@@ -42,6 +42,15 @@ jobs:
         run: python build/build_ra_evaluator.py
       - name: Exercise native discovery, credential protection and companion wire protocols
         run: python -m unittest tests.test_retroachievements tests.test_game_library tests.test_achievement_viewer tests.test_achievement_loader tests.test_discord_presence -v
+      - name: Run the package achievement gate from source (macOS)
+        # The release build runs tools/check_achievements_package.py against
+        # the Nuitka app; running the same gate from source here catches a
+        # macOS-only hang on every PR instead of only after merge.
+        if: matrix.target == 'macos-arm64'
+        timeout-minutes: 10
+        run: |
+          python -m pip install lz4==4.4.5 Pillow==13.0.0 zstandard==0.25.0
+          python tools/check_achievements_package.py python "$GITHUB_WORKSPACE/ps2servers.py"
 
   windows-storage:
     name: Windows raw and virtual storage tests
