@@ -24,5 +24,20 @@
     "commit": "98949c0efba151f16b234ba5b392b5241791f40e",
     "path": "client/src/diag.c",
     "adaptations": "bounded explicit loopback export; generation reset; no automatic files or uploads"
+  },
+  "xerabora-2.2-client": {
+    "repository": "https://github.com/hacan359/xerabora",
+    "commit": "9eace3f2658e35a1fe4b791e123b5c5194b56cdb",
+    "paths": [
+      "client/src/console.c",
+      "client/src/console.h",
+      "client/src/main.c",
+      "client/src/protocol.h",
+      "client/src/watchlist.c",
+      "client/src/watchlist.h",
+      "protocol/PROTOCOL.md",
+      "protocol/ra_watch.h"
+    ],
+    "adaptations": "2.1.0 RAI1 game identity and RAH1 hash tail, 2.2.0 Remember/Recall chains, 512/256 node ceilings and console-only answers during list transfer; RANL keeps the 128-node ceiling and incomplete plans are still refused"
   }
 }

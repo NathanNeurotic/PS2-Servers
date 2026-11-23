@@ -692,7 +692,8 @@ int main(int argc, char **argv)
     struct sockaddr_in addr;
     int rcvbuf = 1 << 20;
     char cur_serial[16] = "";
-    int game_up = 0, seen_pkts = 0, said_first = 0, said_stale = 0;
+    int game_up = 0, seen_pkts = 0, said_first = 0, said_stale = 0, named = 0;
+    time_t nohash_at = 0;
     /* A discovery arrived while a set was loading: the reset it calls
        for runs once the worker is collected. */
     int reset_pending = 0;
@@ -1069,7 +1070,7 @@ int main(int argc, char **argv)
         const char *head = (const char *)pkt;
         char serial[16];
         const char *hash;
-        int n, served, ready, busy, wait_ms;
+        int n, served, ready, busy, held, wait_ms;
 
         /* A set finished loading on the worker: take its outcome. It is
            the running game's set only when the hash matches; a set an
@@ -1118,7 +1119,12 @@ int main(int argc, char **argv)
         busy = console_ident_busy();
         wait_ms = busy ? 100 : 1000;
 
-        ready = platform_wait_readable2(sock, ui, wait_ms);
+        /* While the console takes the watch list, the loop listens to the
+           console only. */
+        held = console_transfer_active();
+        if (held)
+            wait_ms = 100;
+        ready = platform_wait_readable2(sock, held ? SOCK_INVALID : ui, wait_ms);
         if (ready < 0) {
             platform_sleep_ms(1000);
             continue;
@@ -1131,7 +1137,7 @@ int main(int argc, char **argv)
         }
         if (ready == 0) {
             link_idle((unsigned long)wait_ms);
-            if (busy)
+            if (busy || held)
                 continue;
             rc_client_idle(client); /* retries of queued unlocks */
             login_retry(client, 60);
@@ -1222,12 +1228,24 @@ int main(int argc, char **argv)
             said_stale = 0;
             game_up = 0;
 
-            if (hash == NULL) {
-                log_warn("no image hash known for %s: choose 'RA: check game support' "
-                         "in the game's menu, or pass --game %s=HASH", serial, serial);
-                webui_set_status("no-hash");
-                log_warn("receiving telemetry only, no achievements are tracked");
-            }
+            named = hash != NULL;
+            nohash_at = hash == NULL ? time(NULL) : 0;
+        }
+
+        /* The console names the image within a second of its first
+           packet; the warning waits for that. */
+        if (hash != NULL && !named) {
+            named = 1;
+            nohash_at = 0;
+            log_info("the console named the image of %s: %s", serial, hash);
+            webui_set_game(serial, hash, NULL);
+        }
+        if (hash == NULL && nohash_at != 0 && time(NULL) - nohash_at >= 3) {
+            nohash_at = 0;
+            log_warn("no image hash known for %s: choose 'RA: check game support' "
+                     "in the game's menu, or pass --game %s=HASH", serial, serial);
+            webui_set_status("no-hash");
+            log_warn("receiving telemetry only, no achievements are tracked");
         }
 
         /* Ask for the set whenever the client does not hold this game's:

@@ -88,6 +88,12 @@ nodes come in dependency order, so one pass resolves a chain of any
 depth. The version in the file header stays 1: an agent that stops
 after `count` entries never sees the tail and works as before.
 
+The file ends with the image hash the list was built for: a
+`struct ra_hash_file`, the magic `RAH1` and 32 hex digits. The agent
+keeps it with the list and names it while the game runs (see "Which
+game is running"). A list without it still works; the client then needs
+its own record of the game's hash.
+
 An agent that reads the tail resolves every chain in the same frame it
 takes the snapshot, and appends an (address, value) pair per node after
 the direct values. An address of 0 means the chain led outside memory
@@ -113,6 +119,16 @@ that is copied out non-atomically. The sequence number `seq` is repeated
 in a trailer word placed after the values. A reader takes `seq` from the
 header, copies the values, then checks the trailer against the header; a
 mismatch means the snapshot changed mid-copy and is dropped.
+
+## Which game is running
+
+    console -> PC   RAI1 <serial> <hash>
+
+Once a second while a game runs, when its watch list carries a hash.
+The snapshot header names the game by serial only, and a serial does
+not say which image it is. With this message a client that has never
+seen the game, on another PC for example, loads the right set without
+a new check from the menu.
 
 ## Unlock notice
 

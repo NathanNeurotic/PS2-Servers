@@ -18,6 +18,13 @@ and protocol adapt xeRAbora v2.0.0 at the separately recorded
 selection is available in both desktop runtimes. See `docs/RA-UPSTREAM-AUDIT.md`
 for dependency validation and remaining console acceptance boundaries.
 
+The xeRAbora 2.1.0 and 2.2.0 desktop changes are adapted from the
+`xerabora-2.2-client` revision: the console's once-a-second `RAI1 <serial>
+<hash>` game announcement, the `RAH1` image hash that now closes each watch
+list, pointer chains through Remember/Recall, the 512-chain (PS2) and 256-chain
+(PS1) ceilings for RAN2, and answering only the console while it takes its
+list. RANL output keeps the 128-chain ceiling that RANL consoles accept.
+
 Local xeRAbora changes:
 
 - Selectable RANL/RAN2 watch serialization with the v2 indexed/constant-base

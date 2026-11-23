@@ -34,6 +34,10 @@ int console_request_set(rc_client_t *client, const char *hash, const char **reas
    and the watch list alone: no frames, no idle, no page state from it. */
 int console_ident_busy(void);
 
+/* True from an OK answer until the console has taken the last chunk of
+   the watch list, at most ten seconds. */
+int console_transfer_active(void);
+
 /* Picks up a finished load: returns 1 once per job with its hash and
    outcome, 0 when nothing finished. Call from the main loop; the
    worker's results are visible only after this. */
