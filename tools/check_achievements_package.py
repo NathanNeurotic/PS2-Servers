@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import platform
+import signal
 import socket
 import subprocess
 import sys
@@ -47,6 +48,35 @@ def temporary_profile():
                 time.sleep(0.1)
 
 
+def report(proc, log):
+    """Show what a failed or hung package printed, plus a native stack on macOS."""
+    if proc.poll() is None:
+        if platform.system() == "Darwin":
+            with tempfile.TemporaryDirectory() as scratch:
+                stack = Path(scratch) / "sample.txt"
+                try:
+                    subprocess.run(["sample", str(proc.pid), "2", "-file", str(stack)],
+                                   timeout=60, check=False, capture_output=True)
+                except (OSError, subprocess.SubprocessError):
+                    pass  # never let sampling hide the package log or the original failure
+                if stack.is_file():
+                    sys.stderr.write("--- native stack ---\n" + stack.read_text(errors="replace") + "\n")
+        if hasattr(signal, "SIGABRT") and os.name != "nt":
+            # PYTHONFAULTHANDLER (set below) makes a source run print every
+            # thread's Python stack on SIGABRT before it dies.
+            proc.send_signal(signal.SIGABRT)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+    try:
+        log.seek(0)
+        sys.stderr.write("--- package output ---\n" + log.read().decode(errors="replace") + "\n")
+    except (OSError, ValueError):
+        pass
+    sys.stderr.flush()
+
+
 def check(command):
     for flag in ("--selfcheck-ra-resolver", "--selfcheck-ra-evaluator", "--selfcheck-ra-account"):
         subprocess.run(command + [flag], check=True, timeout=60)
@@ -57,7 +87,7 @@ def check(command):
             folder = root / "games"
             folder.mkdir()
             env = dict(os.environ, LOCALAPPDATA=temporary, APPDATA=temporary,
-                       XDG_CONFIG_HOME=temporary, HOME=temporary, PS2SERVERS_RA_NO_BROWSER="1")
+                       XDG_CONFIG_HOME=temporary, HOME=temporary, PS2SERVERS_RA_NO_BROWSER="1", PYTHONFAULTHANDLER="1")
             env.pop("PYTHONPATH", None)
             args = command + ["--serve", "retroachievements", "--mode", mode, "--no-sound"]
             if owned:
@@ -110,10 +140,18 @@ def check(command):
                         key = (folder / "ART/CADUCEUS.KEY").read_text("ascii").strip()
                         console.sendto(("CADA1 1 G 0 0 0 " + key).encode(), ("127.0.0.1", 18198))
                         assert console.recvfrom(1024)[0].rstrip(b"\0") == b"CADB1 1 OFFLINE"
+                except BaseException as error:
+                    if not isinstance(error, RuntimeError):  # RuntimeError already carries the log
+                        report(proc, log)
+                    raise
                 finally:
                     if proc.poll() is None:
                         proc.terminate()
-                    proc.wait(timeout=15)
+                    try:
+                        proc.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        report(proc, log)
+                        raise
                 deadline = time.monotonic() + 15
                 while True:
                     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:

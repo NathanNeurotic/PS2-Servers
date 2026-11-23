@@ -149,3 +149,18 @@ class RAWebTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoNameLookupTests(unittest.TestCase):
+    """Binding must not wait on reverse DNS (socket.getfqdn blocks on some Macs)."""
+
+    def test_servers_bind_without_getfqdn(self):
+        from launcher.achievement_viewer import Viewer
+        with mock.patch("socket.getfqdn", side_effect=AssertionError("getfqdn called")):
+            server = RAWebServer(0, RAState())
+            try:
+                self.assertEqual(server.server.server_name, "127.0.0.1")
+                viewer = Viewer(server.server_port, port=0, host="127.0.0.1")
+                viewer.server.server_close()
+            finally:
+                server.server.server_close()
