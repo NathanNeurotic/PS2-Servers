@@ -54,8 +54,11 @@ def report(proc, log):
         if platform.system() == "Darwin":
             with tempfile.TemporaryDirectory() as scratch:
                 stack = Path(scratch) / "sample.txt"
-                subprocess.run(["sample", str(proc.pid), "2", "-file", str(stack)],
-                               timeout=60, check=False, capture_output=True)
+                try:
+                    subprocess.run(["sample", str(proc.pid), "2", "-file", str(stack)],
+                                   timeout=60, check=False, capture_output=True)
+                except (OSError, subprocess.SubprocessError):
+                    pass  # never let sampling hide the package log or the original failure
                 if stack.is_file():
                     sys.stderr.write("--- native stack ---\n" + stack.read_text(errors="replace") + "\n")
         if hasattr(signal, "SIGABRT") and os.name != "nt":
