@@ -3,6 +3,7 @@ import hashlib
 from importlib.util import find_spec
 from contextlib import closing
 import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -187,7 +188,7 @@ class LibraryTests(unittest.TestCase):
             self.library.backup(self.library.database)
         linked = self.root / "linked.sqlite3"
         try:
-            linked.hardlink_to(self.library.database)
+            os.link(self.library.database, linked)
         except OSError:
             return
         with self.assertRaises(ValueError):

@@ -121,14 +121,17 @@ does not add VMC support to a loader that lacks it.
 | System | Desktop download |
 |---|---|
 | Windows x64 | `PS2Servers-windows-x64-portable.zip` (recommended), or `PS2Servers-windows-x64.zip` |
-| Windows x86 (32-bit OS) | `PS2Servers-windows-x86-portable.zip`, or `PS2Servers-windows-x86.zip` |
+| Windows 7 / 8 / 8.1 (32- or 64-bit), or a 32-bit Windows | `PS2Servers-windows-x86-portable.zip`, or `PS2Servers-windows-x86.zip` |
 | Linux x64 | `PS2Servers-linux-x64`; use `PS2Servers-linux-x64-portable.tar.gz` when `/tmp` is `noexec` |
 | Linux desktop integration | `PS2Servers-x86_64.AppImage`, when present in the release |
 | macOS Apple Silicon / Intel | `PS2Servers-macos-arm64.zip` / `PS2Servers-macos-x64.zip` |
 | ARM/MIPS/router/headless systems | See the [Edge build picker](docs/EDGE-WHICH-BUILD.md), or run Core with Python |
 
 Packaged Desktop includes Python; a separate Python installation is unnecessary.
-Source builds use Python 3.12 in CI. The GUI needs Tkinter (for example
+The x64 packages need Windows 10 or 11. The x86 package is built with Python 3.8,
+the last Python that runs on Windows 7, so it starts on Windows 7 SP1 and 8 as well;
+Windows 7 needs its updates installed, including the Universal C Runtime (KB2999226).
+Source builds use Python 3.12 in CI, and CI also runs the tests on Python 3.8. The GUI needs Tkinter (for example
 `python3-tk` on Debian/Ubuntu); Core does not need a display. Both computers need
 compatible IP settings and a working Ethernet path to the PS2; a wired PC is
 preferable to Wi-Fi. Fat PS2s require an Ethernet-capable network adapter.

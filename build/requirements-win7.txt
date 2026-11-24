@@ -1,0 +1,22 @@
+# Build-only dependencies for the 32-bit Windows package (PS2Servers-windows-x86),
+# which is built with Python 3.8 so it runs on Windows 7 and 8 (issue #330).
+#
+# Python 3.9 and later cannot start on Windows 7: python39.dll and newer import
+# api-ms-win-core-path-l1-1-0.dll, and python312.dll also imports
+# kernel32!PssQuerySnapshot (Windows 8.1). Python 3.8.10 is the last official
+# CPython with a Windows installer that runs on Windows 7 SP1.
+#
+# Same packages as requirements-build.txt, at the newest release of each that
+# still supports Python 3.8. tools/check_win7_imports.py checks the result.
+#
+# This file lives in build/ on purpose: Dependabot's pip entry watches the
+# repository root, and every newer zstandard, lz4 and Pillow drops Python 3.8,
+# so its bumps here could only break the build. Keep Nuitka equal to
+# requirements-build.txt (tests/test_win7_build.py checks that); the other three
+# stay at these versions for as long as this build is on Python 3.8.
+
+Nuitka==4.3.5
+ordered-set==4.1.0
+zstandard==0.23.0
+lz4==4.3.3
+Pillow==10.4.0

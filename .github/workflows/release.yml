@@ -85,7 +85,8 @@ jobs:
           - os: windows-latest
             asset: PS2Servers-windows-x64.zip
             portable_asset: PS2Servers-windows-x64-portable.zip
-          # 32-bit Windows, for older / low-end PCs still used for SMB on OPL.
+          # 32-bit Windows, for older / low-end PCs still used for SMB on OPL,
+          # and the Windows 7 / 8 build: it is built with Python 3.8 (see below).
           - os: windows-latest
             asset: PS2Servers-windows-x86.zip
             portable_asset: PS2Servers-windows-x86-portable.zip
@@ -114,11 +115,18 @@ jobs:
       # The 32-bit Windows build needs a 32-bit interpreter (with 32-bit Tcl/Tk)
       # so Nuitka emits a 32-bit .exe and pip pulls the win32 wheels (lz4,
       # zstandard). setup-python provides an official 32-bit CPython.
+      #
+      # It is also the package for Windows 7 and 8 (32- or 64-bit), so it is
+      # built with Python 3.8.10, the last official CPython that starts there.
+      # Python 3.9+ cannot: python3X.dll imports api-ms-win-core-path-l1-1-0.dll,
+      # and 3.12's also imports kernel32!PssQuerySnapshot (issue #330).
+      # build/requirements-win7.txt pins the 3.8-capable dependency versions,
+      # and tools/check_win7_imports.py below fails the job if anything slips back.
       - name: Set up Python (Windows x86)
         if: matrix.win_arch == 'x86'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12"
+          python-version: "3.8.10"
           architecture: "x86"
 
       - name: Install universal2 Python (macOS x86_64 cross-build)
@@ -147,8 +155,12 @@ jobs:
         run: python -m pip install pystray Pillow python-xlib
 
       - name: Install Nuitka
-        if: matrix.macos_arch != 'x86_64'
+        if: matrix.macos_arch != 'x86_64' && matrix.win_arch != 'x86'
         run: python -m pip install --upgrade pip -r requirements-build.txt
+
+      - name: Install Nuitka (Windows x86, Python 3.8)
+        if: matrix.win_arch == 'x86'
+        run: python -m pip install --upgrade pip -r build/requirements-win7.txt
 
       - name: Install Nuitka (macOS x86_64)
         if: matrix.macos_arch == 'x86_64'
@@ -176,6 +188,14 @@ jobs:
       - name: Verify fresh-profile Windows desktop stays open
         if: runner.os == 'Windows'
         run: python tools/check_desktop_startup.py dist/PS2Servers.exe
+
+      - name: Check the 32-bit package can load on Windows 7
+        if: matrix.win_arch == 'x86'
+        shell: pwsh
+        run: |
+          $paths = @('dist/PS2Servers.exe')
+          if (Test-Path build/native) { $paths += 'build/native' }
+          python tools/check_win7_imports.py @paths
 
       - name: Build single-file binary (macOS x86_64)
         if: matrix.macos_arch == 'x86_64'
@@ -247,6 +267,13 @@ jobs:
             Copy-Item -Path build/native -Destination $packageDir -Recurse -Force
           }
           Compress-Archive -Path $packageDir -DestinationPath "out/${{ matrix.portable_asset }}" -Force
+
+      # The portable folder holds every DLL and .pyd the onefile packs inside
+      # itself, so this is the full check. Not continue-on-error: a Windows 7
+      # download that cannot load on Windows 7 must not be published.
+      - name: Check the 32-bit portable package can load on Windows 7
+        if: matrix.win_arch == 'x86' && hashFiles('out/PS2Servers-windows-x86-portable.zip') != ''
+        run: python tools/check_win7_imports.py out/PS2Servers-windows-x86-portable
 
       - name: Stage Linux portable artifact
         if: runner.os == 'Linux' && matrix.portable_asset != '' && steps.portable-build.outcome == 'success'
@@ -533,8 +560,8 @@ jobs:
           table=$(
             row "Windows, normal (64-bit)"   PS2Servers-windows-x64-portable.zip   PS2Servers-windows-x64.zip           "$no_portable"
             row_alternative PS2Servers-windows-x64-portable.zip PS2Servers-windows-x64.zip "Windows, 64-bit single-file alternative"
-            row "Windows, older 32-bit PC"   PS2Servers-windows-x86-portable.zip   PS2Servers-windows-x86.zip           "$no_portable"
-            row_alternative PS2Servers-windows-x86-portable.zip PS2Servers-windows-x86.zip "Windows, 32-bit single-file alternative"
+            row "Windows 7 / 8, or a 32-bit PC" PS2Servers-windows-x86-portable.zip PS2Servers-windows-x86.zip      "$no_portable"
+            row_alternative PS2Servers-windows-x86-portable.zip PS2Servers-windows-x86.zip "Windows 7 / 8 or 32-bit, single-file alternative"
             row "Linux, x86_64"              PS2Servers-linux-x64                  PS2Servers-linux-x64-portable.tar.gz "$no_onefile"
             row_alternative PS2Servers-linux-x64 PS2Servers-linux-x64-portable.tar.gz "Linux, x86_64 standalone folder"
             if [ -f PS2Servers-x86_64.AppImage ]; then

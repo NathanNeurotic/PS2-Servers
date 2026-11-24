@@ -11,10 +11,12 @@ import io
 import json
 import os
 from pathlib import Path
+import queue
 import re
 import secrets
 import selectors
 import socket
+import sys
 import threading
 import time
 import tempfile
@@ -26,6 +28,27 @@ import urllib.request
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, new_url):
         return None
+
+
+def shutdown_cancelling(pool):
+    """pool.shutdown(wait=False, cancel_futures=True), on Python 3.8 too.
+
+    cancel_futures is Python 3.9+, and the Windows 7 build runs on 3.8. The
+    fallback is the loop 3.9 runs for it: cancel every queued, not-yet-started
+    task, then shut down without waiting for the running ones. Cancelling a
+    future runs its done callbacks, so a task's slot is released either way.
+    """
+    if sys.version_info >= (3, 9):
+        pool.shutdown(wait=False, cancel_futures=True)
+        return
+    while True:
+        try:
+            item = pool._work_queue.get_nowait()
+        except queue.Empty:
+            break
+        if item is not None:
+            item.future.cancel()
+    pool.shutdown(wait=False)
 
 
 def open_remote(request, timeout):
@@ -193,7 +216,7 @@ class Bridge:
         for sock in self.sockets:
             sock.close()
         self.selector.close()
-        self.pool.shutdown(wait=False, cancel_futures=True)
+        shutdown_cancelling(self.pool)
 
     def send(self, sock, peer, body):
         if not self.stop.is_set():

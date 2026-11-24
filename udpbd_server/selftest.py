@@ -26,6 +26,12 @@ import udpbd_server as U
 SRV = ("127.0.0.1", U.UDPBD_PORT)
 
 
+def _randbytes(rng, count):
+    # random.Random.randbytes() is Python 3.9+, and the Windows 7 build runs on
+    # Python 3.8. This is the exact body CPython 3.9 uses, so the bytes match.
+    return rng.getrandbits(count * 8).to_bytes(count, "little")
+
+
 def _client():
     c = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     c.settimeout(3.0)
@@ -56,7 +62,7 @@ def _read(c, img, start, count):
 
 
 def _write(c, path, start, count):
-    new = random.Random(99).randbytes(count * 512)
+    new = _randbytes(random.Random(99), count * 512)
     c.sendto(U.pack_header(U.CMD_WRITE, 3, 0) + struct.pack("<IH", start, count), SRV)
     off, blocks = 0, count
     while blocks > 0:  # block_shift 7 => 1 block == 1 sector, 2 sectors per packet
@@ -88,7 +94,7 @@ def _optimizer():
 def _fuzz(c, expected_sectors):
     # malformed / short packets (fuzzing, port scans) must never crash the server
     for bad in (b"\x00", b"\x02", b"\x02\x00\x00", b"\x05\x00\x00\x00\x00",
-                random.Random(7).randbytes(5), b"\x04\x00\x01\x00\x00\x00\x00"):
+                _randbytes(random.Random(7), 5), b"\x04\x00\x01\x00\x00\x00\x00"):
         c.sendto(bad, SRV)
     _info(c, expected_sectors)  # still answers -> it survived the garbage
     print("  FUZZ  ok: server survived malformed packets")
@@ -141,7 +147,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="udpbd_") as tmp:
         path = os.path.join(tmp, "test.img")
         size = 4 * 1024 * 1024
-        img = random.Random(1234).randbytes(size)
+        img = _randbytes(random.Random(1234), size)
         with open(path, "wb") as f:
             f.write(img)
 
