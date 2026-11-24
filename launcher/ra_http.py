@@ -11,6 +11,16 @@ import urllib.request
 from launcher.ra_sets import MAX_RESPONSE
 
 
+def _close(error):
+    # An HTTPError built without a body (fp=None) raises KeyError from close()
+    # on Python 3.8, which the Windows 7 build runs on; 3.10+ gives it an
+    # empty body instead. Nothing is left to release in that case.
+    try:
+        error.close()
+    except Exception:
+        pass
+
+
 class RateLimited(ValueError):
     """Sanitized server backoff that the owning worker retains across children."""
     def __init__(self, retry_after):
@@ -67,9 +77,9 @@ class Transport:
                             delay = 60
                     if not math.isfinite(delay):
                         delay = 60
-                    error.close()
+                    _close(error)
                     raise RateLimited(max(1, min(300, math.ceil(delay)))) from None
-                error.close()
+                _close(error)
                 raise ValueError("RA account request failed") from None
             except Exception:
                 raise ValueError("RA account request failed") from None

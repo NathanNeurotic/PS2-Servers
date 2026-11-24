@@ -65,6 +65,29 @@ jobs:
       - name: Launcher Stop runs server shutdown on Windows (stop pipe, not TerminateProcess)
         run: python -m unittest tests.test_cooperative_stop -v
 
+  python38:
+    # The 32-bit Windows package is built with Python 3.8 so it starts on
+    # Windows 7 and 8 (issue #330). Nothing else runs the code on 3.8, so a
+    # Python 3.9+ call (str.removeprefix, cancel_futures=, a parenthesised
+    # multi-item `with`) would otherwise reach that package unnoticed and fail
+    # only on the user's PC. The package itself is built and checked by
+    # win7-package.yml and the release workflows.
+    name: Python 3.8 (Windows 7 build)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.8'
+      - name: Install the Windows 7 build's runtime packages and test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            $(grep -E '^(zstandard|lz4|Pillow)==' build/requirements-win7.txt) PyYAML smbprotocol
+      - name: Compile Python sources
+        run: python -m compileall -q launcher smbv1_server smb2_server udpbd_server udpfs_server http_server nfs4_server ps2servers.py build tools tests
+      - name: Run the Python test suite on Python 3.8
+        run: python -m unittest discover -s tests -t . -v
+
   python-checks:
     name: Python checks
     runs-on: ubuntu-latest

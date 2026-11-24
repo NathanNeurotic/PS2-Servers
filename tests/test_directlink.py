@@ -772,9 +772,9 @@ class FirewallSafetyTests(unittest.TestCase):
 
     def test_directlink_firewall_script_uses_local_address(self):
         result = mock.Mock(returncode=0, stdout="SETUP_CHANGED=True", stderr="")
-        with (mock.patch.object(windows_setup, "is_windows", return_value=True),
+        with mock.patch.object(windows_setup, "is_windows", return_value=True), \
               mock.patch.object(windows_setup, "_powershell",
-                                return_value=result) as ps):
+                                return_value=result) as ps:
             windows_setup.apply_setup("directlink", {"server_ip": SERVER})
         self.assertIn("-LocalAddress '{}'".format(SERVER), ps.call_args.args[0])
 
@@ -821,13 +821,13 @@ class LauncherLifecycleTests(unittest.TestCase):
         app.nb = mock.Mock()
         app.terminal_tab = object()
         app._direct_link_fail = mock.Mock()
-        with (mock.patch.object(directlink, "apply_adapter_config",
-                               return_value="CONFIGURED=Ethernet"),
+        with mock.patch.object(directlink, "apply_adapter_config",
+                               return_value="CONFIGURED=Ethernet"), \
               mock.patch.object(windows_setup, "apply_setup",
-                                side_effect=WindowsSetupError("firewall failed")),
+                                side_effect=WindowsSetupError("firewall failed")), \
               mock.patch.object(directlink, "restore_adapter_dhcp",
-                                return_value="RESTORED=automatic (DHCP)") as restore,
-              mock.patch("launcher.gui.threading.Thread") as thread):
+                                return_value="RESTORED=automatic (DHCP)") as restore, \
+              mock.patch("launcher.gui.threading.Thread") as thread:
             LauncherApp._direct_link_apply_async(app)
             thread.call_args.kwargs["target"]()
         restore.assert_called_once_with(3, expect_ip=SERVER)

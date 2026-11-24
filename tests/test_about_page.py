@@ -44,8 +44,8 @@ class VersionLabelTest(unittest.TestCase):
         from launcher import release_metadata
         fake = types.ModuleType("launcher._build_id")
         fake.COMMIT = "abc1234"
-        with (mock.patch.dict(sys.modules, {"launcher._build_id": fake}),
-              mock.patch("subprocess.check_output", return_value=b"deadbee\n")):
+        with mock.patch.dict(sys.modules, {"launcher._build_id": fake}), \
+              mock.patch("subprocess.check_output", return_value=b"deadbee\n"):
             self.assertEqual(release_metadata.build_commit(), "deadbee")
             self.assertEqual(
                 release_metadata.version_label(),
@@ -57,10 +57,10 @@ class VersionLabelTest(unittest.TestCase):
         from launcher import release_metadata
         fake = types.ModuleType("launcher._build_id")
         fake.COMMIT = "abc1234"
-        with (mock.patch.dict(sys.modules, {"launcher._build_id": fake}),
+        with mock.patch.dict(sys.modules, {"launcher._build_id": fake}), \
               mock.patch.object(release_metadata.sys, "frozen", True,
-                                create=True),
-              mock.patch("subprocess.check_output") as git_mock):
+                                create=True), \
+              mock.patch("subprocess.check_output") as git_mock:
             self.assertEqual(release_metadata.build_commit(), "abc1234")
             git_mock.assert_not_called()
 
@@ -68,14 +68,14 @@ class VersionLabelTest(unittest.TestCase):
         from launcher import release_metadata
         fake = types.ModuleType("launcher._build_id")
         fake.COMMIT = "abc1234"
-        with (mock.patch.dict(sys.modules, {"launcher._build_id": fake}),
-              mock.patch("subprocess.check_output", side_effect=OSError)):
+        with mock.patch.dict(sys.modules, {"launcher._build_id": fake}), \
+              mock.patch("subprocess.check_output", side_effect=OSError):
             self.assertEqual(release_metadata.build_commit(), "abc1234")
 
     def test_unknown_commit_shows_the_bare_version(self):
         from launcher import release_metadata
-        with (mock.patch.dict(sys.modules, {"launcher._build_id": None}),
-              mock.patch("subprocess.check_output", side_effect=OSError)):
+        with mock.patch.dict(sys.modules, {"launcher._build_id": None}), \
+              mock.patch("subprocess.check_output", side_effect=OSError):
             self.assertEqual(release_metadata.build_commit(), "")
             self.assertEqual(release_metadata.version_label(),
                              "v" + release_metadata.DISPLAY_VERSION)

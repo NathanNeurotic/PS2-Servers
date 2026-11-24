@@ -96,12 +96,12 @@ class ResetSettingsGUITest(unittest.TestCase):
         self.assertTrue(os.path.exists(config.config_path()))
 
         popen_calls = []
-        with (mock.patch.object(gui.messagebox, "askyesno", return_value=True),
-              mock.patch.object(gui.messagebox, "showwarning"),
+        with mock.patch.object(gui.messagebox, "askyesno", return_value=True), \
+              mock.patch.object(gui.messagebox, "showwarning"), \
               mock.patch.object(gui.subprocess, "Popen",
                                 side_effect=lambda *a, **k: popen_calls.append((a, k))
-                                or mock.Mock()),
-              mock.patch.object(app, "_shutdown_app")):
+                                or mock.Mock()), \
+              mock.patch.object(app, "_shutdown_app"):
             app.reset_settings()
 
         self.assertFalse(os.path.exists(config.config_path()))
@@ -117,8 +117,8 @@ class ResetSettingsGUITest(unittest.TestCase):
         from launcher import config
         config.save({"servers": {"udpfs": {"root": "/keep"}}})
 
-        with (mock.patch.object(gui.messagebox, "askyesno", return_value=False),
-              mock.patch.object(gui.subprocess, "Popen") as popen_mock):
+        with mock.patch.object(gui.messagebox, "askyesno", return_value=False), \
+              mock.patch.object(gui.subprocess, "Popen") as popen_mock:
             app.reset_settings()
 
         self.assertTrue(os.path.exists(config.config_path()))
@@ -131,9 +131,9 @@ class ResetSettingsGUITest(unittest.TestCase):
         config.save({"direct_link": {"enabled": True}})
         app.saved["direct_link"] = {"enabled": True}
 
-        with (mock.patch.object(gui.messagebox, "askyesno") as ask_mock,
-              mock.patch.object(gui.messagebox, "showwarning") as warn_mock,
-              mock.patch.object(gui.subprocess, "Popen") as popen_mock):
+        with mock.patch.object(gui.messagebox, "askyesno") as ask_mock, \
+              mock.patch.object(gui.messagebox, "showwarning") as warn_mock, \
+              mock.patch.object(gui.subprocess, "Popen") as popen_mock:
             app.reset_settings()
 
         warn_mock.assert_called_once()
@@ -152,9 +152,9 @@ class ResetSettingsGUITest(unittest.TestCase):
         config.save({"direct_link": dict(stale)})
         app.saved["direct_link"] = dict(stale)
 
-        with (mock.patch.object(gui.messagebox, "askyesno") as ask_mock,
-              mock.patch.object(gui.messagebox, "showwarning") as warn_mock,
-              mock.patch.object(gui.subprocess, "Popen") as popen_mock):
+        with mock.patch.object(gui.messagebox, "askyesno") as ask_mock, \
+              mock.patch.object(gui.messagebox, "showwarning") as warn_mock, \
+              mock.patch.object(gui.subprocess, "Popen") as popen_mock:
             app.reset_settings()
 
         warn_mock.assert_called_once()
@@ -172,11 +172,11 @@ class ResetSettingsGUITest(unittest.TestCase):
         from launcher import config
         config.save({"servers": {"udpfs": {"root": "/keep"}}})
 
-        with (mock.patch.object(gui.messagebox, "askyesno", return_value=True),
-              mock.patch.object(gui.messagebox, "showerror") as err_mock,
+        with mock.patch.object(gui.messagebox, "askyesno", return_value=True), \
+              mock.patch.object(gui.messagebox, "showerror") as err_mock, \
               mock.patch.object(gui.config, "reset",
-                                side_effect=PermissionError("locked")),
-              mock.patch.object(gui.subprocess, "Popen") as popen_mock):
+                                side_effect=PermissionError("locked")), \
+              mock.patch.object(gui.subprocess, "Popen") as popen_mock:
             app.reset_settings()
 
         err_mock.assert_called_once()
@@ -189,10 +189,10 @@ class ResetSettingsGUITest(unittest.TestCase):
         from launcher import config
         config.save({"servers": {"udpfs": {"root": "/keep"}}})
 
-        with (mock.patch.object(gui.messagebox, "askyesno", return_value=True),
-              mock.patch.object(gui.messagebox, "showerror"),
+        with mock.patch.object(gui.messagebox, "askyesno", return_value=True), \
+              mock.patch.object(gui.messagebox, "showerror"), \
               mock.patch.object(gui.subprocess, "Popen",
-                                side_effect=OSError("boom"))):
+                                side_effect=OSError("boom")):
             app.reset_settings()
 
         # Rollback: the reset flag is cleared and the current state is saved again.
