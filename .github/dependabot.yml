@@ -15,6 +15,9 @@ updates:
   # Python build dependencies pinned in requirements-build.txt (Nuitka, etc.).
   - package-ecosystem: "pip"
     directory: "/"
+    # The Windows 7 pins in build/ must never be bumped (see the /build entry).
+    exclude-paths:
+      - "build/**"
     schedule:
       interval: "weekly"
     commit-message:

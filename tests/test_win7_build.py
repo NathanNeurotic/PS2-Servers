@@ -150,6 +150,11 @@ class WorkflowTests(unittest.TestCase):
                    and entry["directory"].rstrip("/") == "/build"]
         self.assertEqual(len(entries), 1, entries)
         self.assertIn({"dependency-name": "*"}, entries[0].get("ignore", []))
+        root = [entry for entry in config["updates"]
+                if entry["package-ecosystem"] == "pip"
+                and entry["directory"] == "/"]
+        self.assertEqual(len(root), 1, root)
+        self.assertIn("build/**", root[0].get("exclude-paths", []))
 
     def test_release_workflows_build_x86_on_python_38_and_gate_it(self):
         for name in ("release.yml", "release-on-main.yml"):
