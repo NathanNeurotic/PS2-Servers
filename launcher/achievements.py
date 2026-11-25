@@ -233,7 +233,6 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
         library=lib,
         profile=str(profile),
     )
-    service.start()
     creds = store.load()
     if creds:
         service.bind_account(creds.username, 1)
@@ -281,6 +280,10 @@ def run_owned_runtime(args, profile, lease, stopped, owner_alive, close_owner):
             bridge = Bridge(profile, args.games_folder, account_port=ui_port)
             bridge.start()
 
+        # Bind the console port last. A console (or the package check) that
+        # gets an answer on 18194 then reads account-port and opens the account
+        # page, so both must already exist when the first answer goes out.
+        service.start()
         last_ping = time.monotonic()
         while not stopped.wait(0.25) and owner_alive():
             evaluated = service.take_evaluation()
