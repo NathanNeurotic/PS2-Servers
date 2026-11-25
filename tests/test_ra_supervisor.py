@@ -207,6 +207,32 @@ class SupervisorTests(unittest.TestCase):
             lease.close.assert_called_once()
             close_owner.assert_called_once()
 
+    def test_console_port_opens_after_account_port_and_page(self):
+        # The package check (and a console) treat an answer on 18194 as ready
+        # and then read account-port and the account page right away.
+        args = mock.Mock(mode="xerabora", login=None, import_credentials=False,
+                         lan_viewer=False, games_folder=None, test_mode=False)
+        library = self.profile / "fixture.dll"
+        library.write_bytes(b"fixture")
+        order = []
+        service = mock.Mock()
+        service.start.side_effect = lambda: order.append(
+            ("service", (self.profile / "account-port").read_text("ascii")))
+        def web_factory(port, state, **options):
+            web = mock.Mock()
+            web.start.side_effect = lambda: order.append(("web", port))
+            return web
+        with mock.patch("launcher.achievements.library_path", return_value=library), \
+             mock.patch("launcher.ra_owned_service.OwnedService", return_value=service), \
+             mock.patch("launcher.ra_credentials.CredentialStore") as store, \
+             mock.patch("launcher.ra_account_worker.AccountWorker"), \
+             mock.patch("launcher.ra_web.RAWebServer", side_effect=web_factory):
+            store.return_value.load.return_value = None
+            self.assertEqual(run_owned_runtime(args, self.profile, mock.Mock(), threading.Event(),
+                                               lambda: False, mock.Mock()), 0)
+        self.assertEqual([name for name, _ in order], ["web", "service"])
+        self.assertEqual(order[1][1], str(order[0][1]))
+
     def test_dashboard_logout_revokes_service_and_blocks_further_lookups(self):
         args = mock.Mock(mode="xerabora", login=None, import_credentials=False,
                          lan_viewer=False, games_folder=None)
