@@ -62,6 +62,7 @@ STATUS_NOT_IMPLEMENTED = 0xC0000002
 STATUS_ACCESS_DENIED = 0xC0000022
 STATUS_OBJECT_NAME_NOT_FOUND = 0xC0000034
 STATUS_OBJECT_NAME_COLLISION = 0xC0000035
+STATUS_SHARING_VIOLATION = 0xC0000043
 STATUS_LOGON_FAILURE = 0xC000006D
 
 # NEGOTIATE response capabilities. UNICODE deliberately OFF so every string stays ASCII/OEM --
@@ -1121,6 +1122,23 @@ def _writable_path(conn, r, name):
     return local, None
 
 
+# Delete, rmdir and rename check and change the share as one step, so two
+# connections cannot both pass the "target is free" check.
+_MUTATE_LOCK = threading.Lock()
+
+
+def _in_use(conn, local):
+    # True if this connection has local, or something under it, open. A write
+    # through that FID reopens of.path, so it would land in whatever file
+    # takes the old name next.
+    target = os.path.normcase(local)
+    for of in conn.files.values():
+        p = os.path.normcase(of.path)
+        if p == target or p.startswith(target + os.sep):
+            return True
+    return False
+
+
 def h_delete(conn, r):
     # Launchstation's file manager removes a file this way (smbman smb_Delete), e.g. before it
     # writes a fresh copy of ember.elf.
@@ -1130,14 +1148,17 @@ def h_delete(conn, r):
     local, status = _writable_path(conn, r, names[0])
     if status is not None:
         return None, None, status
-    if not os.path.isfile(local):
-        return None, None, STATUS_ACCESS_DENIED if os.path.isdir(local) else STATUS_OBJECT_NAME_NOT_FOUND
-    try:
-        os.remove(local)
-    except FileNotFoundError:
-        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
-    except OSError:
-        return None, None, STATUS_ACCESS_DENIED
+    with _MUTATE_LOCK:
+        if not os.path.isfile(local):
+            return None, None, STATUS_ACCESS_DENIED if os.path.isdir(local) else STATUS_OBJECT_NAME_NOT_FOUND
+        if _in_use(conn, local):
+            return None, None, STATUS_SHARING_VIOLATION
+        try:
+            os.remove(local)
+        except FileNotFoundError:
+            return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+        except OSError:
+            return None, None, STATUS_ACCESS_DENIED
     log("delete", repr(names[0]))
     return b"", b"", STATUS_SUCCESS
 
@@ -1150,12 +1171,15 @@ def h_delete_directory(conn, r):
     local, status = _writable_path(conn, r, names[0])
     if status is not None:
         return None, None, status
-    if not os.path.isdir(local):
-        return None, None, STATUS_ACCESS_DENIED if os.path.exists(local) else STATUS_OBJECT_NAME_NOT_FOUND
-    try:
-        os.rmdir(local)
-    except OSError:
-        return None, None, STATUS_ACCESS_DENIED  # not empty, or in use
+    with _MUTATE_LOCK:
+        if not os.path.isdir(local):
+            return None, None, STATUS_ACCESS_DENIED if os.path.exists(local) else STATUS_OBJECT_NAME_NOT_FOUND
+        if _in_use(conn, local):
+            return None, None, STATUS_SHARING_VIOLATION
+        try:
+            os.rmdir(local)
+        except OSError:
+            return None, None, STATUS_ACCESS_DENIED  # not empty, or in use
     log("rmdir", repr(names[0]))
     return b"", b"", STATUS_SUCCESS
 
@@ -1171,17 +1195,20 @@ def h_rename(conn, r):
     new, status = _writable_path(conn, r, names[1])
     if status is not None:
         return None, None, status
-    if not os.path.exists(old):
-        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
-    same = os.path.normcase(old) == os.path.normcase(new)
-    if os.path.exists(new) and not same:
-        return None, None, STATUS_OBJECT_NAME_COLLISION
-    if not os.path.isdir(os.path.dirname(new)):
-        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
-    try:
-        os.rename(old, new)
-    except OSError:
-        return None, None, STATUS_ACCESS_DENIED
+    with _MUTATE_LOCK:
+        if not os.path.exists(old):
+            return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+        same = os.path.normcase(old) == os.path.normcase(new)
+        if os.path.exists(new) and not same:
+            return None, None, STATUS_OBJECT_NAME_COLLISION
+        if not os.path.isdir(os.path.dirname(new)):
+            return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+        if _in_use(conn, old):
+            return None, None, STATUS_SHARING_VIOLATION
+        try:
+            os.rename(old, new)
+        except OSError:
+            return None, None, STATUS_ACCESS_DENIED
     log("rename", repr(names[0]), "->", repr(names[1]))
     return b"", b"", STATUS_SUCCESS
 

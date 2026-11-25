@@ -81,6 +81,10 @@ class SMBv1DeleteRename(unittest.TestCase):
         self.assertFalse(os.path.exists(self.path("EMBER", "games")))
 
     def test_share_root_is_never_removed(self):
+        # Empty root: os.rmdir would succeed, so only the root guard refuses it.
+        os.remove(self.path("EMBER", "ember.elf"))
+        os.rmdir(self.path("EMBER", "games"))
+        os.rmdir(self.path("EMBER"))
         _, _, status = self.smb.h_delete_directory(self.conn, _request(_names("\\")))
         self.assertEqual(status, self.smb.STATUS_ACCESS_DENIED)
         self.assertTrue(os.path.isdir(self.root))
@@ -96,6 +100,19 @@ class SMBv1DeleteRename(unittest.TestCase):
         self.assertEqual(status, self.smb.STATUS_OBJECT_NAME_COLLISION)
         with open(self.path("EMBER", "ember.elf"), "rb") as f:
             self.assertEqual(f.read(), b"new")
+
+    def test_open_file_is_not_deleted_or_renamed(self):
+        local = self.path("EMBER", "ember.elf")
+        self.conn.files[0x1000] = self.smb.OpenFile(local, is_dir=False)
+        for handler, data in ((self.smb.h_delete, _names("\\EMBER\\ember.elf")),
+                              (self.smb.h_rename, _names("\\EMBER\\ember.elf", "\\EMBER\\x.elf")),
+                              (self.smb.h_rename, _names("\\EMBER", "\\EMBER2"))):
+            _, _, status = handler(self.conn, _request(data))
+            self.assertEqual(status, self.smb.STATUS_SHARING_VIOLATION)
+        self.assertTrue(os.path.isfile(local))
+        self.conn.files.pop(0x1000).close()
+        _, _, status = self.smb.h_delete(self.conn, _request(_names("\\EMBER\\ember.elf")))
+        self.assertEqual(status, self.smb.STATUS_SUCCESS)
 
     def test_read_only_refuses_all(self):
         self.server.read_only = True
