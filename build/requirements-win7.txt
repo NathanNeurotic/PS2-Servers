@@ -9,11 +9,13 @@
 # Same packages as requirements-build.txt, at the newest release of each that
 # still supports Python 3.8. tools/check_win7_imports.py checks the result.
 #
-# This file lives in build/ on purpose: Dependabot's pip entry watches the
-# repository root, and every newer zstandard, lz4 and Pillow drops Python 3.8,
-# so its bumps here could only break the build. Keep Nuitka equal to
-# requirements-build.txt (tests/test_win7_build.py checks that); the other three
-# stay at these versions for as long as this build is on Python 3.8.
+# Dependabot must never bump this file: every newer zstandard, lz4 and Pillow
+# drops Python 3.8, so a bump here can only break the Windows 7 package (#332
+# was one). .github/dependabot.yml has an entry for /build that ignores every
+# dependency, for version and security updates alike. Bump by hand, and only to
+# a release that still ships Python 3.8 wheels. Nuitka is bumped by hand too,
+# after checking the new release still supports Python 3.8; the "Windows 7
+# package" workflow builds and checks the result on the pull request.
 
 Nuitka==4.3.5
 ordered-set==4.1.0
