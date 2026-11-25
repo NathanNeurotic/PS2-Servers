@@ -102,7 +102,7 @@ class SMBv1DeleteRename(unittest.TestCase):
             self.assertEqual(f.read(), b"new")
 
     def test_open_file_is_not_deleted_or_renamed(self):
-        local = self.path("EMBER", "ember.elf")
+        local = self.share.resolve("\\EMBER\\ember.elf")  # canonical, as production opens are
         self.conn.files[0x1000] = self.smb.OpenFile(local, is_dir=False)
         for handler, data in ((self.smb.h_delete, _names("\\EMBER\\ember.elf")),
                               (self.smb.h_rename, _names("\\EMBER\\ember.elf", "\\EMBER\\x.elf")),
