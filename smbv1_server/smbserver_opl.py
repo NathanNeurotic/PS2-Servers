@@ -1222,6 +1222,33 @@ def _dir_entry_104(name, local_path, size_override=None):
     return rec + nb
 
 
+# Most directory data one FIND reply carries, whatever MaxDataCount says: small enough for the
+# 4 KiB receive buffer of the PS2 SMB drivers.
+FIND_BATCH_MAX = 2048
+
+
+def _find_batch(r, entries, cursor, want):
+    """Records for entries[cursor:], as many as the client asked for (SearchCount) and has room
+    for (MaxDataCount), chained by NextEntryOffset. Always at least one. A client that asks for
+    one entry at a time gets exactly the single record it always did."""
+    max_data = struct.unpack_from("<H", r.params, 6)[0] if len(r.params) >= 8 else FIND_BATCH_MAX
+    max_data = min(max_data, FIND_BATCH_MAX)
+    data = b""
+    count = 0
+    for name, lp, sz in entries[cursor : cursor + max(want, 1)]:
+        rec = _dir_entry_104(name, lp, sz)
+        start = (len(data) + 7) & ~7  # each record starts 8-aligned
+        if count and start + len(rec) > max_data:
+            break
+        if count:  # point the previous record at this one
+            data = data.ljust(start, b"\x00")
+            data = data[:last] + struct.pack("<I", start - last) + data[last + 4 :]
+        last = start
+        data += rec
+        count += 1
+    return data, count
+
+
 def h_trans2_find_first2(conn, r, t_params, t_data):
     # request param: SearchAttributes(2) SearchCount(2) Flags(2) LevelOfInterest(2)
     #                StorageType(4) SearchPattern(asciiz)
@@ -1246,12 +1273,12 @@ def h_trans2_find_first2(conn, r, t_params, t_data):
     except OSError:
         return None, None, STATUS_OBJECT_NAME_NOT_FOUND
     sid = conn.alloc_sid()
-    name, lp, sz = entries[0]
-    eos = 1 if len(entries) == 1 else 0
-    conn.searches[sid] = (entries, 1)
+    want = struct.unpack_from("<H", t_params, 2)[0] if len(t_params) >= 4 else 1
+    rd, count = _find_batch(r, entries, 0, want)
+    eos = 1 if count == len(entries) else 0
+    conn.searches[sid] = (entries, count)
     log("findfirst", repr(dirpath), "sid", sid, "entries", len(entries))
-    rp = struct.pack("<HHHHH", sid, 1, eos, 0, 0)  # SID,SearchCount,EndOfSearch,EAErrOff,LastNameOff
-    rd = _dir_entry_104(name, lp, sz)
+    rp = struct.pack("<HHHHH", sid, count, eos, 0, 0)  # SID,SearchCount,EndOfSearch,EAErrOff,LastNameOff
     return _build_trans2_reply(conn, r, STATUS_SUCCESS, rp, rd)
 
 
@@ -1266,11 +1293,11 @@ def h_trans2_find_next2(conn, r, t_params, t_data):
         conn.searches.pop(sid, None)
         rp = struct.pack("<HHHH", 0, 1, 0, 0)
         return _build_trans2_reply(conn, r, STATUS_SUCCESS, rp, b"")
-    name, lp, sz = entries[cursor]
-    eos = 1 if cursor == len(entries) - 1 else 0
-    conn.searches[sid] = (entries, cursor + 1)
-    rp = struct.pack("<HHHH", 1, eos, 0, 0)  # NEXT2: no leading SID (8 bytes)
-    rd = _dir_entry_104(name, lp, sz)
+    want = struct.unpack_from("<H", t_params, 2)[0] if len(t_params) >= 4 else 1
+    rd, count = _find_batch(r, entries, cursor, want)
+    eos = 1 if cursor + count == len(entries) else 0
+    conn.searches[sid] = (entries, cursor + count)
+    rp = struct.pack("<HHHH", count, eos, 0, 0)  # NEXT2: no leading SID (8 bytes)
     return _build_trans2_reply(conn, r, STATUS_SUCCESS, rp, rd)
 
 
