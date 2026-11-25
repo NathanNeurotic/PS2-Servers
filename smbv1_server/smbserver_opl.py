@@ -35,7 +35,10 @@ SMB_MAGIC = b"\xffSMB"
 
 # Commands
 SMB_COM_CREATE_DIRECTORY = 0x00
+SMB_COM_DELETE_DIRECTORY = 0x01
 SMB_COM_CLOSE = 0x04
+SMB_COM_DELETE = 0x06
+SMB_COM_RENAME = 0x07
 SMB_COM_CHECK_DIRECTORY = 0x10
 SMB_COM_QUERY_INFORMATION_DISK = 0x80
 SMB_COM_TRANSACTION = 0x25
@@ -1095,6 +1098,94 @@ def h_create_directory(conn, r):
     return b"", b"", STATUS_SUCCESS
 
 
+def _buffer_names(data):
+    # DELETE, DELETE_DIRECTORY and RENAME carry BufferFormat=0x04 + an ASCII z-string per name
+    # (UNICODE is never negotiated).
+    names = []
+    while data[:1] == b"\x04":
+        name, _, data = data[1:].partition(b"\x00")
+        names.append(name.decode("ascii", "ignore"))
+    return names
+
+
+def _writable_path(conn, r, name):
+    # (local path, None) for a name a write command may change, else (None, status).
+    if conn.server.read_only:
+        return None, STATUS_ACCESS_DENIED
+    sh = _share_for_tid(conn, r)
+    if sh is None:
+        return None, STATUS_OBJECT_NAME_NOT_FOUND
+    local = sh.resolve(name)
+    if local is None or os.path.normcase(local) == os.path.normcase(sh.root):
+        return None, STATUS_ACCESS_DENIED
+    return local, None
+
+
+def h_delete(conn, r):
+    # Launchstation's file manager removes a file this way (smbman smb_Delete), e.g. before it
+    # writes a fresh copy of ember.elf.
+    names = _buffer_names(r.data)
+    if not names:
+        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+    local, status = _writable_path(conn, r, names[0])
+    if status is not None:
+        return None, None, status
+    if not os.path.isfile(local):
+        return None, None, STATUS_ACCESS_DENIED if os.path.isdir(local) else STATUS_OBJECT_NAME_NOT_FOUND
+    try:
+        os.remove(local)
+    except FileNotFoundError:
+        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+    except OSError:
+        return None, None, STATUS_ACCESS_DENIED
+    log("delete", repr(names[0]))
+    return b"", b"", STATUS_SUCCESS
+
+
+def h_delete_directory(conn, r):
+    # An empty folder only, as SMB_COM_DELETE_DIRECTORY requires.
+    names = _buffer_names(r.data)
+    if not names:
+        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+    local, status = _writable_path(conn, r, names[0])
+    if status is not None:
+        return None, None, status
+    if not os.path.isdir(local):
+        return None, None, STATUS_ACCESS_DENIED if os.path.exists(local) else STATUS_OBJECT_NAME_NOT_FOUND
+    try:
+        os.rmdir(local)
+    except OSError:
+        return None, None, STATUS_ACCESS_DENIED  # not empty, or in use
+    log("rmdir", repr(names[0]))
+    return b"", b"", STATUS_SUCCESS
+
+
+def h_rename(conn, r):
+    # Old name, then new name. Never replaces an existing target.
+    names = _buffer_names(r.data)
+    if len(names) < 2:
+        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+    old, status = _writable_path(conn, r, names[0])
+    if status is not None:
+        return None, None, status
+    new, status = _writable_path(conn, r, names[1])
+    if status is not None:
+        return None, None, status
+    if not os.path.exists(old):
+        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+    same = os.path.normcase(old) == os.path.normcase(new)
+    if os.path.exists(new) and not same:
+        return None, None, STATUS_OBJECT_NAME_COLLISION
+    if not os.path.isdir(os.path.dirname(new)):
+        return None, None, STATUS_OBJECT_NAME_NOT_FOUND
+    try:
+        os.rename(old, new)
+    except OSError:
+        return None, None, STATUS_ACCESS_DENIED
+    log("rename", repr(names[0]), "->", repr(names[1]))
+    return b"", b"", STATUS_SUCCESS
+
+
 def h_check_directory(conn, r):
     sh = _share_for_tid(conn, r)
     d = r.data
@@ -1367,6 +1458,9 @@ def h_transaction(conn, r):
 # --------------------------------------------------------------------------------------------
 HANDLERS = {
     SMB_COM_CREATE_DIRECTORY: h_create_directory,
+    SMB_COM_DELETE_DIRECTORY: h_delete_directory,
+    SMB_COM_DELETE: h_delete,
+    SMB_COM_RENAME: h_rename,
     SMB_COM_NEGOTIATE: h_negotiate,
     SMB_COM_SESSION_SETUP_ANDX: h_session_setup,
     SMB_COM_TREE_CONNECT_ANDX: h_tree_connect,
