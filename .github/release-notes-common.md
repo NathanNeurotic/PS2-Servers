@@ -6,6 +6,12 @@ changelog and a download table, not another copy of the operator manual.
 ## Changelog
 
 - Windows 7 and 8: the 32-bit package (`PS2Servers-windows-x86`) starts there now; it is built with Python 3.8, the last Python that runs on Windows 7. Before, it stopped at launch asking for api-ms-win-core-path-l1-1-0.dll, then PssQuerySnapshot (#330). The 64-bit packages still need Windows 10 or 11.
+- SMBv1: the console can delete files and empty folders and rename them (#334). Not on read-only shares, outside the share or on the share root; a rename never replaces an existing name, and a file or folder that is open answers "in use".
+- SMBv1: folder listings send many entries per reply (up to 2 KiB) instead of one per round trip (#335), so big folders list faster. RiptOPL builds from PR 540 on use it for faster Ember lists. A client that asks for one entry at a time gets the same reply as before.
+- SMBv1 testing: delete and rename are host-tested; batched listings were checked in PCSX2 with RiptOPL. Neither has been run with a real PS2 yet.
+
+### Earlier, in v0.9.5
+
 - RetroAchievements: caught up with xeRAbora 2.1 and 2.2. When RiptOPL says which game is running, the PC loads its set by itself, even if you never ran "check game support" on that PC.
 - RetroAchievements: achievements that read memory through Remember/Recall now work, and big sets can use up to 512 pointer chains (256 for PS1) in RAN2 mode. RANL mode keeps its 128.
 - RetroAchievements: the first check of a new game no longer times out while the console downloads its list.
