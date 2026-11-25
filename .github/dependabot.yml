@@ -19,3 +19,18 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "build"
+
+  # build/requirements-win7.txt pins the 32-bit Windows (Windows 7 / 8) build to
+  # the last releases that still support Python 3.8 (issue #330). Every newer
+  # zstandard, lz4 and Pillow drops Python 3.8, so any bump there breaks the
+  # Windows 7 package. This entry exists only to turn Dependabot off for that
+  # file: the ignore rule also stops security-update pull requests for it, which
+  # otherwise open with Dependabot's defaults (#332). Bump that file by hand, and
+  # only to a version that still ships Python 3.8 wheels.
+  - package-ecosystem: "pip"
+    directory: "/build"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"

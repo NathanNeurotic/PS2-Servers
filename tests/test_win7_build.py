@@ -135,11 +135,21 @@ def pins(text):
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_nuitka_matches_the_main_build(self):
+    def test_same_packages_as_the_main_build(self):
+        # Versions differ on purpose: the Windows 7 build keeps the last
+        # releases that support Python 3.8.
         main = pins(read("requirements-build.txt"))
         win7_pins = pins(read("build", "requirements-win7.txt"))
-        self.assertEqual(win7_pins["Nuitka"], main["Nuitka"])
         self.assertEqual(set(win7_pins), set(main))
+
+    def test_dependabot_never_bumps_the_windows_7_pins(self):
+        import yaml
+        config = yaml.safe_load(read(".github", "dependabot.yml"))
+        entries = [entry for entry in config["updates"]
+                   if entry["package-ecosystem"] == "pip"
+                   and entry["directory"].rstrip("/") == "/build"]
+        self.assertEqual(len(entries), 1, entries)
+        self.assertIn({"dependency-name": "*"}, entries[0].get("ignore", []))
 
     def test_release_workflows_build_x86_on_python_38_and_gate_it(self):
         for name in ("release.yml", "release-on-main.yml"):
