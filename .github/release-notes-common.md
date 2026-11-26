@@ -5,6 +5,10 @@ changelog and a download table, not another copy of the operator manual.
 
 ## Changelog
 
+- RetroAchievements: the PC now answers the console on port 18194 only after the account page and bridge are up (#337). Before, a console that connected in the first moments after start could find the account page missing. Not yet tested with a real PS2.
+
+### Earlier, in v0.9.6
+
 - Windows 7 and 8: the 32-bit package (`PS2Servers-windows-x86`) starts there now; it is built with Python 3.8, the last Python that runs on Windows 7. Before, it stopped at launch asking for api-ms-win-core-path-l1-1-0.dll, then PssQuerySnapshot (#330). The 64-bit packages still need Windows 10 or 11.
 - SMBv1: the console can delete files and empty folders and rename them (#334). Not on read-only shares, outside the share or on the share root; a rename never replaces an existing name, and a file or folder that is open answers "in use".
 - SMBv1: folder listings send many entries per reply (up to 2 KiB) instead of one per round trip (#335), so big folders list faster. RiptOPL builds from PR 540 on use it for faster Ember lists. A client that asks for one entry at a time gets the same reply as before.
