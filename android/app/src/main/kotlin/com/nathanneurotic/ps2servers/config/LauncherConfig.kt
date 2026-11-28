@@ -105,6 +105,7 @@ object LauncherConfig {
             )
             "nfs" -> linkedMapOf(
                 "root_dir" to "",
+                "port" to 2049,
                 "allow_writes" to false,
                 "bind" to "",
                 "verbose" to true
