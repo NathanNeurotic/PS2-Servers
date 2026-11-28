@@ -25,5 +25,25 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PS2Servers"
         android:usesCleartextTraffic="true"
-        tools:targetApi="35" />
+        tools:targetApi="35">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".service.Ps2ServerService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="@string/special_use_fgs_subtype" />
+        </service>
+    </application>
 </manifest>

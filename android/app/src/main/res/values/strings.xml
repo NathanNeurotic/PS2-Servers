@@ -1,4 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PS2 Servers</string>
+    <string name="device_ip_label">Device IP (Wi-Fi / USB-Ethernet)</string>
+    <string name="refresh">Refresh</string>
+    <string name="custom_ip_hint">Custom IPv4 address (e.g. 192.168.42.129)</string>
+    <string name="games_folder_label">Shared Games Folder</string>
+    <string name="choose_saf_folder">Choose Folder (SAF)</string>
+    <string name="clear">Clear</string>
+    <string name="fallback_path_hint">Fallback path (optional, e.g. /storage/emulated/0/PS2)</string>
+    <string name="app_media_folder">Use App Folder</string>
+    <string name="check">Check</string>
+    <string name="stop_all">Stop All</string>
+    <string name="reset_defaults">Reset Defaults</string>
+    <string name="server_log_label">Activity Log</string>
+    <string name="notification_channel_name">PS2 Game Servers</string>
+    <string name="notification_channel_desc">Keeps active PS2 network servers running reliably in the background</string>
+    <string name="special_use_fgs_subtype">Serves local PS2 disc images and homebrew files to a PlayStation 2 console over LAN sockets.</string>
 </resources>

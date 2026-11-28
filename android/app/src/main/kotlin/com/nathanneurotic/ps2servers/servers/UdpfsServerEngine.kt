@@ -12,7 +12,6 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.SocketAddress
-import java.net.StandardSocketOptions
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.DatagramChannel
@@ -351,28 +350,31 @@ class UdpfsServerEngine(
             }
 
             val bindHost = bindIp.trim().takeIf { it.isNotEmpty() }?.let { InetAddress.getByName(it) }
+            val discAddr = if (bindHost == null) InetSocketAddress(port) else InetSocketAddress(bindHost, port)
+            val dataAddr = if (bindHost == null) InetSocketAddress(dataPort) else InetSocketAddress(bindHost, dataPort)
+
             val disc = DatagramChannel.open().apply {
                 configureBlocking(false)
-                setOption(StandardSocketOptions.SO_REUSEADDR, true)
-                setOption(StandardSocketOptions.SO_BROADCAST, true)
+                socket().reuseAddress = true
+                socket().broadcast = true
+                socket().bind(discAddr)
                 widenBuffers(this, if (singlePort) (1 shl 20) else (1 shl 16))
-                bind(if (bindHost == null) InetSocketAddress(port) else InetSocketAddress(bindHost, port))
             }
             discChannel = disc
-            actualDiscoveryPort = (disc.localAddress as InetSocketAddress).port
+            actualDiscoveryPort = disc.socket().localPort
 
             val dataCh = if (singlePort) {
                 disc
             } else {
                 DatagramChannel.open().apply {
                     configureBlocking(false)
-                    setOption(StandardSocketOptions.SO_REUSEADDR, true)
+                    socket().reuseAddress = true
+                    socket().bind(dataAddr)
                     widenBuffers(this, 1 shl 20)
-                    bind(if (bindHost == null) InetSocketAddress(dataPort) else InetSocketAddress(bindHost, dataPort))
                 }
             }
             dataChannel = dataCh
-            actualDataPort = (dataCh.localAddress as InetSocketAddress).port
+            actualDataPort = dataCh.socket().localPort
 
             val sel = Selector.open()
             disc.register(sel, SelectionKey.OP_READ, SOCKET_DISCOVERY)
@@ -446,15 +448,16 @@ class UdpfsServerEngine(
     }
 
     private fun widenBuffers(ch: DatagramChannel, target: Int) {
+        val sock = ch.socket()
         try {
-            if ((ch.getOption(StandardSocketOptions.SO_RCVBUF) ?: 0) < target) {
-                ch.setOption(StandardSocketOptions.SO_RCVBUF, target)
+            if (sock.receiveBufferSize < target) {
+                sock.receiveBufferSize = target
             }
         } catch (_: Exception) {
         }
         try {
-            if ((ch.getOption(StandardSocketOptions.SO_SNDBUF) ?: 0) < target) {
-                ch.setOption(StandardSocketOptions.SO_SNDBUF, target)
+            if (sock.sendBufferSize < target) {
+                sock.sendBufferSize = target
             }
         } catch (_: Exception) {
         }
