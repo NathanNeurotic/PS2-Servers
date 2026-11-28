@@ -1,0 +1,9 @@
+* text=auto
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.kts text eol=lf
+*.kt text eol=lf
+*.xml text eol=lf
+*.properties text eol=lf
