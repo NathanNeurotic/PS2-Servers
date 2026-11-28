@@ -498,6 +498,67 @@ jobs:
             PS2Servers-source.zip.sha256.txt
           if-no-files-found: error
 
+  android:
+    name: Build PS2Servers-android.apk
+    needs: verify-version
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+          cache-dependency-path: |
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/**/*.gradle.kts
+
+      - name: Build and test Android release APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest lintDebug assembleRelease --no-daemon --stacktrace
+
+      - name: Stage APK and write checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk out/PS2Servers-android.apk
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          AAPT2="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name aapt2 -type f | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)"
+          "$AAPT2" dump badging out/PS2Servers-android.apk | grep -qE "(minSdk|sdk)Version:'21'"
+          "$AAPT2" dump badging out/PS2Servers-android.apk | grep -q "targetSdkVersion:'35'"
+          "$APKSIGNER" verify --verbose out/PS2Servers-android.apk
+          sha256sum out/PS2Servers-android.apk | sed 's|out/||' > out/PS2Servers-android.apk.sha256.txt
+
+      - name: Attest Android APK provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: out/PS2Servers-android.apk
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: PS2Servers-android.apk
+          path: |
+            out/PS2Servers-android.apk
+            out/PS2Servers-android.apk.sha256.txt
+          if-no-files-found: error
+
   edge:
     name: Build Edge binaries
     needs: verify-version
@@ -514,6 +575,7 @@ jobs:
     needs:
       - build
       - source
+      - android
       - create-release
       - edge
     # Tags publish only after the required Edge artifacts arrive. Optional
@@ -569,13 +631,15 @@ jobs:
             fi
             row "Mac, Apple Silicon (M1–M4)" PS2Servers-macos-arm64.zip            ""                                   ""
             row "Mac, Intel"                 PS2Servers-macos-x64.zip              ""                                   ""
+            row "Android 5.0+ phone / tablet (APK)" PS2Servers-android.apk         ""                                   ""
             row "Source / inspection"        PS2Servers-source.zip                 ""                                   ""
             edge_rows
           )
           # A leg that failed outright now leaves its row out rather than
           # blocking the release, so say so where a maintainer will see it.
           for expected in PS2Servers-windows-x64.zip PS2Servers-windows-x86.zip \
-                          PS2Servers-linux-x64 PS2Servers-macos-arm64.zip PS2Servers-macos-x64.zip; do
+                          PS2Servers-linux-x64 PS2Servers-macos-arm64.zip PS2Servers-macos-x64.zip \
+                          PS2Servers-android.apk; do
             [ -f "$expected" ] || echo "::warning::$expected is absent; its build leg did not finish, and this release will publish without it"
           done
           if [ -z "$table" ]; then

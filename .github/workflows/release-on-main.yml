@@ -279,6 +279,64 @@ jobs:
           path: PS2Servers-source.zip
           if-no-files-found: error
 
+  android:
+    name: Build PS2Servers-android.apk
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+          cache-dependency-path: |
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/**/*.gradle.kts
+
+      - name: Build and test Android release APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest lintDebug assembleRelease --no-daemon --stacktrace
+
+      - name: Stage and verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp android/app/build/outputs/apk/release/app-release.apk PS2Servers-android.apk
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          AAPT2="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name aapt2 -type f | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)"
+          "$AAPT2" dump badging PS2Servers-android.apk | grep -qE "(minSdk|sdk)Version:'21'"
+          "$AAPT2" dump badging PS2Servers-android.apk | grep -q "targetSdkVersion:'35'"
+          "$APKSIGNER" verify --verbose PS2Servers-android.apk
+
+      - name: Generate Android artifact attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: PS2Servers-android.apk
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: PS2Servers-android.apk
+          path: PS2Servers-android.apk
+          if-no-files-found: error
+
   # Edge builds here rather than in edge.yml so its binaries land in the same
   # run that publishes the rolling release. The tag is main-<run>-<sha> using
   # THIS workflow's run number, which edge.yml cannot know, and Edge finishes
@@ -298,6 +356,7 @@ jobs:
     needs:
       - build
       - source
+      - android
       - edge
     runs-on: ubuntu-latest
 
@@ -320,6 +379,7 @@ jobs:
           # builds. Sum only the ones present so a missing optional portable asset
           # never blocks the release of the primary downloads.
           assets=(
+            PS2Servers-android.apk
             PS2Servers-linux-x64
             PS2Servers-linux-x64-portable.tar.gz
             PS2Servers-macos-arm64.zip
@@ -364,6 +424,7 @@ jobs:
             fi
             row "Mac, Apple Silicon (M1–M4)" PS2Servers-macos-arm64.zip            ""                                   ""
             row "Mac, Intel"                 PS2Servers-macos-x64.zip              ""                                   ""
+            row "Android 5.0+ phone / tablet (APK)" PS2Servers-android.apk         ""                                   ""
             row "Source / inspection"        PS2Servers-source.zip                 ""                                   ""
             edge_rows
             echo "PS2SERVERS_EOF"
@@ -426,6 +487,7 @@ jobs:
           make_latest: false
           body_path: ${{ steps.notes.outputs.path }}
           files: |
+            release-assets/PS2Servers-android.apk
             release-assets/PS2Servers-linux-x64
             release-assets/PS2Servers-linux-x64-portable.tar.gz
             release-assets/PS2Servers-macos-arm64.zip

@@ -40,3 +40,4 @@ packaging/**    text eol=lf
 *.png           binary
 *.ico           binary
 *.zip           binary
+*.apk           binary

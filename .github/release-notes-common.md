@@ -5,6 +5,7 @@ changelog and a download table, not another copy of the operator manual.
 
 ## Changelog
 
+- Android 5.0+ app (`PS2Servers-android.apk`): serve UDPFS, SMBv1, SMBv2/v3, HTTP, NFSv4, and UDPBD (Virtual exFAT or raw image) from an Android phone or tablet over Wi-Fi, hotspot, or USB-Ethernet tethering, with Mobile Data internet sharing guidance and optional root TCP 445 / NAT helpers (#339). Host-tested only; not yet tested with a real PS2.
 - RetroAchievements: the PC now answers the console on port 18194 only after the account page and bridge are up (#337). Before, a console that connected in the first moments after start could find the account page missing. Not yet tested with a real PS2.
 
 ### Earlier, in v0.9.6

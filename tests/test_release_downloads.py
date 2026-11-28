@@ -149,6 +149,7 @@ class ReleaseDownloadTests(unittest.TestCase):
                 "PS2Servers-x86_64.AppImage",
                 "PS2Servers-macos-arm64.zip",
                 "PS2Servers-macos-x64.zip",
+                "PS2Servers-android.apk",
                 "PS2Servers-source.zip",
                 "PS2ServersEdge-test-arm64-pi3-pi4-pi5-nas.tar.gz",
             ):
@@ -205,6 +206,7 @@ class ReleaseDownloadTests(unittest.TestCase):
                         "PS2Servers-windows-x64-portable.zip",
                         "PS2Servers-windows-x64.zip",
                         "PS2Servers-linux-x64-portable.tar.gz",
+                        "PS2Servers-android.apk",
                         "PS2Servers-source.zip",
                         "PS2Servers-x86_64.AppImage",
                         "PS2ServersEdge-test-arm64-pi3-pi4-pi5-nas.tar.gz",

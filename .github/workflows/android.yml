@@ -27,24 +27,34 @@ jobs:
             android/gradle/wrapper/gradle-wrapper.properties
             android/**/*.gradle.kts
 
-      - name: Run unit tests, lint, and assemble debug APK
+      - name: Run unit tests, lint, and assemble APKs
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon --stacktrace
+          ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease --no-daemon --stacktrace
 
-      - name: Verify APK API levels and inspect manifest metadata
+      - name: Stage and verify APKs
         run: |
+          set -euo pipefail
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk out/PS2Servers-android.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/PS2Servers-android-debug.apk
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           AAPT2="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name aapt2 -type f | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)"
           test -n "$AAPT2"
-          "$AAPT2" dump badging android/app/build/outputs/apk/debug/app-debug.apk | tee /tmp/apk-badging.txt
+          test -n "$APKSIGNER"
+          "$AAPT2" dump badging out/PS2Servers-android.apk | tee /tmp/apk-badging.txt
           grep -qE "(minSdk|sdk)Version:'21'" /tmp/apk-badging.txt
           grep -q "targetSdkVersion:'35'" /tmp/apk-badging.txt
+          "$APKSIGNER" verify --verbose out/PS2Servers-android.apk
+          "$APKSIGNER" verify --verbose out/PS2Servers-android-debug.apk
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ps2-servers-android-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: PS2Servers-android.apk
+          path: |
+            out/PS2Servers-android.apk
+            out/PS2Servers-android-debug.apk
           if-no-files-found: error
           retention-days: 14
