@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROPS="$SCRIPT_DIR/gradle/wrapper/gradle-wrapper.properties"
+
+DIST_URL=$(grep '^distributionUrl=' "$PROPS" | head -n 1 | cut -d= -f2- | sed 's/\\:/:/g')
+EXPECTED_SHA=$(grep '^distributionSha256Sum=' "$PROPS" | head -n 1 | cut -d= -f2-)
+ARCHIVE_NAME=$(basename "$DIST_URL")
+GRADLE_DIR_NAME=$(basename "$ARCHIVE_NAME" -bin.zip)
+
+GRADLE_HOME_BASE="${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists/ps2servers-$GRADLE_DIR_NAME"
+DIST_ZIP="$GRADLE_HOME_BASE/$ARCHIVE_NAME"
+GRADLE_BIN="$GRADLE_HOME_BASE/$GRADLE_DIR_NAME/bin/gradle"
+
+if [ ! -x "$GRADLE_BIN" ]; then
+    mkdir -p "$GRADLE_HOME_BASE"
+    TMP_ZIP="$DIST_ZIP.part.$$"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "$TMP_ZIP" "$DIST_URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$TMP_ZIP" "$DIST_URL"
+    else
+        echo "error: curl or wget is required to bootstrap Gradle" >&2
+        exit 1
+    fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL_SHA=$(sha256sum "$TMP_ZIP" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        ACTUAL_SHA=$(shasum -a 256 "$TMP_ZIP" | awk '{print $1}')
+    else
+        echo "error: sha256sum or shasum is required to verify Gradle" >&2
+        rm -f "$TMP_ZIP"
+        exit 1
+    fi
+
+    if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+        echo "error: Gradle checksum mismatch (expected $EXPECTED_SHA, got $ACTUAL_SHA)" >&2
+        rm -f "$TMP_ZIP"
+        exit 1
+    fi
+
+    mv "$TMP_ZIP" "$DIST_ZIP"
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -q -o "$DIST_ZIP" -d "$GRADLE_HOME_BASE"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -m zipfile -e "$DIST_ZIP" "$GRADLE_HOME_BASE"
+    else
+        echo "error: unzip or python3 is required to extract Gradle" >&2
+        exit 1
+    fi
+    chmod +x "$GRADLE_BIN"
+fi
+
+exec "$GRADLE_BIN" "$@"

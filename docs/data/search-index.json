@@ -2,7 +2,7 @@
   {
     "title": "PS2 Servers Documentation",
     "cat": "overview",
-    "text": "PS2 Servers Documentation DESKTOP GUI CORE HEADLESS EDGE GO SERVER UDPFS · SMBV1/2/3 · UDPBD · HTTP OPENWRT & ROUTERS AUTO MODULO & STANDARD ON-THE-FLY DECOMPRESSION Launch your first game Explore server modes First Time Connecting a PS2? Choose the matching protocol and PC path before starting: UDPFS/SMB/HTTP serve game-library folders, while UDPBD serves one block-image file . They are not interchangeable. If your console says mass0: or \"cannot open folder\", read the UDPBD troubleshooting guide . About PS2 Servers PS2 Servers provides dedicated, lightweight game and file servers for network-capable PlayStation 2 homebrew (including Open PS2 Loader (OPL) , RiptOPL , Neutrino , and NHDDL ). It is delivered in three deployment editions: Desktop provides a simple click-and-go graphical launcher; Core runs the identical Python servers headlessly from any terminal, script, or container; and Edge is a high-speed, statically linked Go implementation designed for home routers (OpenWrt), Raspberry Pi, NAS appliances, and minimal Linux setups. For the PS2 console loader side, see the companion RiptOPL Documentation . Sister Project: RiptOPL & POPStarter Documentation Looking for console-side loader guides, theme configuration, controller pairing, Neutrino launch arguments, or POPSTARTER VCD setups? Visit the comprehensive RiptOPL Docs and the POPStarter Docs for complete client-side walkthroughs. Seven Server Modes Choose the protocol supported by your PS2 loader. A server cannot add a protocol to a client that does not implement it. UDPFS Port: UDP 62966 ( 0xF5F6 ) + dynamic or pinned data port High-speed modern file and disc-image streaming over UDP. Features automatic Standard/Modulo mode negotiation per client, multi-client concurrency, and optional on-the-fly decompression of CHD, CSO, and ZSO images. Works seamlessly with NHDDL, Neutrino, and RiptOPL. Explore UDPFS setup → SMBv1 Port: TCP 1025 (Desktop) · TCP 1111 (Core / Edge) Custom user-space guest file sharing for OPL and legacy SMBv1 clients. Implements the SMBv1 dialect directly in user space without requiring you to enable insecure Windows SMB1 features or expose port 445. Share name defaults to games . Explore SMBv1 guide → SMB2 / SMB3 Port: TCP 1445 Authenticated modern SMB file sharing for newer loaders supporting SMB 2.0.2 through SMB 3.0.2. Run alongside or separately from SMBv1. Provides password protection, writable shares for Virtual Memory Cards (VMC), and optional port 445 admin capture. Expl",
+    "text": "PS2 Servers Documentation DESKTOP GUI CORE HEADLESS EDGE GO SERVER ANDROID APK (5.0+) UDPFS · SMBV1/2/3 · UDPBD · HTTP OPENWRT & ROUTERS AUTO MODULO & STANDARD ON-THE-FLY DECOMPRESSION Launch your first game Explore server modes First Time Connecting a PS2? Choose the matching protocol and PC path before starting: UDPFS/SMB/HTTP serve game-library folders, while UDPBD serves one block-image file . They are not interchangeable. If your console says mass0: or \"cannot open folder\", read the UDPBD troubleshooting guide . About PS2 Servers PS2 Servers provides dedicated, lightweight game and file servers for network-capable PlayStation 2 homebrew (including Open PS2 Loader (OPL) , RiptOPL , Neutrino , and NHDDL ). It is delivered in three deployment editions: Desktop provides a simple click-and-go graphical launcher; Core runs the identical Python servers headlessly from any terminal, script, or container; and Edge is a high-speed, statically linked Go implementation designed for home routers (OpenWrt), Raspberry Pi, NAS appliances, and minimal Linux setups. For the PS2 console loader side, see the companion RiptOPL Documentation . Sister Project: RiptOPL & POPStarter Documentation Looking for console-side loader guides, theme configuration, controller pairing, Neutrino launch arguments, or POPSTARTER VCD setups? Visit the comprehensive RiptOPL Docs and the POPStarter Docs for complete client-side walkthroughs. Seven Server Modes Choose the protocol supported by your PS2 loader. A server cannot add a protocol to a client that does not implement it. UDPFS Port: UDP 62966 ( 0xF5F6 ) + dynamic or pinned data port High-speed modern file and disc-image streaming over UDP. Features automatic Standard/Modulo mode negotiation per client, multi-client concurrency, and optional on-the-fly decompression of CHD, CSO, and ZSO images. Works seamlessly with NHDDL, Neutrino, and RiptOPL. Explore UDPFS setup → SMBv1 Port: TCP 1025 (Desktop) · TCP 1111 (Core / Edge) Custom user-space guest file sharing for OPL and legacy SMBv1 clients. Implements the SMBv1 dialect directly in user space without requiring you to enable insecure Windows SMB1 features or expose port 445. Share name defaults to games . Explore SMBv1 guide → SMB2 / SMB3 Port: TCP 1445 Authenticated modern SMB file sharing for newer loaders supporting SMB 2.0.2 through SMB 3.0.2. Run alongside or separately from SMBv1. Provides password protection, writable shares for Virtual Memory Cards (VMC), and optional port 445 ",
     "url": "index.html"
   },
   {
@@ -54,9 +54,9 @@
     "url": "index.html"
   },
   {
-    "title": "PS2 Servers Documentation — Three Deployment Shapes",
+    "title": "PS2 Servers Documentation — Four Deployment Shapes",
     "cat": "overview",
-    "text": "Three Deployment Shapes. Whether you want a simple desktop window with one-click toggles, a scriptable terminal command for automation, or a lightweight daemon on your home router, PS2 Servers has an edition built for your workflow.",
+    "text": "Four Deployment Shapes. Whether you want a desktop window, a scriptable terminal command, a lightweight router daemon, or an Android phone or tablet serving over Wi-Fi or tethering, PS2 Servers has an edition built for your workflow.",
     "url": "index.html#editions"
   },
   {
@@ -75,6 +75,12 @@
     "title": "PS2 Servers Documentation — PS2 Servers Edge",
     "cat": "overview",
     "text": "PS2 Servers Edge. Target: OpenWrt routers, Raspberry Pi, NAS, embedded SBCs Statically linked Go binaries tailored for embedded hardware and routers. Consumes minimal memory, runs without Python, and offers an optional password-protected Web management dashboard. Available for MIPS, ARM, x86, and RISC-V. Edge architecture guide →",
+    "url": "index.html"
+  },
+  {
+    "title": "PS2 Servers Documentation — PS2 Servers Android",
+    "cat": "overview",
+    "text": "PS2 Servers Android. Target: Android 5.0+ (API 21+) phones & tablets Pure-Kotlin Android app ( PS2Servers-android.apk ) serving all seven protocols over Wi-Fi, hotspot, or USB-Ethernet tethering with SAF folder picking, wake/Wi-Fi locks, and Mobile Data internet sharing for PS2 online play. Android & Mobile Data guide →",
     "url": "index.html"
   },
   {
@@ -98,7 +104,7 @@
   {
     "title": "PS2 Servers Documentation — Downloads & Packages",
     "cat": "overview",
-    "text": "Downloads & Packages. Find the right package for your OS (Windows portable zip, Linux AppImage/tar.gz, macOS arm64/x64, Edge architectures).",
+    "text": "Downloads & Packages. Find the right package for your OS (Windows portable zip, Linux AppImage/tar.gz, macOS arm64/x64, Android APK, Edge architectures).",
     "url": "index.html"
   },
   {
@@ -141,6 +147,12 @@
     "title": "Getting Started — Topology B: Direct Ethernet Cable (PC to PS2)",
     "cat": "start",
     "text": "Topology B: Direct Ethernet Cable (PC to PS2). Connect an Ethernet cable directly between the PC's network jack and the PS2. Modern PC network interfaces support Auto-MDIX (automatic crossover), so a standard patch cable works fine. Assign your PC's Ethernet adapter a manual static IP: 192.168.0.1 (Subnet: 255.255.255.0 ). Assign the PS2 a static IP in the same subnet: 192.168.0.2 . Leave Gateway blank or set to 192.168.0.1 .",
+    "url": "getting-started.html"
+  },
+  {
+    "title": "Getting Started — Topology C: Android Phone (Wi-Fi, Tethering & Mobile Data)",
+    "cat": "start",
+    "text": "Topology C: Android Phone (Wi-Fi, Tethering & Mobile Data). Install PS2Servers-android.apk on an Android 5.0+ phone connected to the same home Wi-Fi as your PS2, or bridge cellular Mobile Data directly via USB-Ethernet tethering or Wi-Fi Hotspot. Android & Mobile Data setup →",
     "url": "getting-started.html"
   },
   {
@@ -194,13 +206,13 @@
   {
     "title": "Editions & Architecture",
     "cat": "start",
-    "text": "PS2 Servers Editions & Architecture PS2 Servers is a unified server ecosystem delivered in three distinct deployment shapes: Desktop , Core , and Edge . Each is engineered for specific operational environments, from standard gaming desktops to resource-constrained embedded routers. One Architecture, Three Shapes All three editions share identical protocol wire-specifications and compatibility goals. A PS2 loader running OPL, RiptOPL, or Neutrino interacts seamlessly whether connected to Desktop on Windows, Core on Ubuntu, or Edge on an OpenWrt router. 1. PS2 Servers Desktop Desktop is the graphical workstation package designed for Windows, macOS, and Linux desktop environments. Built with Python and Tkinter, it provides an intuitive multi-card interface for immediate operation. Key Desktop Features 6 Dedicated Server Cards: SMBv1, UDPFS, UDPBD, SMB2, SMB3, and HTTP game streaming. Integrated Network Selector: Detects active network interfaces and automatically populates IP setup hints. Firewall Helper: Automatic creation and cleanup of Windows Defender Firewall rules for each server port. Zero Setup Runtime: Distributed as standalone portable executables with bundled Python; no pre-existing runtime required. Compression Engine: Full support for on-the-fly decompression of CHD, CSO, and ZSO disc images when optional native libraries (such as libchdr ) are detected. 2. PS2 Servers Core Core exposes the full Python server implementations from the terminal without launching a graphical window. It is the premier choice for headless servers, developer workflows, remote SSH sessions, container environments, and CI/CD automated testing. # Serve UDPFS games from a directory python ps2servers.py serve udpfs --root-dir /srv/ps2 --read-only # Serve SMBv1 guest share python ps2servers.py serve smbv1 --share games=/srv/ps2 --port 1111 # Serve raw disk image over UDPBD python ps2servers.py serve udpbd /srv/images/game.iso --read-only # Serve HTTP games for OPL-HTTP python ps2servers.py serve http --root-dir /srv/ps2 --port 1100 Packaged standalone executables also support identical subcommands: ps2servers.exe serve udpfs ... . Core includes extensive diagnostic flags like --verbose , structured JSON logging, and connection inactivity telemetry. 3. PS2 Servers Edge Edge is a high-speed, native Go rewrite engineered specifically for headless and embedded environments where Python is either unavailable, too heavy, or slow to start. Edge compiles to a compact, statically lin",
+    "text": "PS2 Servers Editions & Architecture PS2 Servers is a unified server ecosystem delivered in four deployment shapes: Desktop , Core , Edge , and Android . Each is engineered for specific operational environments, from gaming workstations and phones to embedded routers. One Architecture, Three Shapes All three editions share identical protocol wire-specifications and compatibility goals. A PS2 loader running OPL, RiptOPL, or Neutrino interacts seamlessly whether connected to Desktop on Windows, Core on Ubuntu, or Edge on an OpenWrt router. 1. PS2 Servers Desktop Desktop is the graphical workstation package designed for Windows, macOS, and Linux desktop environments. Built with Python and Tkinter, it provides an intuitive multi-card interface for immediate operation. Key Desktop Features 6 Dedicated Server Cards: SMBv1, UDPFS, UDPBD, SMB2, SMB3, and HTTP game streaming. Integrated Network Selector: Detects active network interfaces and automatically populates IP setup hints. Firewall Helper: Automatic creation and cleanup of Windows Defender Firewall rules for each server port. Zero Setup Runtime: Distributed as standalone portable executables with bundled Python; no pre-existing runtime required. Compression Engine: Full support for on-the-fly decompression of CHD, CSO, and ZSO disc images when optional native libraries (such as libchdr ) are detected. 2. PS2 Servers Core Core exposes the full Python server implementations from the terminal without launching a graphical window. It is the premier choice for headless servers, developer workflows, remote SSH sessions, container environments, and CI/CD automated testing. # Serve UDPFS games from a directory python ps2servers.py serve udpfs --root-dir /srv/ps2 --read-only # Serve SMBv1 guest share python ps2servers.py serve smbv1 --share games=/srv/ps2 --port 1111 # Serve raw disk image over UDPBD python ps2servers.py serve udpbd /srv/images/game.iso --read-only # Serve HTTP games for OPL-HTTP python ps2servers.py serve http --root-dir /srv/ps2 --port 1100 Packaged standalone executables also support identical subcommands: ps2servers.exe serve udpfs ... . Core includes extensive diagnostic flags like --verbose , structured JSON logging, and connection inactivity telemetry. 3. PS2 Servers Edge Edge is a high-speed, native Go rewrite engineered specifically for headless and embedded environments where Python is either unavailable, too heavy, or slow to start. Edge compiles to a compact, statically linked binary with",
     "url": "editions.html"
   },
   {
     "title": "Editions & Architecture — PS2 Servers Editions & Architecture",
     "cat": "start",
-    "text": "PS2 Servers Editions & Architecture. PS2 Servers is a unified server ecosystem delivered in three distinct deployment shapes: Desktop , Core , and Edge . Each is engineered for specific operational environments, from standard gaming desktops to resource-constrained embedded routers. One Architecture, Three Shapes All three editions share identical protocol wire-specifications and compatibility goals. A PS2 loader running OPL, RiptOPL, or Neutrino interacts seamlessly whether connected to Desktop on Windows, Core on Ubuntu, or Edge on an OpenWrt router.",
+    "text": "PS2 Servers Editions & Architecture. PS2 Servers is a unified server ecosystem delivered in four deployment shapes: Desktop , Core , Edge , and Android . Each is engineered for specific operational environments, from gaming workstations and phones to embedded routers. One Architecture, Three Shapes All three editions share identical protocol wire-specifications and compatibility goals. A PS2 loader running OPL, RiptOPL, or Neutrino interacts seamlessly whether connected to Desktop on Windows, Core on Ubuntu, or Edge on an OpenWrt router.",
     "url": "editions.html"
   },
   {
@@ -234,21 +246,99 @@
     "url": "editions.html"
   },
   {
+    "title": "Editions & Architecture — 4. PS2 Servers Android",
+    "cat": "start",
+    "text": "4. PS2 Servers Android. Android ( PS2Servers-android.apk ) brings a native Kotlin launcher and all seven game servers directly to Android 5.0+ (API 21+) phones and tablets over Wi-Fi, hotspot, or USB-Ethernet tethering, alongside Mobile Data internet sharing for PS2 online play. See the Android & Mobile Data Guide .",
+    "url": "editions.html#android"
+  },
+  {
+    "title": "Editions & Architecture — Key Android Capabilities",
+    "cat": "start",
+    "text": "Key Android Capabilities. All Seven Protocols: Pure-Kotlin engines for UDPFS, SMBv1, SMBv2/v3, HTTP, NFSv4, and UDPBD (Virtual exFAT or raw image). Storage Access Framework: Native ACTION_OPEN_DOCUMENT_TREE folder picker plus fallback filesystem path support. Background Stability: Foreground service with persistent notification, wake lock, low-latency Wi-Fi lock, and UDP multicast lock. Mobile Data Internet Bridge: Live NETCNF DHCP/Static guidance, Custom PS2 DNS field, Tethering shortcut, and optional root NAT / TCP 445 redirect.",
+    "url": "editions.html"
+  },
+  {
     "title": "Editions & Architecture — Feature & Edition Comparison Matrix",
     "cat": "start",
-    "text": "Feature & Edition Comparison Matrix. Feature Desktop (GUI) Core (CLI) Edge (Go Native) Language / Runtime Python 3.12 (Bundled) Python 3.12 (CLI / Bundled) Go 1.22+ (Static Native Binary) User Interface Desktop Tkinter GUI Terminal / CLI Flags CLI + Embedded Web UI Dashboard Typical RAM Usage 60 – 120 MB 40 – 80 MB 8 – 25 MB (Sub-32MB Capable) UDPFS Protocol Yes (Auto Modulo/Standard) Yes (Auto Modulo/Standard) Yes (High-Throughput Native) SMBv1 Sharing Yes (Port 1025) Yes (Port 1111) Yes (Port 1111) SMB2 / SMB3 Sharing Yes (Port 1445) Yes (Port 1445) No (SMBv1 Only) UDPBD Block Device Yes (Port 48573) Yes (Port 48573) Yes (Port 48573) HTTP Game Streaming Yes (Port 1100) Yes (Port 1100) No (Web UI is Management Only) ISO / CSO / ZSO Support Yes Yes Yes (CSO/ZSO Decompressed Cache) CHD Format Support Yes (via libchdr ) Yes (via libchdr ) No (Excluded from static builds) OpenWrt / Router Packages No No Yes (Official .ipk packages) Docker & systemd Integration No Yes Yes (Minimal scratch image)",
+    "text": "Feature & Edition Comparison Matrix. Feature Desktop (GUI) Core (CLI) Edge (Go Native) Android (APK) Language / Runtime Python 3.12 (Bundled) Python 3.12 (CLI / Bundled) Go 1.22+ (Static Native Binary) Kotlin (Android 5.0 / API 21+) User Interface Desktop Tkinter GUI Terminal / CLI Flags CLI + Embedded Web UI Dashboard Android Material UI + Foreground Service Typical RAM Usage 60 – 120 MB 40 – 80 MB 8 – 25 MB (Sub-32MB Capable) 30 – 65 MB UDPFS Protocol Yes (Auto Modulo/Standard) Yes (Auto Modulo/Standard) Yes (High-Throughput Native) Yes (Auto Modulo/Standard) SMBv1 Sharing Yes (Port 1025) Yes (Port 1111) Yes (Port 1111) Yes (Port 1025 / Root 445) SMB2 / SMB3 Sharing Yes (Port 1445) Yes (Port 1445) No (SMBv1 Only) Yes (Port 1445 / Root 445) UDPBD Block Device Yes (Port 48573) Yes (Port 48573) Yes (Port 48573) Yes (Port 48573, Virtual exFAT/Image) HTTP Game Streaming Yes (Port 1100) Yes (Port 1100) No (Web UI is Management Only) Yes (Port 1100) NFSv4 Sharing Yes (Port 2049) Yes (Port 2049) No Yes (Port 2049) ISO / CSO / ZSO Support Yes Yes Yes (CSO/ZSO Decompressed Cache) Yes (ISO / CSO / ZSO) CHD Format Support Yes (via libchdr ) Yes (via libchdr ) No (Excluded from static builds) No (Use Desktop / Core) OpenWrt / Ro",
     "url": "editions.html#matrix"
   },
   {
     "title": "Editions & Architecture — Which Edition Should You Choose?",
     "cat": "start",
-    "text": "Which Edition Should You Choose?. Choose Desktop if you are playing on Windows, macOS, or a Linux workstation and want a simple visual launcher with start/stop buttons and automatic configuration saving. Choose Core if you have an existing Linux server with Python installed, run games from Docker containers, or want to script headless background services. Choose Edge if you want to run servers 24/7 on an OpenWrt router, Raspberry Pi, home NAS, or old low-power hardware without a monitor or desktop environment. Choose Desktop/Core if you have disc images in CHD format , or require SMB2/SMB3 authenticated sharing or HTTP game streaming .",
+    "text": "Which Edition Should You Choose?. Choose Desktop if you are playing on Windows, macOS, or a Linux workstation and want a simple visual launcher with start/stop buttons and automatic configuration saving. Choose Android if you want to serve games from a phone or tablet over Wi-Fi, hotspot, or USB-Ethernet tethering, or share Mobile Data internet with your console. Choose Core if you have an existing Linux server with Python installed, run games from Docker containers, or want to script headless background services. Choose Edge if you want to run servers 24/7 on an OpenWrt router, Raspberry Pi, home NAS, or old low-power hardware without a monitor or desktop environment. Choose Desktop/Core if you have disc images in CHD format .",
     "url": "editions.html#picker"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing",
+    "cat": "start",
+    "text": "PS2 Servers for Android Run all seven PS2 Servers protocols natively on any Android 5.0 (API 21) or newer phone or tablet over home Wi-Fi, hotspot, or USB-Ethernet tethering, and share Mobile Data internet with your PlayStation 2. Download PS2Servers-android.apk Mobile Data Internet Setup Validation Status All seven protocol servers, Storage Access Framework adapters, and NAT/redirect helpers are host unit-tested on JVM and Android Lint verified for API 21–35. Real Android hardware and physical PlayStation 2 testing are still pending. 1. Download & Install Download PS2Servers-android.apk from the Downloads & Releases page . It is a pure-Kotlin universal APK supporting ARM64, ARMv7, x86, and x86_64 phones and tablets running Android 5.0 or newer, with zero telemetry. # Verify SHA-256 and GitHub build provenance before installing sha256sum -c SHA256SUMS.txt --ignore-missing gh attestation verify PS2Servers-android.apk -R NathanNeurotic/PS2-Servers Tap the APK on your phone (allowing unknown apps when prompted) or install over USB debugging with adb install -r PS2Servers-android.apk . 2. Shared Games Folder (SAF & Fallback) Tap Choose Folder (SAF) to grant persistent access via Android's Storage Access Framework to the parent folder containing your uppercase DVD/ and CD/ directories. If your device uses a direct path, enter it under Fallback path or tap Use App Folder to serve files placed in the app's media directory. CSO / ZSO compression is enabled on UDPFS and HTTP by default and optional on SMBv1. CHD requires Desktop or Core. UDPBD automatically serves your Games Folder as a Virtual exFAT drive, or lets you pick a single raw .iso / .img file. 3. Supported Servers & Port 445 Rules Server Default Port Unrooted Android Notes Supported Clients UDPFS UDP 62966 Works directly on unrooted phones Neutrino, NHDDL, RiptOPL SMBv1 TCP 1025 TCP 445 requires root; use port 1025 in OPL or root 445 redirect OPL, POPStarter, Launchstation SMBv2 / SMBv3 TCP 1445 Set password or enable Open Share ; custom port or root 445 redirect Neutrino usmb2 / bsd-smb , RiptOPL, Launchstation HTTP TCP 1100 Supports OPL legacy-flat and RiptOPL riptopl-path-aware OPL-HTTP, RiptOPL NFSv4 TCP 2049 Export / ; read-only unless Allow writes is enabled Neutrino, RiptOPL, Launchstation ( unfs4 ) UDPBD UDP 48573 Virtual exFAT folder mode or raw image mode; acquires MulticastLock OPL, Neutrino UDPBD 4. Home Wi-Fi LAN & Background Locks When your phone connects to your home Wi-Fi and the PS2 conn",
+    "url": "android.html"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — PS2 Servers for Android",
+    "cat": "start",
+    "text": "PS2 Servers for Android. Run all seven PS2 Servers protocols natively on any Android 5.0 (API 21) or newer phone or tablet over home Wi-Fi, hotspot, or USB-Ethernet tethering, and share Mobile Data internet with your PlayStation 2. Download PS2Servers-android.apk Mobile Data Internet Setup Validation Status All seven protocol servers, Storage Access Framework adapters, and NAT/redirect helpers are host unit-tested on JVM and Android Lint verified for API 21–35. Real Android hardware and physical PlayStation 2 testing are still pending.",
+    "url": "android.html"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — 1. Download & Install",
+    "cat": "start",
+    "text": "1. Download & Install. Download PS2Servers-android.apk from the Downloads & Releases page . It is a pure-Kotlin universal APK supporting ARM64, ARMv7, x86, and x86_64 phones and tablets running Android 5.0 or newer, with zero telemetry. # Verify SHA-256 and GitHub build provenance before installing sha256sum -c SHA256SUMS.txt --ignore-missing gh attestation verify PS2Servers-android.apk -R NathanNeurotic/PS2-Servers Tap the APK on your phone (allowing unknown apps when prompted) or install over USB debugging with adb install -r PS2Servers-android.apk .",
+    "url": "android.html#install"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — 2. Shared Games Folder (SAF & Fallback)",
+    "cat": "start",
+    "text": "2. Shared Games Folder (SAF & Fallback). Tap Choose Folder (SAF) to grant persistent access via Android's Storage Access Framework to the parent folder containing your uppercase DVD/ and CD/ directories. If your device uses a direct path, enter it under Fallback path or tap Use App Folder to serve files placed in the app's media directory. CSO / ZSO compression is enabled on UDPFS and HTTP by default and optional on SMBv1. CHD requires Desktop or Core. UDPBD automatically serves your Games Folder as a Virtual exFAT drive, or lets you pick a single raw .iso / .img file.",
+    "url": "android.html#storage"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — 3. Supported Servers & Port 445 Rules",
+    "cat": "start",
+    "text": "3. Supported Servers & Port 445 Rules. Server Default Port Unrooted Android Notes Supported Clients UDPFS UDP 62966 Works directly on unrooted phones Neutrino, NHDDL, RiptOPL SMBv1 TCP 1025 TCP 445 requires root; use port 1025 in OPL or root 445 redirect OPL, POPStarter, Launchstation SMBv2 / SMBv3 TCP 1445 Set password or enable Open Share ; custom port or root 445 redirect Neutrino usmb2 / bsd-smb , RiptOPL, Launchstation HTTP TCP 1100 Supports OPL legacy-flat and RiptOPL riptopl-path-aware OPL-HTTP, RiptOPL NFSv4 TCP 2049 Export / ; read-only unless Allow writes is enabled Neutrino, RiptOPL, Launchstation ( unfs4 ) UDPBD UDP 48573 Virtual exFAT folder mode or raw image mode; acquires MulticastLock OPL, Neutrino UDPBD",
+    "url": "android.html#protocols"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — 4. Home Wi-Fi LAN & Background Locks",
+    "cat": "start",
+    "text": "4. Home Wi-Fi LAN & Background Locks. When your phone connects to your home Wi-Fi and the PS2 connects to the same router over Ethernet, both sit on the same LAN subnet. Disable AP Isolation / Client Isolation on your router and stay off Guest Wi-Fi networks so Ethernet-to-Wi-Fi traffic and UDP discovery broadcasts pass freely. Starting any server launches a foreground service holding a PARTIAL_WAKE_LOCK , a low-latency WifiLock , and a MulticastLock (when UDPFS or UDPBD is active).",
+    "url": "android.html#wifi-lan"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — 5. Connecting the PS2 to Mobile Data Internet",
+    "cat": "start",
+    "text": "5. Connecting the PS2 to Mobile Data Internet. The PS2 Internet (Mobile Data) card helps you bridge cellular internet to your PlayStation 2 for DNAS and community online servers while simultaneously serving games locally.",
+    "url": "android.html#mobile-data-internet"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — Option A: Unrooted Android 11+ (USB-Ethernet Tethering)",
+    "cat": "start",
+    "text": "Option A: Unrooted Android 11+ (USB-Ethernet Tethering). Connect a USB-Ethernet adapter to your phone and wire an Ethernet cable to the PS2. Tap Open Hotspot & Tethering and enable Ethernet tethering . In PS2 Network Config ( NETCNF ), choose Auto (DHCP) , or enter the static IP, Subnet Mask, Gateway, and Primary DNS shown live in the app.",
+    "url": "android.html"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — Option B: Unrooted Android 5.0+ (Wi-Fi Hotspot + Bridge)",
+    "cat": "start",
+    "text": "Option B: Unrooted Android 5.0+ (Wi-Fi Hotspot + Bridge). Enable Android's Wi-Fi Hotspot and join it from a travel router or Wi-Fi-to-Ethernet bridge connected to your PS2. Tap Refresh in the app to read the hotspot gateway IP and suggested PS2 static configuration.",
+    "url": "android.html"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — Option C: Custom PS2 DNS & Root NAT Bridge",
+    "cat": "start",
+    "text": "Option C: Custom PS2 DNS & Root NAT Bridge. Enter a community revival DNS IPv4 under Custom PS2 DNS to update the NETCNF hints immediately. On rooted devices (including Android 5–10 with USB-Ethernet OTG), switch on Root NAT Bridge to enable IPv4 forwarding, iptables MASQUERADE to your active cellular interface, and optional TCP/UDP port 53 DNS redirection.",
+    "url": "android.html"
+  },
+  {
+    "title": "Android App & Mobile Data Sharing — 6. Quick Troubleshooting",
+    "cat": "start",
+    "text": "6. Quick Troubleshooting. No incoming connection on Wi-Fi: Confirm the phone is on the main SSID (5 GHz recommended) rather than a guest network, and check the top Device IP banner. Loader hardcodes SMB port 445 on unrooted Android: Switch to UDPFS ( 62966 ), HTTP ( 1100 ), NFSv4 ( 2049 ), or UDPBD ( 48573 ). Background drops: Allow notifications on Android 13+ and exclude PS2 Servers from aggressive OEM battery optimization if your device vendor kills foreground services.",
+    "url": "android.html#troubleshooting"
   },
   {
     "title": "Downloads & Releases",
     "cat": "start",
-    "text": "Downloads & Releases Official release binaries for Windows, Linux, macOS, and embedded architectures. PS2 Servers binaries are compiled directly from source in automated GitHub Actions workflows with cryptographic attestations. Pre-Releases vs Tagged Releases For active development and the latest compatibility improvements (such as UDPFS handoff resilience and Edge Web UI updates), download the newest pre-release on GitHub. A tagged release may represent an earlier milestone. Always inspect the assets table of the release for the exact packages built. Open GitHub Releases Page ↗ Edge Router Build Picker Desktop & Workstation Packages Desktop packages include the Tkinter graphical launcher, the underlying Core CLI, and all server modules. Portable builds keep all libraries extracted in a folder and avoid single-file decompression overhead. Platform Recommended Package Alternative / Legacy Description Windows x64 (64-bit) PS2Servers-windows-x64-portable.zip PS2Servers-windows-x64.zip Recommended for modern Windows 10/11 PCs. Extract anywhere and launch PS2Servers.exe . Needs Windows 10 or 11. Windows 7 / 8, or 32-bit Windows (x86) PS2Servers-windows-x86-portable.zip PS2Servers-windows-x86.zip For Windows 7 SP1, 8 and 8.1 (32- or 64-bit), 32-bit Windows 10, older netbooks and thin clients. Built with Python 3.8, the last Python that runs on Windows 7. Windows 7 needs its updates installed, including the Universal C Runtime (KB2999226). Linux x86_64 (64-bit) PS2Servers-linux-x64-portable.tar.gz PS2Servers-x86_64.AppImage AppImage offers full desktop menu integration; portable archive works when /tmp has noexec mount flags. macOS Apple Silicon PS2Servers-macos-arm64.zip — Native ARM64 build optimized for Apple M1, M2, M3, and M4 Macs. macOS Intel x64 PS2Servers-macos-x64.zip — Universal binary for Intel-based Macs. Edge Headless & Router Binaries Edge binaries are compact, standalone Go executables compiled for headless hardware, single-board computers, and network routers. They require zero Python runtime. For device family selection, refer to the Edge Build Picker . Target Architecture Binary Asset Name Target Hardware Examples x86_64 (amd64) ps2servers-edge-linux-amd64 Standard PC, Intel/AMD NAS (Synology, QNAP, TrueNAS), Proxmox VM ARM64 (aarch64) ps2servers-edge-linux-arm64 Raspberry Pi 3/4/5 running 64-bit OS, modern ARM NAS, Orange Pi 5 ARMv7 (32-bit) ps2servers-edge-linux-armv7 Raspberry Pi 2, Pi 3/4/5 running 32-bit Raspberry Pi OS, ARMv7 routers ARMv6",
+    "text": "Downloads & Releases Official release binaries for Windows, Linux, macOS, Android, and embedded architectures. PS2 Servers binaries are compiled directly from source in automated GitHub Actions workflows with cryptographic attestations. Pre-Releases vs Tagged Releases For active development and the latest compatibility improvements (such as UDPFS handoff resilience and Edge Web UI updates), download the newest pre-release on GitHub. A tagged release may represent an earlier milestone. Always inspect the assets table of the release for the exact packages built. Open GitHub Releases Page ↗ Edge Router Build Picker Desktop & Workstation Packages Desktop packages include the Tkinter graphical launcher, the underlying Core CLI, and all server modules. Portable builds keep all libraries extracted in a folder and avoid single-file decompression overhead. Platform Recommended Package Alternative / Legacy Description Windows x64 (64-bit) PS2Servers-windows-x64-portable.zip PS2Servers-windows-x64.zip Recommended for modern Windows 10/11 PCs. Extract anywhere and launch PS2Servers.exe . Needs Windows 10 or 11. Windows 7 / 8, or 32-bit Windows (x86) PS2Servers-windows-x86-portable.zip PS2Servers-windows-x86.zip For Windows 7 SP1, 8 and 8.1 (32- or 64-bit), 32-bit Windows 10, older netbooks and thin clients. Built with Python 3.8, the last Python that runs on Windows 7. Windows 7 needs its updates installed, including the Universal C Runtime (KB2999226). Linux x86_64 (64-bit) PS2Servers-linux-x64-portable.tar.gz PS2Servers-x86_64.AppImage AppImage offers full desktop menu integration; portable archive works when /tmp has noexec mount flags. macOS Apple Silicon PS2Servers-macos-arm64.zip — Native ARM64 build optimized for Apple M1, M2, M3, and M4 Macs. macOS Intel x64 PS2Servers-macos-x64.zip — Universal binary for Intel-based Macs. Android APK (Phones & Tablets) Run all seven PS2 server protocols on Android 5.0+ phones or tablets over Wi-Fi, hotspot, or USB-Ethernet tethering, and share Mobile Data internet with your console. See the Android & Mobile Data setup guide . Platform Asset Name Minimum OS Description Android Phone / Tablet (Universal APK) PS2Servers-android.apk Android 5.0 (API 21+) Pure-Kotlin app supporting ARM64, ARMv7, x86, and x86_64 devices. Serves UDPFS, SMBv1/v2/v3, HTTP, NFSv4, and UDPBD (Virtual exFAT or raw image) plus Mobile Data sharing helpers. Edge Headless & Router Binaries Edge binaries are compact, standalone Go executables compiled for hea",
     "url": "releases.html"
   },
   {
@@ -256,6 +346,12 @@
     "cat": "start",
     "text": "Desktop & Workstation Packages. Desktop packages include the Tkinter graphical launcher, the underlying Core CLI, and all server modules. Portable builds keep all libraries extracted in a folder and avoid single-file decompression overhead. Platform Recommended Package Alternative / Legacy Description Windows x64 (64-bit) PS2Servers-windows-x64-portable.zip PS2Servers-windows-x64.zip Recommended for modern Windows 10/11 PCs. Extract anywhere and launch PS2Servers.exe . Needs Windows 10 or 11. Windows 7 / 8, or 32-bit Windows (x86) PS2Servers-windows-x86-portable.zip PS2Servers-windows-x86.zip For Windows 7 SP1, 8 and 8.1 (32- or 64-bit), 32-bit Windows 10, older netbooks and thin clients. Built with Python 3.8, the last Python that runs on Windows 7. Windows 7 needs its updates installed, including the Universal C Runtime (KB2999226). Linux x86_64 (64-bit) PS2Servers-linux-x64-portable.tar.gz PS2Servers-x86_64.AppImage AppImage offers full desktop menu integration; portable archive works when /tmp has noexec mount flags. macOS Apple Silicon PS2Servers-macos-arm64.zip — Native ARM64 build optimized for Apple M1, M2, M3, and M4 Macs. macOS Intel x64 PS2Servers-macos-x64.zip — Universal binary for Intel-based Macs.",
     "url": "releases.html#desktop-downloads"
+  },
+  {
+    "title": "Downloads & Releases — Android APK (Phones & Tablets)",
+    "cat": "start",
+    "text": "Android APK (Phones & Tablets). Run all seven PS2 server protocols on Android 5.0+ phones or tablets over Wi-Fi, hotspot, or USB-Ethernet tethering, and share Mobile Data internet with your console. See the Android & Mobile Data setup guide . Platform Asset Name Minimum OS Description Android Phone / Tablet (Universal APK) PS2Servers-android.apk Android 5.0 (API 21+) Pure-Kotlin app supporting ARM64, ARMv7, x86, and x86_64 devices. Serves UDPFS, SMBv1/v2/v3, HTTP, NFSv4, and UDPBD (Virtual exFAT or raw image) plus Mobile Data sharing helpers.",
+    "url": "releases.html#android-downloads"
   },
   {
     "title": "Downloads & Releases — Edge Headless & Router Binaries",
@@ -266,7 +362,7 @@
   {
     "title": "Downloads & Releases — Verifying Checksums & Build Attestations",
     "cat": "start",
-    "text": "Verifying Checksums & Build Attestations. Integrity can be confirmed against the published SHA-256 checksums, and cryptographic build provenance can be verified via the GitHub CLI: # 1. Verify SHA-256 on Linux/macOS sha256sum -c SHA256SUMS.txt # 1b. Verify SHA-256 in Windows PowerShell Get-FileHash .\\PS2Servers-windows-x64-portable.zip -Algorithm SHA256 # 2. Verify GitHub Actions build attestation gh attestation verify PS2Servers-windows-x64-portable.zip -R NathanNeurotic/PS2-Servers Antivirus Detections on Windows Unsigned executables that bind to network sockets and extract self-contained runtime files are commonly flagged by heuristic antivirus scanners. These are false positives. See our complete Antivirus Transparency & Trust Guide for detailed analysis and exclusion instructions.",
+    "text": "Verifying Checksums & Build Attestations. Integrity can be confirmed against the published SHA-256 checksums, and cryptographic build provenance can be verified via the GitHub CLI: # 1. Verify SHA-256 on Linux/macOS sha256sum -c SHA256SUMS.txt # 1b. Verify SHA-256 in Windows PowerShell Get-FileHash .\\PS2Servers-windows-x64-portable.zip -Algorithm SHA256 # 2. Verify GitHub Actions build attestation gh attestation verify PS2Servers-windows-x64-portable.zip -R NathanNeurotic/PS2-Servers gh attestation verify PS2Servers-android.apk -R NathanNeurotic/PS2-Servers Antivirus Detections on Windows Unsigned executables that bind to network sockets and extract self-contained runtime files are commonly flagged by heuristic antivirus scanners. These are false positives. See our complete Antivirus Transparency & Trust Guide for detailed analysis and exclusion instructions.",
     "url": "releases.html#verifying-downloads"
   },
   {

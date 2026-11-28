@@ -36,6 +36,7 @@
     <h4>Start</h4>
     <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
     <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="android.html"><span class="icon icon-usb"></span>Android &amp; Mobile Data</a>
     <a href="releases.html" class="active"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
 
     <h4>Protocols</h4>
@@ -67,7 +68,7 @@
   </nav>
   <main class="content">
 <h1>Downloads &amp; Releases</h1>
-<p class="lead">Official release binaries for Windows, Linux, macOS, and embedded architectures. PS2 Servers binaries are compiled directly from source in automated GitHub Actions workflows with cryptographic attestations.</p>
+<p class="lead">Official release binaries for Windows, Linux, macOS, Android, and embedded architectures. PS2 Servers binaries are compiled directly from source in automated GitHub Actions workflows with cryptographic attestations.</p>
 
 <div class="callout info"><div class="h">Pre-Releases vs Tagged Releases</div>
 For active development and the latest compatibility improvements (such as UDPFS handoff resilience and Edge Web UI updates), download the newest <b>pre-release</b> on GitHub. A tagged release may represent an earlier milestone. Always inspect the assets table of the release for the exact packages built.
@@ -120,6 +121,28 @@ For active development and the latest compatibility improvements (such as UDPFS 
       <td><code>PS2Servers-macos-x64.zip</code></td>
       <td>&mdash;</td>
       <td>Universal binary for Intel-based Macs.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="android-downloads">Android APK (Phones &amp; Tablets)</h2>
+<p>Run all seven PS2 server protocols on Android 5.0+ phones or tablets over Wi-Fi, hotspot, or USB-Ethernet tethering, and share Mobile Data internet with your console. See the <a href="android.html">Android &amp; Mobile Data setup guide</a>.</p>
+
+<table data-sortable>
+  <thead>
+    <tr>
+      <th>Platform</th>
+      <th>Asset Name</th>
+      <th>Minimum OS</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Android Phone / Tablet (Universal APK)</b></td>
+      <td><code>PS2Servers-android.apk</code></td>
+      <td>Android 5.0 (API 21+)</td>
+      <td>Pure-Kotlin app supporting ARM64, ARMv7, x86, and x86_64 devices. Serves UDPFS, SMBv1/v2/v3, HTTP, NFSv4, and UDPBD (Virtual exFAT or raw image) plus Mobile Data sharing helpers.</td>
     </tr>
   </tbody>
 </table>
@@ -194,7 +217,8 @@ sha256sum -c SHA256SUMS.txt
 Get-FileHash .\PS2Servers-windows-x64-portable.zip -Algorithm SHA256
 
 # 2. Verify GitHub Actions build attestation
-gh attestation verify PS2Servers-windows-x64-portable.zip -R NathanNeurotic/PS2-Servers</code></pre>
+gh attestation verify PS2Servers-windows-x64-portable.zip -R NathanNeurotic/PS2-Servers
+gh attestation verify PS2Servers-android.apk -R NathanNeurotic/PS2-Servers</code></pre>
 
 <div class="callout warn"><div class="h">Antivirus Detections on Windows</div>
 Unsigned executables that bind to network sockets and extract self-contained runtime files are commonly flagged by heuristic antivirus scanners. These are false positives. See our complete <a href="antivirus.html">Antivirus Transparency &amp; Trust Guide</a> for detailed analysis and exclusion instructions.
