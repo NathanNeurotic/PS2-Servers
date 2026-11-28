@@ -136,7 +136,10 @@ object LauncherConfig {
             "android_saf_tree_uri" to "",
             "android_fallback_path" to "",
             "android_udpbd_image_uri" to "",
-            "android_udpbd_mode" to "virtual_exfat"
+            "android_udpbd_mode" to "virtual_exfat",
+            "android_ps2_dns" to "",
+            "android_nat_lan_iface" to "",
+            "android_nat_cell_iface" to ""
         )
     }
 

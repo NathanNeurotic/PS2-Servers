@@ -16,4 +16,10 @@
     <string name="notification_channel_name">PS2 Game Servers</string>
     <string name="notification_channel_desc">Keeps active PS2 network servers running reliably in the background</string>
     <string name="special_use_fgs_subtype">Serves local PS2 disc images and homebrew files to a PlayStation 2 console over LAN sockets.</string>
+    <string name="mobile_internet_label">PS2 Internet (Mobile Data)</string>
+    <string name="open_tether_settings">Open Hotspot &amp; Tethering</string>
+    <string name="custom_ps2_dns_hint">Custom PS2 DNS (optional, e.g. 45.7.228.197)</string>
+    <string name="root_nat_bridge_title">Root NAT Bridge (Android 5–10 / DNS Redirect)</string>
+    <string name="nat_lan_iface_hint">LAN interface override (auto, e.g. eth0 / rndis0)</string>
+    <string name="nat_cell_iface_hint">Mobile interface override (auto, e.g. rmnet_data0)</string>
 </resources>

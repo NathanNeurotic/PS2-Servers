@@ -31,6 +31,7 @@ import com.google.android.material.card.MaterialCardView
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.nathanneurotic.ps2servers.R
 import com.nathanneurotic.ps2servers.config.LauncherConfig
+import com.nathanneurotic.ps2servers.net.MobileInternetHelper
 import com.nathanneurotic.ps2servers.net.NetworkAddressCandidate
 import com.nathanneurotic.ps2servers.net.NetworkAddressHelper
 import com.nathanneurotic.ps2servers.net.OplHintFormatter
@@ -51,6 +52,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ipSpinner: Spinner
     private lateinit var customIpInput: EditText
     private lateinit var activeIpBanner: TextView
+    private lateinit var mobileInternetStatusText: TextView
+    private lateinit var customPs2DnsInput: EditText
+    private lateinit var mobileNatSwitch: SwitchMaterial
+    private lateinit var natLanIfaceInput: EditText
+    private lateinit var natCellIfaceInput: EditText
     private lateinit var rootSummaryText: TextView
     private lateinit var fallbackPathInput: EditText
     private lateinit var serverCardsContainer: LinearLayout
@@ -144,6 +150,11 @@ class MainActivity : AppCompatActivity() {
         ipSpinner = findViewById(R.id.spinnerIp)
         customIpInput = findViewById(R.id.editCustomIp)
         activeIpBanner = findViewById(R.id.textActiveIpBanner)
+        mobileInternetStatusText = findViewById(R.id.textMobileInternetStatus)
+        customPs2DnsInput = findViewById(R.id.editCustomPs2Dns)
+        mobileNatSwitch = findViewById(R.id.switchMobileNat)
+        natLanIfaceInput = findViewById(R.id.editNatLanIface)
+        natCellIfaceInput = findViewById(R.id.editNatCellIface)
         rootSummaryText = findViewById(R.id.textRootSummary)
         fallbackPathInput = findViewById(R.id.editFallbackPath)
         serverCardsContainer = findViewById(R.id.containerServers)
@@ -175,6 +186,34 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnRefreshIp).setOnClickListener {
             refreshNetworkChoices()
             refreshUi()
+        }
+        findViewById<Button>(R.id.btnOpenTetherSettings).setOnClickListener {
+            openTetherSettings()
+        }
+        findViewById<Button>(R.id.btnRefreshInternet).setOnClickListener {
+            refreshNetworkChoices()
+            refreshUi()
+        }
+        customPs2DnsInput.addTextChangedListener(SimpleAfterTextWatcher { text ->
+            if (!updatingUi) {
+                coordinator.updateTopLevel("android_ps2_dns", text.trim())
+                updateMobileInternetCard(coordinator.snapshotConfig())
+            }
+        })
+        natLanIfaceInput.addTextChangedListener(SimpleAfterTextWatcher { text ->
+            if (!updatingUi) {
+                coordinator.updateTopLevel("android_nat_lan_iface", text.trim())
+            }
+        })
+        natCellIfaceInput.addTextChangedListener(SimpleAfterTextWatcher { text ->
+            if (!updatingUi) {
+                coordinator.updateTopLevel("android_nat_cell_iface", text.trim())
+            }
+        })
+        mobileNatSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (!updatingUi) {
+                toggleMobileNat(isChecked)
+            }
         }
         customIpInput.addTextChangedListener(SimpleAfterTextWatcher { text ->
             if (!updatingUi) {
@@ -650,6 +689,75 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun openTetherSettings() {
+        for (intent in MobileInternetHelper.tetherSettingsIntents()) {
+            try {
+                startActivity(intent)
+                return
+            } catch (_: Exception) {
+            }
+        }
+        Toast.makeText(this, "Open Android Settings -> Network & internet -> Hotspot & tethering", Toast.LENGTH_LONG).show()
+    }
+
+    private fun toggleMobileNat(turnOn: Boolean) {
+        if (turnOn) {
+            ensureNotificationPermission()
+            ContextCompat.startForegroundService(this, Intent(this, Ps2ServerService::class.java))
+        }
+        bgExecutor.execute {
+            try {
+                val cfg = coordinator.snapshotConfig()
+                val dns = LauncherConfig.asString(cfg["android_ps2_dns"]).trim()
+                if (dns.isNotEmpty() && !MobileInternetHelper.isValidIpv4(dns)) {
+                    throw IllegalArgumentException("Custom PS2 DNS must be a valid IPv4 address")
+                }
+                val tether = MobileInternetHelper.detectTetherSubnets().firstOrNull()
+                val cell = MobileInternetHelper.detectCellularUpstream(this)
+                val lanIface = LauncherConfig.asString(cfg["android_nat_lan_iface"]).trim()
+                    .ifEmpty { tether?.interfaceName ?: "eth0" }
+                val cellIface = LauncherConfig.asString(cfg["android_nat_cell_iface"]).trim()
+                    .ifEmpty { cell.interfaceName ?: "rmnet0" }
+
+                val svc = serverService
+                val result = if (turnOn) {
+                    if (svc != null) svc.startMobileNat(lanIface, cellIface, dns)
+                    else coordinator.startMobileNat(lanIface, cellIface, dns)
+                } else {
+                    if (svc != null) svc.stopMobileNat() else coordinator.stopMobileNat()
+                    null
+                }
+                if (turnOn && result != null && !result.active) {
+                    runOnUiThread {
+                        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                        refreshUi()
+                    }
+                }
+            } catch (e: Exception) {
+                val msg = e.message ?: e::class.java.simpleName
+                coordinator.appendLog("[Mobile Data] $msg")
+                runOnUiThread {
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                    refreshUi()
+                }
+            }
+        }
+    }
+
+    private fun updateMobileInternetCard(cfg: Map<String, Any?>) {
+        val cellular = MobileInternetHelper.detectCellularUpstream(this)
+        val tether = MobileInternetHelper.detectTetherSubnets().firstOrNull()
+        val customDns = LauncherConfig.asString(cfg["android_ps2_dns"]).trim()
+        val natStatus = coordinator.natStatus()
+        mobileNatSwitch.isChecked = natStatus.active
+        mobileInternetStatusText.text = MobileInternetHelper.formatPs2NetcnfGuide(
+            cellular = cellular,
+            tether = tether,
+            customDns = customDns,
+            natStatus = natStatus
+        )
+    }
+
     private fun refreshUi() {
         val cfg = coordinator.snapshotConfig()
         val statuses = coordinator.statuses().associateBy { it.key }
@@ -659,8 +767,21 @@ class MainActivity : AppCompatActivity() {
         if (fallbackPathInput.text.toString() != savedFallback) {
             fallbackPathInput.setText(savedFallback)
         }
+        val savedDns = LauncherConfig.asString(cfg["android_ps2_dns"])
+        if (customPs2DnsInput.text.toString() != savedDns) {
+            customPs2DnsInput.setText(savedDns)
+        }
+        val savedLanIface = LauncherConfig.asString(cfg["android_nat_lan_iface"])
+        if (natLanIfaceInput.text.toString() != savedLanIface) {
+            natLanIfaceInput.setText(savedLanIface)
+        }
+        val savedCellIface = LauncherConfig.asString(cfg["android_nat_cell_iface"])
+        if (natCellIfaceInput.text.toString() != savedCellIface) {
+            natCellIfaceInput.setText(savedCellIface)
+        }
         rootSummaryText.text = coordinator.describeActiveRoot()
 
+        updateMobileInternetCard(cfg)
         updateCardStatuses(cfg, statuses)
         updatingUi = false
     }

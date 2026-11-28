@@ -6,6 +6,8 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import com.nathanneurotic.ps2servers.config.LauncherConfig
+import com.nathanneurotic.ps2servers.net.MobileDataNatController
+import com.nathanneurotic.ps2servers.net.NatShareStatus
 import com.nathanneurotic.ps2servers.net.Port445RedirectHelper
 import com.nathanneurotic.ps2servers.net.PortBindCheck
 import com.nathanneurotic.ps2servers.net.RedirectStatus
@@ -128,7 +130,8 @@ data class ServerStatusSnapshot(
 class ServerCoordinator(
     private val configFile: File,
     private val safBridge: SafBridge? = null,
-    private val redirectHelper: Port445RedirectHelper = Port445RedirectHelper()
+    private val redirectHelper: Port445RedirectHelper = Port445RedirectHelper(),
+    private val natController: MobileDataNatController = MobileDataNatController()
 ) {
     interface Listener {
         fun onStateChanged()
@@ -139,6 +142,7 @@ class ServerCoordinator(
     private val config: LinkedHashMap<String, Any?> = LauncherConfig.load(configFile)
     private val runningEngines = LinkedHashMap<String, ServerEngine>()
     private val activeRedirects = LinkedHashMap<String, RedirectStatus>()
+    private var activeNatStatus: NatShareStatus = NatShareStatus(active = false)
     private val logs = ArrayDeque<String>()
     private val listeners = LinkedHashSet<Listener>()
 
@@ -263,6 +267,41 @@ class ServerCoordinator(
     fun activeKeys(): Set<String> = synchronized(lock) { runningEngines.keys.toSet() }
 
     fun isAnyRunning(): Boolean = synchronized(lock) { runningEngines.isNotEmpty() }
+
+    fun natStatus(): NatShareStatus = synchronized(lock) { activeNatStatus }
+
+    fun isMobileNatActive(): Boolean = synchronized(lock) { activeNatStatus.active }
+
+    fun isAnyBackgroundWorkActive(): Boolean = synchronized(lock) {
+        runningEngines.isNotEmpty() || activeNatStatus.active
+    }
+
+    fun startMobileNat(lanIface: String, cellIface: String, dnsOverride: String = ""): NatShareStatus {
+        val prev = synchronized(lock) { activeNatStatus }
+        if (prev.active) {
+            natController.disableNat(prev.lanIface, prev.cellularIface, prev.dnsOverride)
+        }
+        val status = natController.enableNat(lanIface, cellIface, dnsOverride)
+        synchronized(lock) {
+            activeNatStatus = status
+        }
+        appendLog("[Mobile Data] ${status.message}")
+        notifyStateChanged()
+        return status
+    }
+
+    fun stopMobileNat() {
+        val current = synchronized(lock) {
+            val prev = activeNatStatus
+            activeNatStatus = NatShareStatus(active = false)
+            prev
+        }
+        if (current.active) {
+            val res = natController.disableNat(current.lanIface, current.cellularIface, current.dnsOverride)
+            appendLog("[Mobile Data] ${res.message}")
+            notifyStateChanged()
+        }
+    }
 
     fun needsMulticastLock(): Boolean = synchronized(lock) {
         runningEngines.containsKey("udpfs") || runningEngines.containsKey("udpbd")
@@ -421,6 +460,7 @@ class ServerCoordinator(
         for (key in keys) {
             stopServer(key)
         }
+        stopMobileNat()
         notifyStateChanged()
     }
 

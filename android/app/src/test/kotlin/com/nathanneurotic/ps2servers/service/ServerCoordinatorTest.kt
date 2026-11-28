@@ -1,6 +1,7 @@
 package com.nathanneurotic.ps2servers.service
 
 import com.nathanneurotic.ps2servers.config.LauncherConfig
+import com.nathanneurotic.ps2servers.net.MobileDataNatController
 import com.nathanneurotic.ps2servers.net.Port445RedirectHelper
 import com.nathanneurotic.ps2servers.net.ShellResult
 import com.nathanneurotic.ps2servers.net.ShellRunner
@@ -112,5 +113,36 @@ class ServerCoordinatorTest {
 
         coordinator.stopServer("smbv3")
         assertTrue(executedCommands.any { it.contains("iptables -t nat -D PREROUTING -p tcp --dport 445 -j REDIRECT --to-ports $bound") })
+    }
+
+    @Test
+    fun mobileNatStartsTracksBackgroundWorkAndStopsOnStopAll() {
+        val configFile = File(tempFolder.root, "launcher.json")
+        val commands = mutableListOf<String>()
+        val natRunner = object : ShellRunner {
+            override fun run(command: List<String>): ShellResult {
+                val joined = command.joinToString(" ")
+                commands.add(joined)
+                return when {
+                    joined.contains("id -u") -> ShellResult(0, "0\n", "")
+                    joined.contains(" -C ") -> ShellResult(1, "", "")
+                    else -> ShellResult(0, "", "")
+                }
+            }
+        }
+        val coordinator = ServerCoordinator(
+            configFile = configFile,
+            safBridge = null,
+            natController = MobileDataNatController(natRunner)
+        )
+        val status = coordinator.startMobileNat("eth0", "rmnet0", "45.7.228.197")
+        assertTrue(status.active)
+        assertTrue(coordinator.isMobileNatActive())
+        assertTrue(coordinator.isAnyBackgroundWorkActive())
+
+        coordinator.stopAll()
+        assertFalse(coordinator.isMobileNatActive())
+        assertFalse(coordinator.isAnyBackgroundWorkActive())
+        assertTrue(commands.any { it.contains("iptables -t nat -D POSTROUTING -o rmnet0 -j MASQUERADE") })
     }
 }

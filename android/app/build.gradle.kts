@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -41,9 +42,46 @@ android {
         versionName = appVersionName
     }
 
+    signingConfigs {
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+        val keystoreB64 = System.getenv("ANDROID_KEYSTORE_BASE64")?.trim().orEmpty()
+        val keystorePathEnv = System.getenv("ANDROID_KEYSTORE_PATH")?.trim().orEmpty()
+        val storePasswordEnv = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        val keyAliasEnv = System.getenv("ANDROID_KEY_ALIAS")
+        val keyPasswordEnv = System.getenv("ANDROID_KEY_PASSWORD")
+        val resolvedStore = when {
+            keystoreB64.isNotEmpty() -> {
+                val outFile = layout.buildDirectory.file("signing/release.keystore").get().asFile
+                outFile.parentFile.mkdirs()
+                outFile.writeBytes(Base64.getDecoder().decode(keystoreB64))
+                outFile
+            }
+            keystorePathEnv.isNotEmpty() -> file(keystorePathEnv)
+            else -> null
+        }
+        if (resolvedStore != null && resolvedStore.isFile &&
+            !storePasswordEnv.isNullOrEmpty() &&
+            !keyAliasEnv.isNullOrEmpty() &&
+            !keyPasswordEnv.isNullOrEmpty()
+        ) {
+            create("release") {
+                storeFile = resolvedStore
+                storePassword = storePasswordEnv
+                keyAlias = keyAliasEnv
+                keyPassword = keyPasswordEnv
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

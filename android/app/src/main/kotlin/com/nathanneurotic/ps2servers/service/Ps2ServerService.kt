@@ -76,7 +76,7 @@ class Ps2ServerService : Service() {
                 return START_STICKY
             }
             else -> {
-                if (coordinator.isAnyRunning()) {
+                if (coordinator.isAnyBackgroundWorkActive()) {
                     promoteForeground()
                     syncLocksAndNotification()
                 }
@@ -95,7 +95,27 @@ class Ps2ServerService : Service() {
     fun stopServer(key: String) {
         coordinator.stopServer(key)
         syncLocksAndNotification()
-        if (!coordinator.isAnyRunning()) {
+        if (!coordinator.isAnyBackgroundWorkActive()) {
+            teardownForegroundAndLocks()
+            stopSelf()
+        }
+    }
+
+    fun startMobileNat(lanIface: String, cellIface: String, dnsOverride: String = ""): com.nathanneurotic.ps2servers.net.NatShareStatus {
+        promoteForeground()
+        val status = coordinator.startMobileNat(lanIface, cellIface, dnsOverride)
+        syncLocksAndNotification()
+        if (!coordinator.isAnyBackgroundWorkActive()) {
+            teardownForegroundAndLocks()
+            stopSelf()
+        }
+        return status
+    }
+
+    fun stopMobileNat() {
+        coordinator.stopMobileNat()
+        syncLocksAndNotification()
+        if (!coordinator.isAnyBackgroundWorkActive()) {
             teardownForegroundAndLocks()
             stopSelf()
         }
@@ -126,8 +146,8 @@ class Ps2ServerService : Service() {
     }
 
     private fun syncLocksAndNotification() {
-        val anyRunning = coordinator.isAnyRunning()
-        if (anyRunning) {
+        val anyActive = coordinator.isAnyBackgroundWorkActive()
+        if (anyActive) {
             acquireWakeAndWifiLocks()
             updateMulticastLock(coordinator.needsMulticastLock())
             if (!foregroundStarted) {
@@ -239,14 +259,23 @@ class Ps2ServerService : Service() {
             NetworkAddressHelper.detectLanAddresses().firstOrNull()?.ipv4 ?: "0.0.0.0"
         }
 
-        val summary = if (active.isEmpty()) {
+        val nat = coordinator.natStatus()
+        val parts = ArrayList<String>()
+        if (active.isNotEmpty()) {
+            parts.add(
+                active.joinToString(", ") { s ->
+                    val portLabel = if (s.redirect445Active) "445->${s.boundPort}" else "${s.boundPort ?: "?"}"
+                    "${s.displayName}:$portLabel"
+                }
+            )
+        }
+        if (nat.active) {
+            parts.add("NAT ${nat.lanIface}->${nat.cellularIface}")
+        }
+        val summary = if (parts.isEmpty()) {
             "Ready on $displayIp (no servers active)"
         } else {
-            val ports = active.joinToString(", ") { s ->
-                val portLabel = if (s.redirect445Active) "445->${s.boundPort}" else "${s.boundPort ?: "?"}"
-                "${s.displayName}:$portLabel"
-            }
-            "IP $displayIp · $ports"
+            "IP $displayIp · ${parts.joinToString(" · ")}"
         }
 
         val openIntent = Intent(this, MainActivity::class.java).apply {
@@ -278,7 +307,7 @@ class Ps2ServerService : Service() {
             .setContentTitle(getString(R.string.app_name))
             .setContentText(summary)
             .setStyle(NotificationCompat.BigTextStyle().bigText(summary))
-            .setOngoing(active.isNotEmpty())
+            .setOngoing(active.isNotEmpty() || nat.active)
             .setOnlyAlertOnce(true)
             .setContentIntent(openPending)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.stop_all), stopPending)
