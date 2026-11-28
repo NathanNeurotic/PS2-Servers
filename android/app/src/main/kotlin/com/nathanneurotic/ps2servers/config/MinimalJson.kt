@@ -7,7 +7,7 @@ package com.nathanneurotic.ps2servers.config
  * JVM unit tests without relying on Android's stubbed org.json in unit tests.
  */
 object MinimalJson {
-    fun parseObject(text: String): MutableMap<String, Any?> {
+    fun parseAny(text: String): Any? {
         val parser = Parser(text)
         parser.skipWhitespace()
         val value = parser.readValue()
@@ -15,6 +15,11 @@ object MinimalJson {
         if (!parser.isAtEnd()) {
             throw IllegalArgumentException("Unexpected trailing JSON content at index ${parser.pos}")
         }
+        return value
+    }
+
+    fun parseObject(text: String): MutableMap<String, Any?> {
+        val value = parseAny(text)
         @Suppress("UNCHECKED_CAST")
         return value as? MutableMap<String, Any?>
             ?: throw IllegalArgumentException("Root JSON value must be an object")
