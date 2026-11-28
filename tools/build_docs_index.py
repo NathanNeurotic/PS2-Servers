@@ -17,6 +17,7 @@ PAGE_CATEGORIES = {
     "index.html": "overview",
     "getting-started.html": "start",
     "editions.html": "start",
+    "android.html": "start",
     "releases.html": "start",
     "udpfs.html": "protocols",
     "smb.html": "protocols",

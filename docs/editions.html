@@ -36,6 +36,7 @@
     <h4>Start</h4>
     <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
     <a href="editions.html" class="active"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="android.html"><span class="icon icon-usb"></span>Android &amp; Mobile Data</a>
     <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
 
     <h4>Protocols</h4>
@@ -67,7 +68,7 @@
   </nav>
   <main class="content">
 <h1>PS2 Servers Editions &amp; Architecture</h1>
-<p class="lead">PS2 Servers is a unified server ecosystem delivered in three distinct deployment shapes: <b>Desktop</b>, <b>Core</b>, and <b>Edge</b>. Each is engineered for specific operational environments, from standard gaming desktops to resource-constrained embedded routers.</p>
+<p class="lead">PS2 Servers is a unified server ecosystem delivered in four deployment shapes: <b>Desktop</b>, <b>Core</b>, <b>Edge</b>, and <b>Android</b>. Each is engineered for specific operational environments, from gaming workstations and phones to embedded routers.</p>
 
 <div class="callout info"><div class="h">One Architecture, Three Shapes</div>
 All three editions share identical protocol wire-specifications and compatibility goals. A PS2 loader running OPL, RiptOPL, or Neutrino interacts seamlessly whether connected to Desktop on Windows, Core on Ubuntu, or Edge on an OpenWrt router.
@@ -122,6 +123,21 @@ python ps2servers.py serve http --root-dir /srv/ps2 --port 1100</code></pre>
   </article>
 </div>
 
+<h2 id="android">4. PS2 Servers Android</h2>
+<p>Android (<code>PS2Servers-android.apk</code>) brings a native Kotlin launcher and all seven game servers directly to Android 5.0+ (API 21+) phones and tablets over Wi-Fi, hotspot, or USB-Ethernet tethering, alongside Mobile Data internet sharing for PS2 online play. See the <a href="android.html">Android &amp; Mobile Data Guide</a>.</p>
+
+<div class="cards">
+  <article class="card">
+    <h3>Key Android Capabilities</h3>
+    <ul>
+      <li><b>All Seven Protocols:</b> Pure-Kotlin engines for UDPFS, SMBv1, SMBv2/v3, HTTP, NFSv4, and UDPBD (Virtual exFAT or raw image).</li>
+      <li><b>Storage Access Framework:</b> Native <code>ACTION_OPEN_DOCUMENT_TREE</code> folder picker plus fallback filesystem path support.</li>
+      <li><b>Background Stability:</b> Foreground service with persistent notification, wake lock, low-latency Wi-Fi lock, and UDP multicast lock.</li>
+      <li><b>Mobile Data Internet Bridge:</b> Live <code>NETCNF</code> DHCP/Static guidance, Custom PS2 DNS field, Tethering shortcut, and optional root NAT / TCP 445 redirect.</li>
+    </ul>
+  </article>
+</div>
+
 <h2 id="matrix">Feature &amp; Edition Comparison Matrix</h2>
 <table data-sortable>
   <thead>
@@ -130,6 +146,7 @@ python ps2servers.py serve http --root-dir /srv/ps2 --port 1100</code></pre>
       <th>Desktop (GUI)</th>
       <th>Core (CLI)</th>
       <th>Edge (Go Native)</th>
+      <th>Android (APK)</th>
     </tr>
   </thead>
   <tbody>
@@ -138,72 +155,91 @@ python ps2servers.py serve http --root-dir /srv/ps2 --port 1100</code></pre>
       <td>Python 3.12 (Bundled)</td>
       <td>Python 3.12 (CLI / Bundled)</td>
       <td>Go 1.22+ (Static Native Binary)</td>
+      <td>Kotlin (Android 5.0 / API 21+)</td>
     </tr>
     <tr>
       <td><b>User Interface</b></td>
       <td>Desktop Tkinter GUI</td>
       <td>Terminal / CLI Flags</td>
       <td>CLI + Embedded Web UI Dashboard</td>
+      <td>Android Material UI + Foreground Service</td>
     </tr>
     <tr>
       <td><b>Typical RAM Usage</b></td>
       <td>60 &ndash; 120 MB</td>
       <td>40 &ndash; 80 MB</td>
       <td><b>8 &ndash; 25 MB</b> (Sub-32MB Capable)</td>
+      <td>30 &ndash; 65 MB</td>
     </tr>
     <tr>
       <td><b>UDPFS Protocol</b></td>
       <td><span class="icon icon-good"></span> Yes (Auto Modulo/Standard)</td>
       <td><span class="icon icon-good"></span> Yes (Auto Modulo/Standard)</td>
       <td><span class="icon icon-good"></span> Yes (High-Throughput Native)</td>
+      <td><span class="icon icon-good"></span> Yes (Auto Modulo/Standard)</td>
     </tr>
     <tr>
       <td><b>SMBv1 Sharing</b></td>
       <td><span class="icon icon-good"></span> Yes (Port 1025)</td>
       <td><span class="icon icon-good"></span> Yes (Port 1111)</td>
       <td><span class="icon icon-good"></span> Yes (Port 1111)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 1025 / Root 445)</td>
     </tr>
     <tr>
       <td><b>SMB2 / SMB3 Sharing</b></td>
       <td><span class="icon icon-good"></span> Yes (Port 1445)</td>
       <td><span class="icon icon-good"></span> Yes (Port 1445)</td>
       <td><span class="icon icon-bad"></span> No (SMBv1 Only)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 1445 / Root 445)</td>
     </tr>
     <tr>
       <td><b>UDPBD Block Device</b></td>
       <td><span class="icon icon-good"></span> Yes (Port 48573)</td>
       <td><span class="icon icon-good"></span> Yes (Port 48573)</td>
       <td><span class="icon icon-good"></span> Yes (Port 48573)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 48573, Virtual exFAT/Image)</td>
     </tr>
     <tr>
       <td><b>HTTP Game Streaming</b></td>
       <td><span class="icon icon-good"></span> Yes (Port 1100)</td>
       <td><span class="icon icon-good"></span> Yes (Port 1100)</td>
       <td><span class="icon icon-bad"></span> No (Web UI is Management Only)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 1100)</td>
+    </tr>
+    <tr>
+      <td><b>NFSv4 Sharing</b></td>
+      <td><span class="icon icon-good"></span> Yes (Port 2049)</td>
+      <td><span class="icon icon-good"></span> Yes (Port 2049)</td>
+      <td><span class="icon icon-bad"></span> No</td>
+      <td><span class="icon icon-good"></span> Yes (Port 2049)</td>
     </tr>
     <tr>
       <td><b>ISO / CSO / ZSO Support</b></td>
       <td><span class="icon icon-good"></span> Yes</td>
       <td><span class="icon icon-good"></span> Yes</td>
       <td><span class="icon icon-good"></span> Yes (CSO/ZSO Decompressed Cache)</td>
+      <td><span class="icon icon-good"></span> Yes (ISO / CSO / ZSO)</td>
     </tr>
     <tr>
       <td><b>CHD Format Support</b></td>
       <td><span class="icon icon-good"></span> Yes (via <code>libchdr</code>)</td>
       <td><span class="icon icon-good"></span> Yes (via <code>libchdr</code>)</td>
       <td><span class="icon icon-bad"></span> No (Excluded from static builds)</td>
+      <td><span class="icon icon-bad"></span> No (Use Desktop / Core)</td>
     </tr>
     <tr>
       <td><b>OpenWrt / Router Packages</b></td>
       <td><span class="icon icon-bad"></span> No</td>
       <td><span class="icon icon-bad"></span> No</td>
       <td><span class="icon icon-good"></span> <b>Yes (Official <code>.ipk</code> packages)</b></td>
+      <td><span class="icon icon-bad"></span> No (Mobile APK only)</td>
     </tr>
     <tr>
       <td><b>Docker &amp; systemd Integration</b></td>
       <td><span class="icon icon-bad"></span> No</td>
       <td><span class="icon icon-good"></span> Yes</td>
       <td><span class="icon icon-good"></span> <b>Yes (Minimal scratch image)</b></td>
+      <td><span class="icon icon-bad"></span> Android Foreground Service</td>
     </tr>
   </tbody>
 </table>
@@ -211,9 +247,10 @@ python ps2servers.py serve http --root-dir /srv/ps2 --port 1100</code></pre>
 <h2 id="picker">Which Edition Should You Choose?</h2>
 <ul class="checklist">
   <li><b>Choose Desktop</b> if you are playing on Windows, macOS, or a Linux workstation and want a simple visual launcher with start/stop buttons and automatic configuration saving.</li>
+  <li><b>Choose Android</b> if you want to serve games from a phone or tablet over Wi-Fi, hotspot, or USB-Ethernet tethering, or share Mobile Data internet with your console.</li>
   <li><b>Choose Core</b> if you have an existing Linux server with Python installed, run games from Docker containers, or want to script headless background services.</li>
   <li><b>Choose Edge</b> if you want to run servers 24/7 on an OpenWrt router, Raspberry Pi, home NAS, or old low-power hardware without a monitor or desktop environment.</li>
-  <li><b>Choose Desktop/Core</b> if you have disc images in <b>CHD format</b>, or require <b>SMB2/SMB3 authenticated sharing</b> or <b>HTTP game streaming</b>.</li>
+  <li><b>Choose Desktop/Core</b> if you have disc images in <b>CHD format</b>.</li>
 </ul>
 
 </main>

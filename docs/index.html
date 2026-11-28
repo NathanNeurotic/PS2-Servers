@@ -36,6 +36,7 @@
     <h4>Start</h4>
     <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
     <a href="editions.html"><span class="icon icon-server"></span>Editions (Desktop/Core/Edge)</a>
+    <a href="android.html"><span class="icon icon-usb"></span>Android &amp; Mobile Data</a>
     <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
 
     <h4>Protocols</h4>
@@ -74,6 +75,7 @@
     <span class="sys-pill">DESKTOP GUI</span>
     <span class="sys-pill">CORE HEADLESS</span>
     <span class="sys-pill">EDGE GO SERVER</span>
+    <span class="sys-pill">ANDROID APK (5.0+)</span>
     <span class="sys-pill">UDPFS · SMBV1/2/3 · UDPBD · HTTP</span>
   </div>
   <div class="sys-strip-row">
@@ -162,8 +164,8 @@ For the PS2 console loader side, see the companion <a href="https://nathanneurot
   </article>
 </div>
 
-<h2 id="editions">Three Deployment Shapes</h2>
-<p>Whether you want a simple desktop window with one-click toggles, a scriptable terminal command for automation, or a lightweight daemon on your home router, PS2 Servers has an edition built for your workflow.</p>
+<h2 id="editions">Four Deployment Shapes</h2>
+<p>Whether you want a desktop window, a scriptable terminal command, a lightweight router daemon, or an Android phone or tablet serving over Wi-Fi or tethering, PS2 Servers has an edition built for your workflow.</p>
 
 <div class="cards">
   <article class="card">
@@ -186,6 +188,13 @@ For the PS2 console loader side, see the companion <a href="https://nathanneurot
     <p>Statically linked Go binaries tailored for embedded hardware and routers. Consumes minimal memory, runs without Python, and offers an optional password-protected Web management dashboard. Available for MIPS, ARM, x86, and RISC-V.</p>
     <p><a href="edge-builds.html">Edge architecture guide &rarr;</a></p>
   </article>
+
+  <article class="card">
+    <h3>PS2 Servers Android</h3>
+    <p><b>Target:</b> Android 5.0+ (API 21+) phones &amp; tablets</p>
+    <p>Pure-Kotlin Android app (<code>PS2Servers-android.apk</code>) serving all seven protocols over Wi-Fi, hotspot, or USB-Ethernet tethering with SAF folder picking, wake/Wi-Fi locks, and Mobile Data internet sharing for PS2 online play.</p>
+    <p><a href="android.html">Android &amp; Mobile Data guide &rarr;</a></p>
+  </article>
 </div>
 
 <h2 id="key-features">What PS2 Servers Solves</h2>
@@ -205,7 +214,7 @@ For the PS2 console loader side, see the companion <a href="https://nathanneurot
   </article>
   <article class="card">
     <h3><a href="releases.html">Downloads &amp; Packages &rarr;</a></h3>
-    <p>Find the right package for your OS (Windows portable zip, Linux AppImage/tar.gz, macOS arm64/x64, Edge architectures).</p>
+    <p>Find the right package for your OS (Windows portable zip, Linux AppImage/tar.gz, macOS arm64/x64, Android APK, Edge architectures).</p>
   </article>
   <article class="card">
     <h3><a href="udpfs-diagnostics.html">UDPFS Diagnostics &rarr;</a></h3>

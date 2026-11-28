@@ -1,6 +1,6 @@
 # PS2 Servers editions
 
-PS2 Servers is one product family with three deployment shapes.
+PS2 Servers is one product family with four deployment shapes.
 
 ## PS2 Servers Desktop
 
@@ -54,6 +54,18 @@ Edge does not implement the HTTP game server, NFS or SMB2/3. Its generic static
 binaries also exclude CHD, which needs a native decoder such as `libchdr`.
 Desktop/Core continue to provide CHD where that library is available.
 
+## PS2 Servers Android
+
+Use Android (`PS2Servers-android.apk`) on Android 5.0+ (API 21+) phones and
+tablets to serve PS2 games over Wi-Fi, hotspot, or USB-Ethernet tethering, and
+optionally share Mobile Data internet with your PS2. See [Android setup](ANDROID.md).
+
+- Pure-Kotlin implementation of UDPFS, SMBv1, SMBv2/SMBv3, HTTP, NFSv4, and UDPBD
+- Storage Access Framework (`ACTION_OPEN_DOCUMENT_TREE`) + fallback directory
+- Foreground service with wake lock, low-latency Wi-Fi lock, and multicast lock
+- CSO/ZSO decompression and Virtual exFAT UDPBD mode (no CHD decoder bundled)
+- Unrooted high ports (`1025`/`1445`) plus optional root TCP `445` redirect and Mobile Data NAT bridge
+
 ## Selection guide
 
 | Environment | Recommended edition |
@@ -61,11 +73,13 @@ Desktop/Core continue to provide CHD where that library is available.
 | Windows desktop | Desktop |
 | macOS desktop | Desktop |
 | Linux desktop | Desktop |
+| Android 5.0+ phone or tablet | Android (`PS2Servers-android.apk`) |
+| Android serving + Mobile Data internet sharing | Android (`PS2Servers-android.apk`) |
 | Linux server with Python | Core |
 | Docker host | Edge for minimal UDPFS; Core for full Python features |
 | Raspberry Pi | Edge |
 | OpenWrt router | Edge |
 | NAS or embedded Linux | Edge |
 | Need CHD now | Desktop/Core |
-| Need UDPBD | Either implementation; validate the chosen build and loader on your console |
-| Need HTTP game serving, NFS or SMB2/3 | Desktop/Core |
+| Need UDPBD | Any edition; validate the chosen build and loader on your console |
+| Need HTTP game serving, NFS or SMB2/3 | Desktop, Core, or Android |

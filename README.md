@@ -18,7 +18,8 @@
 PS2 Servers runs game and file servers for network-capable PlayStation 2
 homebrew. **Desktop** provides a Tkinter launcher; **Core** runs the same Python
 servers from a terminal; **Edge** is a separate Go server for routers, NAS,
-Raspberry Pi, and headless computers.
+Raspberry Pi, and headless computers; **Android** runs the servers natively on an
+Android 5.0+ phone or tablet over Wi-Fi, hotspot, or USB-Ethernet tethering.
 
 Choose the protocol your loader supports. A server mode being available here
 does not add that protocol to a PS2 application.
@@ -35,7 +36,10 @@ does not add that protocol to a PS2 application.
 Desktop has seven game/file server cards plus [RetroAchievements](docs/RETROACHIEVEMENTS.md)
 with xeRAbora and Caduceus console modes. Edge provides UDPFS, SMBv1, UDPBD, and a separate
 HTTP **management dashboard**; it does not provide the HTTP game server, NFS or SMB2/3.
-See [editions](docs/EDITIONS.md) and [Edge setup](docs/EDGE.md).
+Android provides all seven server modes (UDPFS, SMBv1, SMBv2/3, HTTP, NFSv4, and UDPBD),
+Storage Access Framework folder access, and Mobile Data internet sharing guidance (including an
+optional root TCP 445 redirect and NAT bridge). See [editions](docs/EDITIONS.md),
+[Edge setup](docs/EDGE.md), and [Android setup](docs/ANDROID.md).
 
 ## Optional desktop game library
 
@@ -125,6 +129,7 @@ does not add VMC support to a loader that lacks it.
 | Linux x64 | `PS2Servers-linux-x64`; use `PS2Servers-linux-x64-portable.tar.gz` when `/tmp` is `noexec` |
 | Linux desktop integration | `PS2Servers-x86_64.AppImage`, when present in the release |
 | macOS Apple Silicon / Intel | `PS2Servers-macos-arm64.zip` / `PS2Servers-macos-x64.zip` |
+| Android 5.0+ phone or tablet | `PS2Servers-android.apk` (universal APK; see [Android setup](docs/ANDROID.md)) |
 | ARM/MIPS/router/headless systems | See the [Edge build picker](docs/EDGE-WHICH-BUILD.md), or run Core with Python |
 
 Packaged Desktop includes Python; a separate Python installation is unnecessary.
